@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
+using DropShelf.Localization;
 
 namespace DropShelf.Models;
 
@@ -48,15 +49,15 @@ public sealed class ShelfItem : INotifyPropertyChanged
     {
         get
         {
-            if (!IsAvailable) return "已移动或删除";
+            if (!IsAvailable) return Strings.MovedOrDeleted;
             return Kind switch
             {
                 ShelfItemKind.File => SizeBytes is { } size
                     ? string.IsNullOrEmpty(TypeName) ? FormatSize(size) : $"{FormatSize(size)} · {TypeName}"
                     : TypeName,
-                ShelfItemKind.Folder => "文件夹",
-                ShelfItemKind.Link => Uri.TryCreate(Value, UriKind.Absolute, out var uri) ? uri.Host : "链接",
-                _ => $"文本 · {Value.Length} 个字符"
+                ShelfItemKind.Folder => Strings.Folder,
+                ShelfItemKind.Link => Uri.TryCreate(Value, UriKind.Absolute, out var uri) ? uri.Host : Strings.Link,
+                _ => Strings.TextDetail(Value.Length)
             };
         }
     }
@@ -118,6 +119,9 @@ public sealed class ShelfItem : INotifyPropertyChanged
             OnPropertyChanged(nameof(Detail));
         }
     }
+
+    /// <summary>切换界面语言后刷新说明文字。</summary>
+    public void RefreshText() => OnPropertyChanged(nameof(Detail));
 
     /// <summary>检查磁盘上的项目是否还在；文本与链接始终可用。</summary>
     public bool RefreshAvailability()

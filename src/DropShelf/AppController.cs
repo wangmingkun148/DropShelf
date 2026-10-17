@@ -62,6 +62,7 @@ public sealed class AppController : IDisposable
 
     public void Start(bool startInBackground)
     {
+        LanguageService.SetMode(_settings.Language);
         ThemeService.Initialize(_settings.Theme);
         LogService.CleanupOldLogs();
         _ = VirtualFileDropService.CleanupStaleCacheAsync();
@@ -225,6 +226,11 @@ public sealed class AppController : IDisposable
     private void Apply(AppSettings previous, AppSettings current)
     {
         if (previous.Theme != current.Theme) ThemeService.SetMode(current.Theme);
+        if (previous.Language != current.Language)
+        {
+            LanguageService.SetMode(current.Language);
+            _tray?.RefreshText();
+        }
         if (_gestures is not null)
         {
             _gestures.Enabled = current.GestureEnabled;

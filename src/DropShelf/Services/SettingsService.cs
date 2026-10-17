@@ -17,6 +17,7 @@ public sealed class AppSettings
     public bool GestureEnabled { get; set; } = true;
     public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
     public AppTheme Theme { get; set; } = AppTheme.System;
+    public AppLanguage Language { get; set; } = AppLanguage.System;
     public bool StartWithWindows { get; set; }
     public QuickShelfSize QuickShelfSize { get; set; } = QuickShelfSize.Medium;
 
@@ -94,6 +95,8 @@ public sealed class SettingsService
             settings.MouseGestureSensitivity = GestureSensitivity.Balanced;
         if (!Enum.IsDefined(settings.Theme))
             settings.Theme = AppTheme.System;
+        if (!Enum.IsDefined(settings.Language))
+            settings.Language = AppLanguage.System;
         if (!Enum.IsDefined(settings.QuickShelfSize))
             settings.QuickShelfSize = QuickShelfSize.Medium;
 

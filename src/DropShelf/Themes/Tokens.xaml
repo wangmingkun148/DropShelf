@@ -104,4 +104,5 @@
     <sys:String x:Key="Glyph.Back">&#xE72B;</sys:String>
     <sys:String x:Key="Glyph.View">&#xE890;</sys:String>
     <sys:String x:Key="Glyph.Lock">&#xE72E;</sys:String>
+    <sys:String x:Key="Glyph.Language">&#xE775;</sys:String>
 </ResourceDictionary>

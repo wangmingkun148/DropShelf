@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
 using DropShelf.ViewModels;
@@ -71,6 +72,7 @@ public partial class ShelfWindow : Window
 
         SourceInitialized += OnSourceInitialized;
         ThemeService.ThemeChanged += OnThemeChanged;
+        LanguageService.LanguageChanged += OnLanguageChanged;
         DragEnter += OnDragEnter;
         DragOver += OnDragOver;
         DragLeave += OnDragLeave;
@@ -134,6 +136,7 @@ public partial class ShelfWindow : Window
         _toastTimer.Stop();
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
+        LanguageService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.ReleaseResources();
         base.OnClosed(e);
@@ -156,6 +159,13 @@ public partial class ShelfWindow : Window
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        ViewModel.RefreshText();
+        // 按钮提示和拖入时的操作名称是代码生成的，需要重新创建；正在拖入时等下一次再更新。
+        if (!_dragInside) BuildActions();
+    }
 
     private void AnimateIn()
     {
@@ -223,7 +233,7 @@ public partial class ShelfWindow : Window
                 Margin = new Thickness(2, 0, 2, 0),
                 Content = info.Glyph,
                 Tag = info,
-                ToolTip = $"{info.Label}：{info.Description}"
+                ToolTip = Strings.QuickActionTooltip(info.Label, info.Description)
             };
             System.Windows.Automation.AutomationProperties.SetName(button, info.Label);
             button.Click += OnActionClick;
@@ -309,7 +319,7 @@ public partial class ShelfWindow : Window
         if (_dragKind == DropContentKind.None || ViewModel.IsBusy)
         {
             e.Effects = WpfDragDropEffects.None;
-            SetDescription(e.Data, DropImageType.Warning, ViewModel.IsBusy ? "请稍候" : "不支持此内容");
+            SetDescription(e.Data, DropImageType.Warning, ViewModel.IsBusy ? Strings.PleaseWait : Strings.UnsupportedContent);
             _dropHelper.Over(e.Effects);
             return;
         }
@@ -319,12 +329,12 @@ public partial class ShelfWindow : Window
         if (action is not null && !DropDataReader.CanProvideFiles(_dragKind))
         {
             e.Effects = WpfDragDropEffects.None;
-            SetDescription(e.Data, DropImageType.Warning, "此操作只支持文件");
+            SetDescription(e.Data, DropImageType.Warning, Strings.FilesOnlyAction);
         }
         else
         {
             e.Effects = PreferredEffect(e.AllowedEffects);
-            SetDescription(e.Data, DropImageType.Label, action?.Label ?? (ViewModel.HasItems ? "添加到置物架" : "放入置物架"));
+            SetDescription(e.Data, DropImageType.Label, action?.Label ?? (ViewModel.HasItems ? Strings.AddToShelf : Strings.PutOnShelf));
         }
         _dropHelper.Over(e.Effects);
     }
@@ -364,7 +374,7 @@ public partial class ShelfWindow : Window
         {
             e.Effects = WpfDragDropEffects.None;
             _dropHelper.Drop(e.Data, e.Effects);
-            if (!fromSelf && kind == DropContentKind.None) ViewModel.Notify("来源程序没有提供可读取的内容", false);
+            if (!fromSelf && kind == DropContentKind.None) ViewModel.Notify(Strings.SourceProvidedNothing, false);
             return;
         }
 
@@ -396,20 +406,20 @@ public partial class ShelfWindow : Window
                 var summary = ViewModel.Add(read);
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
                 else if (summary.Duplicates > 0 || summary.Unavailable > 0 || read.FailedCount > 0)
-                    ViewModel.Notify(read.FailedCount > 0 ? $"{summary.Message}，{read.FailedCount} 个附件接收失败" : summary.Message);
+                    ViewModel.Notify(read.FailedCount > 0 ? Strings.WithFailedAttachments(summary.Message, read.FailedCount) : summary.Message);
                 if (ViewModel.IsEmpty) await CloseIfStillEmptyAsync();
             }
         }
         catch (Exception exception)
         {
             LogService.Error("处理拖入内容失败", exception);
-            ViewModel.Notify("拖入没有完成，来源内容未受影响", false);
+            ViewModel.Notify(Strings.DropFailed, false);
         }
     }
 
     private void ShowDropOverlay()
     {
-        DropZoneText.Text = ViewModel.HasItems ? "松开以添加" : "松开以暂存";
+        DropZoneText.Text = ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
         Body.Visibility = Visibility.Hidden;
         ActionBarHost.Opacity = 0;
         DropOverlay.Visibility = Visibility.Visible;
@@ -629,7 +639,7 @@ public partial class ShelfWindow : Window
 
     private string? PickFolder()
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择要移动到的文件夹", Multiselect = false };
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Strings.ChooseMoveFolder, Multiselect = false };
         return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
     }
 
@@ -656,17 +666,17 @@ public partial class ShelfWindow : Window
         var hasItems = ViewModel.HasItems;
         var menu = new ContextMenu();
         if (ViewModel.HasMultiple && !ViewModel.IsExpanded)
-            menu.Items.Add(CreateMenuItem("展开列表", "", Expand));
-        menu.Items.Add(CreateMenuItem("全选", "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
-        menu.Items.Add(CreateMenuItem("复制", "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
-        menu.Items.Add(CreateMenuItem("粘贴", "", Paste, "Ctrl+V"));
-        menu.Items.Add(CreateMenuItem("复制路径", "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
-        menu.Items.Add(CreateMenuItem("在资源管理器中显示", "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
+            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "", Expand));
+        menu.Items.Add(CreateMenuItem(Strings.MenuSelectAll, "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
+        menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
+        menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));
+        menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
+        menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem("清空置物架", "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
-        menu.Items.Add(CreateMenuItem("DropShelf 设置", "", _host.ShowSettings));
+        menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
+        menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem("关闭置物架", "", CloseAnimated, "Esc"));
+        menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, "Esc"));
         return menu;
     }
 
@@ -674,13 +684,13 @@ public partial class ShelfWindow : Window
     {
         var menu = new ContextMenu();
         var single = items.Count == 1 ? items[0] : null;
-        menu.Items.Add(CreateMenuItem(single?.Kind == ShelfItemKind.Text ? "复制文本" : "打开", "",
+        menu.Items.Add(CreateMenuItem(single?.Kind == ShelfItemKind.Text ? Strings.MenuCopyText : Strings.MenuOpen, "",
             () => { if (single is not null) ViewModel.Open(single); }, "Enter", single is not null));
-        menu.Items.Add(CreateMenuItem("在资源管理器中显示", "", () => ViewModel.Reveal(items), enabled: items.Any(item => item.IsFileSystem)));
-        menu.Items.Add(CreateMenuItem("复制", "", () => ViewModel.CopyToClipboard(items), "Ctrl+C"));
-        menu.Items.Add(CreateMenuItem("复制路径", "", () => ViewModel.CopyPaths(items), enabled: items.Any(item => item.IsFileSystem)));
+        menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(items), enabled: items.Any(item => item.IsFileSystem)));
+        menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(items), "Ctrl+C"));
+        menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(items), enabled: items.Any(item => item.IsFileSystem)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem("从置物架移除", "", () => RemoveItems(items), "Delete"));
+        menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveItems(items), "Delete"));
         return menu;
     }
 
@@ -716,7 +726,7 @@ public partial class ShelfWindow : Window
         var data = ClipboardService.TryGetDataObject();
         if (data is null)
         {
-            ViewModel.Notify("剪贴板是空的", false);
+            ViewModel.Notify(Strings.ClipboardEmpty, false);
             return;
         }
         try
@@ -733,7 +743,7 @@ public partial class ShelfWindow : Window
         catch (Exception exception)
         {
             LogService.Error("从剪贴板粘贴失败", exception);
-            ViewModel.Notify("粘贴没有完成", false);
+            ViewModel.Notify(Strings.PasteFailed, false);
         }
     }
 

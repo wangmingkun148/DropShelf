@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using DropShelf.Interop;
+using DropShelf.Localization;
 
 namespace DropShelf.Services;
 
@@ -112,9 +113,17 @@ public sealed class TrayIconService : IDisposable
     {
         if (_disposed || !_added) return;
         var data = CreateData(NativeMethods.NIF_INFO);
-        data.InfoTitle = "DropShelf 仍在运行";
-        data.Info = "拖住文件并晃动鼠标即可呼出置物架。可从任务栏通知区域重新打开设置。";
+        data.InfoTitle = Strings.StillRunningTitle;
+        data.Info = Strings.StillRunningBody;
         data.InfoFlags = NativeMethods.NIIF_INFO | NativeMethods.NIIF_RESPECT_QUIET_TIME;
+        NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref data);
+    }
+
+    /// <summary>切换界面语言后更新托盘提示文字。</summary>
+    public void RefreshText()
+    {
+        if (_disposed || !_added) return;
+        var data = CreateData(NativeMethods.NIF_TIP | NativeMethods.NIF_SHOWTIP);
         NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref data);
     }
 
@@ -150,7 +159,7 @@ public sealed class TrayIconService : IDisposable
         Flags = flags,
         CallbackMessage = CallbackMessage,
         Icon = _icon,
-        Tip = "DropShelf · 拖住文件并晃动鼠标",
+        Tip = Strings.TrayTip,
         Info = string.Empty,
         InfoTitle = string.Empty
     };
@@ -186,14 +195,14 @@ public sealed class TrayIconService : IDisposable
         if (_menu is { IsOpen: true }) return;
         var state = _getState();
         _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
-        _menu.Items.Add(CreateItem("新建置物架", "", _newShelf, state.Hotkey));
-        var pause = CreateItem("暂停晃动呼出", "", () => _setGestureEnabled(!state.GestureEnabled));
+        _menu.Items.Add(CreateItem(Strings.NewShelf, "", _newShelf, state.Hotkey));
+        var pause = CreateItem(Strings.PauseShake, "", () => _setGestureEnabled(!state.GestureEnabled));
         pause.IsCheckable = true;
         pause.IsChecked = !state.GestureEnabled;
         _menu.Items.Add(pause);
         _menu.Items.Add(new Separator());
-        _menu.Items.Add(CreateItem("打开设置", "", _showWindow));
-        _menu.Items.Add(CreateItem("退出 DropShelf", "", _exit));
+        _menu.Items.Add(CreateItem(Strings.OpenSettings, "", _showWindow));
+        _menu.Items.Add(CreateItem(Strings.QuitApp, "", _exit));
         _menu.IsOpen = true;
 
         // 先把菜单窗口设为前台，点击其他位置时菜单才会正常关闭。

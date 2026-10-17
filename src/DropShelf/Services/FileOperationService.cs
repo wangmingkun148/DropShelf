@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using DropShelf.Localization;
 
 namespace DropShelf.Services;
 
@@ -7,6 +8,8 @@ public sealed record FileOperationResult(string Source, string? Destination, boo
 
 public sealed class FileOperationService
 {
+    private const string FolderIntoItselfMessage = "不能把文件夹复制或移动到它自己的内部。";
+
     public void Open(string path)
     {
         EnsureExists(path);
@@ -178,7 +181,7 @@ public sealed class FileOperationService
         var sourcePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
         var destinationPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
         if (destinationPath.StartsWith(sourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("不能把文件夹复制或移动到它自己的内部。");
+            throw new IOException(FolderIntoItselfMessage);
     }
 
     private static string GetSourceName(string source)
@@ -189,12 +192,12 @@ public sealed class FileOperationService
 
     private static string ToUserMessage(Exception exception) => exception switch
     {
-        UnauthorizedAccessException => "没有访问权限。",
-        FileNotFoundException => "项目已经不存在或暂时无法访问。",
-        DirectoryNotFoundException => "文件夹已经不存在或暂时无法访问。",
-        PathTooLongException => "路径过长，Windows 无法处理。",
-        IOException when exception.Message.Contains("自己的内部", StringComparison.Ordinal) => exception.Message,
-        IOException => "项目正被占用、目标空间不足或设备暂时不可用。",
-        _ => "操作没有完成。"
+        UnauthorizedAccessException => Strings.AccessDenied,
+        FileNotFoundException => Strings.ItemNotFound,
+        DirectoryNotFoundException => Strings.FolderNotFound,
+        PathTooLongException => Strings.PathTooLong,
+        IOException when exception.Message == FolderIntoItselfMessage => Strings.FolderIntoItself,
+        IOException => Strings.ItemBusy,
+        _ => Strings.OperationIncomplete
     };
 }

@@ -2,18 +2,20 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
 using DropShelf.Interop;
+using DropShelf.Localization;
 
 namespace DropShelf.Services;
 
 public static class ShellFileInfo
 {
-    private static readonly ConcurrentDictionary<string, string> TypeNames = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, string?> TypeNames = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>取得 Windows 显示的文件类型名称，例如“PDF 文件”。只按扩展名查询，不访问磁盘。</summary>
     public static string GetTypeName(string path)
     {
         var extension = Path.GetExtension(path);
-        if (string.IsNullOrEmpty(extension)) return "文件";
+        if (string.IsNullOrEmpty(extension)) return Strings.GenericFileType;
+        // 只缓存 Windows 提供的名称；备用名称跟随界面语言，每次重新生成。
         return TypeNames.GetOrAdd(extension, static ext =>
         {
             try
@@ -26,8 +28,8 @@ public static class ShellFileInfo
             catch
             {
             }
-            return ext.TrimStart('.').ToUpperInvariant() + " 文件";
-        });
+            return null;
+        }) ?? Strings.FileType(extension.TrimStart('.').ToUpperInvariant());
     }
 
     public static long? TryGetFileSize(string path)

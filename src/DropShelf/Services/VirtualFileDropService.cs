@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using DropShelf.Localization;
 using WpfDataObject = System.Windows.IDataObject;
 using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 using NativeMethods = DropShelf.Interop.NativeMethods;
@@ -31,9 +32,9 @@ public static class VirtualFileDropService
 
     public static async Task<VirtualFileImportResult> ImportAsync(WpfDataObject data)
     {
-        if (!CanImport(data)) return new VirtualFileImportResult([], null, 0, "没有可接收的虚拟附件");
+        if (!CanImport(data)) return new VirtualFileImportResult([], null, 0, Strings.NoVirtualAttachments);
         if (data is not ComDataObject comDataObject)
-            return new VirtualFileImportResult([], null, 0, "来源程序未提供标准 Windows 附件内容");
+            return new VirtualFileImportResult([], null, 0, Strings.NonStandardAttachments);
 
         IReadOnlyList<VirtualFileDescriptor> descriptors;
         try
@@ -43,11 +44,11 @@ public static class VirtualFileDropService
         catch (Exception exception)
         {
             LogService.Error("读取虚拟附件名称失败", exception);
-            return new VirtualFileImportResult([], null, 0, "无法读取附件信息");
+            return new VirtualFileImportResult([], null, 0, Strings.AttachmentInfoUnreadable);
         }
 
         if (descriptors.Count == 0)
-            return new VirtualFileImportResult([], null, 0, "没有可接收的文件附件");
+            return new VirtualFileImportResult([], null, 0, Strings.NoFileAttachments);
 
         var cacheDirectory = CreateCacheDirectory();
         List<PreparedVirtualFile>? preparedFiles = null;
@@ -60,7 +61,7 @@ public static class VirtualFileDropService
             if (preparedFiles.Count == 0)
             {
                 await DeleteCacheAsync(cacheDirectory);
-                return new VirtualFileImportResult([], null, preparationFailures, "此附件暂时无法从来源程序读取");
+                return new VirtualFileImportResult([], null, preparationFailures, Strings.AttachmentUnavailable);
             }
 
             return await Task.Run(() => ImportPreparedContents(preparedFiles, cacheDirectory, preparationFailures));
@@ -70,7 +71,7 @@ public static class VirtualFileDropService
             LogService.Error("接收虚拟附件失败", exception);
             if (preparedFiles is not null) ReleasePreparedContents(preparedFiles);
             await DeleteCacheAsync(cacheDirectory);
-            return new VirtualFileImportResult([], null, descriptors.Count, "附件接收失败，来源文件未受影响");
+            return new VirtualFileImportResult([], null, descriptors.Count, Strings.AttachmentReceiveFailed);
         }
     }
 
@@ -206,7 +207,7 @@ public static class VirtualFileDropService
             paths,
             cacheDirectory,
             failed,
-            paths.Count == 0 ? "附件接收失败，来源文件未受影响" : null);
+            paths.Count == 0 ? Strings.AttachmentReceiveFailed : null);
     }
 
     private static void CopyPreparedContent(STGMEDIUM medium, string destination)

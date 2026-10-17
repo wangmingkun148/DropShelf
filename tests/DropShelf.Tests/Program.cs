@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -7,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using DropShelf;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
 using DropShelf.Services.Gestures;
@@ -39,6 +41,8 @@ internal static class Program
         application.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/DropShelf;component/Themes/Tokens.xaml") });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/DropShelf;component/Themes/Controls.xaml") });
         ThemeService.Initialize(AppTheme.Light);
+        // 断言按中文界面文字编写，固定语言，避免受运行测试的电脑的显示语言影响。
+        LanguageService.SetMode(AppLanguage.Chinese);
 
         // 设置与模型
         Run("设置默认值与保存恢复", TestSettingsRoundTrip);
@@ -50,6 +54,8 @@ internal static class Program
         Run("三档尺寸保持比例", TestShelfSizes);
         Run("小窗以鼠标为中心并保持在屏幕内", TestQuickShelfPositioning);
         Run("正式版本号已写入程序", TestProductVersion);
+        Run("界面文字中英文齐全", TestStringTables);
+        Run("切换语言后文字随之更新", TestLanguageSwitch);
 
         // 手势识别
         Run("均衡手势可识别快速左右晃动", TestBalancedGestureTriggers);
@@ -124,9 +130,11 @@ internal static class Program
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActions!.SequenceEqual(QuickActions.Defaults), "默认快速操作不正确");
         Assert(defaults.Hotkey == "Ctrl+Shift+Space", "默认快捷键不正确");
+        Assert(defaults.Language == AppLanguage.System, "默认语言应跟随系统");
 
         defaults.MouseGestureSensitivity = GestureSensitivity.Steady;
         defaults.Theme = AppTheme.Dark;
+        defaults.Language = AppLanguage.English;
         defaults.QuickShelfSize = QuickShelfSize.Large;
         defaults.QuickActions = [QuickActionType.Reveal, QuickActionType.CopyFullPath];
         defaults.RemoveAfterDragOut = false;
@@ -137,6 +145,7 @@ internal static class Program
         var loaded = service.Load();
         Assert(loaded.MouseGestureSensitivity == GestureSensitivity.Steady, "灵敏度未恢复");
         Assert(loaded.Theme == AppTheme.Dark, "主题未恢复");
+        Assert(loaded.Language == AppLanguage.English, "语言未恢复");
         Assert(loaded.QuickShelfSize == QuickShelfSize.Large, "尺寸未恢复");
         Assert(loaded.QuickActions!.SequenceEqual([QuickActionType.CopyFullPath, QuickActionType.Reveal]), "快速操作未按固定顺序恢复");
         Assert(!loaded.RemoveAfterDragOut, "拖出后移除设置未恢复");
@@ -186,6 +195,7 @@ internal static class Program
         {
             MouseGestureSensitivity = (GestureSensitivity)999,
             Theme = (AppTheme)999,
+            Language = (AppLanguage)999,
             QuickShelfSize = (QuickShelfSize)999,
             QuickActions = [QuickActionType.ConvertJpeg, QuickActionType.Properties, QuickActionType.Properties, QuickActionType.Reveal,
                 QuickActionType.MoveTo, QuickActionType.CopyFullPath, QuickActionType.CompressZip],
@@ -196,6 +206,7 @@ internal static class Program
         var normalized = SettingsService.Normalize(invalid.Clone());
         Assert(normalized.MouseGestureSensitivity == GestureSensitivity.Balanced, "异常灵敏度没有恢复默认值");
         Assert(normalized.Theme == AppTheme.System, "异常主题没有恢复默认值");
+        Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
         Assert(normalized.QuickActions!.Count == 4 && !normalized.QuickActions.Contains(QuickActionType.ConvertJpeg), "快速操作没有规范化");
         Assert(normalized.Hotkey == HotkeyGesture.Default.ToString(), "无效快捷键没有恢复默认值");
@@ -222,6 +233,67 @@ internal static class Program
             "快速操作顺序或数量不正确");
         Assert(QuickActions.Normalize(null).Count == 0, "空列表处理不正确");
         Assert(QuickActions.All.All(info => info.Glyph.Length == 1 && info.Label.Length > 0), "快速操作缺少图标或名称");
+    }
+
+    private static void TestStringTables()
+    {
+        try
+        {
+            foreach (var language in new[] { AppLanguage.Chinese, AppLanguage.English })
+            {
+                LanguageService.SetMode(language);
+                foreach (var key in LocalizedText.Keys)
+                {
+                    var text = LocalizedText.Instance[key];
+                    Assert(!string.IsNullOrWhiteSpace(text), $"{language} 缺少界面文字：{key}");
+                    Assert(language == AppLanguage.Chinese || !text.Any(c => c is >= '\u4e00' and <= '\u9fff'), $"英文界面文字中含有中文：{key}");
+                }
+            }
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+        }
+        Assert(LocalizedText.Contains("Overview") && !LocalizedText.Contains("NoSuchText"), "界面文字名称查询不正确");
+    }
+
+    private static void TestLanguageSwitch()
+    {
+        Assert(LanguageService.ResolveIsChinese(AppLanguage.System, new CultureInfo("zh-CN")) &&
+               LanguageService.ResolveIsChinese(AppLanguage.System, new CultureInfo("zh-TW")) &&
+               !LanguageService.ResolveIsChinese(AppLanguage.System, new CultureInfo("en-US")) &&
+               LanguageService.ResolveIsChinese(AppLanguage.Chinese, new CultureInfo("en-US")) &&
+               !LanguageService.ResolveIsChinese(AppLanguage.English, new CultureInfo("zh-CN")), "跟随系统时的语言判断不正确");
+
+        var changes = 0;
+        var notified = new List<string?>();
+        EventHandler onLanguage = (_, _) => changes++;
+        System.ComponentModel.PropertyChangedEventHandler onText = (_, e) => notified.Add(e.PropertyName);
+        LanguageService.LanguageChanged += onLanguage;
+        LocalizedText.Instance.PropertyChanged += onText;
+        try
+        {
+            LanguageService.SetMode(AppLanguage.English);
+            LanguageService.SetMode(AppLanguage.English);
+            Assert(changes == 1 && !LanguageService.IsChinese, "切换到英文时没有通知或重复通知");
+            Assert(LocalizedText.Instance["Overview"] == "Overview" && notified.Contains(System.Windows.Data.Binding.IndexerName),
+                "绑定使用的文字没有切换");
+
+            var viewModel = new ShelfViewModel();
+            viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "a"), new DroppedEntry(ShelfItemKind.Text, "b")]);
+            Assert(viewModel.Title == "2 items" && viewModel.StackDetail == "2 snippets", $"英文汇总不正确：{viewModel.StackDetail}");
+            Assert(new ShelfAddSummary(1, 2, 0).Message == "Added 1 item, skipped 2 duplicates", "英文添加结果不正确");
+            Assert(QuickActions.Get(QuickActionType.CompressZip).Label == "Compress", "快速操作名称没有切换");
+            Assert(ShellFileInfo.GetTypeName("noextension") == "File", "文件类型备用名称没有切换");
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+            LanguageService.LanguageChanged -= onLanguage;
+            LocalizedText.Instance.PropertyChanged -= onText;
+        }
+        Assert(changes == 2 && LocalizedText.Instance["Overview"] == "概览" && new ShelfAddSummary(0, 3, 0).Message == "这些项目已在置物架中",
+            "切换回中文后文字不正确");
     }
 
     private static void TestShelfItemText()
@@ -920,6 +992,19 @@ internal static class Program
         var bar = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("ActionBar")!;
         Assert(bar.Children.Count == controller.Settings.QuickActions!.Count, "快速操作按钮数量不正确");
         Assert(window.IsReusable, "空置物架应可复用");
+        Assert(window.Title == "DropShelf 置物架 - 置物架", "置物架窗口标题不正确");
+
+        LanguageService.SetMode(AppLanguage.English);
+        try
+        {
+            Assert(((System.Windows.Controls.Button)bar.Children[0]).ToolTip is string tip && tip.StartsWith("Compress: "),
+                "切换语言后快速操作提示没有更新");
+            Assert(window.Title == "DropShelf shelf - Shelf", "切换语言后置物架标题没有更新");
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+        }
 
         controller.Settings.QuickActions = [];
         window.ApplySettings(controller.Settings);
@@ -948,8 +1033,8 @@ internal static class Program
         window.Show();
         Pump(200);
 
-        foreach (var name in new[] { "NavList", "ExitApplicationButton", "StartupEnabledBox", "HotkeyEditor", "GestureEnabledBox",
-                     "SensitivitySelector", "ShelfSizeSelector", "ThemeSelector", "ActionOptionsList" })
+        foreach (var name in new[] { "NavList", "ExitApplicationButton", "LanguageSelector", "StartupEnabledBox", "HotkeyEditor",
+                     "GestureEnabledBox", "SensitivitySelector", "ShelfSizeSelector", "ThemeSelector", "ActionOptionsList" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
         ((System.Windows.Controls.ListBox)window.FindName("NavList")!).SelectedIndex = 1;
@@ -982,6 +1067,24 @@ internal static class Program
             "快速操作顺序不正确");
         Assert(viewModel.StatusTitle == "晃动呼出已暂停", "状态没有反映暂停");
 
+        var navList = (System.Windows.Controls.ListBox)window.FindName("NavList")!;
+        var overviewLabel = (System.Windows.Controls.TextBlock)((StackPanel)((ListBoxItem)navList.Items[0]).Content).Children[1];
+        Assert(overviewLabel.Text == "概览", "导航文字不正确");
+        try
+        {
+            ((System.Windows.Controls.ListBox)window.FindName("LanguageSelector")!).SelectedValue = AppLanguage.English;
+            Pump(50);
+            Assert(service.Load().Language == AppLanguage.English && !LanguageService.IsChinese, "语言设置没有保存或生效");
+            Assert(overviewLabel.Text == "Overview" && viewModel.StatusTitle == "Shake to open is paused", "切换语言后主窗口文字没有更新");
+            viewModel.Language = AppLanguage.Chinese;
+            Pump(50);
+            Assert(overviewLabel.Text == "概览" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+        }
+
         ThemeService.SetMode(AppTheme.Light);
         window.CloseForShutdown();
         File.Delete(service.SettingsPath);
@@ -998,6 +1101,17 @@ internal static class Program
         Assert(window.CurrentStep == 3 && (string)next.Content == "开始使用", "教程最后一步不正确");
         var hotkey = AppController.Current?.Settings.HotkeyGesture ?? HotkeyGesture.Default;
         Assert(((System.Windows.Controls.TextBlock)window.FindName("StepBodyText")!).Text.Contains(hotkey.ToString()), "教程没有说明当前的快捷键");
+        LanguageService.SetMode(AppLanguage.English);
+        try
+        {
+            Assert((string)next.Content == "Get started" &&
+                   ((System.Windows.Controls.TextBlock)window.FindName("StepTitleText")!).Text == "Quick actions and shortcut",
+                "切换语言后教程文字没有更新");
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+        }
         window.ShowStep(99);
         Assert(window.CurrentStep == 3, "越界步骤没有限制");
         window.Close();

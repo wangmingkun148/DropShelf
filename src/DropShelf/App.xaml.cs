@@ -2,6 +2,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Services;
 
 namespace DropShelf;
@@ -113,7 +114,7 @@ public partial class App : System.Windows.Application
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         LogService.Error("未处理的界面异常", e.Exception);
-        System.Windows.MessageBox.Show("操作失败，错误已写入日志。请重试。", "DropShelf", MessageBoxButton.OK, MessageBoxImage.Error);
+        System.Windows.MessageBox.Show(Strings.UnexpectedError, "DropShelf", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }
 

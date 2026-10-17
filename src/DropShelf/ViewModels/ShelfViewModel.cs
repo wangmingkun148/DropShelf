@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
 
@@ -17,11 +18,11 @@ public sealed record ShelfAddSummary(int Added, int Duplicates, int Unavailable)
     {
         get
         {
-            if (Added == 0 && Duplicates > 0 && Unavailable == 0) return "这些项目已在置物架中";
-            if (Added == 0) return Unavailable > 0 ? "项目无法访问，未能添加" : "没有可添加的内容";
-            var message = $"已添加 {Added} 项";
-            if (Duplicates > 0) message += $"，忽略 {Duplicates} 个重复项";
-            if (Unavailable > 0) message += $"，{Unavailable} 项无法访问";
+            if (Added == 0 && Duplicates > 0 && Unavailable == 0) return Strings.AlreadyOnShelf;
+            if (Added == 0) return Unavailable > 0 ? Strings.ItemsUnavailable : Strings.NothingToAdd;
+            var message = Strings.Added(Added);
+            if (Duplicates > 0) message += Strings.SkippedDuplicates(Duplicates);
+            if (Unavailable > 0) message += Strings.UnavailableItems(Unavailable);
             return message;
         }
     }
@@ -61,7 +62,8 @@ public sealed class ShelfViewModel : ObservableObject
     public bool HasItems => Items.Count > 0;
     public bool IsEmpty => Items.Count == 0;
     public bool HasMultiple => Items.Count > 1;
-    public string Title => Items.Count == 0 ? "置物架" : $"{Items.Count} 个项目";
+    public string Title => Items.Count == 0 ? Strings.Shelf : Strings.ItemCount(Items.Count);
+    public string WindowTitle => Strings.ShelfWindowTitle(Title);
 
     /// <summary>堆叠最上面是最新放入的项目。</summary>
     public ShelfItem? Stack0 => ItemFromEnd(1);
@@ -72,7 +74,7 @@ public sealed class ShelfViewModel : ObservableObject
     {
         0 => string.Empty,
         1 => Items[0].DisplayName,
-        _ => $"{Items.Count} 个项目"
+        _ => Strings.ItemCount(Items.Count)
     };
 
     public string StackDetail => Items.Count == 1 ? Items[0].Detail : BuildSummary();
@@ -263,7 +265,7 @@ public sealed class ShelfViewModel : ObservableObject
         var available = targets.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
         if (available.Length == 0)
         {
-            var empty = new QuickActionResult(false, Items.Count == 0 ? "先把文件放进置物架" : "这个操作只支持文件或文件夹");
+            var empty = new QuickActionResult(false, Items.Count == 0 ? Strings.AddFilesFirst : Strings.FilesAndFoldersOnly);
             Notify(empty.Message, false);
             return empty;
         }
@@ -277,7 +279,7 @@ public sealed class ShelfViewModel : ObservableObject
         foreach (var cache in dropped.CacheDirectories) RegisterCache(cache);
         if (dropped.FilePaths.Count == 0)
         {
-            var failed = new QuickActionResult(false, dropped.ErrorMessage ?? "这个操作只支持文件或文件夹");
+            var failed = new QuickActionResult(false, dropped.ErrorMessage ?? Strings.FilesAndFoldersOnly);
             Notify(failed.Message, false);
             return failed;
         }
@@ -313,7 +315,7 @@ public sealed class ShelfViewModel : ObservableObject
         catch (Exception exception)
         {
             LogService.Error($"快速操作“{info.Label}”失败", exception);
-            result = new QuickActionResult(false, "操作没有完成，原文件没有改变");
+            result = new QuickActionResult(false, Strings.ActionFailed);
         }
         finally
         {
@@ -334,7 +336,7 @@ public sealed class ShelfViewModel : ObservableObject
         var copied = files.Length > 0
             ? ClipboardService.TrySetFiles(files)
             : ClipboardService.TrySetText(string.Join(Environment.NewLine, items.Select(item => item.Value)));
-        Notify(copied ? (files.Length > 0 ? $"已复制 {files.Length} 个文件" : "已复制文本") : "剪贴板正被占用，请重试", copied);
+        Notify(copied ? (files.Length > 0 ? Strings.CopiedFiles(files.Length) : Strings.CopiedText) : Strings.ClipboardBusy, copied);
         return copied;
     }
 
@@ -343,11 +345,11 @@ public sealed class ShelfViewModel : ObservableObject
         var paths = items.Where(item => item.IsFileSystem).Select(item => item.Value).ToArray();
         if (paths.Length == 0)
         {
-            Notify("没有可复制的路径", false);
+            Notify(Strings.NoPathsToCopy, false);
             return false;
         }
         var copied = ClipboardService.TrySetText(string.Join(Environment.NewLine, paths));
-        Notify(copied ? (paths.Length > 1 ? $"已复制 {paths.Length} 个路径" : "已复制路径") : "剪贴板正被占用，请重试", copied);
+        Notify(copied ? (paths.Length > 1 ? Strings.CopiedPaths(paths.Length) : Strings.CopiedPath) : Strings.ClipboardBusy, copied);
         return copied;
     }
 
@@ -358,7 +360,7 @@ public sealed class ShelfViewModel : ObservableObject
             switch (item.Kind)
             {
                 case ShelfItemKind.Text:
-                    if (ClipboardService.TrySetText(item.Value)) Notify("已复制文本");
+                    if (ClipboardService.TrySetText(item.Value)) Notify(Strings.CopiedText);
                     break;
                 case ShelfItemKind.Link:
                     Process.Start(new ProcessStartInfo(item.Value) { UseShellExecute = true });
@@ -366,7 +368,7 @@ public sealed class ShelfViewModel : ObservableObject
                 default:
                     if (!item.RefreshAvailability())
                     {
-                        Notify("项目已被移动或删除", false);
+                        Notify(Strings.ItemMissing, false);
                         return;
                     }
                     Process.Start(new ProcessStartInfo(item.Value) { UseShellExecute = true });
@@ -376,14 +378,24 @@ public sealed class ShelfViewModel : ObservableObject
         catch (Exception exception)
         {
             LogService.Error("打开项目失败", exception);
-            Notify("无法打开这个项目", false);
+            Notify(Strings.CannotOpenItem, false);
         }
     }
 
     public void Reveal(IReadOnlyList<ShelfItem> items)
     {
         var paths = items.Where(item => item.IsFileSystem).Select(item => item.Value).ToArray();
-        if (paths.Length == 0 || !ShellInterop.OpenFolderAndSelect(paths)) Notify("无法打开所在文件夹", false);
+        if (paths.Length == 0 || !ShellInterop.OpenFolderAndSelect(paths)) Notify(Strings.CannotOpenFolder, false);
+    }
+
+    /// <summary>切换界面语言后刷新标题、汇总和项目说明。</summary>
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(StackCaption));
+        OnPropertyChanged(nameof(StackDetail));
+        foreach (var item in Items) item.RefreshText();
     }
 
     /// <summary>关闭置物架时清理 DropShelf 自己创建的临时附件。</summary>
@@ -433,10 +445,10 @@ public sealed class ShelfViewModel : ObservableObject
         var texts = Items.Count(item => item.Kind == ShelfItemKind.Text);
         var links = Items.Count(item => item.Kind == ShelfItemKind.Link);
         var parts = new List<string>();
-        if (files > 0) parts.Add($"{files} 个文件");
-        if (folders > 0) parts.Add($"{folders} 个文件夹");
-        if (texts > 0) parts.Add($"{texts} 段文本");
-        if (links > 0) parts.Add($"{links} 个链接");
+        if (files > 0) parts.Add(Strings.FileCount(files));
+        if (folders > 0) parts.Add(Strings.FolderCount(folders));
+        if (texts > 0) parts.Add(Strings.TextCount(texts));
+        if (links > 0) parts.Add(Strings.LinkCount(links));
         var total = Items.Where(item => item.Kind == ShelfItemKind.File).Sum(item => item.SizeBytes ?? 0);
         if (total > 0) parts.Add(ShelfItem.FormatSize(total));
         return string.Join(" · ", parts);
@@ -456,6 +468,7 @@ public sealed class ShelfViewModel : ObservableObject
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(HasMultiple));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(WindowTitle));
         OnPropertyChanged(nameof(Stack0));
         OnPropertyChanged(nameof(Stack1));
         OnPropertyChanged(nameof(Stack2));

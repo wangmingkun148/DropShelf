@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows.Input;
 using DropShelf.Infrastructure;
+using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
 
@@ -33,6 +34,8 @@ public sealed class QuickActionOption : ObservableObject
 
     public void Refresh()
     {
+        OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(Description));
         OnPropertyChanged(nameof(IsEnabled));
         OnPropertyChanged(nameof(CanToggle));
     }
@@ -41,7 +44,7 @@ public sealed class QuickActionOption : ObservableObject
 public sealed class SettingsViewModel : ObservableObject
 {
     private readonly AppController _controller;
-    private string? _startupError;
+    private bool _startupFailed;
 
     public SettingsViewModel(AppController controller)
     {
@@ -67,28 +70,34 @@ public sealed class SettingsViewModel : ObservableObject
 
     public IReadOnlyList<QuickActionOption> ActionOptions { get; }
 
-    public string Version => $"版本 {typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3)}";
+    public string Version => Strings.Version(typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3));
     public string SettingsPath => _controller.SettingsPath;
     public string LogDirectory => LogService.LogDirectory;
 
     public bool IsHealthy => GestureEnabled && _controller.IsGestureRunning;
 
     public string StatusTitle => !GestureEnabled
-        ? "晃动呼出已暂停"
-        : _controller.IsGestureRunning ? "正在后台运行" : "手势识别未能启动";
+        ? Strings.StatusPaused
+        : _controller.IsGestureRunning ? Strings.StatusRunning : Strings.StatusGestureFailed;
 
     public string StatusDetail
     {
         get
         {
             var hotkey = Settings.HotkeyGesture;
-            var hotkeyText = hotkey.IsEmpty ? string.Empty : $"，或按 {hotkey} 打开置物架";
+            var hotkeyText = hotkey.IsEmpty ? null : hotkey.ToString();
             return !GestureEnabled
-                ? $"可在“手势与置物架”中重新开启{hotkeyText}"
+                ? Strings.StatusPausedDetail(hotkeyText)
                 : _controller.IsGestureRunning
-                    ? $"拖住文件并快速晃动鼠标{hotkeyText}"
-                    : "请重新启动 DropShelf；置物架和快捷键仍可使用";
+                    ? Strings.StatusRunningDetail(hotkeyText)
+                    : Strings.StatusGestureFailedDetail;
         }
+    }
+
+    public AppLanguage Language
+    {
+        get => Settings.Language;
+        set => Update(settings => settings.Language = value);
     }
 
     public bool StartWithWindows
@@ -97,21 +106,21 @@ public sealed class SettingsViewModel : ObservableObject
         set
         {
             if (value == Settings.StartWithWindows) return;
-            StartupError = _controller.SetStartWithWindows(value) ? null : "Windows 没有允许修改开机启动，设置保持不变";
+            StartupFailed = !_controller.SetStartWithWindows(value);
             OnPropertyChanged();
         }
     }
 
-    public string? StartupError
+    public bool StartupFailed
     {
-        get => _startupError;
+        get => _startupFailed;
         private set
         {
-            if (SetField(ref _startupError, value)) OnPropertyChanged(nameof(StartupDescription));
+            if (SetField(ref _startupFailed, value)) OnPropertyChanged(nameof(StartupDescription));
         }
     }
 
-    public string StartupDescription => StartupError ?? "登录 Windows 后在后台运行，不弹出窗口";
+    public string StartupDescription => StartupFailed ? Strings.StartupFailed : Strings.StartupDescription;
 
     public bool GestureEnabled
     {
@@ -156,20 +165,20 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     public string HotkeyDescription => Settings.HotkeyGesture.IsEmpty
-        ? "未设置快捷键"
+        ? Strings.HotkeyNotSet
         : _controller.IsHotkeyRegistered
-            ? "在光标处打开空置物架，可直接按 Ctrl+V 粘贴"
-            : "这个快捷键已被其他程序占用，请换一个";
+            ? Strings.HotkeyRegistered
+            : Strings.HotkeyTaken;
 
     public bool HotkeyHasError => !Settings.HotkeyGesture.IsEmpty && !_controller.IsHotkeyRegistered;
 
-    public string AccentDescription => "按钮、开关和选中状态使用 Windows 强调色";
+    public string AccentDescription => Strings.AccentDescription;
 
     public int EnabledActionCount => Settings.QuickActions?.Count ?? 0;
 
     public string ActionsSummary => EnabledActionCount == 0
-        ? "已关闭快速操作，置物架底部不显示按钮"
-        : $"已选择 {EnabledActionCount} 个，最多 {QuickActions.MaximumVisible} 个";
+        ? Strings.ActionsOff
+        : Strings.ActionsSelected(EnabledActionCount, QuickActions.MaximumVisible);
 
     public bool IsActionEnabled(QuickActionType type) => Settings.QuickActions?.Contains(type) == true;
 
@@ -193,9 +202,10 @@ public sealed class SettingsViewModel : ObservableObject
         foreach (var name in new[]
                  {
                      nameof(StartWithWindows), nameof(GestureEnabled), nameof(Sensitivity), nameof(ShelfSize),
-                     nameof(RemoveAfterDragOut), nameof(CloseWhenEmpty), nameof(Theme), nameof(Hotkey),
+                     nameof(RemoveAfterDragOut), nameof(CloseWhenEmpty), nameof(Theme), nameof(Language), nameof(Hotkey),
                      nameof(HotkeyDescription), nameof(HotkeyHasError), nameof(StatusTitle), nameof(StatusDetail),
-                     nameof(IsHealthy), nameof(EnabledActionCount), nameof(ActionsSummary)
+                     nameof(IsHealthy), nameof(EnabledActionCount), nameof(ActionsSummary), nameof(StartupDescription),
+                     nameof(AccentDescription), nameof(Version)
                  })
             OnPropertyChanged(name);
         foreach (var option in ActionOptions) option.Refresh();

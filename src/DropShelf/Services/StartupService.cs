@@ -1,4 +1,5 @@
 using System.IO;
+using DropShelf.Localization;
 using Microsoft.Win32;
 
 namespace DropShelf.Services;
@@ -23,7 +24,7 @@ public sealed class StartupService
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
             if (key is null)
-                return new StartupRegistrationResult(false, "Windows 启动设置不可用");
+                return new StartupRegistrationResult(false, Strings.StartupSettingsUnavailable);
 
             if (enabled)
                 key.SetValue(ValueName, BuildCommand(_executablePath), RegistryValueKind.String);
@@ -35,7 +36,7 @@ public sealed class StartupService
         catch (Exception exception)
         {
             LogService.Error("修改开机启动设置失败", exception);
-            return new StartupRegistrationResult(false, "Windows 拒绝了这项设置");
+            return new StartupRegistrationResult(false, Strings.StartupRefused);
         }
     }
 

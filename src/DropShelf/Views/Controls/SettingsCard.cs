@@ -3,7 +3,9 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using DropShelf.Localization;
 using DropShelf.Models;
+using DropShelf.Services;
 
 namespace DropShelf.Views.Controls;
 
@@ -90,7 +92,7 @@ public class HotkeyBox : Control
     public static readonly DependencyProperty IsRecordingProperty = IsRecordingKey.DependencyProperty;
 
     private static readonly DependencyPropertyKey DisplayTextKey = DependencyProperty.RegisterReadOnly(
-        nameof(DisplayText), typeof(string), typeof(HotkeyBox), new PropertyMetadata("未设置"));
+        nameof(DisplayText), typeof(string), typeof(HotkeyBox), new PropertyMetadata(string.Empty));
 
     public static readonly DependencyProperty DisplayTextProperty = DisplayTextKey.DependencyProperty;
 
@@ -98,6 +100,12 @@ public class HotkeyBox : Control
     {
         DefaultStyleKeyProperty.OverrideMetadata(typeof(HotkeyBox), new FrameworkPropertyMetadata(typeof(HotkeyBox)));
         FocusableProperty.OverrideMetadata(typeof(HotkeyBox), new FrameworkPropertyMetadata(true));
+    }
+
+    public HotkeyBox()
+    {
+        Loaded += (_, _) => LanguageService.LanguageChanged += OnLanguageChanged;
+        Unloaded += (_, _) => LanguageService.LanguageChanged -= OnLanguageChanged;
     }
 
     public HotkeyGesture Gesture
@@ -126,7 +134,7 @@ public class HotkeyBox : Control
         base.OnMouseLeftButtonDown(e);
         Focus();
         SetValue(IsRecordingKey, true);
-        SetValue(DisplayTextKey, "请按下快捷键…");
+        SetValue(DisplayTextKey, Strings.HotkeyPrompt);
         e.Handled = true;
     }
 
@@ -144,7 +152,7 @@ public class HotkeyBox : Control
             if (e.Key is Key.Enter or Key.Space)
             {
                 SetValue(IsRecordingKey, true);
-                SetValue(DisplayTextKey, "请按下快捷键…");
+                SetValue(DisplayTextKey, Strings.HotkeyPrompt);
                 e.Handled = true;
             }
             return;
@@ -171,14 +179,14 @@ public class HotkeyBox : Control
         if (HotkeyGesture.IsModifierKey(key))
         {
             var preview = new HotkeyGesture(modifiers, Key.None).ToString();
-            SetValue(DisplayTextKey, string.IsNullOrEmpty(preview) ? "请按下快捷键…" : preview + "+…");
+            SetValue(DisplayTextKey, string.IsNullOrEmpty(preview) ? Strings.HotkeyPrompt : preview + "+…");
             return;
         }
 
         var gesture = new HotkeyGesture(modifiers, key);
         if (!gesture.IsValid)
         {
-            SetValue(DisplayTextKey, "需要搭配 Ctrl、Alt 或 Win");
+            SetValue(DisplayTextKey, Strings.HotkeyNeedsModifier);
             return;
         }
 
@@ -187,6 +195,8 @@ public class HotkeyBox : Control
     }
 
     private static bool IsWindowsKeyDown() => Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
+
+    private void OnLanguageChanged(object? sender, EventArgs e) => UpdateDisplay();
 
     private void StopRecording()
     {
@@ -197,6 +207,6 @@ public class HotkeyBox : Control
     private void UpdateDisplay()
     {
         if (IsRecording) return;
-        SetValue(DisplayTextKey, Gesture.IsEmpty ? "未设置" : Gesture.ToString());
+        SetValue(DisplayTextKey, Gesture.IsEmpty ? Strings.HotkeyNone : Gesture.ToString());
     }
 }

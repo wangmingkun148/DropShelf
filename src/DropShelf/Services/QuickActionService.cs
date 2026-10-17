@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Models;
 
 namespace DropShelf.Services;
@@ -40,7 +41,7 @@ public static class QuickActionService
     public static async Task<QuickActionResult> ExecuteAsync(QuickActionRequest request)
     {
         var paths = request.Paths.Where(IsAvailablePath).ToArray();
-        if (paths.Length == 0) return new QuickActionResult(false, "没有可操作的文件");
+        if (paths.Length == 0) return new QuickActionResult(false, Strings.NoFilesToProcess);
 
         switch (request.Type)
         {
@@ -54,7 +55,7 @@ public static class QuickActionService
                 catch (Exception exception)
                 {
                     LogService.Error("准备压缩或解压输出位置失败", exception);
-                    return new QuickActionResult(false, "无法使用输出文件夹，原文件没有改变");
+                    return new QuickActionResult(false, Strings.OutputFolderUnavailable);
                 }
 
             case QuickActionType.CopyFullPath:
@@ -66,27 +67,27 @@ public static class QuickActionService
                     pathsToCopy = saved.OutputPaths;
                 }
                 return ClipboardService.TrySetText(string.Join(Environment.NewLine, pathsToCopy))
-                    ? new QuickActionResult(true, pathsToCopy.Count > 1 ? $"已复制 {pathsToCopy.Count} 个路径" : "已复制路径")
-                    : new QuickActionResult(false, "剪贴板正被其他程序占用，请重试");
+                    ? new QuickActionResult(true, pathsToCopy.Count > 1 ? Strings.CopiedPaths(pathsToCopy.Count) : Strings.CopiedPath)
+                    : new QuickActionResult(false, Strings.ClipboardBusyOtherApp);
 
             case QuickActionType.MoveTo:
                 var destination = request.PickFolder?.Invoke();
                 if (string.IsNullOrWhiteSpace(destination))
-                    return new QuickActionResult(false, "已取消移动") { Cancelled = true };
+                    return new QuickActionResult(false, Strings.MoveCancelled) { Cancelled = true };
                 var results = await new FileOperationService().MoveAsync(paths, destination);
                 var moved = results.Where(result => result.Succeeded && result.Destination is not null)
                     .Select(result => (result.Source, result.Destination!))
                     .ToArray();
                 var failed = results.Count - moved.Length;
                 var message = failed == 0
-                    ? $"已移动 {moved.Length} 项到 {Path.GetFileName(Path.TrimEndingDirectorySeparator(destination))}"
-                    : moved.Length == 0 ? "移动失败，原项目保持不变" : $"已移动 {moved.Length} 项，{failed} 项未能移动";
+                    ? Strings.MovedTo(moved.Length, Path.GetFileName(Path.TrimEndingDirectorySeparator(destination)))
+                    : moved.Length == 0 ? Strings.MoveFailed : Strings.MovedPartially(moved.Length, failed);
                 return new QuickActionResult(moved.Length > 0, message, moved.Select(item => item.Item2).ToArray()) { Moves = moved };
 
             case QuickActionType.Reveal:
                 return ShellInterop.OpenFolderAndSelect(paths)
-                    ? new QuickActionResult(true, "已在文件资源管理器中显示")
-                    : new QuickActionResult(false, "无法打开所在文件夹");
+                    ? new QuickActionResult(true, Strings.ShownInExplorer)
+                    : new QuickActionResult(false, Strings.CannotOpenFolder);
 
             default:
                 return ShowProperties(request.Owner, paths);
@@ -96,7 +97,7 @@ public static class QuickActionService
     public static QuickActionResult ShowProperties(IntPtr owner, IReadOnlyList<string> paths)
     {
         var available = paths.Where(IsAvailablePath).ToArray();
-        if (available.Length == 0) return new QuickActionResult(false, "没有可查看属性的文件");
+        if (available.Length == 0) return new QuickActionResult(false, Strings.NoFilesForProperties);
 
         try
         {
@@ -105,7 +106,7 @@ public static class QuickActionService
                 try
                 {
                     if (NativeMethods.SHMultiFileProperties(data, 0) == 0)
-                        return new QuickActionResult(true, $"已打开 {available.Length} 个项目的属性");
+                        return new QuickActionResult(true, Strings.OpenedPropertiesFor(available.Length));
                 }
                 finally
                 {
@@ -114,13 +115,13 @@ public static class QuickActionService
             }
 
             return NativeMethods.SHObjectProperties(owner, ShopFilePath, available[0], null)
-                ? new QuickActionResult(true, "已打开属性")
-                : new QuickActionResult(false, "Windows 未能打开属性窗口");
+                ? new QuickActionResult(true, Strings.OpenedProperties)
+                : new QuickActionResult(false, Strings.PropertiesUnavailable);
         }
         catch (Exception exception)
         {
             LogService.Error("打开文件属性失败", exception);
-            return new QuickActionResult(false, "未能打开属性窗口，原文件没有改变");
+            return new QuickActionResult(false, Strings.PropertiesFailed);
         }
     }
 
@@ -130,7 +131,7 @@ public static class QuickActionService
     public static QuickActionResult Archive(IReadOnlyList<string> paths, string? outputDirectory = null)
     {
         var sources = NormalizeSources(paths);
-        if (sources.Length == 0) return new QuickActionResult(false, "没有可压缩或解压的文件");
+        if (sources.Length == 0) return new QuickActionResult(false, Strings.NothingToArchive);
         if (sources.Length == 1 && File.Exists(sources[0]))
         {
             var extension = Path.GetExtension(sources[0]);
@@ -145,13 +146,13 @@ public static class QuickActionService
     public static QuickActionResult Compress(IReadOnlyList<string> paths, string? outputDirectory = null)
     {
         var sources = NormalizeSources(paths);
-        if (sources.Length == 0) return new QuickActionResult(false, "没有可压缩的文件");
+        if (sources.Length == 0) return new QuickActionResult(false, Strings.NothingToCompress);
 
         string? temporaryPath = null;
         try
         {
             var destinationDirectory = ResolveDestinationDirectory(sources[0], outputDirectory);
-            var archiveName = sources.Length == 1 ? ResolveSourceName(sources[0]) : "DropShelf 压缩文件";
+            var archiveName = sources.Length == 1 ? ResolveSourceName(sources[0]) : Strings.DefaultArchiveName;
             var outputPath = GetAvailableFilePath(destinationDirectory, archiveName, ".zip");
             temporaryPath = Path.Combine(destinationDirectory, $".dropshelf-{Guid.NewGuid():N}.tmp");
 
@@ -175,12 +176,12 @@ public static class QuickActionService
 
             File.Move(temporaryPath, outputPath);
             temporaryPath = null;
-            return new QuickActionResult(true, $"已创建 {Path.GetFileName(outputPath)}", [outputPath]);
+            return new QuickActionResult(true, Strings.Created(Path.GetFileName(outputPath)), [outputPath]);
         }
         catch (Exception exception)
         {
             LogService.Error("快速压缩失败", exception);
-            return new QuickActionResult(false, "压缩失败，原文件没有改变");
+            return new QuickActionResult(false, Strings.CompressFailed);
         }
         finally
         {
@@ -201,13 +202,13 @@ public static class QuickActionService
                 .Select(result => result.Destination!)
                 .ToArray();
             return outputs.Length > 0
-                ? new QuickActionResult(true, $"已保存 {outputs.Length} 项到下载文件夹", outputs)
-                : new QuickActionResult(false, "附件保存失败，无法复制可用路径");
+                ? new QuickActionResult(true, Strings.SavedToDownloads(outputs.Length), outputs)
+                : new QuickActionResult(false, Strings.AttachmentSaveFailed);
         }
         catch (Exception exception)
         {
             LogService.Error("保存附件副本失败", exception);
-            return new QuickActionResult(false, "附件保存失败，无法复制可用路径");
+            return new QuickActionResult(false, Strings.AttachmentSaveFailed);
         }
     }
 
@@ -241,12 +242,12 @@ public static class QuickActionService
             ExtractZipSafely(source, temporaryDirectory);
             Directory.Move(temporaryDirectory, destination);
             temporaryDirectory = null;
-            return new QuickActionResult(true, $"已解压到 {Path.GetFileName(destination)}", [destination]);
+            return new QuickActionResult(true, Strings.ExtractedTo(Path.GetFileName(destination)), [destination]);
         }
         catch (Exception exception)
         {
             LogService.Error("快速解压失败", exception);
-            return new QuickActionResult(false, "解压失败，压缩包没有改变");
+            return new QuickActionResult(false, Strings.ExtractFailed);
         }
         finally
         {
@@ -265,7 +266,7 @@ public static class QuickActionService
         {
             var tarPath = GetWindowsTarPath();
             if (!File.Exists(tarPath))
-                return new QuickActionResult(false, "当前 Windows 版本不支持内置 7z 解压");
+                return new QuickActionResult(false, Strings.SevenZipUnsupported);
 
             var parent = ResolveDestinationDirectory(source, outputDirectory);
             var destination = GetAvailableDirectoryPath(parent, Path.GetFileNameWithoutExtension(source));
@@ -287,12 +288,12 @@ public static class QuickActionService
 
             Directory.Move(temporaryDirectory, destination);
             temporaryDirectory = null;
-            return new QuickActionResult(true, $"已解压到 {Path.GetFileName(destination)}", [destination]);
+            return new QuickActionResult(true, Strings.ExtractedTo(Path.GetFileName(destination)), [destination]);
         }
         catch (Exception exception)
         {
             LogService.Error("Windows 内置 7z 解压失败", exception);
-            return new QuickActionResult(false, "7z 解压失败，压缩包没有改变");
+            return new QuickActionResult(false, Strings.SevenZipFailed);
         }
         finally
         {

@@ -38,6 +38,7 @@ DropShelf 是一个 Windows 临时文件置物架。拖住文件并晃动鼠标�
 - Windows 11 风格的设置窗口：云母背景、侧边导航、设置卡片、开关和分段选择。
 - 置物架在 Windows 11 上使用亚克力半透明材质和系统圆角；按钮、开关和选中状态使用 Windows 强调色，并自动保证文字对比度。
 - 支持跟随系统、浅色和深色三种主题。所有设置修改后立即生效并自动保存。
+- 界面支持简体中文和英文：默认跟随 Windows 显示语言，可在“概览 > 常规 > 语言”中切换，已打开的窗口、置物架和托盘菜单立即更新，无需重启。
 - 首次运行显示带动画演示的四步教程，之后可在设置中重新查看。
 
 ### 系统集成
@@ -99,6 +100,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 - `src/DropShelf/Shelves/ShelfManager.cs`：多个置物架的创建、复用与关闭。
 - `src/DropShelf/Views/ShelfWindow.xaml`：置物架界面；`MainWindow.xaml`：设置；`OnboardingWindow.xaml`：教程。
 - `src/DropShelf/Services`：拖入数据解析、原生拖出、快速操作、剪贴板、缩略图、主题、托盘、快捷键等。
+- `src/DropShelf/Localization`：中英文界面文字；XAML 通过 `{l:Loc 名称}` 引用，切换语言时自动刷新。
 - `src/DropShelf/Themes`：颜色、图标与 Fluent 风格控件样式。
 - `src/DropShelf/Interop`：Win32、DWM 与 Shell 接口。
 - `tests/DropShelf.Tests`：自动化测试。

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Media.Imaging;
+using DropShelf.Localization;
 using DropShelf.Models;
 using WpfDataFormats = System.Windows.DataFormats;
 using WpfDataObject = System.Windows.IDataObject;
@@ -111,21 +112,21 @@ public static class DropDataReader
             case DropContentKind.Link when !filesOnly:
                 return ReadLink(data) is { } link
                     ? new DropReadResult([link], [], 0, null)
-                    : DropReadResult.Failed("没有读取到链接地址");
+                    : DropReadResult.Failed(Strings.NoLinkRead);
 
             case DropContentKind.Text when !filesOnly:
                 var text = ReadText(data);
-                if (string.IsNullOrWhiteSpace(text)) return DropReadResult.Failed("没有可添加的文本");
+                if (string.IsNullOrWhiteSpace(text)) return DropReadResult.Failed(Strings.NoTextToAdd);
                 var trimmed = text.Trim();
                 return IsSingleUrl(trimmed)
                     ? new DropReadResult([new DroppedEntry(ShelfItemKind.Link, trimmed)], [], 0, null)
                     : new DropReadResult([new DroppedEntry(ShelfItemKind.Text, trimmed)], [], 0, null);
 
             case DropContentKind.Link or DropContentKind.Text:
-                return DropReadResult.Failed("这个操作只支持文件或文件夹");
+                return DropReadResult.Failed(Strings.FilesAndFoldersOnly);
 
             default:
-                return DropReadResult.Failed("来源程序没有提供可读取的内容");
+                return DropReadResult.Failed(Strings.SourceProvidedNothing);
         }
     }
 
@@ -137,7 +138,7 @@ public static class DropDataReader
     private static DropReadResult ReadFileDrop(WpfDataObject data)
     {
         if (data.GetData(WpfDataFormats.FileDrop, false) is not string[] paths || paths.Length == 0)
-            return DropReadResult.Failed("没有读取到文件");
+            return DropReadResult.Failed(Strings.NoFilesRead);
         var entries = paths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => new DroppedEntry(Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File, path))
@@ -164,10 +165,10 @@ public static class DropDataReader
             LogService.Error("读取拖入的图片失败", exception);
         }
 
-        if (pngBytes is null && bitmap is null) return DropReadResult.Failed("没有读取到图片内容");
+        if (pngBytes is null && bitmap is null) return DropReadResult.Failed(Strings.NoImageRead);
 
         var cacheDirectory = VirtualFileDropService.CreateCacheDirectory();
-        var path = Path.Combine(cacheDirectory, $"图片 {DateTime.Now:yyyy-MM-dd HH.mm.ss}.png");
+        var path = Path.Combine(cacheDirectory, $"{Strings.DroppedImageName} {DateTime.Now:yyyy-MM-dd HH.mm.ss}.png");
         try
         {
             await Task.Run(() =>
@@ -188,7 +189,7 @@ public static class DropDataReader
         {
             LogService.Error("保存拖入的图片失败", exception);
             await VirtualFileDropService.DeleteCacheAsync(cacheDirectory);
-            return DropReadResult.Failed("图片保存失败");
+            return DropReadResult.Failed(Strings.ImageSaveFailed);
         }
     }
 
