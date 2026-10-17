@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DropShelf", "src\DropShelf\DropShelf.csproj", "{916F4B4F-2829-45B4-A195-9E57C7AD741A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DropShelf.Tests", "tests\DropShelf.Tests\DropShelf.Tests.csproj", "{DC452B4D-2599-4F26-A53E-386408B32FCF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{916F4B4F-2829-45B4-A195-9E57C7AD741A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{916F4B4F-2829-45B4-A195-9E57C7AD741A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{916F4B4F-2829-45B4-A195-9E57C7AD741A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{916F4B4F-2829-45B4-A195-9E57C7AD741A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC452B4D-2599-4F26-A53E-386408B32FCF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC452B4D-2599-4F26-A53E-386408B32FCF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC452B4D-2599-4F26-A53E-386408B32FCF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC452B4D-2599-4F26-A53E-386408B32FCF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

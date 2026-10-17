@@ -1,0 +1,365 @@
+<Window x:Class="DropShelf.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:DropShelf.Views.Controls"
+        xmlns:models="clr-namespace:DropShelf.Models"
+        Title="DropShelf" Style="{StaticResource AppWindowStyle}"
+        Width="900" Height="640" MinWidth="760" MinHeight="540" WindowStartupLocation="CenterScreen">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="48" GlassFrameThickness="-1" ResizeBorderThickness="6" CornerRadius="0"
+                      UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="PageStyle" TargetType="StackPanel">
+            <Setter Property="Visibility" Value="Collapsed" />
+        </Style>
+
+        <Style x:Key="ThemeTileStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" CornerRadius="10" BorderThickness="2" BorderBrush="Transparent" Padding="6"
+                                Background="Transparent">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TipCardStyle" TargetType="Border" BasedOn="{StaticResource CardBorderStyle}">
+            <Setter Property="Padding" Value="16,16,16,18" />
+        </Style>
+
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="244" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 标题栏 -->
+        <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+            <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="16" Height="16"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <TextBlock Text="DropShelf" Margin="12,0,0,1" FontSize="12" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- 侧边导航 -->
+        <Grid Grid.Row="1" Margin="6,0,6,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ListBox x:Name="NavList" Style="{StaticResource NavListStyle}" SelectedIndex="0" SelectionChanged="OnNavigationChanged">
+                <ListBoxItem Tag="Overview">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{StaticResource Glyph.Home}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                        <TextBlock Text="概览" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="Shelf">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{StaticResource Glyph.Mouse}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                        <TextBlock Text="手势与置物架" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="Actions">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{StaticResource Glyph.Lightning}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                        <TextBlock Text="快速操作" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="Appearance">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{StaticResource Glyph.Color}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                        <TextBlock Text="外观" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="About">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{StaticResource Glyph.Info}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                        <TextBlock Text="关于" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ListBoxItem>
+            </ListBox>
+            <Button x:Name="ExitApplicationButton" Grid.Row="1" Style="{StaticResource SubtleButtonStyle}" Height="38"
+                    HorizontalContentAlignment="Left" Padding="14,0" Command="{Binding ExitCommand}"
+                    ToolTip="停止手势识别并退出，关闭所有置物架">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{StaticResource Glyph.Power}" Style="{StaticResource GlyphTextStyle}" Margin="0,0,14,0" />
+                    <TextBlock Text="退出 DropShelf" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- 页面内容 -->
+        <Border x:Name="ContentLayer" Grid.Row="1" Grid.Column="1" Background="{DynamicResource LayerBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1,1,0,0" CornerRadius="8,0,0,0">
+            <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Focusable="False">
+                <Grid MaxWidth="860" Margin="36,26,36,36">
+                    <!-- 概览 -->
+                    <StackPanel x:Name="OverviewPage" Visibility="Visible">
+                        <TextBlock Text="概览" Style="{StaticResource TitleTextStyle}" Margin="0,0,0,20" />
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="22,20">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="56" Height="56"
+                                       RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" Margin="18,0,16,0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="9" Height="9" Margin="0,2,9,0" VerticalAlignment="Center">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{DynamicResource CautionBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsHealthy}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock x:Name="StatusTitleText" Text="{Binding StatusTitle}" FontSize="18" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding StatusDetail}" Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="18,5,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}"
+                                        VerticalAlignment="Center" Padding="16,6,16,7">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                                   Margin="0,1,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="打开置物架" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <TextBlock Text="快速上手" Style="{StaticResource SectionHeaderTextStyle}" />
+                        <UniformGrid Columns="3">
+                            <Border Style="{StaticResource TipCardStyle}" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                               Foreground="{DynamicResource AccentTextBrush}" />
+                                    <TextBlock Text="拖住并晃动" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                    <TextBlock Text="拖住文件后左右快速晃动鼠标，置物架会出现在光标处。" Style="{StaticResource CaptionTextStyle}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource TipCardStyle}" Margin="3,0,3,0">
+                                <StackPanel>
+                                    <TextBlock Text="{StaticResource Glyph.Library}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                               Foreground="{DynamicResource AccentTextBrush}" />
+                                    <TextBlock Text="整摞拖出" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                    <TextBlock Text="拖动缩略图堆叠一次带走全部文件；点开后也能单独或多选拖出。" Style="{StaticResource CaptionTextStyle}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource TipCardStyle}" Margin="6,0,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                               Foreground="{DynamicResource AccentTextBrush}" />
+                                    <TextBlock Text="快速操作" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                    <TextBlock Text="把文件拖到置物架底部的按钮上，直接压缩、复制路径或移动。" Style="{StaticResource CaptionTextStyle}" />
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+
+                        <TextBlock Text="常规" Style="{StaticResource SectionHeaderTextStyle}" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="开机自动启动" Description="{Binding StartupDescription}">
+                            <CheckBox x:Name="StartupEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding StartWithWindows}" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Keyboard}" Header="全局快捷键" Description="{Binding HotkeyDescription}">
+                            <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="使用教程" Description="用动画快速了解晃动呼出、整摞拖出和快速操作">
+                            <Button Content="查看教程" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
+                        </controls:SettingsCard>
+                    </StackPanel>
+
+                    <!-- 手势与置物架 -->
+                    <StackPanel x:Name="ShelfPage" Style="{StaticResource PageStyle}">
+                        <TextBlock Text="手势与置物架" Style="{StaticResource TitleTextStyle}" Margin="0,0,0,20" />
+                        <TextBlock Text="晃动呼出" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,8" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Mouse}" Header="晃动鼠标呼出置物架"
+                                               Description="拖住文件、附件、图片或文本时，快速来回晃动鼠标">
+                            <CheckBox x:Name="GestureEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding GestureEnabled}" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="灵敏度"
+                                               Description="灵敏只需小幅晃动；稳健需要更明确的晃动，误触更少"
+                                               IsEnabled="{Binding GestureEnabled}">
+                            <ListBox x:Name="SensitivitySelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                     SelectedValue="{Binding Sensitivity}">
+                                <ListBoxItem Content="灵敏" Tag="{x:Static models:GestureSensitivity.Responsive}" />
+                                <ListBoxItem Content="均衡" Tag="{x:Static models:GestureSensitivity.Balanced}" />
+                                <ListBoxItem Content="稳健" Tag="{x:Static models:GestureSensitivity.Steady}" />
+                            </ListBox>
+                        </controls:SettingsCard>
+
+                        <TextBlock Text="置物架" Style="{StaticResource SectionHeaderTextStyle}" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="尺寸" Description="三档尺寸保持相同的比例和布局">
+                            <ListBox x:Name="ShelfSizeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                     SelectedValue="{Binding ShelfSize}">
+                                <ListBoxItem Content="小" Tag="{x:Static models:QuickShelfSize.Small}" />
+                                <ListBoxItem Content="中" Tag="{x:Static models:QuickShelfSize.Medium}" />
+                                <ListBoxItem Content="大" Tag="{x:Static models:QuickShelfSize.Large}" />
+                            </ListBox>
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.MoveToFolder}" Header="拖出后从置物架移除"
+                                               Description="关闭后可以把同一批文件依次拖到多个地方">
+                            <CheckBox Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding RemoveAfterDragOut}" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Clear}" Header="清空后自动关闭"
+                                               Description="项目全部拖出或移除后关闭置物架；钉住的置物架会保持打开">
+                            <CheckBox Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
+                        </controls:SettingsCard>
+
+                        <Border Style="{StaticResource CardBorderStyle}" Margin="0,16,0,0" Background="{DynamicResource ControlAltBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{StaticResource Glyph.Shield}" FontFamily="{StaticResource IconFont}" FontSize="18"
+                                           Margin="2,1,16,0" VerticalAlignment="Top" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource CaptionTextStyle}" FontSize="13" LineHeight="20"
+                                           Text="置物架只记录文件路径，不读取也不复制文件内容；放入、移除或清空都不会改动磁盘文件。尚未落盘的附件会暂存在临时目录，关闭置物架时自动清理。" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 快速操作 -->
+                    <StackPanel x:Name="ActionsPage" Style="{StaticResource PageStyle}">
+                        <TextBlock Text="快速操作" Style="{StaticResource TitleTextStyle}" Margin="0,0,0,8" />
+                        <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,0,0,6"
+                                   Text="显示在置物架底部。点击按钮处理置物架中的项目（展开后只处理选中项）；拖动文件时，也可以直接放到对应按钮上。" />
+                        <TextBlock Text="{Binding ActionsSummary}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,16,0,8" />
+                        <ItemsControl x:Name="ActionOptionsList" ItemsSource="{Binding ActionOptions}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <controls:SettingsCard Icon="{Binding Glyph}" Header="{Binding Label}" Description="{Binding Description}">
+                                        <CheckBox Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding IsEnabled}"
+                                                  IsEnabled="{Binding CanToggle}" />
+                                    </controls:SettingsCard>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- 外观 -->
+                    <StackPanel x:Name="AppearancePage" Style="{StaticResource PageStyle}">
+                        <TextBlock Text="外观" Style="{StaticResource TitleTextStyle}" Margin="0,0,0,20" />
+                        <TextBlock Text="主题" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,10" />
+                        <ListBox x:Name="ThemeSelector" SelectedValuePath="Tag" SelectedValue="{Binding Theme}" Background="Transparent"
+                                 BorderThickness="0" ItemContainerStyle="{StaticResource ThemeTileStyle}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.Template>
+                                <ControlTemplate TargetType="ListBox">
+                                    <ItemsPresenter />
+                                </ControlTemplate>
+                            </ListBox.Template>
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBoxItem Tag="{x:Static models:AppTheme.System}">
+                                <StackPanel>
+                                    <Grid Width="140" Height="92">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border CornerRadius="7,0,0,7" Background="#F3F3F3" />
+                                        <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
+                                        <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
+                                            <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
+                                        </Border>
+                                    </Grid>
+                                    <TextBlock Text="跟随系统" Margin="2,8,0,2" FontSize="13" />
+                                </StackPanel>
+                            </ListBoxItem>
+                            <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
+                                <StackPanel>
+                                    <Border Width="140" Height="92" CornerRadius="7" Background="#F3F3F3" BorderBrush="#14000000" BorderThickness="1">
+                                        <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
+                                            <Border Width="30" Height="30" CornerRadius="5" Background="#F3F3F3" BorderBrush="#26000000" BorderThickness="1" />
+                                        </Border>
+                                    </Border>
+                                    <TextBlock Text="浅色" Margin="2,8,0,2" FontSize="13" />
+                                </StackPanel>
+                            </ListBoxItem>
+                            <ListBoxItem Tag="{x:Static models:AppTheme.Dark}">
+                                <StackPanel>
+                                    <Border Width="140" Height="92" CornerRadius="7" Background="#202020" BorderBrush="#33FFFFFF" BorderThickness="1">
+                                        <Border Width="64" Height="64" CornerRadius="8" Background="#2B2B2B" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                            <Border Width="30" Height="30" CornerRadius="5" Background="#3B3B3B" BorderBrush="#33FFFFFF" BorderThickness="1" />
+                                        </Border>
+                                    </Border>
+                                    <TextBlock Text="深色" Margin="2,8,0,2" FontSize="13" />
+                                </StackPanel>
+                            </ListBoxItem>
+                        </ListBox>
+
+                        <TextBlock Text="颜色" Style="{StaticResource SectionHeaderTextStyle}" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Brush}" Header="强调色" Description="{Binding AccentDescription}">
+                            <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentBrush}"
+                                    BorderBrush="{DynamicResource ControlBorderBrush}" BorderThickness="1" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Light}" Header="材质效果"
+                                               Description="Windows 11 上，主窗口使用云母背景，置物架使用亚克力半透明效果" />
+                    </StackPanel>
+
+                    <!-- 关于 -->
+                    <StackPanel x:Name="AboutPage" Style="{StaticResource PageStyle}">
+                        <TextBlock Text="关于" Style="{StaticResource TitleTextStyle}" Margin="0,0,0,20" />
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="22,20">
+                            <StackPanel Orientation="Horizontal">
+                                <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="48" Height="48"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="DropShelf for Windows" Style="{StaticResource SubtitleTextStyle}" FontSize="18" />
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,3,0,0">
+                                        <Run Text="{Binding Version, Mode=OneWay}" />
+                                        <Run Text=" · 通过鼠标手势呼出的临时文件置物架" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="隐私与数据" Style="{StaticResource SectionHeaderTextStyle}" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Shield}" Header="隐私"
+                                               Description="鼠标位置只在内存中用于识别手势，不会保存或上传；关闭置物架后不保留文件记录。程序以普通用户权限运行。" />
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Settings}" Header="设置文件" Description="{Binding SettingsPath}">
+                            <Button Content="打开文件夹" Command="{Binding OpenSettingsFolderCommand}" />
+                        </controls:SettingsCard>
+                        <controls:SettingsCard Icon="{StaticResource Glyph.Document}" Header="运行日志"
+                                               Description="{Binding LogDirectory}">
+                            <Button Content="打开文件夹" Command="{Binding OpenLogFolderCommand}" />
+                        </controls:SettingsCard>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>

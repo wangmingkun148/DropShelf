@@ -1,0 +1,107 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!-- 以下为浅色默认值，ThemeService 启动后会按当前主题与系统强调色整体替换。 -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#E60067C0" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#CC0067C0" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#003E92" />
+    <SolidColorBrush x:Key="AccentSubtleBrush" Color="#1F0067C0" />
+    <SolidColorBrush x:Key="AccentFaintBrush" Color="#100067C0" />
+    <Color x:Key="AccentColor">#0067C0</Color>
+
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E4000000" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#9E000000" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#72000000" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#5C000000" />
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="LayerBrush" Color="#80FFFFFF" />
+    <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
+    <SolidColorBrush x:Key="CardHoverBrush" Color="#E6FFFFFF" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#14000000" />
+    <SolidColorBrush x:Key="ControlBrush" Color="#B3FFFFFF" />
+    <SolidColorBrush x:Key="ControlHoverBrush" Color="#80F9F9F9" />
+    <SolidColorBrush x:Key="ControlPressedBrush" Color="#4DF9F9F9" />
+    <SolidColorBrush x:Key="ControlBorderBrush" Color="#1F000000" />
+    <SolidColorBrush x:Key="ControlStrongBorderBrush" Color="#72000000" />
+    <SolidColorBrush x:Key="ControlAltBrush" Color="#06000000" />
+    <SolidColorBrush x:Key="SubtleHoverBrush" Color="#09000000" />
+    <SolidColorBrush x:Key="SubtlePressedBrush" Color="#06000000" />
+    <SolidColorBrush x:Key="SubtleSelectedBrush" Color="#0D000000" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#0F000000" />
+    <SolidColorBrush x:Key="FlyoutBrush" Color="#F9F9F9" />
+    <SolidColorBrush x:Key="FlyoutBorderBrush" Color="#1A000000" />
+    <SolidColorBrush x:Key="ShelfSolidBrush" Color="#F6F6F6" />
+    <SolidColorBrush x:Key="ShelfAcrylicTintBrush" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="ShelfTileBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ShelfTileBorderBrush" Color="#17000000" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#72000000" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#0F7B0F" />
+    <SolidColorBrush x:Key="CautionBrush" Color="#9D5D00" />
+    <SolidColorBrush x:Key="CriticalBrush" Color="#C42B1C" />
+    <SolidColorBrush x:Key="SmokeBrush" Color="#CCF6F6F6" />
+
+    <FontFamily x:Key="TextFont">Segoe UI, Microsoft YaHei UI</FontFamily>
+    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+    <sys:Double x:Key="CaptionFontSize">12</sys:Double>
+    <sys:Double x:Key="BodyFontSize">14</sys:Double>
+    <sys:Double x:Key="SubtitleFontSize">20</sys:Double>
+    <sys:Double x:Key="TitleFontSize">28</sys:Double>
+
+    <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
+    <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+
+    <!-- 图标字形，Segoe Fluent Icons 与 Segoe MDL2 Assets 共有 -->
+    <sys:String x:Key="Glyph.Close">&#xE711;</sys:String>
+    <sys:String x:Key="Glyph.Pin">&#xE718;</sys:String>
+    <sys:String x:Key="Glyph.Pinned">&#xE840;</sys:String>
+    <sys:String x:Key="Glyph.More">&#xE712;</sys:String>
+    <sys:String x:Key="Glyph.Info">&#xE946;</sys:String>
+    <sys:String x:Key="Glyph.Copy">&#xE8C8;</sys:String>
+    <sys:String x:Key="Glyph.Zip">&#xF012;</sys:String>
+    <sys:String x:Key="Glyph.FolderOpen">&#xE838;</sys:String>
+    <sys:String x:Key="Glyph.Folder">&#xE8B7;</sys:String>
+    <sys:String x:Key="Glyph.Document">&#xE8A5;</sys:String>
+    <sys:String x:Key="Glyph.Picture">&#xE8B9;</sys:String>
+    <sys:String x:Key="Glyph.Link">&#xE71B;</sys:String>
+    <sys:String x:Key="Glyph.Text">&#xE8D2;</sys:String>
+    <sys:String x:Key="Glyph.Settings">&#xE713;</sys:String>
+    <sys:String x:Key="Glyph.Home">&#xE80F;</sys:String>
+    <sys:String x:Key="Glyph.Color">&#xE790;</sys:String>
+    <sys:String x:Key="Glyph.Lightning">&#xE945;</sys:String>
+    <sys:String x:Key="Glyph.Keyboard">&#xE765;</sys:String>
+    <sys:String x:Key="Glyph.Power">&#xE7E8;</sys:String>
+    <sys:String x:Key="Glyph.Mouse">&#xE962;</sys:String>
+    <sys:String x:Key="Glyph.Move">&#xE7C2;</sys:String>
+    <sys:String x:Key="Glyph.ViewAll">&#xE8A9;</sys:String>
+    <sys:String x:Key="Glyph.List">&#xEA37;</sys:String>
+    <sys:String x:Key="Glyph.Check">&#xE73E;</sys:String>
+    <sys:String x:Key="Glyph.Error">&#xE783;</sys:String>
+    <sys:String x:Key="Glyph.Add">&#xE710;</sys:String>
+    <sys:String x:Key="Glyph.Delete">&#xE74D;</sys:String>
+    <sys:String x:Key="Glyph.Download">&#xE896;</sys:String>
+    <sys:String x:Key="Glyph.MoveToFolder">&#xE8DE;</sys:String>
+    <sys:String x:Key="Glyph.OpenWith">&#xE7AC;</sys:String>
+    <sys:String x:Key="Glyph.ChevronDown">&#xE70D;</sys:String>
+    <sys:String x:Key="Glyph.ChevronUp">&#xE70E;</sys:String>
+    <sys:String x:Key="Glyph.ChevronRight">&#xE76C;</sys:String>
+    <sys:String x:Key="Glyph.Library">&#xE8F1;</sys:String>
+    <sys:String x:Key="Glyph.Paste">&#xE77F;</sys:String>
+    <sys:String x:Key="Glyph.SelectAll">&#xE8B3;</sys:String>
+    <sys:String x:Key="Glyph.Clear">&#xE894;</sys:String>
+    <sys:String x:Key="Glyph.Pause">&#xE769;</sys:String>
+    <sys:String x:Key="Glyph.Help">&#xE897;</sys:String>
+    <sys:String x:Key="Glyph.Warning">&#xE7BA;</sys:String>
+    <sys:String x:Key="Glyph.Completed">&#xE930;</sys:String>
+    <sys:String x:Key="Glyph.Shield">&#xEA18;</sys:String>
+    <sys:String x:Key="Glyph.Collapse">&#xE73F;</sys:String>
+    <sys:String x:Key="Glyph.Expand">&#xE740;</sys:String>
+    <sys:String x:Key="Glyph.Brush">&#xE771;</sys:String>
+    <sys:String x:Key="Glyph.Light">&#xE793;</sys:String>
+    <sys:String x:Key="Glyph.NewWindow">&#xE78B;</sys:String>
+    <sys:String x:Key="Glyph.Back">&#xE72B;</sys:String>
+    <sys:String x:Key="Glyph.View">&#xE890;</sys:String>
+    <sys:String x:Key="Glyph.Lock">&#xE72E;</sys:String>
+</ResourceDictionary>

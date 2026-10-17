@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DropShelf</AssemblyName>
+    <RootNamespace>DropShelf</RootNamespace>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Product>DropShelf for Windows</Product>
+    <Company>DropShelf</Company>
+    <Authors>DropShelf Project</Authors>
+    <Description>通过鼠标手势呼出的 Windows 临时文件置物架</Description>
+    <ApplicationIcon>Assets\DropShelf.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\DropShelf.ico" />
+    <Resource Include="Assets\DropShelf-256.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DropShelf.Tests" />
+  </ItemGroup>
+</Project>

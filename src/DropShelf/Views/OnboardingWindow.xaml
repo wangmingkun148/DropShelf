@@ -1,0 +1,380 @@
+<Window x:Class="DropShelf.Views.OnboardingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="欢迎使用 DropShelf" Style="{StaticResource AppWindowStyle}"
+        Width="600" Height="560" ResizeMode="NoResize" ShowInTaskbar="True" WindowStartupLocation="CenterOwner">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" GlassFrameThickness="-1" ResizeBorderThickness="0" CornerRadius="0"
+                      UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="MiniCard" TargetType="Border">
+            <Setter Property="Width" Value="58" />
+            <Setter Property="Height" Value="58" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        </Style>
+        <Style x:Key="MiniShelf" TargetType="Border">
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Background" Value="{DynamicResource ShelfSolidBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.18" Color="Black" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CardGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="FontSize" Value="26" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+        <Geometry x:Key="CursorGeometry">M0,0 L0,19 L4.6,14.4 L7.8,21.4 L11.2,19.9 L8.1,13 L14,13 Z</Geometry>
+
+        <Storyboard x:Key="Step1Story" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="S1Float" Storyboard.TargetProperty="Y" From="0" To="-8" Duration="0:0:1.6"
+                             AutoReverse="True">
+                <DoubleAnimation.EasingFunction>
+                    <SineEase EasingMode="EaseInOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
+
+        <Storyboard x:Key="Step2Story" RepeatBehavior="Forever" Duration="0:0:3.8">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S2Move" Storyboard.TargetProperty="X">
+                <EasingDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.4" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.58" Value="-48" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.76" Value="46" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.94" Value="-46" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.12" Value="44" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.32" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S2Shelf" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.55" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.3" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.6" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S2ShelfScale" Storyboard.TargetProperty="ScaleX">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0.9" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="0.9" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.6" Value="1">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <BackEase Amplitude="0.4" EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S2ShelfScale" Storyboard.TargetProperty="ScaleY">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0.9" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="0.9" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.6" Value="1">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <BackEase Amplitude="0.4" EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+        </Storyboard>
+
+        <Storyboard x:Key="Step3Story" RepeatBehavior="Forever" Duration="0:0:3.8">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3InMove" Storyboard.TargetProperty="X">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="250" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseInOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3InMove" Storyboard.TargetProperty="Y">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-60" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseInOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3InCard" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.05" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3Stack" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.05" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.7" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3OutCard" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.7" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.75" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3OutMove" Storyboard.TargetProperty="X">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.7" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:2.7" Value="262">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseInOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3FolderScale" Storyboard.TargetProperty="ScaleX">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:2.7" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:2.85" Value="1.12" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.1" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S3FolderScale" Storyboard.TargetProperty="ScaleY">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:2.7" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:2.85" Value="1.12" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.1" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+        </Storyboard>
+
+        <Storyboard x:Key="Step4Story" RepeatBehavior="Forever" Duration="0:0:3.8">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Move" Storyboard.TargetProperty="X">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-190" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseInOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Move" Storyboard.TargetProperty="Y">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-80" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseInOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Card" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.2" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Highlight" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.8" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.95" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.5" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Toast" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.4" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.6" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.3" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.6" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+        </Storyboard>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="262" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="欢迎使用 DropShelf" Margin="18,0,0,0" FontSize="12" VerticalAlignment="Center" />
+
+        <!-- 动画演示 -->
+        <Border Grid.Row="1" Margin="24,0" CornerRadius="12" Background="{DynamicResource LayerBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" ClipToBounds="True">
+            <Grid ClipToBounds="True">
+                <!-- 第 1 步：欢迎 -->
+                <Canvas x:Name="Step1Art" Width="552" Height="262">
+                    <Canvas.RenderTransform>
+                        <TranslateTransform x:Name="S1Float" />
+                    </Canvas.RenderTransform>
+                    <Border Canvas.Left="191" Canvas.Top="36" Width="170" Height="186" Style="{StaticResource MiniShelf}">
+                        <Grid>
+                            <TextBlock Text="3 个项目" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <Border Style="{StaticResource MiniCard}" Margin="0,4,0,0">
+                                <Border.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform Angle="-10" />
+                                        <TranslateTransform X="-12" />
+                                    </TransformGroup>
+                                </Border.RenderTransform>
+                                <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
+                            </Border>
+                            <Border Style="{StaticResource MiniCard}" Margin="0,2,0,0">
+                                <Border.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform Angle="7" />
+                                        <TranslateTransform X="11" />
+                                    </TransformGroup>
+                                </Border.RenderTransform>
+                                <TextBlock Text="{StaticResource Glyph.Text}" Style="{StaticResource CardGlyph}" />
+                            </Border>
+                            <Border Style="{StaticResource MiniCard}">
+                                <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" />
+                            </Border>
+                            <Border Width="22" Height="22" CornerRadius="11" Background="{DynamicResource AccentBrush}"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="62,-60,0,0"
+                                    BorderBrush="{DynamicResource ShelfTileBrush}" BorderThickness="2">
+                                <TextBlock Text="3" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextOnAccentBrush}" />
+                            </Border>
+                            <Border Height="1" VerticalAlignment="Bottom" Margin="14,0,14,40" Background="{DynamicResource DividerBrush}" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12">
+                                <TextBlock Text="{StaticResource Glyph.Zip}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
+                                <TextBlock Text="{StaticResource Glyph.Copy}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
+                                <TextBlock Text="{StaticResource Glyph.MoveToFolder}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
+                                <TextBlock Text="{StaticResource Glyph.Info}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Canvas>
+
+                <!-- 第 2 步：拖住并晃动 -->
+                <Canvas x:Name="Step2Art" Width="552" Height="262" Visibility="Collapsed">
+                    <Border x:Name="S2Shelf" Canvas.Left="186" Canvas.Top="30" Width="180" Height="196" Opacity="0"
+                            Style="{StaticResource MiniShelf}" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="S2ShelfScale" ScaleX="0.9" ScaleY="0.9" />
+                        </Border.RenderTransform>
+                        <Grid Margin="14">
+                            <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
+                                       Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" Margin="0,22,0,0" />
+                            <TextBlock Text="松开以暂存" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,26"
+                                       Foreground="{DynamicResource AccentTextBrush}" />
+                        </Grid>
+                    </Border>
+                    <Canvas Canvas.Left="246" Canvas.Top="96">
+                        <Canvas.RenderTransform>
+                            <TranslateTransform x:Name="S2Move" />
+                        </Canvas.RenderTransform>
+                        <Border Style="{StaticResource MiniCard}" Width="60" Height="60">
+                            <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" />
+                        </Border>
+                        <Path Canvas.Left="40" Canvas.Top="38" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
+                              StrokeThickness="1.2" StrokeLineJoin="Round" />
+                    </Canvas>
+                </Canvas>
+
+                <!-- 第 3 步：放进来，再拖出去 -->
+                <Canvas x:Name="Step3Art" Width="552" Height="262" Visibility="Collapsed">
+                    <Border Canvas.Left="70" Canvas.Top="34" Width="170" Height="194" Style="{StaticResource MiniShelf}">
+                        <Grid>
+                            <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.2" StrokeDashArray="4 3" Margin="14,34,14,40"
+                                       Stroke="{DynamicResource ControlStrongBorderBrush}" Opacity="0.4" />
+                            <Border x:Name="S3Stack" Style="{StaticResource MiniCard}" Opacity="0" Margin="0,-6,0,0">
+                                <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <StackPanel Canvas.Left="392" Canvas.Top="86" RenderTransformOrigin="0.5,0.5">
+                        <StackPanel.RenderTransform>
+                            <ScaleTransform x:Name="S3FolderScale" />
+                        </StackPanel.RenderTransform>
+                        <TextBlock Text="{StaticResource Glyph.Folder}" FontFamily="{StaticResource IconFont}" FontSize="64"
+                                   Foreground="#E8A93B" HorizontalAlignment="Center" />
+                        <TextBlock Text="文档" FontSize="12" HorizontalAlignment="Center" Margin="0,4,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                    <Canvas x:Name="S3InCard" Canvas.Left="126" Canvas.Top="96">
+                        <Canvas.RenderTransform>
+                            <TranslateTransform x:Name="S3InMove" X="250" Y="-60" />
+                        </Canvas.RenderTransform>
+                        <Border Style="{StaticResource MiniCard}">
+                            <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
+                        </Border>
+                        <Path Canvas.Left="38" Canvas.Top="36" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
+                              StrokeThickness="1.2" StrokeLineJoin="Round" />
+                    </Canvas>
+                    <Canvas x:Name="S3OutCard" Canvas.Left="126" Canvas.Top="96" Opacity="0">
+                        <Canvas.RenderTransform>
+                            <TranslateTransform x:Name="S3OutMove" />
+                        </Canvas.RenderTransform>
+                        <Border Style="{StaticResource MiniCard}">
+                            <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
+                        </Border>
+                        <Path Canvas.Left="38" Canvas.Top="36" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
+                              StrokeThickness="1.2" StrokeLineJoin="Round" />
+                    </Canvas>
+                </Canvas>
+
+                <!-- 第 4 步：快速操作 -->
+                <Canvas x:Name="Step4Art" Width="552" Height="262" Visibility="Collapsed">
+                    <Border Canvas.Left="176" Canvas.Top="24" Width="200" Height="214" Style="{StaticResource MiniShelf}">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.3" StrokeDashArray="4 3" Margin="2,16,2,6"
+                                       Stroke="{DynamicResource AccentBrush}" Opacity="0.5" />
+                            <UniformGrid Grid.Row="1" Columns="2">
+                                <Grid Margin="3" Height="40">
+                                    <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                    <Border x:Name="S4Highlight" CornerRadius="8" Background="{DynamicResource AccentBrush}" Opacity="0" />
+                                    <TextBlock Text="压缩" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Grid>
+                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
+                                    <TextBlock Text="复制路径" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
+                                    <TextBlock Text="移动到" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
+                                    <TextBlock Text="属性" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </UniformGrid>
+                            <Border x:Name="S4Toast" Opacity="0" VerticalAlignment="Top" Margin="6,30,6,0" Padding="8,6" CornerRadius="8"
+                                    Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Completed}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                               Foreground="{DynamicResource SuccessBrush}" Margin="0,1,6,0" />
+                                    <TextBlock Text="已创建 资料.zip" FontSize="11" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <Canvas x:Name="S4Card" Canvas.Left="206" Canvas.Top="150">
+                        <Canvas.RenderTransform>
+                            <TranslateTransform x:Name="S4Move" X="-190" Y="-80" />
+                        </Canvas.RenderTransform>
+                        <Border Style="{StaticResource MiniCard}" Width="48" Height="48">
+                            <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" FontSize="22" />
+                        </Border>
+                        <Path Canvas.Left="32" Canvas.Top="30" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
+                              StrokeThickness="1.2" StrokeLineJoin="Round" />
+                    </Canvas>
+                </Canvas>
+            </Grid>
+        </Border>
+
+        <!-- 说明文字 -->
+        <StackPanel Grid.Row="2" Margin="34,26,34,0">
+            <TextBlock x:Name="StepTitleText" Style="{StaticResource SubtitleTextStyle}" FontSize="22" />
+            <TextBlock x:Name="StepBodyText" Margin="0,10,0,0" FontSize="14" LineHeight="22" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- 底部导航 -->
+        <Grid Grid.Row="3" Margin="34,0,24,24">
+            <StackPanel x:Name="Dots" Orientation="Horizontal" VerticalAlignment="Center" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SkipButton" Content="跳过" Style="{StaticResource SubtleButtonStyle}" Margin="0,0,8,0" MinWidth="72"
+                        Click="OnSkipClick" />
+                <Button x:Name="BackButton" Content="上一步" Margin="0,0,8,0" MinWidth="88" Click="OnBackClick" />
+                <Button x:Name="NextButton" Content="下一步" Style="{StaticResource AccentButtonStyle}" MinWidth="104"
+                        Click="OnNextClick" IsDefault="True" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
