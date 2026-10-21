@@ -167,10 +167,10 @@ public static class Strings
     public static string DragToSwapHint => T("拖动操作即可更换位置", "Drag an action onto another to swap them");
     public static string SlotLeft => T("左", "Left");
     public static string SlotRight => T("右", "Right");
-    public static string SlotTopLeft => T("左上", "Top left");
-    public static string SlotTopRight => T("右上", "Top right");
-    public static string SlotBottomLeft => T("左下", "Bottom left");
-    public static string SlotBottomRight => T("右下", "Bottom right");
+    public static string SlotFarLeft => T("左一", "Far left");
+    public static string SlotCenterLeft => T("左二", "Center left");
+    public static string SlotCenterRight => T("右二", "Center right");
+    public static string SlotFarRight => T("右一", "Far right");
     public static string DropHintReplace => T("替换", "Replace");
     public static string DropHintSwap => T("交换", "Swap");
     public static string AddCustomAction => T("添加自定义操作", "Add custom action");

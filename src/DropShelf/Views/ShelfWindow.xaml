@@ -282,7 +282,7 @@
                     </StackPanel>
                 </Grid>
                 <Border x:Name="ActionTilesHost" Grid.Row="1" ClipToBounds="True">
-                    <UniformGrid x:Name="ActionTiles" Columns="2" Margin="7,0,7,7" VerticalAlignment="Bottom" />
+                    <UniformGrid x:Name="ActionTiles" Rows="1" Margin="8,0,8,7" VerticalAlignment="Bottom" />
                 </Border>
             </Grid>
 

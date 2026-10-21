@@ -415,10 +415,10 @@ public sealed class SettingsViewModel : ObservableObject
         ? index == 0 ? Strings.SlotLeft : Strings.SlotRight
         : index switch
         {
-            0 => Strings.SlotTopLeft,
-            1 => Strings.SlotTopRight,
-            2 => Strings.SlotBottomLeft,
-            _ => Strings.SlotBottomRight
+            0 => Strings.SlotFarLeft,
+            1 => Strings.SlotCenterLeft,
+            2 => Strings.SlotCenterRight,
+            _ => Strings.SlotFarRight
         };
 
     private void RefreshActions()

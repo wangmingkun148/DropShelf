@@ -54,6 +54,7 @@ public partial class ShelfWindow : Window
     private const double HeaderHeight = 40;
     private const double CaptionHeight = 38;
     private const double ActionBarHeight = 50;
+    private const double ActionTileHeight = 94;
     private const double RowHeight = 46;
     private const int WS_SYSMENU = 0x00080000;
     private const int WS_MINIMIZEBOX = 0x00020000;
@@ -367,9 +368,9 @@ public partial class ShelfWindow : Window
             ? Math.Min(Math.Max(ViewModel.Count, 2), 6) * RowHeight + 6
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
-        // 两个和四个操作的拖放区域占用相同高度：四个排成两行，两个各占满两行的高度。
-        var tileRows = ViewModel.HasActions ? 2 : 0;
-        body = Math.Max(body, 66 + tileRows * 50 + 8 - actions);
+        // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
+        var tiles = ViewModel.HasActions ? ActionTileHeight + 14 : 8;
+        body = Math.Max(body, 66 + tiles - actions);
 
         ActionBarHost.Visibility = ViewModel.HasActions ? Visibility.Visible : Visibility.Collapsed;
         Body.Margin = new Thickness(10, 2, 10, ViewModel.HasActions ? 0 : 10);
@@ -388,10 +389,8 @@ public partial class ShelfWindow : Window
         ActionBar.Children.Clear();
         ActionTiles.Children.Clear();
         _tiles.Clear();
-        // 只有两个操作时按钮显示文字，拖放区域的两块也更大。
+        // 只有两个操作时按钮显示文字。拖放区域的快速操作与按钮一一对齐，从按钮所在位置向上展开。
         var large = ViewModel.Actions.Count <= 2;
-        ActionTiles.Columns = Math.Max(1, Math.Min(2, ViewModel.Actions.Count));
-        ActionTiles.Rows = large ? 1 : 0;
         var textFont = (System.Windows.Media.FontFamily)FindResource("TextFont");
         var iconFont = (System.Windows.Media.FontFamily)FindResource("IconFont");
         foreach (var info in ViewModel.Actions)
@@ -429,31 +428,25 @@ public partial class ShelfWindow : Window
             {
                 Text = info.Glyph,
                 FontFamily = iconFont,
-                FontSize = large ? 22 : 15,
-                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = large ? 22 : 20,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                Margin = large ? new Thickness(0, 0, 0, 8) : new Thickness(0, 1, 7, 0)
+                Margin = new Thickness(0, 0, 0, 8)
             };
             var label = new TextBlock
             {
                 Text = info.Label,
                 FontSize = 12,
-                VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
-            var content = new DockPanel { HorizontalAlignment = System.Windows.HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            DockPanel.SetDock(glyph, large ? Dock.Top : Dock.Left);
-            content.Children.Add(glyph);
-            content.Children.Add(label);
             var tile = new Border
             {
-                Height = large ? 94 : 44,
-                Margin = new Thickness(3),
-                Padding = new Thickness(6, 0, 6, 0),
-                CornerRadius = new CornerRadius(large ? 10 : 8),
+                Height = ActionTileHeight,
+                Margin = new Thickness(2, 3, 2, 3),
+                Padding = new Thickness(large ? 6 : 2, 0, large ? 6 : 2, 0),
+                CornerRadius = new CornerRadius(10),
                 BorderThickness = new Thickness(1),
-                Child = content
+                Child = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { glyph, label } }
             };
             _tiles.Add((tile, glyph, label, info));
             ActionTiles.Children.Add(tile);

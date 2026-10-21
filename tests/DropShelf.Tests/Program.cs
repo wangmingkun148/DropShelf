@@ -321,6 +321,7 @@ internal static class Program
         Assert(controller.Settings.QuickActionSlots!.SequenceEqual(["Reveal", "CopyFullPath", "MoveTo", "Properties"]), "替换快速操作不正确");
         viewModel.AssignSlot(3, "Reveal");
         Assert(controller.Settings.QuickActionSlots!.SequenceEqual(["Properties", "CopyFullPath", "MoveTo", "Reveal"]), "已在其他位置的操作没有互换");
+        Assert(viewModel.VisibleSlots.Select(slot => slot.Position).SequenceEqual(["左一", "左二", "右二", "右一"]), "四个操作时位置应从左到右排列");
         viewModel.ActionLayout = QuickActionLayout.Two;
         Assert(viewModel.VisibleSlots.Count == 2 && viewModel.VisibleSlots[1].Action.Id == "CopyFullPath", "两个按钮时显示的位置不正确");
         viewModel.ActionLayout = QuickActionLayout.Off;
@@ -1330,6 +1331,7 @@ internal static class Program
         controller.Settings.QuickActionLayout = QuickActionLayout.Four;
         window.ApplySettings(controller.Settings);
         Assert(Math.Abs(window.Height - twoHeight) < 0.5, "两个和四个按钮的置物架高度应相同");
+        Assert(tiles.Rows == 1 && tiles.Children.Count == 4, "四个操作时拖放区域应与按钮排成一行");
 
         controller.Settings.QuickActionLayout = QuickActionLayout.Off;
         window.ApplySettings(controller.Settings);
