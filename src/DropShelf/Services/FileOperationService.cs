@@ -180,7 +180,9 @@ public sealed class FileOperationService
         if (!Directory.Exists(source)) return;
         var sourcePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
         var destinationPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
-        if (destinationPath.StartsWith(sourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        // 目标就是源文件夹本身也不行：复制时会把新建的子文件夹一起遍历进去，无限嵌套。
+        if (string.Equals(destinationPath, sourcePath, StringComparison.OrdinalIgnoreCase) ||
+            destinationPath.StartsWith(sourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new IOException(FolderIntoItselfMessage);
     }
 

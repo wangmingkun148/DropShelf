@@ -1,0 +1,59 @@
+# 推送 v 开头的标签（或在 Releases 页面用新标签发布）时，编译安装包和便携版并附加到对应的 Release。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency: release-${{ github.ref_name }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Get-ChildItem "${env:ProgramFiles}\Inno Setup*\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          if (-not $iscc) { throw "未找到 Inno Setup 编译器。" }
+          # Inno Setup 6 不自带简体中文界面文件。
+          $language = Join-Path $iscc.DirectoryName "Languages\ChineseSimplified.isl"
+          if (-not (Test-Path -LiteralPath $language)) {
+              Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_4_3/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $language
+          }
+          "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
+
+      - name: 生成安装包和便携版
+        shell: pwsh
+        run: .\installer\Build-Installer.ps1 -InnoCompilerPath $env:ISCC
+
+      - name: 发布到 Release
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart('v')
+          $installer = "artifacts\installer\DropShelf-Setup-$version.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw "标签 $tag 与安装包版本号不一致，请先修改版本号。" }
+          $portable = "artifacts\DropShelf-$version-portable.zip"
+          Compress-Archive -LiteralPath "artifacts\win-x64\DropShelf.exe" -DestinationPath $portable -Force
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag $installer $portable --clobber
+          } else {
+              gh release create $tag $installer $portable --title "DropShelf $version" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "无法发布到 Release。" }

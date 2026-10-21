@@ -707,9 +707,10 @@ public partial class ShelfWindow : Window
         if (items.Count == 0 || ViewModel.IsBusy) return;
         IsDraggingOut = true;
         DragOutResult result;
+        IReadOnlyList<ShelfItem> dragged;
         try
         {
-            result = ShelfDragService.DoDragDrop(this, items, ViewModel.Id, _dragOutMode);
+            result = ShelfDragService.DoDragDrop(this, items, ViewModel.Id, out dragged, _dragOutMode);
         }
         finally
         {
@@ -719,9 +720,9 @@ public partial class ShelfWindow : Window
         ViewModel.HasInteracted = true;
         if (result == DragOutResult.Cancelled) return;
         // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
-        if (items.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
+        if (dragged.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
         var closeWhenEmpty = _host.Settings.CloseWhenEmpty;
-        ViewModel.ApplyDragOut(items, result, removeCopied: closeWhenEmpty);
+        ViewModel.ApplyDragOut(dragged, result, removeCopied: closeWhenEmpty);
         if (ViewModel.IsEmpty && !ViewModel.IsPinned && closeWhenEmpty) CloseAnimated();
     }
 

@@ -31,14 +31,17 @@ public static class ShelfDragService
     private const int EffectLink = 4;
     private const int InvalidArgument = unchecked((int)0x80070057);
 
+    /// <summary>
+    /// 有文件时只拖出文件，否则拖出文字和链接；<paramref name="dragged"/> 是实际交给目标程序的项目，
+    /// 只有它们该按拖出结果移除。
+    /// </summary>
     public static DragOutResult DoDragDrop(Window owner, IReadOnlyList<ShelfItem> items, string shelfId,
-        TransferMode mode = TransferMode.Move, int button = NativeMethods.MK_LBUTTON)
+        out IReadOnlyList<ShelfItem> dragged, TransferMode mode = TransferMode.Move, int button = NativeMethods.MK_LBUTTON)
     {
         var files = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
         var others = items.Where(item => !item.IsFileSystem).ToList();
         ComDataObject? data;
         int allowedEffects;
-        IReadOnlyList<ShelfItem> dragged;
 
         if (files.Count > 0)
         {
@@ -63,6 +66,7 @@ public static class ShelfDragService
         }
         else
         {
+            dragged = [];
             return DragOutResult.Cancelled;
         }
 

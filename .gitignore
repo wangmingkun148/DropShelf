@@ -5,3 +5,5 @@ obj/
 *.suo
 *.log
 artifacts/
+# 安装包发布在 GitHub Releases，不放进仓库。
+installer/*.exe

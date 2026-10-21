@@ -364,16 +364,19 @@ public sealed class ShelfViewModel : ObservableObject
         if (additions.Count > 0) AddFiles(additions);
     }
 
-    /// <summary>临时附件已交给其他程序（拖出到聊天软件、用程序打开），关闭置物架后稍晚再清理，避免对方读取时文件已被删除。</summary>
+    /// <summary>临时附件已交给其他程序（拖出、复制、用程序打开），关闭置物架后稍晚再清理，避免对方读取时文件已被删除。</summary>
     public void KeepTemporaryFilesForAWhile() => _delayCacheCleanup = true;
 
     public bool CopyToClipboard(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return false;
-        var files = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).Select(item => item.Value).ToArray();
+        var available = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
+        var files = available.Select(item => item.Value).ToArray();
         var copied = files.Length > 0
             ? ClipboardService.TrySetFiles(files)
             : ClipboardService.TrySetText(string.Join(Environment.NewLine, items.Select(item => item.Value)));
+        // 剪贴板里只有临时附件的路径，关闭置物架后可能才去粘贴。
+        if (copied && available.Any(item => item.IsTemporaryAttachment)) KeepTemporaryFilesForAWhile();
         Notify(copied ? (files.Length > 0 ? Strings.CopiedFiles(files.Length) : Strings.CopiedText) : Strings.ClipboardBusy, copied);
         return copied;
     }

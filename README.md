@@ -2,9 +2,16 @@
 
 DropShelf 是一个 Windows 临时文件置物架。拖住文件并晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现；先把文件放进来，切换窗口或文件夹后，再从置物架拖到目标位置、聊天软件或浏览器。
 
+## 下载
+
+到 [Releases](https://github.com/wangmingkun148/dropshelf/releases/latest) 下载最新版：
+
+- `DropShelf-Setup-版本号.exe`：安装包，推荐。
+- `DropShelf-版本号-portable.zip`：便携版，解压后直接运行 `DropShelf.exe`。
+
 ## 使用方法
 
-1. 运行 `artifacts\installer\DropShelf-Setup-2.0.7.exe` 安装；也可以直接运行便携版 `artifacts\win-x64\DropShelf.exe`。
+1. 运行安装包，或解压便携版后运行 `DropShelf.exe`。
 2. 关闭主窗口后，程序继续在任务栏通知区域运行。
 3. 在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速来回晃动鼠标，置物架会出现在光标处；也可以拖到屏幕左、右或上边缘停一下，置物架会从边缘滑入。
 4. 把文件放进置物架。之后拖动缩略图堆叠，可一次带走全部文件；在右上角“⋯”菜单中展开列表，可以单独或多选拖出。
@@ -105,6 +112,8 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 .\installer\Build-Installer.ps1
 ```
 
+生成的文件在 `artifacts\installer`（安装包）和 `artifacts\win-x64`（便携版）中。
+
 开发调试时可设置环境变量 `DROPSHELF_INSTANCE`（独立实例，可与已安装版本同时运行）、`DROPSHELF_SETTINGS_PATH` 和 `DROPSHELF_LOG_DIRECTORY`。
 
 ## 项目结构
@@ -119,3 +128,13 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 - `src/DropShelf/Themes`：颜色、图标与 Fluent 风格控件样式。
 - `src/DropShelf/Interop`：Win32、DWM 与 Shell 接口。
 - `tests/DropShelf.Tests`：自动化测试。
+
+## 发布新版本
+
+1. 修改 `DropShelf.csproj`、`app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
+2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.0.8`，须与版本号一致）并发布。
+3. GitHub Actions 会自动编译安装包和便携版，几分钟后附加到这个 Release 上。也可以直接推送标签：`git tag v2.0.8 && git push origin v2.0.8`。
+
+## 许可证
+
+[MIT](LICENSE)

@@ -102,11 +102,11 @@ internal static class Program
         Run("同名复制不覆盖", TestCopyDoesNotOverwrite);
         Run("源文件消失时返回失败", TestMissingSourceIsReported);
         Run("文件被占用时返回失败", TestLockedFileIsReported);
-        Run("阻止复制到文件夹自身内部", TestNestedDestinationIsRejected);
+        Run("阻止复制到文件夹自身或其内部", TestNestedDestinationIsRejected);
         Run("快速压缩与安全解压", TestArchiveActions);
         Run("复制路径写入剪贴板", TestCopyPathAction);
         Run("移动到所选文件夹并可取消", TestMoveToAction);
-        Run("压缩结果放回置物架", TestArchiveAddsOutputToShelf);
+        Run("压缩结果放进新的置物架", TestArchiveAddsOutputToShelf);
         Run("复制文件到剪贴板", TestCopyFilesToClipboard);
         Run("自定义操作：复制或移动到文件夹", TestCustomFolderAction);
         Run("自定义操作：压缩图片到指定大小", TestImageCompression);
@@ -1015,6 +1015,10 @@ internal static class Program
         File.WriteAllText(Path.Combine(source, "file.txt"), "content");
         var results = await new FileOperationService().CopyAsync([source], Path.Combine(source, "child"));
         Assert(results.Count == 1 && !results[0].Succeeded, "复制到文件夹自身内部未被阻止");
+
+        var same = await new FileOperationService().CopyAsync([source], source);
+        Assert(same.Count == 1 && !same[0].Succeeded && !Directory.Exists(Path.Combine(source, "nested-source")),
+            "复制到文件夹自身未被阻止");
     }
 
     private static void TestArchiveActions()
@@ -1106,8 +1110,11 @@ internal static class Program
         viewModel.AddFiles([source]);
         var toasts = new List<ShelfToast>();
         viewModel.ToastRequested += (_, toast) => toasts.Add(toast);
+        IReadOnlyList<string>? produced = null;
+        viewModel.NewItemsProduced += (_, outputs) => produced = outputs;
         var result = await viewModel.RunActionAsync(QuickActions.Get(QuickActionType.CompressZip), viewModel.Items.ToArray(), IntPtr.Zero, null);
-        Assert(result.Succeeded && viewModel.Items.Count == 2 && viewModel.Items[1].Value.EndsWith("report.zip"), "压缩结果没有放回置物架");
+        Assert(result.Succeeded && viewModel.Items.Count == 1 && produced?.Single().EndsWith("report.zip") == true,
+            "压缩结果没有放进新的置物架");
         Assert(toasts.Single().Success && !viewModel.IsBusy, "操作结果没有提示");
 
         var empty = await new ShelfViewModel().RunActionAsync(QuickActions.Get(QuickActionType.CompressZip), [], IntPtr.Zero, null);
