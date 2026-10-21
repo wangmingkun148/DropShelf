@@ -13,7 +13,7 @@ DropShelf 是一个 Windows 临时文件置物架。拖住文件并晃动鼠标�
 ## 功能
 
 ### 呼出置物架
-- 由独立线程上的低级鼠标钩子识别晃动，不再定时轮询，空闲时几乎不占用资源。
+- 在独立线程上用原始输入（Raw Input）识别晃动。系统不必等待 DropShelf 处理完才移动光标，程序繁忙时也不会让鼠标卡顿。
 - 识别到晃动后，在光标下放置一个肉眼不可见的探针窗口，由系统拖放机制确认确实在拖动文件、附件、图片或文本后才弹出置物架。按住鼠标晃动但没有拖东西时不会误弹。
 - 支持左右、上下和斜向晃动，提供灵敏、均衡、稳健三档。
 - 拖到屏幕左、右或上边缘停留即可呼出，停留时间可选 0.3 秒、0.6 秒或 1 秒。任务栏所在的位置和多显示器之间相邻的边缘不会触发。
@@ -107,7 +107,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 ## 项目结构
 
 - `src/DropShelf/AppController.cs`：应用总控，协调设置、手势、置物架、托盘和窗口。
-- `src/DropShelf/Services/Gestures`：低级鼠标钩子、晃动识别与屏幕边缘停留。
+- `src/DropShelf/Services/Gestures`：鼠标原始输入监听、晃动识别与屏幕边缘停留。
 - `src/DropShelf/Views/ProbeWindow.cs`：确认拖放内容的探针窗口。
 - `src/DropShelf/Shelves/ShelfManager.cs`：多个置物架的创建、复用与关闭。
 - `src/DropShelf/Views/ShelfWindow.xaml`：置物架界面；`MainWindow.xaml`：设置；`OnboardingWindow.xaml`：教程。

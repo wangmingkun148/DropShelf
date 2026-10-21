@@ -16,22 +16,27 @@ public sealed class GestureTriggeredEventArgs(int x, int y, ScreenEdge edge = Sc
 }
 
 /// <summary>
-/// 在独立线程上用低级鼠标钩子监听按住鼠标时的晃动，以及拖到屏幕边缘后的停留。钩子回调只做轻量计算，
-/// 界面线程繁忙时也不会拖慢系统鼠标；识别到手势后再交给界面线程用探针窗口确认是否真的在拖放。
+/// 在独立线程上用原始输入（Raw Input）监听按住鼠标时的晃动，以及拖到屏幕边缘后的停留。
+/// 原始输入由系统异步投递，不像低级鼠标钩子那样每次移动都要等本程序处理完才放行，
+/// 因此本程序繁忙、被系统降频或回收内存时都不会拖慢鼠标。
+/// 识别到手势后再交给界面线程用探针窗口确认是否真的在拖放。
 /// </summary>
 public sealed class GestureService : IDisposable
 {
-    /// <summary>光标停在边缘不动时不会产生鼠标事件，用计时器定期检查。</summary>
+    /// <summary>光标停着不动时没有鼠标输入，按住期间用计时器定期检查是否停在边缘。</summary>
     private const uint EdgePollMilliseconds = 40;
     private const int EdgeTolerance = 1;
 
+    private static readonly uint RawInputSize = (uint)Marshal.SizeOf<RAWINPUTMOUSE>();
+    private static readonly uint RawHeaderSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
+
     private readonly Dispatcher _dispatcher;
-    private readonly LowLevelMouseProc _callback;
     private readonly ManualResetEventSlim _started = new();
     private readonly EdgeDwellDetector _edgeDetector;
     private Thread? _thread;
     private uint _threadId;
-    private IntPtr _hook;
+    private IntPtr _window;
+    private volatile bool _listening;
     private volatile bool _enabled;
     private volatile bool _shakeEnabled = true;
     private volatile bool _edgeEnabled;
@@ -61,7 +66,6 @@ public sealed class GestureService : IDisposable
     public GestureService(Dispatcher dispatcher, GestureSensitivity sensitivity, bool enabled)
     {
         _dispatcher = dispatcher;
-        _callback = OnHook;
         _requestedSensitivity = (int)sensitivity;
         _appliedSensitivity = (int)sensitivity;
         _detector = new MouseGestureDetector(sensitivity);
@@ -70,7 +74,7 @@ public sealed class GestureService : IDisposable
         _enabled = enabled;
     }
 
-    public bool IsRunning => _hook != IntPtr.Zero;
+    public bool IsRunning => _listening;
 
     public bool Enabled
     {
@@ -109,9 +113,7 @@ public sealed class GestureService : IDisposable
     private void Run()
     {
         _threadId = NativeMethods.GetCurrentThreadId();
-        _hook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _callback, NativeMethods.GetModuleHandle(null), 0);
-        if (_hook == IntPtr.Zero)
-            LogService.Info($"鼠标钩子安装失败，错误码 {Marshal.GetLastWin32Error()}");
+        _listening = StartListening();
         _started.Set();
 
         while (NativeMethods.GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
@@ -121,105 +123,151 @@ public sealed class GestureService : IDisposable
                 OnEdgeTimer();
                 continue;
             }
+            // 原始输入处理完仍要交给默认窗口过程，系统才会释放这条输入。
+            if (message.Message == NativeMethods.WM_INPUT) OnInput(message.LParam);
             NativeMethods.TranslateMessage(ref message);
             NativeMethods.DispatchMessage(ref message);
         }
 
         StopEdgeTimer();
-        if (_hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_hook);
-        _hook = IntPtr.Zero;
+        StopListening();
     }
 
-    private IntPtr OnHook(int code, IntPtr wParam, IntPtr lParam)
+    /// <summary>创建只接收消息的隐藏窗口，并登记为程序在后台时也接收鼠标原始输入。</summary>
+    private bool StartListening()
     {
-        if (code >= 0)
+        _window = NativeMethods.CreateWindowEx(0, "STATIC", "DropShelf Input", 0, 0, 0, 0, 0,
+            NativeMethods.HWND_MESSAGE, IntPtr.Zero, NativeMethods.GetModuleHandle(null), IntPtr.Zero);
+        if (_window == IntPtr.Zero)
         {
-            try
-            {
-                Handle((int)wParam, lParam);
-            }
-            catch
-            {
-                // 钩子回调中绝不能抛出异常，否则会影响整个系统的鼠标输入。
-            }
+            LogService.Info($"鼠标输入窗口创建失败，错误码 {Marshal.GetLastWin32Error()}");
+            return false;
         }
-        return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
+        if (RegisterMouse(NativeMethods.RIDEV_INPUTSINK, _window)) return true;
+
+        LogService.Info($"鼠标原始输入注册失败，错误码 {Marshal.GetLastWin32Error()}");
+        NativeMethods.DestroyWindow(_window);
+        _window = IntPtr.Zero;
+        return false;
     }
 
-    private void Handle(int message, IntPtr lParam)
+    private void StopListening()
     {
-        switch (message)
+        if (_listening) RegisterMouse(NativeMethods.RIDEV_REMOVE, IntPtr.Zero);
+        _listening = false;
+        if (_window != IntPtr.Zero) NativeMethods.DestroyWindow(_window);
+        _window = IntPtr.Zero;
+    }
+
+    private static bool RegisterMouse(uint flags, IntPtr target) => NativeMethods.RegisterRawInputDevices(
+        [new RAWINPUTDEVICE
         {
-            case NativeMethods.WM_LBUTTONDOWN:
-            case NativeMethods.WM_RBUTTONDOWN:
-                if (!_leftDown && !_rightDown) BeginPress();
-                if (message == NativeMethods.WM_LBUTTONDOWN) _leftDown = true;
-                else _rightDown = true;
-                break;
+            UsagePage = NativeMethods.HID_USAGE_PAGE_GENERIC,
+            Usage = NativeMethods.HID_USAGE_GENERIC_MOUSE,
+            Flags = flags,
+            Target = target
+        }], 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
 
-            case NativeMethods.WM_LBUTTONUP:
-            case NativeMethods.WM_RBUTTONUP:
-                if (message == NativeMethods.WM_LBUTTONUP) _leftDown = false;
-                else _rightDown = false;
-                if (!_leftDown && !_rightDown) EndPress();
-                break;
+    /// <summary>处理一条鼠标原始输入。原始输入只有相对位移，光标位置另行读取。</summary>
+    private void OnInput(IntPtr rawInput)
+    {
+        try
+        {
+            var size = RawInputSize;
+            if (NativeMethods.GetRawInputData(rawInput, NativeMethods.RID_INPUT, out var input, ref size, RawHeaderSize) == uint.MaxValue ||
+                input.Header.Type != NativeMethods.RIM_TYPEMOUSE) return;
 
-            case NativeMethods.WM_MOUSEMOVE:
-                if (!_leftDown && !_rightDown) return;
-                _movesThisPress++;
-                var now = NowMilliseconds();
-                if (now - _lastButtonCheck > 250)
-                {
-                    // 遇到安全桌面或钩子被系统跳过时可能漏掉松开事件，定期用实际按键状态校正。
-                    _lastButtonCheck = now;
-                    if (!NativeMethods.IsButtonPhysicallyDown())
-                    {
-                        _leftDown = _rightDown = false;
-                        EndPress();
-                        return;
-                    }
-                }
-
-                if (!_enabled || _triggered) return;
-                var point = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam).Point;
-                if (_edgeEnabled && CheckEdge(point, now)) return;
-                if (!_shakeEnabled) return;
-                ApplySensitivityIfChanged();
-                if (!_detector.AddRawSample(point.X, point.Y, now, IsNearOuterScreenEdge(point))) return;
-
-                _triggered = true;
-                StopEdgeTimer();
-                _dispatcher.BeginInvoke(() => ShakeDetected?.Invoke(this, new GestureTriggeredEventArgs(point.X, point.Y)));
-                break;
+            // 同一条输入可能同时包含按下、移动和松开，按发生顺序处理。
+            var buttons = input.Mouse.ButtonFlags;
+            if ((buttons & NativeMethods.RI_MOUSE_LEFT_BUTTON_DOWN) != 0) Press(left: true);
+            if ((buttons & NativeMethods.RI_MOUSE_RIGHT_BUTTON_DOWN) != 0) Press(left: false);
+            if (input.Mouse.LastX != 0 || input.Mouse.LastY != 0 || (input.Mouse.Flags & NativeMethods.MOUSE_MOVE_ABSOLUTE) != 0)
+                OnMove();
+            if ((buttons & NativeMethods.RI_MOUSE_LEFT_BUTTON_UP) != 0) Release(left: true);
+            if ((buttons & NativeMethods.RI_MOUSE_RIGHT_BUTTON_UP) != 0) Release(left: false);
+        }
+        catch
+        {
+            // 单条输入处理失败不影响之后的识别。
         }
     }
 
-    /// <summary>检查边缘停留；触发时返回 true。光标到达边缘后启动计时器，静止不动也能按时触发。</summary>
+    private void Press(bool left)
+    {
+        if (!_leftDown && !_rightDown) BeginPress();
+        if (left) _leftDown = true;
+        else _rightDown = true;
+    }
+
+    private void Release(bool left)
+    {
+        // 计时器发现按键已松开时会提前结束本次按住，之后到达的松开输入直接忽略。
+        if (!_leftDown && !_rightDown) return;
+        if (left) _leftDown = false;
+        else _rightDown = false;
+        if (!_leftDown && !_rightDown) EndPress();
+    }
+
+    private void OnMove()
+    {
+        if (!_leftDown && !_rightDown) return;
+        _movesThisPress++;
+        var now = NowMilliseconds();
+        if (now - _lastButtonCheck > 250)
+        {
+            // 遇到安全桌面等情况可能收不到松开的输入，定期用实际按键状态校正。
+            _lastButtonCheck = now;
+            if (!NativeMethods.IsButtonPhysicallyDown())
+            {
+                _leftDown = _rightDown = false;
+                EndPress();
+                return;
+            }
+        }
+
+        if (!_enabled || _triggered || !NativeMethods.GetCursorPos(out var point)) return;
+        if (_edgeEnabled && CheckEdge(point, now)) return;
+        if (!_shakeEnabled) return;
+        ApplySensitivityIfChanged();
+        if (!_detector.AddRawSample(point.X, point.Y, now, IsNearOuterScreenEdge(point))) return;
+
+        _triggered = true;
+        StopEdgeTimer();
+        _dispatcher.BeginInvoke(() => ShakeDetected?.Invoke(this, new GestureTriggeredEventArgs(point.X, point.Y)));
+    }
+
+    /// <summary>检查边缘停留；触发时返回 true。</summary>
     private bool CheckEdge(POINT point, long now)
     {
         _edgeDetector.DwellMilliseconds = _requestedDwell;
         var edge = HitTestEdge(point);
-        if (_edgeDetector.Update(edge, point.X, point.Y, now))
-        {
-            _triggered = true;
-            StopEdgeTimer();
-            _dispatcher.BeginInvoke(() => EdgeDwellDetected?.Invoke(this, new GestureTriggeredEventArgs(point.X, point.Y, edge)));
-            return true;
-        }
+        if (!_edgeDetector.Update(edge, point.X, point.Y, now)) return false;
 
-        if (edge == ScreenEdge.None) StopEdgeTimer();
-        else if (_edgeTimer == UIntPtr.Zero) _edgeTimer = NativeMethods.SetTimer(IntPtr.Zero, UIntPtr.Zero, EdgePollMilliseconds, IntPtr.Zero);
-        return false;
+        _triggered = true;
+        StopEdgeTimer();
+        _dispatcher.BeginInvoke(() => EdgeDwellDetected?.Invoke(this, new GestureTriggeredEventArgs(point.X, point.Y, edge)));
+        return true;
     }
 
     private void OnEdgeTimer()
     {
-        if (!_enabled || !_edgeEnabled || _triggered || (!_leftDown && !_rightDown) || !NativeMethods.IsButtonPhysicallyDown())
+        if (!_enabled || !_edgeEnabled || _triggered || (!_leftDown && !_rightDown))
         {
             StopEdgeTimer();
             return;
         }
+        if (!NativeMethods.IsButtonPhysicallyDown())
+        {
+            _leftDown = _rightDown = false;
+            EndPress();
+            return;
+        }
         if (NativeMethods.GetCursorPos(out var point)) CheckEdge(point, NowMilliseconds());
+    }
+
+    private void StartEdgeTimer()
+    {
+        if (_edgeTimer == UIntPtr.Zero) _edgeTimer = NativeMethods.SetTimer(IntPtr.Zero, UIntPtr.Zero, EdgePollMilliseconds, IntPtr.Zero);
     }
 
     private void StopEdgeTimer()
@@ -285,6 +333,7 @@ public sealed class GestureService : IDisposable
         _edgeDetector.Reset();
         // 每次按下时重新读取显示器信息，显示器布局变化后也能正确判断边缘。
         _hasMonitor = false;
+        if (_enabled && _edgeEnabled) StartEdgeTimer();
     }
 
     private void EndPress()

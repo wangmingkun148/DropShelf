@@ -45,13 +45,42 @@ internal struct MONITORINFO
 }
 
 [StructLayout(LayoutKind.Sequential)]
-internal struct MSLLHOOKSTRUCT
+internal struct RAWINPUTDEVICE
 {
-    public POINT Point;
-    public uint MouseData;
+    public ushort UsagePage;
+    public ushort Usage;
     public uint Flags;
-    public uint Time;
-    public IntPtr ExtraInfo;
+    public IntPtr Target;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct RAWINPUTHEADER
+{
+    public uint Type;
+    public uint Size;
+    public IntPtr Device;
+    public IntPtr WParam;
+}
+
+/// <summary>RAWMOUSE：usFlags 之后的联合体按 4 字节对齐，按键标志从第 4 字节开始。</summary>
+[StructLayout(LayoutKind.Explicit)]
+internal struct RAWMOUSE
+{
+    [FieldOffset(0)] public ushort Flags;
+    [FieldOffset(4)] public ushort ButtonFlags;
+    [FieldOffset(6)] public ushort ButtonData;
+    [FieldOffset(8)] public uint RawButtons;
+    [FieldOffset(12)] public int LastX;
+    [FieldOffset(16)] public int LastY;
+    [FieldOffset(20)] public uint ExtraInformation;
+}
+
+/// <summary>只注册了鼠标，RAWINPUT 的数据部分总是 RAWMOUSE。</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct RAWINPUTMOUSE
+{
+    public RAWINPUTHEADER Header;
+    public RAWMOUSE Mouse;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -165,16 +194,11 @@ internal struct COPYDATASTRUCT
     public IntPtr Pointer;
 }
 
-internal delegate IntPtr LowLevelMouseProc(int code, IntPtr wParam, IntPtr lParam);
-
 internal static class NativeMethods
 {
-    public const int WH_MOUSE_LL = 14;
     public const int WM_QUIT = 0x0012;
-    public const int WM_MOUSEMOVE = 0x0200;
-    public const int WM_LBUTTONDOWN = 0x0201;
+    public const int WM_INPUT = 0x00FF;
     public const int WM_LBUTTONUP = 0x0202;
-    public const int WM_RBUTTONDOWN = 0x0204;
     public const int WM_RBUTTONUP = 0x0205;
     public const int WM_CONTEXTMENU = 0x007B;
     public const int WM_HOTKEY = 0x0312;
@@ -183,6 +207,19 @@ internal static class NativeMethods
     public const int MA_NOACTIVATE = 3;
     public const int WM_APP = 0x8000;
     public const int WM_COPYDATA = 0x004A;
+
+    public static readonly IntPtr HWND_MESSAGE = new(-3);
+    public const uint RID_INPUT = 0x10000003;
+    public const uint RIM_TYPEMOUSE = 0;
+    public const uint RIDEV_REMOVE = 0x00000001;
+    public const uint RIDEV_INPUTSINK = 0x00000100;
+    public const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+    public const ushort HID_USAGE_GENERIC_MOUSE = 0x02;
+    public const ushort MOUSE_MOVE_ABSOLUTE = 0x0001;
+    public const ushort RI_MOUSE_LEFT_BUTTON_DOWN = 0x0001;
+    public const ushort RI_MOUSE_LEFT_BUTTON_UP = 0x0002;
+    public const ushort RI_MOUSE_RIGHT_BUTTON_DOWN = 0x0004;
+    public const ushort RI_MOUSE_RIGHT_BUTTON_UP = 0x0008;
 
     public const int VK_LBUTTON = 0x01;
     public const int VK_RBUTTON = 0x02;
@@ -329,14 +366,19 @@ internal static class NativeMethods
     public static extern bool AllowSetForegroundWindow(int processId);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr SetWindowsHookEx(int hookId, LowLevelMouseProc callback, IntPtr module, uint threadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool UnhookWindowsHookEx(IntPtr hook);
+    public static extern bool RegisterRawInputDevices([In] RAWINPUTDEVICE[] devices, uint count, uint size);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+    public static extern uint GetRawInputData(IntPtr rawInput, uint command, out RAWINPUTMOUSE data, ref uint size, uint headerSize);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateWindowEx(int exStyle, string className, string? windowName, int style,
+        int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     public static extern int GetMessage(out MSG message, IntPtr window, uint filterMin, uint filterMax);

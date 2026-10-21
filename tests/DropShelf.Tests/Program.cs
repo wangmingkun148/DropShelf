@@ -74,7 +74,7 @@ internal static class Program
         Run("低精度计时下的高回报率晃动可以识别", TestCoarseTimerShakeTriggers);
         Run("高回报率鼠标的普通移动不会触发", TestHighRateNormalMovement);
         Run("掉头时的细小侧移不会打断手势", TestTurnaroundJitter);
-        Run("低级鼠标钩子可以启动和停止", TestGestureServiceLifecycle);
+        Run("鼠标输入监听可以启动和停止", TestGestureServiceLifecycle);
         Run("拖到屏幕边缘停留后触发", TestEdgeDwellDetector);
 
         // 置物架逻辑
@@ -580,14 +580,14 @@ internal static class Program
     {
         var service = new GestureService(Dispatcher.CurrentDispatcher, GestureSensitivity.Balanced, enabled: true);
         service.Start();
-        Assert(service.IsRunning, "低级鼠标钩子没有安装");
+        Assert(service.IsRunning, "鼠标原始输入没有注册");
         service.SetSensitivity(GestureSensitivity.Steady);
         service.SetTrigger(AutoOpenTrigger.Edge);
         service.SetEdgeDwell(EdgeDwellTime.Short);
         service.Enabled = false;
         service.Dispose();
         Thread.Sleep(100);
-        Assert(!service.IsRunning, "停止后钩子仍然存在");
+        Assert(!service.IsRunning, "停止后仍在监听鼠标输入");
     }
 
     private static void TestEdgeDwellDetector()
