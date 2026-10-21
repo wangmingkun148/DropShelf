@@ -36,7 +36,7 @@ public sealed class ShelfManager : IShelfHost
 
     /// <summary>
     /// 准备一个隐藏的置物架窗口。创建窗口会占用界面线程几十毫秒，若在弹出动画或拖动途中进行会造成卡顿，
-    /// 所以等鼠标松开、动画结束后再创建。
+    /// 所以等鼠标松开、动画结束、置物架不再自动收起后再创建。
     /// </summary>
     public void Prewarm()
     {
@@ -57,8 +57,9 @@ public sealed class ShelfManager : IShelfHost
             _prewarmTimer!.Stop();
             return;
         }
-        // 仍在拖动或有置物架正在播放动画时，稍后再试。
-        if (NativeMethods.IsButtonPhysicallyDown() || _open.Any(shelf => shelf.IsSliding)) return;
+        // 仍在拖动、有置物架正在播放动画，或晃动呼出的空置物架松手后马上要收起时，稍后再试。
+        if (NativeMethods.IsButtonPhysicallyDown() ||
+            _open.Any(shelf => shelf.IsSliding || shelf.ViewModel.OpenedByGesture && shelf.IsReusable)) return;
         _prewarmTimer!.Stop();
         _spare = CreateWindow();
         WindowEffects.Handle(_spare);

@@ -254,7 +254,7 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     public string HotkeyDescription => Settings.HotkeyGesture.IsEmpty
-        ? Strings.HotkeyNotSet
+        ? Strings.HotkeyNotSetDescription
         : _controller.IsHotkeyRegistered
             ? Strings.HotkeyRegistered
             : Strings.HotkeyTaken;

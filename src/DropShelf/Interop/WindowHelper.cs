@@ -21,8 +21,17 @@ internal static class WindowEffects
 
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).EnsureHandle();
 
-    /// <summary>为窗口启用 Windows 11 系统材质（云母或亚克力），旧系统返回 false 并保持纯色背景。</summary>
-    public static bool TryApplyBackdrop(Window window, SystemBackdrop backdrop)
+    /// <summary>
+    /// 按主题设置窗口深浅色并启用系统材质，旧系统返回 false 并保持纯色背景。
+    /// 材质的深浅在启用时确定，之后只改深浅色不会重绘，所以先设深浅色，主题切换时再调用一次重新启用材质。
+    /// </summary>
+    public static bool ApplyTheme(Window window, SystemBackdrop backdrop, bool dark)
+    {
+        SetDarkMode(window, dark);
+        return TryApplyBackdrop(window, backdrop);
+    }
+
+    private static bool TryApplyBackdrop(Window window, SystemBackdrop backdrop)
     {
         if (!SupportsSystemBackdrop || backdrop == SystemBackdrop.None) return false;
         try
@@ -32,6 +41,8 @@ internal static class WindowEffects
             target.BackgroundColor = Colors.Transparent;
             var margins = MARGINS.Sheet;
             NativeMethods.DwmExtendFrameIntoClientArea(handle, ref margins);
+            var none = (int)SystemBackdrop.None;
+            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
             var value = (int)backdrop;
             return NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref value, sizeof(int)) == 0;
         }
@@ -41,7 +52,7 @@ internal static class WindowEffects
         }
     }
 
-    public static void SetDarkMode(Window window, bool dark)
+    private static void SetDarkMode(Window window, bool dark)
     {
         try
         {

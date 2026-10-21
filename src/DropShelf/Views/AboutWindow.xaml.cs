@@ -14,9 +14,8 @@ public partial class AboutWindow : Window
         DataContext = viewModel;
         SourceInitialized += (_, _) =>
         {
-            if (WindowEffects.TryApplyBackdrop(this, SystemBackdrop.Mica))
+            if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
                 Background = System.Windows.Media.Brushes.Transparent;
-            WindowEffects.SetDarkMode(this, ThemeService.IsDark);
         };
     }
 }

@@ -93,8 +93,6 @@ public static class ThemeService
         _ => systemIsDark
     };
 
-    public static void ApplyWindowTitleBar(Window window) => WindowEffects.SetDarkMode(window, IsDark);
-
     public static void Dispose()
     {
         if (!_initialized) return;

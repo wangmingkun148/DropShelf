@@ -65,8 +65,8 @@ public static class Strings
         trigger switch
         {
             AutoOpenTrigger.Shake => T("晃动呼出", "Shake to open"),
-            AutoOpenTrigger.Edge => T("屏幕边缘呼出", "Screen edge to open"),
-            _ => T("晃动或屏幕边缘呼出", "Shake or screen edge to open")
+            AutoOpenTrigger.Edge => T("屏幕边缘呼出", "Pause at edge to open"),
+            _ => T("晃动或屏幕边缘呼出", "Shake or pause at edge")
         },
         mode == TransferMode.Copy ? T("拖出时复制", "Drag out copies") : T("拖出时移动", "Drag out moves"));
 
@@ -95,58 +95,59 @@ public static class Strings
     public static string DismissTooltip => T("不再显示", "Don't show again");
     public static string TipShakeTitle => T("拖住并晃动", "Drag and shake");
     public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
-        "While dragging a file, shake the mouse or pause at the edge of the screen and a shelf appears.");
+        "While dragging a file, shake the mouse or pause at the edge of the screen, and a shelf appears.");
     public static string TipStackTitle => T("整摞拖出", "Drag out the stack");
     public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；在“⋯”菜单中展开列表，也能单独或多选拖出。",
         "Drag the thumbnail stack to take every file at once, or expand the list from the ⋯ menu to drag out one or several.");
-    public static string TipActionsBody => T("拖动文件到置物架底部，按钮展开后放到其中一个上，直接压缩、复制路径或移动。",
-        "Drag files to the bottom of the shelf. When the buttons expand, drop on one to compress, copy paths or move them.");
+    public static string TipActionsBody => T("把文件拖到置物架底部，在展开的操作上松开，就能直接压缩、复制路径或移动。",
+        "Drag files to the bottom of a shelf and release them on an action to compress them, copy their paths or move them.");
     public static string RestoreShelf => T("恢复", "Reopen");
     public static string RemoveHistoryTooltip => T("删除这条记录", "Remove from history");
 
     public static string General => T("常规", "General");
     public static string Language => T("语言", "Language");
-    public static string LanguageDescription => T("选择界面显示的语言，切换后立即生效", "Choose the display language. Changes apply immediately");
+    public static string LanguageDescription => T("切换后立即生效，无需重启", "Applies right away, no restart needed");
     public static string StartWithWindows => T("开机自动启动", "Start with Windows");
     public static string StartupDescription => T("登录 Windows 后在后台运行，不弹出窗口", "Runs in the background after you sign in, without opening a window");
     public static string StartupFailed => T("Windows 没有允许修改开机启动，设置保持不变", "Windows didn't allow the startup change, so the setting is unchanged");
-    public static string GlobalHotkey => T("全局快捷键", "Global shortcut");
+    public static string GlobalHotkey => T("快捷键", "Keyboard shortcut");
     public static string HotkeyNotSet => T("未设置快捷键", "No shortcut set");
+    public static string HotkeyNotSetDescription => T("设置后，在任何程序中按下都能在光标处打开空置物架", "Set one to open an empty shelf at the cursor from any app");
     public static string HotkeyRegistered => T("在光标处打开空置物架，可直接按 Ctrl+V 粘贴", "Opens an empty shelf at the cursor. Press Ctrl+V to paste into it");
     public static string HotkeyTaken => T("这个快捷键已被其他程序占用，请换一个", "Another app is already using this shortcut. Please choose a different one");
     public static string Tutorial => T("使用教程", "Tutorial");
-    public static string TutorialDescription => T("用动画快速了解晃动呼出、整摞拖出和快速操作", "Short animations of shake to open, dragging out the stack and quick actions");
+    public static string TutorialDescription => T("用几段动画了解如何呼出置物架、拖出文件和使用快速操作", "Short animations showing how to open a shelf, drag files out and use quick actions");
     public static string ViewTutorial => T("查看教程", "View tutorial");
 
     public static string AutoOpen => T("自动弹出", "Auto open");
     public static string TriggerHeader => T("呼出方式", "How to open");
-    public static string TriggerDescription => T("晃动鼠标，或拖到屏幕边缘停一下", "Shake the mouse, or pause at the edge of the screen");
+    public static string TriggerDescription => T("拖动文件时晃动鼠标，或拖到屏幕边缘停一下", "While dragging files, shake the mouse or pause at the edge of the screen");
     public static string TriggerShake => T("晃动", "Shake");
     public static string TriggerEdge => T("屏幕边缘", "Screen edge");
-    public static string TriggerBoth => T("两者", "Both");
+    public static string TriggerBoth => T("两种都用", "Both");
     public static string ShakeSensitivity => T("晃动灵敏度", "Shake sensitivity");
-    public static string SensitivityDescription => T("灵敏只需轻轻晃动，稳健误触更少", "Responsive needs only a small shake. Steady avoids accidental opens");
+    public static string SensitivityDescription => T("灵敏只需轻轻晃动，稳健不易误触", "Responsive opens with a small shake. Steady avoids accidental opens");
     public static string SensitivityResponsive => T("灵敏", "Responsive");
     public static string SensitivityBalanced => T("均衡", "Balanced");
     public static string SensitivitySteady => T("稳健", "Steady");
     public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
-    public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘，停留多久后弹出", "How long to pause at the left, right or top edge");
+    public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘后，停留多久弹出置物架", "How long to pause at the left, right or top edge before a shelf opens");
     public static string DwellShort => T("0.3 秒", "0.3 s");
     public static string DwellMedium => T("0.6 秒", "0.6 s");
     public static string DwellLong => T("1 秒", "1 s");
     public static string Size => T("尺寸", "Size");
-    public static string SizeDescription => T("三档尺寸保持相同的比例和布局", "All three sizes keep the same proportions and layout");
+    public static string SizeDescription => T("置物架窗口的大小", "How large shelves appear");
     public static string SizeSmall => T("小", "Small");
     public static string SizeMedium => T("中", "Medium");
     public static string SizeLarge => T("大", "Large");
     public static string DragOutModeHeader => T("拖动目的", "Drag-out action");
-    public static string DragOutModeDescription => T("拖出文件时移动还是复制，也可以在置物架顶部随时切换",
-        "Whether dragging files out moves or copies them. You can also switch it at the top of a shelf");
+    public static string DragOutModeDescription => T("把文件拖出置物架时移动还是复制，也可以在置物架顶部随时切换",
+        "Whether files dragged off a shelf are moved or copied. You can also switch this at the top of a shelf");
     public static string TransferMove => T("移动", "Move");
     public static string TransferCopy => T("复制", "Copy");
     public static string CloseWhenEmpty => T("自动关闭空置物架", "Close empty shelves");
-    public static string CloseWhenEmptyDescription => T("拖出的项目从置物架移走，全部拖出或移除后关闭；关闭此项可把同一批文件依次拖到多个地方。钉住的置物架始终保持打开",
-        "Dragged items leave the shelf, and it closes once everything is dragged out or removed. Turn off to drag the same files to several places. Pinned shelves stay open");
+    public static string CloseWhenEmptyDescription => T("拖出的文件会离开置物架，空了就自动关闭。关闭此项后，复制出去的文件仍留在架上，可以再拖到别处",
+        "Dragged-out files leave the shelf, and it closes once empty. Turn off to keep copied files on the shelf so you can drag them elsewhere too");
     public static string RecentShelves => T("最近关闭的置物架", "Recently closed shelves");
     public static string ClearShelfHistory => T("清空置物架历史", "Clear shelf history");
     public static string HistoryEmpty => T("暂无最近关闭的置物架", "No recently closed shelves");
@@ -154,17 +155,17 @@ public static class Strings
     public static string ClearHistory => T("清除记录", "Clear history");
     public static string Clear => T("清空", "Clear");
 
-    public static string ActionsPageDescription => T("显示在置物架底部。点按处理置物架中的项目，拖动文件时也可以直接放到按钮上。",
-        "Shown at the bottom of a shelf. Click one to use it on the shelf's items, or drop files right onto it.");
-    public static string ActionLayoutHeader => T("按钮数量", "Buttons");
-    public static string ActionLayoutDescription => T("两个时按钮更大，并显示名称", "With two, the buttons are larger and show their names");
+    public static string ActionsPageDescription => T("显示在置物架底部。点按可处理架上的项目，也可以把文件直接拖到按钮上。",
+        "Shown at the bottom of each shelf. Click one to use it on the shelf's items, or drop files straight onto it.");
+    public static string ActionLayoutHeader => T("按钮数量", "Number of buttons");
+    public static string ActionLayoutDescription => T("两个时按钮更大，并显示名称", "With two, buttons are larger and show their names");
     public static string ActionLayoutOffDescription => T("不显示按钮，整个置物架都可以放入文件", "No buttons, so you can drop files anywhere on the shelf");
     public static string LayoutOff => T("关闭", "Off");
     public static string LayoutTwo => T("2 个", "2");
     public static string LayoutFour => T("4 个", "4");
     public static string CurrentActions => T("当前操作", "Current actions");
     public static string MoreActions => T("更多操作", "More actions");
-    public static string DragToSwapHint => T("拖动操作即可更换位置", "Drag an action onto another to swap them");
+    public static string DragToSwapHint => T("拖动卡片调换位置，或从下方“更多操作”拖上来替换", "Drag to rearrange, or drag one up from More actions to replace an action");
     public static string SlotLeft => T("左", "Left");
     public static string SlotRight => T("右", "Right");
     public static string SlotFarLeft => T("左一", "Far left");
@@ -212,8 +213,8 @@ public static class Strings
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null
-        ? T("把文件拖到底部按钮上，可以直接压缩、复制路径、移动或查看属性。也可以在设置中添加全局快捷键，随时打开空置物架。",
-            "Drop files on the buttons at the bottom to compress, copy paths, move them or view their properties. You can also add a global shortcut in Settings to open an empty shelf at any time.")
+        ? T("把文件拖到底部按钮上，可以直接压缩、复制路径、移动或查看属性。也可以在设置中设定快捷键，随时打开空置物架。",
+            "Drop files on the buttons at the bottom to compress, copy paths, move them or view their properties. You can also set a keyboard shortcut in Settings to open an empty shelf at any time.")
         : T($"把文件拖到底部按钮上，可以直接压缩、复制路径、移动或查看属性。按 {hotkey} 也能随时打开空置物架。",
             $"Drop files on the buttons at the bottom to compress, copy paths, move them or view their properties. Press {hotkey} to open an empty shelf at any time.");
 
@@ -235,7 +236,7 @@ public static class Strings
     // ───────────── 置物架 ─────────────
 
     public static string ShelfWindowTitle(string title) => T($"DropShelf 置物架 - {title}", $"DropShelf shelf - {title}");
-    public static string PinTooltip => T("钉住：清空后也保持打开", "Pin: stay open even when empty");
+    public static string PinTooltip => T("钉住：空了也保持打开", "Pin: keep open even when empty");
     public static string MoreTooltip => T("更多", "More");
     public static string CloseShelfTooltip => T("关闭置物架 (Esc)", "Close shelf (Esc)");
     public static string DropHere => T("拖到这里暂存", "Drop here to hold");
@@ -257,7 +258,7 @@ public static class Strings
         $"已恢复 {added} 项{(unavailable > 0 ? $"，{unavailable} 项已删除或移动" : null)}",
         $"Reopened {Count(added, "item", "items")}{(unavailable > 0 ? $", {unavailable} moved or deleted" : null)}");
 
-    public static string RestoreUnavailable => T("这些项目已被移动或删除", "These items were moved or deleted");
+    public static string RestoreUnavailable => T("这些项目已删除或移动", "These items were moved or deleted");
 
     public static string HistoryEntryTitle(ShelfHistoryEntry entry)
     {
@@ -316,13 +317,13 @@ public static class Strings
     public static string NoPathsToCopy => T("没有可复制的路径", "No paths to copy");
     public static string CopiedPath => T("已复制路径", "Copied path");
     public static string CopiedPaths(int count) => T($"已复制 {count} 个路径", $"Copied {count} paths");
-    public static string ItemMissing => T("项目已被移动或删除", "The item was moved or deleted");
+    public static string ItemMissing => T("项目已删除或移动", "The item was moved or deleted");
     public static string CannotOpenItem => T("无法打开这个项目", "Couldn't open this item");
     public static string CannotOpenFolder => T("无法打开所在文件夹", "Couldn't open the containing folder");
 
     // ───────────── 项目说明 ─────────────
 
-    public static string MovedOrDeleted => T("已移动或删除", "Moved or deleted");
+    public static string MovedOrDeleted => T("已删除或移动", "Moved or deleted");
     public static string Folder => T("文件夹", "Folder");
     public static string Link => T("链接", "Link");
     public static string TextDetail(int characters) => T($"文本 · {characters} 个字符", $"Text · {Count(characters, "character", "characters")}");
@@ -348,17 +349,21 @@ public static class Strings
     };
 
     /// <summary>设置页和提示中的完整名称；按钮上的名称较短时在这里写全。</summary>
-    public static string QuickActionTitle(QuickActionType type) =>
-        type == QuickActionType.CopyFullPath ? MenuCopyPath : QuickActionLabel(type);
+    public static string QuickActionTitle(QuickActionType type) => type switch
+    {
+        QuickActionType.CopyFullPath => MenuCopyPath,
+        QuickActionType.Reveal => MenuReveal,
+        _ => QuickActionLabel(type)
+    };
 
     public static string QuickActionDescription(QuickActionType type) => type switch
     {
-        QuickActionType.CompressZip => T("压缩为 ZIP；单独放入 ZIP 或 7z 时解压到原位置旁。",
-            "Compresses into a ZIP. A single ZIP or 7z file is extracted next to the original instead."),
+        QuickActionType.CompressZip => T("压缩为 ZIP；只有一个 ZIP 或 7z 时改为解压到它旁边。",
+            "Compresses into a ZIP. A single ZIP or 7z file is extracted next to it instead."),
         QuickActionType.CopyFullPath => T("把完整路径复制到剪贴板，多个项目按行分隔。",
             "Copies full paths to the clipboard, one item per line."),
-        QuickActionType.MoveTo => T("选择文件夹后移动项目，同名时自动保留两份。",
-            "Moves items to a folder you choose, keeping both if the names clash."),
+        QuickActionType.MoveTo => T("移动到你选择的文件夹，重名时两份都保留。",
+            "Moves items to a folder you choose, keeping both if names clash."),
         QuickActionType.Reveal => T("在文件资源管理器中选中这些项目。", "Selects these items in File Explorer."),
         _ => T("打开 Windows 文件属性窗口。", "Opens the Windows file properties window.")
     };
@@ -376,17 +381,17 @@ public static class Strings
 
     // ───────────── 自定义操作 ─────────────
 
-    public static string KindFolder => T("文件夹", "Folder");
+    public static string KindFolder => T("发送到文件夹", "Send to folder");
     public static string KindCompressImage => T("压缩图片", "Compress image");
-    public static string KindOpenWith => T("用程序打开", "Open with");
+    public static string KindOpenWith => T("用程序打开", "Open with app");
     public static string ActionKind => T("类型", "Type");
-    public static string FolderLabel => T("目标文件夹", "Folder");
+    public static string FolderLabel => T("目标文件夹", "Destination folder");
     public static string FolderModeLabel => T("移动还是复制", "Move or copy");
     public static string ImageSizeLabel => T("最大文件大小", "Maximum file size");
     public static string ImageSizeHint => T("保存为尽量清晰的 JPG，原图保持不变", "Saves a JPG as sharp as the limit allows. The original stays unchanged");
     public static string ProgramLabel => T("程序", "Program");
     public static string ArgumentsLabel => T("参数（可选）", "Arguments (optional)");
-    public static string ArgumentsHint => T("用 {files} 指定文件的位置，留空时放在最后", "Use {files} to place the files. Without it they go at the end");
+    public static string ArgumentsHint => T("用 {files} 指定文件在参数中的位置；不写时文件放在最后", "Use {files} to mark where the files go. Without it, they're added at the end");
     public static string NameLabel => T("按钮名称（可选）", "Button name (optional)");
     public static string Browse => T("浏览…", "Browse…");
     public static string Save => T("保存", "Save");
@@ -395,9 +400,9 @@ public static class Strings
     public static string ChooseProgram => T("选择程序", "Choose a program");
     public static string ProgramFilter => T("程序|*.exe;*.bat;*.cmd;*.lnk|所有文件|*.*", "Programs|*.exe;*.bat;*.cmd;*.lnk|All files|*.*");
     public static string ChooseFolderFirst => T("请选择文件夹", "Choose a folder");
-    public static string FolderNotFoundShort => T("找不到这个文件夹", "This folder doesn't exist");
+    public static string FolderNotFoundShort => T("找不到这个文件夹", "Folder not found");
     public static string ChooseProgramFirst => T("请选择程序", "Choose a program");
-    public static string ProgramNotFoundShort => T("找不到这个程序", "This program doesn't exist");
+    public static string ProgramNotFoundShort => T("找不到这个程序", "Program not found");
     public static string ImageSizeInvalid(int minimum, int maximum) => T($"请输入 {minimum} 到 {maximum} 之间的整数", $"Enter a whole number from {minimum} to {maximum}");
 
     /// <summary>500 KB、2 MB 等大小文字。</summary>

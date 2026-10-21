@@ -121,7 +121,7 @@
 
         <!-- 窗口右下角的版本号等文字链接 -->
         <Style x:Key="TextLinkStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />

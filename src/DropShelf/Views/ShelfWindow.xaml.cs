@@ -211,12 +211,11 @@ public partial class ShelfWindow : Window
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
             NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_FRAMECHANGED);
         WindowEffects.SetRoundedCorners(this);
-        BackdropActive = WindowEffects.TryApplyBackdrop(this, SystemBackdrop.Acrylic);
+        BackdropActive = WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
         Root.SetResourceReference(Border.BackgroundProperty, BackdropActive ? "ShelfAcrylicTintBrush" : "ShelfSolidBrush");
-        WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
+    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {

@@ -30,12 +30,11 @@ public partial class MainWindow : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        if (WindowEffects.TryApplyBackdrop(this, SystemBackdrop.Mica))
+        if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
             Background = System.Windows.Media.Brushes.Transparent;
-        WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
+    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
 
     private SettingsViewModel ViewModel => (SettingsViewModel)DataContext;
 
