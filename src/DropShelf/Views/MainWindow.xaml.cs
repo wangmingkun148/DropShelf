@@ -15,7 +15,6 @@ namespace DropShelf.Views;
 public partial class MainWindow : Window
 {
     private readonly AppController _controller;
-    private bool _closingForShutdown;
 
     public MainWindow(AppController controller)
     {
@@ -27,13 +26,6 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
         StateChanged += (_, _) => UpdateMaximizedPadding();
         ThemeService.ThemeChanged += OnThemeChanged;
-    }
-
-    public void CloseForShutdown()
-    {
-        _closingForShutdown = true;
-        SaveBounds();
-        Close();
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -198,19 +190,14 @@ public partial class MainWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         SaveBounds();
-        if (!_closingForShutdown)
-        {
-            // 关闭主窗口只是隐藏到通知区域，手势识别继续运行。
-            e.Cancel = true;
-            Hide();
-            _controller.OnMainWindowHidden();
-        }
         base.OnClosing(e);
     }
 
+    /// <summary>主窗口关闭后释放，下次打开时重新创建；程序留在通知区域，手势识别继续运行。</summary>
     protected override void OnClosed(EventArgs e)
     {
         ThemeService.ThemeChanged -= OnThemeChanged;
+        ViewModel.Detach();
         base.OnClosed(e);
     }
 

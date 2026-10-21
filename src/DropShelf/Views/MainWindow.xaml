@@ -588,13 +588,9 @@
                                     <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
                                 </ListBox>
                             </controls:SettingsCard>
-                            <controls:SettingsCard Icon="{StaticResource Glyph.MoveToFolder}" Header="{l:Loc CloseAfterDragOut}"
-                                                   Description="{l:Loc CloseAfterDragOutDescription}">
-                                <CheckBox x:Name="CloseAfterDragOutBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseAfterDragOut}" />
-                            </controls:SettingsCard>
                             <controls:SettingsCard Icon="{StaticResource Glyph.Clear}" Header="{l:Loc CloseWhenEmpty}"
                                                    Description="{l:Loc CloseWhenEmptyDescription}">
-                                <CheckBox Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
+                                <CheckBox x:Name="CloseWhenEmptyBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
                             </controls:SettingsCard>
                             <controls:SettingsCard Icon="{StaticResource Glyph.History}" Header="{l:Loc ClearShelfHistory}"
                                                    Description="{Binding HistoryDescription}">

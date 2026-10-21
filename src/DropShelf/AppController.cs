@@ -161,14 +161,22 @@ public sealed class AppController : IDisposable
             _dispatcher.BeginInvoke(ShowMainWindow);
             return;
         }
-        _mainWindow ??= new MainWindow(this);
+        if (_mainWindow is null)
+        {
+            _mainWindow = new MainWindow(this);
+            _mainWindow.Closed += OnMainWindowClosed;
+        }
         if (!_mainWindow.IsVisible) _mainWindow.Show();
         if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
         _mainWindow.Activate();
     }
 
-    public void OnMainWindowHidden()
+    private void OnMainWindowClosed(object? sender, EventArgs e)
     {
+        _mainWindow = null;
+        if (_exiting) return;
+        // 窗口占用的内存早已进入老一代，空闲时主动回收一次，否则长时间待在通知区域时不会释放。
+        _dispatcher.BeginInvoke(() => GC.Collect(), DispatcherPriority.ApplicationIdle);
         if (_hasShownTrayHint) return;
         _hasShownTrayHint = true;
         _tray?.ShowStillRunningHint();
@@ -222,7 +230,7 @@ public sealed class AppController : IDisposable
         _hotkey?.Dispose();
         _tray?.Dispose();
         _onboarding?.Close();
-        _mainWindow?.CloseForShutdown();
+        _mainWindow?.Close();
         _messageWindow?.Dispose();
     }
 

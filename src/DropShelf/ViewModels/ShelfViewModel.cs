@@ -216,7 +216,7 @@ public sealed class ShelfViewModel : ObservableObject
     }
 
     /// <summary>处理拖出结果；返回置物架内容是否发生变化。</summary>
-    public bool ApplyDragOut(IReadOnlyList<ShelfItem> dragged, DragOutResult result, bool removeAfterDragOut)
+    public bool ApplyDragOut(IReadOnlyList<ShelfItem> dragged, DragOutResult result, bool removeCopied)
     {
         switch (result)
         {
@@ -233,7 +233,7 @@ public sealed class ShelfViewModel : ObservableObject
 
             case DragOutResult.Copied:
             case DragOutResult.Linked:
-                if (!removeAfterDragOut) return false;
+                if (!removeCopied) return false;
                 Remove(dragged);
                 return true;
 

@@ -46,8 +46,7 @@ public sealed class AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public QuickActionType QuickAction { get; set; } = QuickActionType.Properties;
 
-    /// <summary>拖出的项目从置物架移走，全部拖出后关闭置物架。</summary>
-    public bool CloseAfterDragOut { get; set; } = true;
+    /// <summary>自动关闭空置物架：拖出的项目从置物架移走，全部拖出或移除后关闭置物架。</summary>
     public bool CloseWhenEmpty { get; set; } = true;
     public string Hotkey { get; set; } = HotkeyGesture.Default.ToString();
     public bool HasCompletedFirstRun { get; set; }

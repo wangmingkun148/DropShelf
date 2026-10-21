@@ -138,13 +138,9 @@ public sealed class SettingsViewModel : ObservableObject
     public SettingsViewModel(AppController controller)
     {
         _controller = controller;
-        controller.SettingsChanged += (_, _) => RefreshAll();
-        controller.History.Changed += (_, _) => RefreshHistory();
-        LanguageService.LanguageChanged += (_, _) =>
-        {
-            RefreshAll();
-            RefreshHistory();
-        };
+        controller.SettingsChanged += OnSettingsChanged;
+        controller.History.Changed += OnHistoryChanged;
+        LanguageService.LanguageChanged += OnLanguageChanged;
 
         OpenShelfCommand = new RelayCommand(_ => controller.OpenShelfNearMainWindow());
         ShowTutorialCommand = new RelayCommand(_ => controller.ShowOnboarding());
@@ -298,12 +294,6 @@ public sealed class SettingsViewModel : ObservableObject
     {
         get => Settings.DragOutMode;
         set => Update(settings => settings.DragOutMode = value);
-    }
-
-    public bool CloseAfterDragOut
-    {
-        get => Settings.CloseAfterDragOut;
-        set => Update(settings => settings.CloseAfterDragOut = value);
     }
 
     public bool CloseWhenEmpty
@@ -481,12 +471,30 @@ public sealed class SettingsViewModel : ObservableObject
         }
     }
 
+    /// <summary>窗口关闭后停止接收通知，让界面和缩略图可以被回收。</summary>
+    public void Detach()
+    {
+        _controller.SettingsChanged -= OnSettingsChanged;
+        _controller.History.Changed -= OnHistoryChanged;
+        LanguageService.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e) => RefreshAll();
+
+    private void OnHistoryChanged(object? sender, EventArgs e) => RefreshHistory();
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshAll();
+        RefreshHistory();
+    }
+
     private void RefreshAll()
     {
         foreach (var name in new[]
                  {
                      nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity),
-                     nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseAfterDragOut), nameof(CloseWhenEmpty),
+                     nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(ShowGettingStarted), nameof(ActionLayout),
                      nameof(StartupDescription), nameof(Version), nameof(HistoryDescription), nameof(GeneralSummary),

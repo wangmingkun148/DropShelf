@@ -143,7 +143,7 @@ internal static class Program
     {
         var service = new SettingsService();
         var defaults = service.Load();
-        Assert(defaults.CloseAfterDragOut && defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
+        Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
         Assert(defaults.AccentColor is null, "默认强调色应跟随 Windows");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
@@ -166,7 +166,7 @@ internal static class Program
         var custom = new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = folder, FolderMode = TransferMode.Copy, Name = "素材" };
         defaults.CustomActions!.Add(custom);
         defaults.QuickActionSlots = ["Reveal", custom.Id, "CopyFullPath", "MoveTo"];
-        defaults.CloseAfterDragOut = false;
+        defaults.CloseWhenEmpty = false;
         defaults.ShowGettingStarted = false;
         defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
@@ -185,7 +185,7 @@ internal static class Program
         var restored = loaded.CustomActions!.Single(action => action.Id == custom.Id);
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
-        Assert(!loaded.CloseAfterDragOut && !loaded.ShowGettingStarted, "拖出后关闭或快速上手设置未恢复");
+        Assert(!loaded.CloseWhenEmpty && !loaded.ShowGettingStarted, "自动关闭或快速上手设置未恢复");
         Assert(loaded.AccentColor == "#8764B8", "强调色未恢复");
         Assert(loaded.Hotkey == "Ctrl+Alt+D", "快捷键未恢复");
         Assert(loaded.HasCompletedFirstRun, "首次运行状态未恢复");
@@ -1391,7 +1391,7 @@ internal static class Program
 
         foreach (var name in new[] { "PageCards", "VersionButton", "StatusIndicator", "GettingStartedSection", "HistorySection", "HistoryList",
                      "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector",
-                     "ShelfSizeSelector", "DragOutModeSelector", "CloseAfterDragOutBox", "ClearHistoryButton", "ThemeSelector",
+                     "ShelfSizeSelector", "DragOutModeSelector", "CloseWhenEmptyBox", "ClearHistoryButton", "ThemeSelector",
                      "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
@@ -1414,7 +1414,7 @@ internal static class Program
         ((System.Windows.Controls.ListBox)window.FindName("ThemeSelector")!).SelectedValue = AppTheme.Dark;
         ((System.Windows.Controls.ListBox)window.FindName("AccentSelector")!).SelectedValue = "#038387";
         ((System.Windows.Controls.ListBox)window.FindName("ActionLayoutSelector")!).SelectedValue = QuickActionLayout.Two;
-        ((System.Windows.Controls.CheckBox)window.FindName("CloseAfterDragOutBox")!).IsChecked = false;
+        ((System.Windows.Controls.CheckBox)window.FindName("CloseWhenEmptyBox")!).IsChecked = false;
         viewModel.AssignSlot(1, "Reveal");
         Assert(viewModel.ShelfSummary == "屏幕边缘呼出 · 拖出时复制" && viewModel.ActionsSummary == "压缩、显示位置" &&
                viewModel.AppearanceSummary == "深色 · 自选强调色", "设置卡片上的摘要不正确");
@@ -1457,7 +1457,7 @@ internal static class Program
         Assert(saved.DragOutMode == TransferMode.Copy, "拖出方式没有保存");
         Assert(saved.QuickShelfSize == QuickShelfSize.Small, "尺寸没有立即保存");
         Assert(saved.Theme == AppTheme.Dark && ThemeService.IsDark, "主题没有保存或生效");
-        Assert(!saved.CloseAfterDragOut && !saved.ShowGettingStarted, "开关设置没有保存");
+        Assert(!saved.CloseWhenEmpty && !saved.ShowGettingStarted, "开关设置没有保存");
         Assert(saved.AccentColor == "#038387" && ThemeService.Accent.Base == ThemeService.ParseAccent("#038387"), "强调色没有保存或生效");
         Assert(saved.QuickActionLayout == QuickActionLayout.Two && viewModel.VisibleSlots.Count == 2, "按钮数量没有保存");
         var created = saved.CustomActions!.Single(action => action.ImageSizeKb == 200);
@@ -1493,7 +1493,7 @@ internal static class Program
         }
 
         ThemeService.SetMode(AppTheme.Light);
-        window.CloseForShutdown();
+        window.Close();
         File.Delete(service.SettingsPath);
     }
 

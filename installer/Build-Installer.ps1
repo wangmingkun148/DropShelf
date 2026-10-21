@@ -13,10 +13,12 @@ $uninstallLauncherScript = Join-Path $PSScriptRoot "UninstallLauncher.iss"
 & $DotnetPath restore $appProject -r win-x64 -p:NuGetAudit=false
 if ($LASTEXITCODE -ne 0) { throw "无法准备发布文件。" }
 
-# 自包含单文件：目标电脑无需安装 .NET；开启压缩以减小体积。
+# 自包含单文件：目标电脑无需安装 .NET。
+# 预编译（ReadyToRun）让启动和第一次弹出置物架时不必等待即时编译；
+# 不压缩单文件，程序集可直接从文件映射而不必解压到内存，占用更少。安装包本身仍会压缩。
 & $DotnetPath publish $appProject -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:EnableCompressionInSingleFile=true -p:DebugType=none `
+    -p:PublishReadyToRun=true -p:DebugType=none `
     --no-restore -o $portableOutput
 if ($LASTEXITCODE -ne 0) { throw "无法生成 DropShelf.exe。" }
 

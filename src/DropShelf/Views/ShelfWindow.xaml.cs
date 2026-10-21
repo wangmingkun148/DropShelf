@@ -60,7 +60,7 @@ public partial class ShelfWindow : Window
     private const int WS_MAXIMIZEBOX = 0x00010000;
     private const int GWL_STYLE = -16;
     private static readonly TimeSpan TilesExpandDuration = TimeSpan.FromMilliseconds(180);
-    private static readonly TimeSpan TilesCollapseDuration = TimeSpan.FromMilliseconds(140);
+    private static readonly TimeSpan TilesCollapseDuration = TimeSpan.FromMilliseconds(240);
 
     private readonly IShelfHost _host;
     private readonly DropTargetHelper _dropHelper = new();
@@ -170,6 +170,7 @@ public partial class ShelfWindow : Window
 
         var duration = ShelfMotion.CloseDuration;
         var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        CacheSurface();
         var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
         fade.Completed += (_, _) => Close();
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
@@ -271,11 +272,19 @@ public partial class ShelfWindow : Window
                 () => WindowPlacement.KeepInWorkArea(this));
         }
 
+        CacheSurface();
         Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
         var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
+        scale.Completed += (_, _) => Surface.CacheMode = null;
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
     }
+
+    /// <summary>
+    /// 缩放和淡入淡出期间把内容缓存为位图，每帧只需合成，不必重新绘制虚线边框、阴影和文字。
+    /// 按显示缩放比例缓存，高分屏上也保持清晰。
+    /// </summary>
+    private void CacheSurface() => Surface.CacheMode = new BitmapCache(DpiScale());
 
     /// <summary>逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。</summary>
     private void SlideWindow(int fromX, int fromY, int toX, int toY, TimeSpan duration, IEasingFunction ease, Action? completed = null)
@@ -309,7 +318,8 @@ public partial class ShelfWindow : Window
         _slideFrame = null;
     }
 
-    private bool IsSliding => _slideFrame is not null;
+    /// <summary>窗口正在滑入或退出。</summary>
+    public bool IsSliding => _slideFrame is not null;
 
     private static void MoveWindow(IntPtr handle, int x, int y) =>
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, x, y, 0, 0,
@@ -718,9 +728,9 @@ public partial class ShelfWindow : Window
         if (result == DragOutResult.Cancelled) return;
         // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
         if (items.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
-        var settings = _host.Settings;
-        ViewModel.ApplyDragOut(items, result, settings.CloseAfterDragOut);
-        if (ViewModel.IsEmpty && !ViewModel.IsPinned && (settings.CloseAfterDragOut || settings.CloseWhenEmpty)) CloseAnimated();
+        var closeWhenEmpty = _host.Settings.CloseWhenEmpty;
+        ViewModel.ApplyDragOut(items, result, removeCopied: closeWhenEmpty);
+        if (ViewModel.IsEmpty && !ViewModel.IsPinned && closeWhenEmpty) CloseAnimated();
     }
 
     private bool PassedDragThreshold(System.Windows.Input.MouseEventArgs e)

@@ -144,12 +144,9 @@ public static class Strings
         "Whether dragging files out moves or copies them. You can also switch it at the top of a shelf");
     public static string TransferMove => T("移动", "Move");
     public static string TransferCopy => T("复制", "Copy");
-    public static string CloseAfterDragOut => T("拖出后自动关闭", "Close after dragging out");
-    public static string CloseAfterDragOutDescription => T("拖出的项目从置物架移走，全部拖出后关闭；关闭此项可把同一批文件依次拖到多个地方",
-        "Dragged items leave the shelf, and it closes once they're all out. Turn off to drag the same files to several places");
-    public static string CloseWhenEmpty => T("清空后自动关闭", "Close when empty");
-    public static string CloseWhenEmptyDescription => T("项目全部拖出或移除后关闭置物架；钉住的置物架会保持打开",
-        "Closes the shelf once every item is dragged out or removed. Pinned shelves stay open");
+    public static string CloseWhenEmpty => T("自动关闭空置物架", "Close empty shelves");
+    public static string CloseWhenEmptyDescription => T("拖出的项目从置物架移走，全部拖出或移除后关闭；关闭此项可把同一批文件依次拖到多个地方。钉住的置物架始终保持打开",
+        "Dragged items leave the shelf, and it closes once everything is dragged out or removed. Turn off to drag the same files to several places. Pinned shelves stay open");
     public static string RecentShelves => T("最近关闭的置物架", "Recently closed shelves");
     public static string ClearShelfHistory => T("清空置物架历史", "Clear shelf history");
     public static string HistoryEmpty => T("暂无最近关闭的置物架", "No recently closed shelves");
@@ -257,8 +254,8 @@ public static class Strings
         : T("拖出时将移动文件", "Dragging out now moves files");
 
     public static string Restored(int added, int unavailable) => T(
-        $"已恢复 {added} 项{(unavailable > 0 ? $"，{unavailable} 项已不存在" : null)}",
-        $"Reopened {Count(added, "item", "items")}{(unavailable > 0 ? $", {unavailable} no longer {(unavailable == 1 ? "exists" : "exist")}" : null)}");
+        $"已恢复 {added} 项{(unavailable > 0 ? $"，{unavailable} 项已删除或移动" : null)}",
+        $"Reopened {Count(added, "item", "items")}{(unavailable > 0 ? $", {unavailable} moved or deleted" : null)}");
 
     public static string RestoreUnavailable => T("这些项目已被移动或删除", "These items were moved or deleted");
 
@@ -509,8 +506,8 @@ public static class Strings
     // ───────────── 文件与系统 ─────────────
 
     public static string AccessDenied => T("没有访问权限。", "Access denied.");
-    public static string ItemNotFound => T("项目已经不存在或暂时无法访问。", "The item no longer exists or can't be accessed right now.");
-    public static string FolderNotFound => T("文件夹已经不存在或暂时无法访问。", "The folder no longer exists or can't be accessed right now.");
+    public static string ItemNotFound => T("项目已删除或移动，或暂时无法访问。", "The item was moved or deleted, or can't be accessed right now.");
+    public static string FolderNotFound => T("文件夹已删除或移动，或暂时无法访问。", "The folder was moved or deleted, or can't be accessed right now.");
     public static string PathTooLong => T("路径过长，Windows 无法处理。", "The path is too long for Windows to handle.");
     public static string FolderIntoItself => T("不能把文件夹复制或移动到它自己的内部。", "A folder can't be copied or moved into itself.");
     public static string ItemBusy => T("项目正被占用、目标空间不足或设备暂时不可用。",

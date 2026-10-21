@@ -17,6 +17,7 @@ public sealed class ShelfManager : IShelfHost
     private readonly Dispatcher _dispatcher;
     private readonly List<ShelfWindow> _open = [];
     private ShelfWindow? _spare;
+    private DispatcherTimer? _prewarmTimer;
     private bool _shuttingDown;
 
     public ShelfManager(Func<AppSettings> settings, Action showSettings, Action<Action<AppSettings>> updateSettings,
@@ -33,18 +34,34 @@ public sealed class ShelfManager : IShelfHost
     public ShelfHistoryService? History { get; }
     public IReadOnlyList<ShelfWindow> OpenShelves => _open;
 
-    public event EventHandler? ShelvesChanged;
-
-    /// <summary>在空闲时创建一个隐藏的置物架窗口。</summary>
+    /// <summary>
+    /// 准备一个隐藏的置物架窗口。创建窗口会占用界面线程几十毫秒，若在弹出动画或拖动途中进行会造成卡顿，
+    /// 所以等鼠标松开、动画结束后再创建。
+    /// </summary>
     public void Prewarm()
     {
         if (_shuttingDown || _spare is not null) return;
-        _dispatcher.BeginInvoke(() =>
+        if (_prewarmTimer is null)
         {
-            if (_shuttingDown || _spare is not null) return;
-            _spare = CreateWindow();
-            WindowEffects.Handle(_spare);
-        }, DispatcherPriority.ApplicationIdle);
+            _prewarmTimer = new DispatcherTimer(DispatcherPriority.ApplicationIdle, _dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
+            _prewarmTimer.Tick += OnPrewarmTick;
+        }
+        _prewarmTimer.Stop();
+        _prewarmTimer.Start();
+    }
+
+    private void OnPrewarmTick(object? sender, EventArgs e)
+    {
+        if (_shuttingDown || _spare is not null)
+        {
+            _prewarmTimer!.Stop();
+            return;
+        }
+        // 仍在拖动或有置物架正在播放动画时，稍后再试。
+        if (NativeMethods.IsButtonPhysicallyDown() || _open.Any(shelf => shelf.IsSliding)) return;
+        _prewarmTimer!.Stop();
+        _spare = CreateWindow();
+        WindowEffects.Handle(_spare);
     }
 
     /// <summary>
@@ -59,7 +76,6 @@ public sealed class ShelfManager : IShelfHost
             shelf = _spare ?? CreateWindow();
             _spare = null;
             _open.Add(shelf);
-            ShelvesChanged?.Invoke(this, EventArgs.Empty);
         }
 
         shelf.ViewModel.OpenedByGesture = openedByGesture;
@@ -85,7 +101,7 @@ public sealed class ShelfManager : IShelfHost
         });
     }
 
-    /// <summary>重新打开最近关闭的置物架：放进指定的置物架，或在光标处打开一个。已不存在的文件会跳过。</summary>
+    /// <summary>重新打开最近关闭的置物架：放进指定的置物架，或在光标处打开一个。已删除或移动的文件会跳过。</summary>
     public void Restore(ShelfHistoryEntry entry, ShelfWindow? target = null)
     {
         var shelf = target is { IsClosing: false } ? target : OpenAtCursor(activate: true);
@@ -125,6 +141,7 @@ public sealed class ShelfManager : IShelfHost
     public void CloseAll()
     {
         _shuttingDown = true;
+        _prewarmTimer?.Stop();
         foreach (var shelf in _open.ToArray()) shelf.Close();
         _open.Clear();
         _spare?.Close();
@@ -136,7 +153,7 @@ public sealed class ShelfManager : IShelfHost
         // 关闭时仍有文件的置物架记入最近关闭，误关或退出后可以恢复。
         if (items.Count > 0) History?.Record(items);
         if (ReferenceEquals(window, _spare)) _spare = null;
-        if (_open.Remove(window)) ShelvesChanged?.Invoke(this, EventArgs.Empty);
+        _open.Remove(window);
     }
 
     public void ShowSettings() => _showSettings();
