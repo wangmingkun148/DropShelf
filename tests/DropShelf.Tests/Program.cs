@@ -437,9 +437,14 @@ internal static class Program
 
     private static void TestSensitivityProfilesTrigger()
     {
-        Assert(Shake(GestureSensitivity.Responsive, [100, 120, 100, 120], 70), "灵敏档无法通过短距离两次来回触发");
-        Assert(Shake(GestureSensitivity.Balanced, [100, 125, 100, 125, 100], 70), "均衡档无法通过正常幅度晃动触发");
-        Assert(Shake(GestureSensitivity.Steady, [100, 135, 100, 135, 100, 135], 70), "稳健档无法通过明确晃动触发");
+        Assert(Shake(GestureSensitivity.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
+        Assert(Shake(GestureSensitivity.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
+        Assert(Shake(GestureSensitivity.Steady, [100, 160, 100, 160, 100, 160], 70), "稳健档无法通过明确晃动触发");
+
+        // 拖动时手部的小幅来回不应触发。
+        Assert(!Shake(GestureSensitivity.Responsive, [100, 120, 100, 120], 70), "灵敏档被小幅来回误触发");
+        Assert(!Shake(GestureSensitivity.Balanced, [100, 125, 100, 125, 100], 70), "均衡档被小幅晃动误触发");
+        Assert(!Shake(GestureSensitivity.Steady, [100, 135, 100, 135, 100, 135], 70), "稳健档被小幅晃动误触发");
 
         static bool Shake(GestureSensitivity sensitivity, int[] xs, long interval)
         {
@@ -451,23 +456,23 @@ internal static class Program
     private static void TestGestureDurationBounds()
     {
         var tooFast = new MouseGestureDetector(GestureSensitivity.Balanced);
-        var fastSamples = new[] { (100, 0L), (125, 30L), (100, 60L), (125, 90L), (100, 120L), (125, 150L) };
+        var fastSamples = new[] { (100, 0L), (143, 30L), (100, 60L), (143, 90L), (100, 120L), (143, 150L) };
         Assert(!fastSamples.Any(sample => tooFast.AddSample(sample.Item1, 100, sample.Item2, false)), "瞬间抖动被错误识别为晃动手势");
 
         var tooSlow = new MouseGestureDetector(GestureSensitivity.Balanced);
-        var slowSamples = new[] { (100, 0L), (125, 300L), (100, 600L), (125, 900L), (100, 1200L), (125, 1500L) };
+        var slowSamples = new[] { (100, 0L), (143, 300L), (100, 600L), (143, 900L), (100, 1200L), (143, 1500L) };
         Assert(!slowSamples.Any(sample => tooSlow.AddSample(sample.Item1, 100, sample.Item2, false)), "缓慢来回移动被错误识别为晃动手势");
     }
 
     private static void TestGestureToleratesIrregularSamples()
     {
         var delayed = new MouseGestureDetector(GestureSensitivity.Balanced);
-        var delayedSamples = new[] { (100, 100, 0L), (125, 103, 60L), (100, 99, 380L), (126, 105, 445L), (99, 98, 510L) };
+        var delayedSamples = new[] { (100, 100, 0L), (143, 103, 60L), (100, 99, 380L), (144, 105, 445L), (99, 98, 510L) };
         Assert(delayedSamples.Any(sample => delayed.AddSample(sample.Item1, sample.Item2, sample.Item3, false)),
             "系统短暂忙碌导致采样间隔变长后未能识别手势");
 
         var compact = new MouseGestureDetector(GestureSensitivity.Balanced);
-        var compactSamples = new[] { 100, 122, 100, 122, 100, 122 };
+        var compactSamples = new[] { 100, 138, 100, 138, 100, 138 };
         Assert(compactSamples.Select((x, index) => (x, index))
                 .Any(sample => compact.AddSample(sample.x, 100 + sample.index % 2 * 2, sample.index * 55L, false)),
             "合理幅度和时长的晃动未被识别");
