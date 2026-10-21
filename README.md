@@ -12,17 +12,7 @@ DropShelf 是一个 Windows 临时文件置物架。拖着文件晃一晃鼠标�
 - 误关的置物架可以恢复。
 - 不需要管理员权限，不读取文件内容，不联网。
 
-**为什么又做一个**
-
-同类软件已经不少，DropShelf 难免有重复造轮子之嫌，但它尽量解决了同类软件的一些问题：
-
-- 识别手势时鼠标卡顿：DropShelf 在独立线程上识别晃动。
-- 没拖东西时晃鼠标也会弹出：DropShelf 确认正在拖动内容后才弹出。
-- 聊天软件拖出的图片，放下后就被删除：DropShelf 会立即另存一份。
-- 资源管理器移走文件后，置物架上仍留着它：DropShelf 会自动移除。
-- 拖到聊天软件或浏览器时被拒绝：DropShelf 会自动改为复制。
-
-灵感来自 macOS 上的 [Dropover](https://dropoverapp.com)。DropShelf 是独立项目，与 Dropover 没有关联。
+同类软件已经不少，DropShelf 难免有重复造轮子之嫌，但它尽量改进了同类软件的一些不足。灵感来自 macOS 上的 [Dropover](https://dropoverapp.com)。DropShelf 是独立项目，与 Dropover 没有关联。
 
 **说明**
 
