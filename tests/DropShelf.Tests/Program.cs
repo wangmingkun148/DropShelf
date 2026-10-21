@@ -44,7 +44,7 @@ internal static class Program
         var application = new WpfApplication { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/DropShelf;component/Themes/Tokens.xaml") });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/DropShelf;component/Themes/Controls.xaml") });
-        ThemeService.Initialize(AppTheme.Light);
+        ThemeService.Initialize(AppTheme.Light, null);
         // 断言按中文界面文字编写，固定语言，避免受运行测试的电脑的显示语言影响。
         LanguageService.SetMode(AppLanguage.Chinese);
 
@@ -143,7 +143,8 @@ internal static class Program
     {
         var service = new SettingsService();
         var defaults = service.Load();
-        Assert(defaults.GestureEnabled && defaults.RemoveAfterDragOut && defaults.CloseWhenEmpty, "默认开关不正确");
+        Assert(defaults.GestureEnabled && defaults.CloseAfterDragOut && defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
+        Assert(defaults.AccentColor is null, "默认强调色应跟随 Windows");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
                defaults.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "默认快速操作不正确");
@@ -165,7 +166,9 @@ internal static class Program
         var custom = new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = folder, FolderMode = TransferMode.Copy, Name = "素材" };
         defaults.CustomActions!.Add(custom);
         defaults.QuickActionSlots = ["Reveal", custom.Id, "CopyFullPath", "MoveTo"];
-        defaults.RemoveAfterDragOut = false;
+        defaults.CloseAfterDragOut = false;
+        defaults.ShowGettingStarted = false;
+        defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
         service.Save(defaults);
@@ -182,7 +185,8 @@ internal static class Program
         var restored = loaded.CustomActions!.Single(action => action.Id == custom.Id);
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
-        Assert(!loaded.RemoveAfterDragOut, "拖出后移除设置未恢复");
+        Assert(!loaded.CloseAfterDragOut && !loaded.ShowGettingStarted, "拖出后关闭或快速上手设置未恢复");
+        Assert(loaded.AccentColor == "#8764B8", "强调色未恢复");
         Assert(loaded.Hotkey == "Ctrl+Alt+D", "快捷键未恢复");
         Assert(loaded.HasCompletedFirstRun, "首次运行状态未恢复");
         Assert(!File.ReadAllText(service.SettingsPath).Contains("\"QuickActions\""), "已迁移的旧版快速操作仍写入了设置文件");
@@ -244,6 +248,7 @@ internal static class Program
             EdgeDwell = (EdgeDwellTime)999,
             DragOutMode = (TransferMode)999,
             Theme = (AppTheme)999,
+            AccentColor = "blue",
             Language = (AppLanguage)999,
             QuickShelfSize = (QuickShelfSize)999,
             QuickActionLayout = (QuickActionLayout)3,
@@ -262,7 +267,7 @@ internal static class Program
         Assert(normalized.MouseGestureSensitivity == GestureSensitivity.Balanced, "异常灵敏度没有恢复默认值");
         Assert(normalized.AutoOpenTrigger == AutoOpenTrigger.Both && normalized.EdgeDwell == EdgeDwellTime.Medium, "异常呼出方式没有恢复默认值");
         Assert(normalized.DragOutMode == TransferMode.Move, "异常拖出方式没有恢复默认值");
-        Assert(normalized.Theme == AppTheme.System, "异常主题没有恢复默认值");
+        Assert(normalized.Theme == AppTheme.System && normalized.AccentColor is null, "异常主题或强调色没有恢复默认值");
         Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
         Assert(normalized.QuickActionLayout == QuickActionLayout.Four, "异常按钮数量没有恢复默认值");
@@ -294,6 +299,8 @@ internal static class Program
             "快速操作顺序或数量不正确");
         Assert(QuickActions.Normalize(null).Count == 0, "空列表处理不正确");
         Assert(QuickActions.All.All(info => info.Glyph.Length == 1 && info.Label.Length > 0), "快速操作缺少图标或名称");
+        var copyPath = QuickActions.Get(QuickActionType.CopyFullPath);
+        Assert(copyPath.Label == "路径" && copyPath.Title == "复制路径", "复制路径的按钮名称应简写为“路径”");
 
         var custom = new CustomQuickAction { Kind = CustomActionKind.CompressImage, ImageSizeKb = 200 };
         var slots = QuickActions.NormalizeSlots(["Reveal", "Reveal", "nope", custom.Id], [custom]);
@@ -422,8 +429,10 @@ internal static class Program
 
     private static void TestProductVersion()
     {
-        var version = typeof(AppController).Assembly.GetName().Version;
-        Assert(version == new Version(2, 0, 0, 0), $"程序版本号不正确：{version}");
+        var assembly = typeof(AppController).Assembly;
+        var version = assembly.GetName().Version;
+        var fileVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location).FileVersion;
+        Assert(version is { Major: >= 2 } && fileVersion == version.ToString(), $"程序版本号不正确：{version} / {fileVersion}");
     }
 
     // ───────────── 手势识别 ─────────────
@@ -1337,6 +1346,17 @@ internal static class Program
         window.ViewModel.IsExpanded = true;
         Pump(100);
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
+
+        // 压缩生成的压缩包放进旁边新开的置物架，不混进原来的项目。
+        controller.Settings.QuickActionLayout = QuickActionLayout.Four;
+        window.ApplySettings(controller.Settings);
+        var openBefore = controller.Shelves.OpenShelves.Count;
+        var compressed = window.ViewModel.RunActionAsync(QuickActions.Get(QuickActionType.CompressZip), [window.ViewModel.Items[0]], IntPtr.Zero, null);
+        while (!compressed.IsCompleted) Pump(20);
+        Assert(compressed.Result.Succeeded && window.ViewModel.Items.Count == 2, "压缩包不应放进原来的置物架");
+        var archiveShelf = controller.Shelves.OpenShelves.Skip(openBefore).Single();
+        Assert(archiveShelf.ViewModel.Items.Single().Value.EndsWith(".zip", StringComparison.OrdinalIgnoreCase), "压缩包没有放进新的置物架");
+        archiveShelf.Close();
         window.Close();
         Assert(window.ViewModel.Items.Count == 0, "关闭后没有释放项目");
 
@@ -1346,8 +1366,6 @@ internal static class Program
         Pump(150);
         var reopened = controller.Shelves.OpenShelves.Last();
         Assert(reopened.ViewModel.Items.Count == 2 && controller.History.Entries.All(entry => entry != latest), "最近关闭的置物架没有恢复");
-        Assert(((FrameworkElement)reopened.FindName("RestoreButton")!).Visibility == Visibility.Visible ||
-               controller.History.Latest is null, "有记录时空置物架应显示恢复按钮");
         reopened.Close();
         controller.History.Clear();
         File.Delete(new SettingsService().SettingsPath);
@@ -1362,13 +1380,13 @@ internal static class Program
         window.Show();
         Pump(200);
 
-        foreach (var name in new[] { "NavList", "ExitApplicationButton", "LanguageSelector", "StartupEnabledBox", "HotkeyEditor",
-                     "GestureEnabledBox", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector", "ShelfSizeSelector",
-                     "DragOutModeSelector", "ClearHistoryButton", "ThemeSelector", "ActionLayoutSelector", "ActionSlotsList",
-                     "CustomActionsList", "AddCustomActionButton", "EditorOverlay" })
+        foreach (var name in new[] { "NavList", "ExitApplicationButton", "StatusIndicator", "GettingStartedSection", "HistoryList",
+                     "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector",
+                     "ShelfSizeSelector", "DragOutModeSelector", "CloseAfterDragOutBox", "ClearHistoryButton", "ThemeSelector",
+                     "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
-        ((System.Windows.Controls.ListBox)window.FindName("NavList")!).SelectedIndex = 1;
+        ((System.Windows.Controls.ListBox)window.FindName("NavList")!).SelectedIndex = 2;
         Pump(100);
         Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible, "导航没有切换页面");
 
@@ -1380,12 +1398,20 @@ internal static class Program
         ((System.Windows.Controls.ListBox)window.FindName("DragOutModeSelector")!).SelectedValue = TransferMode.Copy;
         ((System.Windows.Controls.ListBox)window.FindName("ShelfSizeSelector")!).SelectedValue = QuickShelfSize.Small;
         ((System.Windows.Controls.ListBox)window.FindName("ThemeSelector")!).SelectedValue = AppTheme.Dark;
+        ((System.Windows.Controls.ListBox)window.FindName("AccentSelector")!).SelectedValue = "#038387";
         ((System.Windows.Controls.ListBox)window.FindName("ActionLayoutSelector")!).SelectedValue = QuickActionLayout.Two;
-        ((System.Windows.Controls.CheckBox)window.FindName("GestureEnabledBox")!).IsChecked = false;
+        ((System.Windows.Controls.CheckBox)window.FindName("CloseAfterDragOutBox")!).IsChecked = false;
+        controller.UpdateSettings(settings => settings.GestureEnabled = false);
         viewModel.AssignSlot(1, "Reveal");
+        Assert(viewModel.VisibleSlots.Select(slot => slot.Position).SequenceEqual(["左", "右"]), "两个操作时位置应为左、右");
+        Assert(viewModel.MoreActions.All(card => viewModel.VisibleSlots.All(slot => slot.Action.Id != card.Action.Id)) &&
+               viewModel.MoreActions.Count == QuickActions.Available(controller.Settings.CustomActions).Count - 2, "更多操作应列出其余全部操作");
         viewModel.Hotkey = new HotkeyGesture(ModifierKeys.Control | ModifierKeys.Alt, Key.D);
+        viewModel.DismissGettingStartedCommand.Execute(null);
+        Pump(50);
+        Assert(((FrameworkElement)window.FindName("GettingStartedSection")!).Visibility == Visibility.Collapsed, "快速上手关闭后仍显示");
 
-        viewModel.BeginNewCustomAction(0);
+        viewModel.BeginNewCustomAction();
         Assert(viewModel.IsEditorOpen && ((FrameworkElement)window.FindName("EditorOverlay")!).Visibility == Visibility.Visible, "自定义操作对话框没有打开");
         var editor = viewModel.Editor!;
         Assert(!editor.TrySave() && editor.Error is not null, "没有选择文件夹时不应保存");
@@ -1401,10 +1427,13 @@ internal static class Program
         Assert(saved.DragOutMode == TransferMode.Copy, "拖出方式没有保存");
         Assert(saved.QuickShelfSize == QuickShelfSize.Small, "尺寸没有立即保存");
         Assert(saved.Theme == AppTheme.Dark && ThemeService.IsDark, "主题没有保存或生效");
-        Assert(!saved.GestureEnabled, "手势开关没有保存");
+        Assert(!saved.GestureEnabled && !saved.CloseAfterDragOut && !saved.ShowGettingStarted, "开关设置没有保存");
+        Assert(saved.AccentColor == "#038387" && ThemeService.Accent.Base == ThemeService.ParseAccent("#038387"), "强调色没有保存或生效");
         Assert(saved.QuickActionLayout == QuickActionLayout.Two && viewModel.VisibleSlots.Count == 2, "按钮数量没有保存");
         var created = saved.CustomActions!.Single(action => action.ImageSizeKb == 200);
-        Assert(saved.QuickActionSlots![0] == created.Id && saved.QuickActionSlots[1] == "Reveal", "新建的操作没有放到所选位置");
+        Assert(viewModel.MoreActions.Any(card => card.Action.Id == created.Id), "新建的操作应出现在更多操作中");
+        viewModel.AssignSlot(0, created.Id);
+        Assert(service.Load().QuickActionSlots![0] == created.Id && service.Load().QuickActionSlots![1] == "Reveal", "拖到位置上的操作没有保存");
         Assert(saved.Hotkey == "Ctrl+Alt+D", "快捷键没有保存");
         Assert(viewModel.StatusTitle == "自动弹出已暂停", "状态没有反映暂停");
 

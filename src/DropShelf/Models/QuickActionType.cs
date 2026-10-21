@@ -95,7 +95,7 @@ public sealed class QuickActionInfo
     public string Label => Custom is null ? Strings.QuickActionLabel(Type) : Strings.CustomActionLabel(Custom);
 
     /// <summary>设置页、菜单和提示中的完整名称。</summary>
-    public string Title => Custom is null ? Label : Strings.CustomActionTitle(Custom);
+    public string Title => Custom is null ? Strings.QuickActionTitle(Type) : Strings.CustomActionTitle(Custom);
     public string Description => Custom is null ? Strings.QuickActionDescription(Type) : Strings.CustomActionDescription(Custom);
     public string BusyText => Custom is null ? Strings.QuickActionBusyText(Type) : Strings.CustomActionBusyText(Custom);
 

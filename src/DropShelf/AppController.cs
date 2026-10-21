@@ -66,7 +66,7 @@ public sealed class AppController : IDisposable
     public void Start(bool startInBackground)
     {
         LanguageService.SetMode(_settings.Language);
-        ThemeService.Initialize(_settings.Theme);
+        ThemeService.Initialize(_settings.Theme, _settings.AccentColor);
         LogService.CleanupOldLogs();
         _ = VirtualFileDropService.CleanupStaleCacheAsync();
         RestoreStartupRegistration();
@@ -236,7 +236,8 @@ public sealed class AppController : IDisposable
 
     private void Apply(AppSettings previous, AppSettings current)
     {
-        if (previous.Theme != current.Theme) ThemeService.SetMode(current.Theme);
+        if (previous.Theme != current.Theme || previous.AccentColor != current.AccentColor)
+            ThemeService.SetMode(current.Theme, current.AccentColor);
         if (previous.Language != current.Language)
         {
             LanguageService.SetMode(current.Language);

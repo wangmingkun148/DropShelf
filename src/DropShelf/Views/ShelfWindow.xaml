@@ -125,9 +125,6 @@
                             </TextBlock>
                         </ToggleButton.Content>
                     </ToggleButton>
-                    <Button x:Name="CollapseButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="13"
-                            Content="{StaticResource Glyph.ViewAll}" ToolTip="{l:Loc CollapseTooltip}" Click="OnCollapseClick"
-                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
                     <Button x:Name="TransferModeButton" Style="{StaticResource ModeChipStyle}" Click="OnTransferModeClick">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="TransferModeGlyph" FontFamily="{StaticResource IconFont}" FontSize="12"
@@ -163,15 +160,6 @@
                                    Foreground="{DynamicResource TextPrimaryBrush}" />
                         <TextBlock Text="{l:Loc OrPaste}" Margin="0,3,0,0" FontSize="11" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
-                        <Button x:Name="RestoreButton" Style="{StaticResource SubtleButtonStyle}" Margin="0,12,0,0" Padding="8,3,10,4"
-                                MinHeight="0" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}"
-                                Visibility="Collapsed" Click="OnRestoreClick">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{StaticResource Glyph.History}" FontFamily="{StaticResource IconFont}" FontSize="12"
-                                           VerticalAlignment="Center" Margin="0,1,6,0" />
-                                <TextBlock Text="{l:Loc RestoreLastShelf}" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
                     </StackPanel>
                 </Grid>
 
@@ -277,7 +265,7 @@
                 <UniformGrid x:Name="ActionBar" Rows="1" Margin="0,2,0,0" />
             </Grid>
 
-            <!-- 拖入时显示：放进置物架或直接执行快速操作 -->
+            <!-- 拖入时显示：放进置物架；拖到底部按钮区域时展开快速操作，可直接执行 -->
             <Grid x:Name="DropOverlay" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
@@ -293,7 +281,9 @@
                                    Foreground="{DynamicResource AccentTextBrush}" />
                     </StackPanel>
                 </Grid>
-                <UniformGrid x:Name="ActionTiles" Grid.Row="1" Columns="2" Margin="7,0,7,7" />
+                <Border x:Name="ActionTilesHost" Grid.Row="1" ClipToBounds="True">
+                    <UniformGrid x:Name="ActionTiles" Columns="2" Margin="7,0,7,7" VerticalAlignment="Bottom" />
+                </Border>
             </Grid>
 
             <!-- 正在处理 -->

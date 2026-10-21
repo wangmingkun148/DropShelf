@@ -27,6 +27,7 @@ public interface IShelfHost
     void ShowSettings();
     void SetDragOutMode(TransferMode mode);
     void Restore(ShelfHistoryEntry entry, ShelfWindow? target);
+    void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths);
 }
 
 public enum ShelfEntranceKind
@@ -58,6 +59,8 @@ public partial class ShelfWindow : Window
     private const int WS_MINIMIZEBOX = 0x00020000;
     private const int WS_MAXIMIZEBOX = 0x00010000;
     private const int GWL_STYLE = -16;
+    private static readonly TimeSpan TilesExpandDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan TilesCollapseDuration = TimeSpan.FromMilliseconds(140);
 
     private readonly IShelfHost _host;
     private readonly DropTargetHelper _dropHelper = new();
@@ -74,6 +77,7 @@ public partial class ShelfWindow : Window
     private bool _dragFromSelf;
     private DropContentKind _dragKind;
     private QuickActionInfo? _hoveredAction;
+    private bool _tilesExpanded;
     private string? _lastDescription;
     private long _lastDragOverTick;
     private WpfPoint _pressPoint;
@@ -90,6 +94,7 @@ public partial class ShelfWindow : Window
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.ToastRequested += (_, toast) => ShowToast(toast);
+        viewModel.NewItemsProduced += (_, paths) => _host.OpenBeside(this, paths);
 
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
         _toastTimer.Tick += (_, _) => HideToast();
@@ -105,12 +110,10 @@ public partial class ShelfWindow : Window
         Drop += OnDrop;
         PreviewKeyDown += OnPreviewKeyDown;
         Activated += (_, _) => ViewModel.RefreshAvailability();
-        if (host.History is { } history) history.Changed += OnHistoryChanged;
 
         Surface.Opacity = 0;
         ApplySettings(host.Settings);
         UpdateViews();
-        UpdateRestoreButton();
     }
 
     public ShelfViewModel ViewModel { get; }
@@ -188,7 +191,6 @@ public partial class ShelfWindow : Window
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
-        if (_host.History is { } history) history.Changed -= OnHistoryChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         var items = ViewModel.Items.ToArray();
         ViewModel.ReleaseResources();
@@ -221,11 +223,6 @@ public partial class ShelfWindow : Window
         if (!_dragInside) BuildActions();
     }
 
-    private void OnHistoryChanged(object? sender, EventArgs e) => UpdateRestoreButton();
-
-    private void UpdateRestoreButton() =>
-        RestoreButton.Visibility = _host.History?.Latest is not null ? Visibility.Visible : Visibility.Collapsed;
-
     private void UpdateTransferMode()
     {
         var copy = _dragOutMode == TransferMode.Copy;
@@ -241,11 +238,6 @@ public partial class ShelfWindow : Window
         var next = _dragOutMode == TransferMode.Move ? TransferMode.Copy : TransferMode.Move;
         _host.SetDragOutMode(next);
         ViewModel.Notify(Strings.DragOutModeChanged(next));
-    }
-
-    private void OnRestoreClick(object sender, RoutedEventArgs e)
-    {
-        if (_host.History?.Latest is { } latest) _host.Restore(latest, this);
     }
 
     // ───────────── 动画 ─────────────
@@ -506,6 +498,8 @@ public partial class ShelfWindow : Window
             return;
         }
 
+        // 拖到底部按钮区域时展开快速操作；展开后区域变高，移回上方的放置区域再收起。
+        if (ViewModel.HasActions) SetTilesExpanded(e.GetPosition(ActionTilesHost).Y >= 0);
         var action = HitTestTiles(e);
         SetHoveredAction(action);
         if (action is not null && !DropDataReader.CanProvideFiles(_dragKind))
@@ -603,8 +597,10 @@ public partial class ShelfWindow : Window
     {
         DropZoneText.Text = ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
         Body.Visibility = Visibility.Hidden;
-        ActionBarHost.Opacity = 0;
+        ResetTiles();
         DropOverlay.Visibility = Visibility.Visible;
+        // 立即完成布局，紧接着判断光标是否在按钮区域时才能拿到正确的位置。
+        DropOverlay.UpdateLayout();
         WindowEffects.SetBorderColor(this, ThemeService.AccentFill);
     }
 
@@ -615,13 +611,51 @@ public partial class ShelfWindow : Window
         SetHoveredAction(null);
         DropOverlay.Visibility = Visibility.Collapsed;
         Body.Visibility = Visibility.Visible;
-        ActionBarHost.Opacity = 1;
+        ResetTiles();
         WindowEffects.SetBorderColor(this, null);
+    }
+
+    /// <summary>快速操作收起为底部按钮栏的高度：按钮栏保持可见，提示可以拖到这里。</summary>
+    private void ResetTiles()
+    {
+        _tilesExpanded = false;
+        foreach (var (element, property, value) in TileStates(expanded: false))
+        {
+            element.BeginAnimation(property, null);
+            element.SetValue(property, value);
+        }
+    }
+
+    private void SetTilesExpanded(bool expanded)
+    {
+        if (expanded == _tilesExpanded) return;
+        _tilesExpanded = expanded;
+        var duration = expanded ? TilesExpandDuration : TilesCollapseDuration;
+        foreach (var (element, property, value) in TileStates(expanded))
+        {
+            if (ShelfMotion.Enabled)
+                element.BeginAnimation(property, new DoubleAnimation(value, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            else
+            {
+                element.BeginAnimation(property, null);
+                element.SetValue(property, value);
+            }
+        }
+    }
+
+    /// <summary>展开时快速操作从按钮栏向上长高并淡入，按钮栏同时淡出。</summary>
+    private IEnumerable<(UIElement Element, DependencyProperty Property, double Value)> TileStates(bool expanded)
+    {
+        var collapsedHeight = ViewModel.HasActions ? ActionBarHeight : 0;
+        if (expanded) ActionTiles.Measure(new System.Windows.Size(ActionTilesHost.ActualWidth, double.PositiveInfinity));
+        yield return (ActionTilesHost, HeightProperty, expanded ? ActionTiles.DesiredSize.Height : collapsedHeight);
+        yield return (ActionTiles, OpacityProperty, expanded ? 1 : 0);
+        yield return (ActionBarHost, OpacityProperty, expanded ? 0 : 1);
     }
 
     private QuickActionInfo? HitTestTiles(WpfDragEventArgs e)
     {
-        if (DropOverlay.Visibility != Visibility.Visible) return null;
+        if (!_tilesExpanded) return null;
         foreach (var (tile, _, _, info) in _tiles)
         {
             if (tile.ActualWidth <= 0) continue;
@@ -674,8 +708,9 @@ public partial class ShelfWindow : Window
         if (result == DragOutResult.Cancelled) return;
         // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
         if (items.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
-        ViewModel.ApplyDragOut(items, result, _host.Settings.RemoveAfterDragOut);
-        if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty && !ViewModel.IsPinned) CloseAnimated();
+        var settings = _host.Settings;
+        ViewModel.ApplyDragOut(items, result, settings.CloseAfterDragOut);
+        if (ViewModel.IsEmpty && !ViewModel.IsPinned && (settings.CloseAfterDragOut || settings.CloseWhenEmpty)) CloseAnimated();
     }
 
     private bool PassedDragThreshold(System.Windows.Input.MouseEventArgs e)
@@ -710,7 +745,6 @@ public partial class ShelfWindow : Window
         if (!_stackPressed) return;
         _stackPressed = false;
         ViewModel.HasInteracted = true;
-        if (ViewModel.HasMultiple) Expand();
     }
 
     private void OnStackRightClick(object sender, MouseButtonEventArgs e)
@@ -725,8 +759,6 @@ public partial class ShelfWindow : Window
         ItemsList.SelectedItems.Clear();
         Dispatcher.BeginInvoke(() => ItemsList.Focus(), DispatcherPriority.Input);
     }
-
-    private void OnCollapseClick(object sender, RoutedEventArgs e) => ViewModel.IsExpanded = false;
 
     private void OnListMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -850,7 +882,9 @@ public partial class ShelfWindow : Window
         var targets = GetTargets();
         var hasItems = ViewModel.HasItems;
         var menu = new ContextMenu();
-        if (ViewModel.HasMultiple && !ViewModel.IsExpanded)
+        if (ViewModel.IsExpanded)
+            menu.Items.Add(CreateMenuItem(Strings.MenuCollapse, "", () => ViewModel.IsExpanded = false, "Esc"));
+        else if (ViewModel.HasMultiple)
             menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "", Expand));
         menu.Items.Add(CreateMenuItem(Strings.MenuSelectAll, "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
@@ -858,14 +892,20 @@ public partial class ShelfWindow : Window
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(new Separator());
-        if (_host.History is { Entries.Count: > 0 } history)
-            menu.Items.Add(HistoryMenu.Create(history.Entries, entry => _host.Restore(entry, ViewModel.IsEmpty ? this : null), history.Clear));
+        if (_host.History is { Latest: { } latest } history)
+        {
+            menu.Items.Add(CreateMenuItem(Strings.RestoreLastShelf, "", () => Restore(latest)));
+            menu.Items.Add(HistoryMenu.Create(history.Entries, Restore, history.Clear));
+        }
         menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, "Esc"));
         return menu;
     }
+
+    /// <summary>恢复的项目放进当前的空置物架；当前置物架已有内容时另开一个。</summary>
+    private void Restore(ShelfHistoryEntry entry) => _host.Restore(entry, ViewModel.IsEmpty ? this : null);
 
     private ContextMenu BuildItemMenu(IReadOnlyList<ShelfItem> items)
     {

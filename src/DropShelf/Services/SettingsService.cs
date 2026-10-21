@@ -22,6 +22,10 @@ public sealed class AppSettings
     public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
 
     public AppTheme Theme { get; set; } = AppTheme.System;
+
+    /// <summary>自选的强调色（#RRGGBB）；为空时跟随 Windows。</summary>
+    public string? AccentColor { get; set; }
+
     public AppLanguage Language { get; set; } = AppLanguage.System;
     public bool StartWithWindows { get; set; }
     public QuickShelfSize QuickShelfSize { get; set; } = QuickShelfSize.Medium;
@@ -44,10 +48,14 @@ public sealed class AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public QuickActionType QuickAction { get; set; } = QuickActionType.Properties;
 
-    public bool RemoveAfterDragOut { get; set; } = true;
+    /// <summary>拖出的项目从置物架移走，全部拖出后关闭置物架。</summary>
+    public bool CloseAfterDragOut { get; set; } = true;
     public bool CloseWhenEmpty { get; set; } = true;
     public string Hotkey { get; set; } = HotkeyGesture.Default.ToString();
     public bool HasCompletedFirstRun { get; set; }
+
+    /// <summary>概览页的“快速上手”被关闭后不再显示。</summary>
+    public bool ShowGettingStarted { get; set; } = true;
 
     [JsonIgnore]
     public HotkeyGesture HotkeyGesture =>
@@ -121,6 +129,8 @@ public sealed class SettingsService
             settings.EdgeDwell = EdgeDwellTime.Medium;
         if (!Enum.IsDefined(settings.Theme))
             settings.Theme = AppTheme.System;
+        if (ThemeService.ParseAccent(settings.AccentColor) is null)
+            settings.AccentColor = null;
         if (!Enum.IsDefined(settings.Language))
             settings.Language = AppLanguage.System;
         if (!Enum.IsDefined(settings.QuickShelfSize))

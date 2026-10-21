@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using DropShelf.Interop;
@@ -23,6 +24,16 @@ public readonly record struct AccentPalette(WpfColor Light3, WpfColor Light2, Wp
         WpfColor At(int index) => WpfColor.FromRgb(bytes[index * 4], bytes[index * 4 + 1], bytes[index * 4 + 2]);
         return new AccentPalette(At(0), At(1), At(2), At(3), At(4), At(5), At(6));
     }
+
+    /// <summary>由一个颜色生成整组深浅：向白色或黑色逐级混合。</summary>
+    public static AccentPalette FromColor(WpfColor color) => new(
+        Mix(color, Colors.White, 0.65), Mix(color, Colors.White, 0.45), Mix(color, Colors.White, 0.25), color,
+        Mix(color, Colors.Black, 0.15), Mix(color, Colors.Black, 0.35), Mix(color, Colors.Black, 0.55));
+
+    private static WpfColor Mix(WpfColor from, WpfColor to, double amount) => WpfColor.FromRgb(
+        (byte)Math.Round(from.R + (to.R - from.R) * amount),
+        (byte)Math.Round(from.G + (to.G - from.G) * amount),
+        (byte)Math.Round(from.B + (to.B - from.B) * amount));
 }
 
 public static class ThemeService
@@ -31,29 +42,49 @@ public static class ThemeService
     private const string AccentKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent";
     private static bool _initialized;
     private static AppTheme _mode = AppTheme.System;
+    private static WpfColor? _customAccent;
+
+    /// <summary>可选的强调色，取自 Windows 的强调色色板。</summary>
+    public static IReadOnlyList<string> AccentPresets { get; } =
+        ["#0078D4", "#8764B8", "#C239B3", "#E74856", "#CA5010", "#498205", "#038387", "#68768A"];
 
     public static event EventHandler? ThemeChanged;
     public static AppTheme Mode => _mode;
     public static bool IsDark { get; private set; }
     public static AccentPalette Accent { get; private set; } = AccentPalette.Default;
+
     public static WpfColor AccentFill => IsDark ? Accent.Light2 : Accent.Dark1;
 
-    public static void Initialize(AppTheme mode)
+    public static void Initialize(AppTheme mode, string? accent)
     {
         if (!_initialized)
         {
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
             _initialized = true;
         }
-        SetMode(mode);
+        SetMode(mode, accent);
     }
 
-    public static void SetMode(AppTheme mode)
+    /// <summary>切换主题；强调色为 #RRGGBB，为空时跟随 Windows。</summary>
+    public static void SetMode(AppTheme mode, string? accent = null)
     {
         _mode = mode;
-        Accent = ReadAccentPalette() ?? AccentPalette.Default;
-        ApplyTheme(ResolveIsDark(mode, ReadSystemDarkMode()));
+        _customAccent = ParseAccent(accent);
+        Refresh();
     }
+
+    private static void Refresh()
+    {
+        var system = ReadAccentPalette() ?? AccentPalette.Default;
+        Accent = _customAccent is { } custom ? AccentPalette.FromColor(custom) : system;
+        ApplyTheme(ResolveIsDark(_mode, ReadSystemDarkMode()), system.Base);
+    }
+
+    public static WpfColor? ParseAccent(string? value) =>
+        value is { Length: 7 } && value[0] == '#' &&
+        uint.TryParse(value.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb)
+            ? WpfColor.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb)
+            : null;
 
     public static bool ResolveIsDark(AppTheme mode, bool systemIsDark) => mode switch
     {
@@ -128,7 +159,8 @@ public static class ThemeService
         ("SmokeBrush", "#CCF6F6F6", "#CC2B2B2B")
     ];
 
-    private static void ApplyTheme(bool dark)
+    /// <param name="systemAccent">Windows 当前的强调色，用于设置页“跟随 Windows”色块的预览。</param>
+    private static void ApplyTheme(bool dark, WpfColor systemAccent)
     {
         IsDark = dark;
         if (System.Windows.Application.Current is not { } application) return;
@@ -140,6 +172,9 @@ public static class ThemeService
             resources[key] = brush;
         }
         resources["AccentColor"] = AccentFill;
+        var systemBrush = new SolidColorBrush(systemAccent);
+        systemBrush.Freeze();
+        resources["SystemAccentBrush"] = systemBrush;
         ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 
@@ -212,6 +247,6 @@ public static class ThemeService
     private static void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
         if (System.Windows.Application.Current is not { } application) return;
-        application.Dispatcher.BeginInvoke(() => SetMode(_mode));
+        application.Dispatcher.BeginInvoke(Refresh);
     }
 }

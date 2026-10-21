@@ -44,13 +44,13 @@ public static class Strings
     public static string QuitTooltip => T("停止手势识别并退出，关闭所有置物架", "Stop gesture detection, close all shelves and quit");
 
     public static string StatusPaused => T("自动弹出已暂停", "Auto open is paused");
-    public static string StatusRunning => T("正在后台运行", "Running in the background");
+    public static string StatusRunning => T("正在运行", "Running");
     public static string StatusGestureFailed => T("手势识别未能启动", "Gesture detection couldn't start");
     public static string StatusGestureFailedDetail => T("请重新启动 DropShelf；置物架和快捷键仍可使用", "Restart DropShelf. Shelves and the shortcut still work");
 
     public static string StatusPausedDetail(string? hotkey) => T(
-        $"可在“{GesturesAndShelf}”中重新开启{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
-        $"Turn it back on in {GesturesAndShelf}{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}");
+        $"可在通知区域图标的菜单中重新开启{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
+        $"Turn it back on from the notification area icon{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}");
 
     public static string StatusRunningDetail(AutoOpenTrigger trigger, string? hotkey) => trigger switch
     {
@@ -63,14 +63,18 @@ public static class Strings
     };
 
     public static string GettingStarted => T("快速上手", "Get started");
+    public static string DismissTooltip => T("不再显示", "Don't show again");
     public static string TipShakeTitle => T("拖住并晃动", "Drag and shake");
     public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
         "While dragging a file, shake the mouse or pause at the edge of the screen and a shelf appears.");
     public static string TipStackTitle => T("整摞拖出", "Drag out the stack");
-    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；点开后也能单独或多选拖出。",
-        "Drag the thumbnail stack to take every file at once, or click it to drag out one or several.");
-    public static string TipActionsBody => T("把文件拖到置物架底部的按钮上，直接压缩、复制路径或移动。",
-        "Drop files on the buttons at the bottom of the shelf to compress, copy paths or move them right away.");
+    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；在“⋯”菜单中展开列表，也能单独或多选拖出。",
+        "Drag the thumbnail stack to take every file at once, or expand the list from the ⋯ menu to drag out one or several.");
+    public static string TipActionsBody => T("拖动文件到置物架底部，按钮展开后放到其中一个上，直接压缩、复制路径或移动。",
+        "Drag files to the bottom of the shelf. When the buttons expand, drop on one to compress, copy paths or move them.");
+    public static string HistoryOverviewEmpty => T("关闭的置物架会出现在这里，可以随时恢复", "Shelves you close appear here, ready to reopen");
+    public static string RestoreShelf => T("恢复", "Reopen");
+    public static string RemoveHistoryTooltip => T("删除这条记录", "Remove from history");
 
     public static string General => T("常规", "General");
     public static string Language => T("语言", "Language");
@@ -87,8 +91,6 @@ public static class Strings
     public static string ViewTutorial => T("查看教程", "View tutorial");
 
     public static string AutoOpen => T("自动弹出", "Auto open");
-    public static string AutoOpenHeader => T("拖动时自动弹出", "Open while dragging");
-    public static string AutoOpenDescription => T("拖住文件、图片或文本时弹出置物架", "Opens a shelf while you drag files, images or text");
     public static string TriggerHeader => T("呼出方式", "How to open");
     public static string TriggerDescription => T("晃动鼠标，或拖到屏幕边缘停一下", "Shake the mouse, or pause at the edge of the screen");
     public static string TriggerShake => T("晃动", "Shake");
@@ -109,19 +111,23 @@ public static class Strings
     public static string SizeSmall => T("小", "Small");
     public static string SizeMedium => T("中", "Medium");
     public static string SizeLarge => T("大", "Large");
-    public static string DragOutModeHeader => T("拖出方式", "When dragging out");
-    public static string DragOutModeDescription => T("也可以在置物架顶部随时切换", "You can also switch it at the top of a shelf");
+    public static string DragOutModeHeader => T("拖动目的", "Drag-out action");
+    public static string DragOutModeDescription => T("拖出文件时移动还是复制，也可以在置物架顶部随时切换",
+        "Whether dragging files out moves or copies them. You can also switch it at the top of a shelf");
     public static string TransferMove => T("移动", "Move");
     public static string TransferCopy => T("复制", "Copy");
-    public static string RemoveAfterDragOut => T("拖出后从置物架移除", "Remove from the shelf after dragging out");
-    public static string RemoveAfterDragOutDescription => T("关闭后可以把同一批文件依次拖到多个地方", "Turn off to drag the same files to several places in turn");
+    public static string CloseAfterDragOut => T("拖出后自动关闭", "Close after dragging out");
+    public static string CloseAfterDragOutDescription => T("拖出的项目从置物架移走，全部拖出后关闭；关闭此项可把同一批文件依次拖到多个地方",
+        "Dragged items leave the shelf, and it closes once they're all out. Turn off to drag the same files to several places");
     public static string CloseWhenEmpty => T("清空后自动关闭", "Close when empty");
     public static string CloseWhenEmptyDescription => T("项目全部拖出或移除后关闭置物架；钉住的置物架会保持打开",
         "Closes the shelf once every item is dragged out or removed. Pinned shelves stay open");
     public static string RecentShelves => T("最近关闭的置物架", "Recently closed shelves");
-    public static string HistoryEmpty => T("关闭的置物架会保留在这里，可从托盘菜单重新打开", "Closed shelves are kept so you can reopen them from the tray menu");
-    public static string HistoryCount(int count) => T($"已保留 {count} 个，可从托盘菜单重新打开", $"{count} kept. Reopen them from the tray menu");
+    public static string ClearShelfHistory => T("清空置物架历史", "Clear shelf history");
+    public static string HistoryEmpty => T("暂无最近关闭的置物架", "No recently closed shelves");
+    public static string HistoryCount(int count) => T($"已保留 {count} 个最近关闭的置物架", $"{Count(count, "recently closed shelf", "recently closed shelves")} kept");
     public static string ClearHistory => T("清除记录", "Clear history");
+    public static string Clear => T("清空", "Clear");
 
     public static string ActionsPageDescription => T("显示在置物架底部。点按处理置物架中的项目，拖动文件时也可以直接放到按钮上。",
         "Shown at the bottom of a shelf. Click one to use it on the shelf's items, or drop files right onto it.");
@@ -131,11 +137,17 @@ public static class Strings
     public static string LayoutOff => T("关闭", "Off");
     public static string LayoutTwo => T("2 个", "2");
     public static string LayoutFour => T("4 个", "4");
-    public static string CurrentButtons => T("当前按钮", "Current buttons");
-    public static string ChangeAction => T("更换", "Change");
-    public static string NewCustomActionMenu => T("新建自定义操作…", "New custom action…");
-    public static string CustomActionsSection => T("自定义操作", "Custom actions");
-    public static string CustomActionsHint => T("添加后，在上方“更换”中选择即可放到置物架上", "After adding one, pick it under Change above to put it on the shelf");
+    public static string CurrentActions => T("当前操作", "Current actions");
+    public static string MoreActions => T("更多操作", "More actions");
+    public static string DragToSwapHint => T("拖动操作即可更换位置", "Drag an action onto another to swap them");
+    public static string SlotLeft => T("左", "Left");
+    public static string SlotRight => T("右", "Right");
+    public static string SlotTopLeft => T("左上", "Top left");
+    public static string SlotTopRight => T("右上", "Top right");
+    public static string SlotBottomLeft => T("左下", "Bottom left");
+    public static string SlotBottomRight => T("右下", "Bottom right");
+    public static string DropHintReplace => T("替换", "Replace");
+    public static string DropHintSwap => T("交换", "Swap");
     public static string AddCustomAction => T("添加自定义操作", "Add custom action");
     public static string EditCustomAction => T("编辑自定义操作", "Edit custom action");
     public static string EditTooltip => T("编辑", "Edit");
@@ -144,12 +156,9 @@ public static class Strings
     public static string Theme => T("主题", "Theme");
     public static string ThemeLight => T("浅色", "Light");
     public static string ThemeDark => T("深色", "Dark");
-    public static string Color => T("颜色", "Color");
     public static string AccentColor => T("强调色", "Accent color");
-    public static string AccentDescription => T("按钮、开关和选中状态使用 Windows 强调色", "Buttons, switches and selections use your Windows accent color");
-    public static string Materials => T("材质效果", "Window materials");
-    public static string MaterialsDescription => T("Windows 11 上，主窗口使用云母背景，置物架使用亚克力半透明效果",
-        "On Windows 11, the main window uses Mica and shelves use translucent Acrylic");
+    public static string AccentDescription => T("按钮、开关和选中状态的颜色", "Used for buttons, switches and selections");
+    public static string AccentFollowSystem => T("跟随 Windows", "Match Windows");
 
     public static string Version(string? version) => T($"版本 {version}", $"Version {version}");
     public static string AboutTagline => T("通过鼠标手势呼出的临时文件置物架", "A temporary file shelf you open with a mouse gesture");
@@ -173,8 +182,8 @@ public static class Strings
     public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。",
         "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
-    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点开堆叠后也能多选，只拖走需要的部分。",
-        "Release to hold the files. Drag the thumbnail stack to take everything at once, or click the stack to pick only the files you need.");
+    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；在“⋯”菜单中展开列表后也能多选，只拖走需要的部分。",
+        "Release to hold the files. Drag the thumbnail stack to take everything at once, or expand the list from the ⋯ menu to pick only the files you need.");
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null
@@ -203,7 +212,6 @@ public static class Strings
 
     public static string ShelfWindowTitle(string title) => T($"DropShelf 置物架 - {title}", $"DropShelf shelf - {title}");
     public static string PinTooltip => T("钉住：清空后也保持打开", "Pin: stay open even when empty");
-    public static string CollapseTooltip => T("收起为堆叠", "Collapse to stack");
     public static string MoreTooltip => T("更多", "More");
     public static string CloseShelfTooltip => T("关闭置物架 (Esc)", "Close shelf (Esc)");
     public static string DropHere => T("拖到这里暂存", "Drop here to hold");
@@ -256,6 +264,7 @@ public static class Strings
         $"{message}; {Count(failed, "attachment", "attachments")} couldn't be received");
 
     public static string MenuExpand => T("展开列表", "Expand list");
+    public static string MenuCollapse => T("收起列表", "Collapse list");
     public static string MenuSelectAll => T("全选", "Select all");
     public static string MenuCopy => T("复制", "Copy");
     public static string MenuPaste => T("粘贴", "Paste");
@@ -300,7 +309,7 @@ public static class Strings
     // ───────────── 快速操作 ─────────────
 
     public static string ActionCompress => T("压缩", "Compress");
-    public static string ActionCopyPath => T("复制路径", "Copy path");
+    public static string ActionCopyPath => T("路径", "Copy path");
     public static string ActionMoveTo => T("移动到", "Move to");
     public static string ActionProperties => T("属性", "Properties");
     public static string ActionReveal => T("显示位置", "Locate");
@@ -313,6 +322,10 @@ public static class Strings
         QuickActionType.Reveal => ActionReveal,
         _ => ActionProperties
     };
+
+    /// <summary>设置页和提示中的完整名称；按钮上的名称较短时在这里写全。</summary>
+    public static string QuickActionTitle(QuickActionType type) =>
+        type == QuickActionType.CopyFullPath ? MenuCopyPath : QuickActionLabel(type);
 
     public static string QuickActionDescription(QuickActionType type) => type switch
     {

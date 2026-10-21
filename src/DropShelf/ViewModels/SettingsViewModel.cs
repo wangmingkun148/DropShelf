@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Input;
+using System.Windows.Media;
 using DropShelf.Infrastructure;
 using DropShelf.Localization;
 using DropShelf.Models;
@@ -8,26 +9,75 @@ using DropShelf.Services;
 
 namespace DropShelf.ViewModels;
 
-/// <summary>置物架底部的一个位置及其当前的快速操作。</summary>
-public sealed class ActionSlotViewModel(int index, QuickActionInfo action)
+/// <summary>快速操作页中的一张操作卡片，可以拖到某个位置上。自定义操作可以编辑和删除。</summary>
+public class ActionCardViewModel(QuickActionInfo action, SettingsViewModel owner) : ObservableObject
 {
-    public int Index { get; } = index;
+    private bool _isDragSource;
+
     public QuickActionInfo Action { get; } = action;
-    public string Label => Action.Label;
+    public string Title => Action.Title;
     public string Description => Action.Description;
     public string Glyph => Action.Glyph;
+    public bool IsCustom => Action.Custom is not null;
+    public ICommand EditCommand { get; } = new RelayCommand(_ => owner.EditCustomAction(action.Custom!));
+    public ICommand DeleteCommand { get; } = new RelayCommand(_ => owner.DeleteCustomAction(action.Custom!));
+
+    /// <summary>正在被拖动，卡片变淡。</summary>
+    public bool IsDragSource
+    {
+        get => _isDragSource;
+        set => SetField(ref _isDragSource, value);
+    }
 }
 
-/// <summary>设置页中列出的一个自定义操作。</summary>
-public sealed class CustomActionItemViewModel(CustomQuickAction action, SettingsViewModel owner)
+/// <summary>置物架底部的一个位置及其当前的快速操作。</summary>
+public sealed class ActionSlotViewModel(int index, string position, QuickActionInfo action, SettingsViewModel owner)
+    : ActionCardViewModel(action, owner)
 {
-    public CustomQuickAction Action { get; } = action;
-    public QuickActionInfo Info { get; } = QuickActionInfo.ForCustom(action);
-    public string Label => Info.Label;
-    public string Description => Info.Description;
-    public string Glyph => Info.Glyph;
-    public ICommand EditCommand { get; } = new RelayCommand(_ => owner.EditCustomAction(action));
-    public ICommand DeleteCommand { get; } = new RelayCommand(_ => owner.DeleteCustomAction(action));
+    private string? _dropHint;
+
+    public int Index { get; } = index;
+
+    /// <summary>在置物架上的位置，如“左”“右下”。</summary>
+    public string Position { get; } = position;
+
+    /// <summary>拖动的操作悬停在这里时显示“替换”或“交换”，否则为空。</summary>
+    public string? DropHint
+    {
+        get => _dropHint;
+        set
+        {
+            if (SetField(ref _dropHint, value)) OnPropertyChanged(nameof(IsDropTarget));
+        }
+    }
+
+    public bool IsDropTarget => _dropHint is not null;
+}
+
+/// <summary>概览页中的一个最近关闭的置物架。</summary>
+public sealed class HistoryEntryViewModel(ShelfHistoryEntry entry, AppController controller)
+{
+    public string Title { get; } = Strings.HistoryEntryTitle(entry);
+    public string Detail { get; } = $"{Strings.ItemCount(entry.Items.Count)} · {Strings.HistoryEntryTime(entry.ClosedAt)}";
+    public string Glyph { get; } = entry.Items.Count == 1 ? "" : "";
+    public ICommand RestoreCommand { get; } = new RelayCommand(_ => controller.Shelves.Restore(entry));
+    public ICommand RemoveCommand { get; } = new RelayCommand(_ => controller.History.Remove(entry));
+}
+
+/// <summary>强调色选项；Value 为空字符串表示跟随 Windows，色块使用主题资源中的系统强调色。</summary>
+public sealed record AccentOption(string Value, SolidColorBrush? Brush)
+{
+    /// <summary>选项列表保持不变：替换列表会让选择框把选中值写回为空，误把强调色改回跟随 Windows。</summary>
+    public static IReadOnlyList<AccentOption> All { get; } =
+    [
+        new(string.Empty, null),
+        .. ThemeService.AccentPresets.Select(hex =>
+        {
+            var brush = new SolidColorBrush(ThemeService.ParseAccent(hex)!.Value);
+            brush.Freeze();
+            return new AccentOption(hex, brush);
+        })
+    ];
 }
 
 public sealed class SettingsViewModel : ObservableObject
@@ -36,43 +86,53 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _startupFailed;
     private CustomActionEditorViewModel? _editor;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
-    private IReadOnlyList<CustomActionItemViewModel> _customActions = [];
+    private IReadOnlyList<ActionCardViewModel> _moreActions = [];
+    private IReadOnlyList<HistoryEntryViewModel> _historyEntries = [];
 
     public SettingsViewModel(AppController controller)
     {
         _controller = controller;
         controller.SettingsChanged += (_, _) => RefreshAll();
         controller.History.Changed += (_, _) => RefreshHistory();
-        ThemeService.ThemeChanged += (_, _) => OnPropertyChanged(nameof(AccentDescription));
-        LanguageService.LanguageChanged += (_, _) => RefreshActions();
+        LanguageService.LanguageChanged += (_, _) =>
+        {
+            RefreshActions();
+            RefreshHistory();
+        };
 
         OpenShelfCommand = new RelayCommand(_ => controller.OpenShelfNearMainWindow());
         ShowTutorialCommand = new RelayCommand(_ => controller.ShowOnboarding());
+        DismissGettingStartedCommand = new RelayCommand(_ => Update(settings => settings.ShowGettingStarted = false));
         ExitCommand = new RelayCommand(_ => controller.Exit());
         OpenLogFolderCommand = new RelayCommand(_ => OpenFolder(LogService.LogDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
         RefreshActions();
+        RefreshHistory();
     }
 
     private AppSettings Settings => _controller.Settings;
 
     public ICommand OpenShelfCommand { get; }
     public ICommand ShowTutorialCommand { get; }
+    public ICommand DismissGettingStartedCommand { get; }
     public ICommand ExitCommand { get; }
     public ICommand OpenLogFolderCommand { get; }
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
     public ICommand ClearHistoryCommand { get; }
 
-    public string Version => Strings.Version(typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3));
+    public string VersionNumber => typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? string.Empty;
+    public string Version => Strings.Version(VersionNumber);
     public string SettingsPath => _controller.SettingsPath;
     public string LogDirectory => LogService.LogDirectory;
 
-    public bool IsHealthy => GestureEnabled && _controller.IsGestureRunning;
+    // ───────────── 运行状态与概览 ─────────────
 
-    public string StatusTitle => !GestureEnabled
+    public bool IsHealthy => Settings.GestureEnabled && _controller.IsGestureRunning;
+
+    public string StatusTitle => !Settings.GestureEnabled
         ? Strings.StatusPaused
         : _controller.IsGestureRunning ? Strings.StatusRunning : Strings.StatusGestureFailed;
 
@@ -82,13 +142,29 @@ public sealed class SettingsViewModel : ObservableObject
         {
             var hotkey = Settings.HotkeyGesture;
             var hotkeyText = hotkey.IsEmpty ? null : hotkey.ToString();
-            return !GestureEnabled
+            return !Settings.GestureEnabled
                 ? Strings.StatusPausedDetail(hotkeyText)
                 : _controller.IsGestureRunning
                     ? Strings.StatusRunningDetail(Settings.AutoOpenTrigger, hotkeyText)
                     : Strings.StatusGestureFailedDetail;
         }
     }
+
+    public bool ShowGettingStarted => Settings.ShowGettingStarted;
+
+    public IReadOnlyList<HistoryEntryViewModel> HistoryEntries
+    {
+        get => _historyEntries;
+        private set => SetField(ref _historyEntries, value);
+    }
+
+    public bool HasHistory => _controller.History.Entries.Count > 0;
+
+    public string HistoryDescription => HasHistory
+        ? Strings.HistoryCount(_controller.History.Entries.Count)
+        : Strings.HistoryEmpty;
+
+    // ───────────── 常规 ─────────────
 
     public AppLanguage Language
     {
@@ -118,13 +194,21 @@ public sealed class SettingsViewModel : ObservableObject
 
     public string StartupDescription => StartupFailed ? Strings.StartupFailed : Strings.StartupDescription;
 
-    // ───────────── 自动弹出 ─────────────
-
-    public bool GestureEnabled
+    public HotkeyGesture Hotkey
     {
-        get => Settings.GestureEnabled;
-        set => Update(settings => settings.GestureEnabled = value);
+        get => Settings.HotkeyGesture;
+        set => Update(settings => settings.Hotkey = value.ToString());
     }
+
+    public string HotkeyDescription => Settings.HotkeyGesture.IsEmpty
+        ? Strings.HotkeyNotSet
+        : _controller.IsHotkeyRegistered
+            ? Strings.HotkeyRegistered
+            : Strings.HotkeyTaken;
+
+    public bool HotkeyHasError => !Settings.HotkeyGesture.IsEmpty && !_controller.IsHotkeyRegistered;
+
+    // ───────────── 手势与置物架 ─────────────
 
     public AutoOpenTrigger Trigger
     {
@@ -147,8 +231,6 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.EdgeDwell = value);
     }
 
-    // ───────────── 置物架 ─────────────
-
     public QuickShelfSize ShelfSize
     {
         get => Settings.QuickShelfSize;
@@ -161,10 +243,10 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.DragOutMode = value);
     }
 
-    public bool RemoveAfterDragOut
+    public bool CloseAfterDragOut
     {
-        get => Settings.RemoveAfterDragOut;
-        set => Update(settings => settings.RemoveAfterDragOut = value);
+        get => Settings.CloseAfterDragOut;
+        set => Update(settings => settings.CloseAfterDragOut = value);
     }
 
     public bool CloseWhenEmpty
@@ -173,11 +255,7 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.CloseWhenEmpty = value);
     }
 
-    public bool HasHistory => _controller.History.Entries.Count > 0;
-
-    public string HistoryDescription => HasHistory
-        ? Strings.HistoryCount(_controller.History.Entries.Count)
-        : Strings.HistoryEmpty;
+    // ───────────── 外观 ─────────────
 
     public AppTheme Theme
     {
@@ -185,21 +263,14 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.Theme = value);
     }
 
-    public HotkeyGesture Hotkey
+    public IReadOnlyList<AccentOption> AccentOptions => AccentOption.All;
+
+    /// <summary>选中的强调色；空字符串表示跟随 Windows。</summary>
+    public string Accent
     {
-        get => Settings.HotkeyGesture;
-        set => Update(settings => settings.Hotkey = value.ToString());
+        get => Settings.AccentColor ?? string.Empty;
+        set => Update(settings => settings.AccentColor = string.IsNullOrEmpty(value) ? null : value);
     }
-
-    public string HotkeyDescription => Settings.HotkeyGesture.IsEmpty
-        ? Strings.HotkeyNotSet
-        : _controller.IsHotkeyRegistered
-            ? Strings.HotkeyRegistered
-            : Strings.HotkeyTaken;
-
-    public bool HotkeyHasError => !Settings.HotkeyGesture.IsEmpty && !_controller.IsHotkeyRegistered;
-
-    public string AccentDescription => Strings.AccentDescription;
 
     // ───────────── 快速操作 ─────────────
 
@@ -211,23 +282,21 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool HasActionSlots => Settings.QuickActionLayout != QuickActionLayout.Off;
 
-    /// <summary>置物架上显示的位置，从左到右。</summary>
+    /// <summary>置物架上显示的位置，按从左到右、从上到下的顺序。</summary>
     public IReadOnlyList<ActionSlotViewModel> VisibleSlots
     {
         get => _visibleSlots;
         private set => SetField(ref _visibleSlots, value);
     }
 
-    public IReadOnlyList<CustomActionItemViewModel> CustomActions
+    /// <summary>没有显示在置物架上的操作，可以拖到上方的位置上。</summary>
+    public IReadOnlyList<ActionCardViewModel> MoreActions
     {
-        get => _customActions;
-        private set => SetField(ref _customActions, value);
+        get => _moreActions;
+        private set => SetField(ref _moreActions, value);
     }
 
     public bool CanAddCustomAction => (Settings.CustomActions?.Count ?? 0) < QuickActions.MaximumCustomActions;
-
-    /// <summary>可以放到某个位置上的全部操作。</summary>
-    public IReadOnlyList<QuickActionInfo> AvailableActions => QuickActions.Available(Settings.CustomActions);
 
     /// <summary>
     /// 把操作放到指定位置。已在其他位置的操作会与原位置的操作互换，避免同一个操作出现两次。
@@ -257,16 +326,15 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool IsEditorOpen => _editor is not null;
 
-    /// <summary>新建自定义操作；从某个位置的“更换”菜单发起时，保存后直接放到该位置。</summary>
-    public void BeginNewCustomAction(int? targetSlot = null)
+    public void BeginNewCustomAction()
     {
         if (!CanAddCustomAction) return;
-        Editor = new CustomActionEditorViewModel(new CustomQuickAction { Kind = CustomActionKind.Folder }, isNew: true, targetSlot,
+        Editor = new CustomActionEditorViewModel(new CustomQuickAction { Kind = CustomActionKind.Folder }, isNew: true,
             SaveCustomAction, () => Editor = null);
     }
 
     public void EditCustomAction(CustomQuickAction action) =>
-        Editor = new CustomActionEditorViewModel(action.Clone(), isNew: false, null, SaveCustomAction, () => Editor = null);
+        Editor = new CustomActionEditorViewModel(action.Clone(), isNew: false, SaveCustomAction, () => Editor = null);
 
     /// <summary>删除自定义操作；它所在的位置原地换成一个未使用的内置操作，其他按钮不移动。</summary>
     public void DeleteCustomAction(CustomQuickAction action) => Update(settings =>
@@ -290,37 +358,44 @@ public sealed class SettingsViewModel : ObservableObject
             if (index >= 0) actions[index] = action;
             else actions.Add(action);
             settings.CustomActions = actions;
-
-            if (editor.TargetSlot is { } slot && slot is >= 0 and < QuickActions.SlotCount)
-            {
-                var slots = QuickActions.NormalizeSlots(settings.QuickActionSlots, actions);
-                var existing = slots.IndexOf(action.Id);
-                if (existing >= 0) slots[existing] = slots[slot];
-                slots[slot] = action.Id;
-                settings.QuickActionSlots = slots;
-            }
         });
         Editor = null;
     }
 
     private void Update(Action<AppSettings> change) => _controller.UpdateSettings(change);
 
+    private static string SlotPosition(int index, QuickActionLayout layout) => layout == QuickActionLayout.Two
+        ? index == 0 ? Strings.SlotLeft : Strings.SlotRight
+        : index switch
+        {
+            0 => Strings.SlotTopLeft,
+            1 => Strings.SlotTopRight,
+            2 => Strings.SlotBottomLeft,
+            _ => Strings.SlotBottomRight
+        };
+
     private void RefreshActions()
     {
-        VisibleSlots = (Settings.QuickActionSlots ?? [])
-            .Take((int)Settings.QuickActionLayout)
-            .Select((id, index) => QuickActions.Find(id, Settings.CustomActions) is { } info ? new ActionSlotViewModel(index, info) : null)
+        var layout = Settings.QuickActionLayout;
+        var visible = (Settings.QuickActionSlots ?? []).Take((int)layout).ToArray();
+        VisibleSlots = visible
+            .Select((id, index) => QuickActions.Find(id, Settings.CustomActions) is { } info
+                ? new ActionSlotViewModel(index, SlotPosition(index, layout), info, this)
+                : null)
             .OfType<ActionSlotViewModel>()
             .ToArray();
-        CustomActions = (Settings.CustomActions ?? []).Select(action => new CustomActionItemViewModel(action, this)).ToArray();
+        MoreActions = QuickActions.Available(Settings.CustomActions)
+            .Where(info => !visible.Contains(info.Id))
+            .Select(info => new ActionCardViewModel(info, this))
+            .ToArray();
         OnPropertyChanged(nameof(HasActionSlots));
         OnPropertyChanged(nameof(CanAddCustomAction));
-        OnPropertyChanged(nameof(AvailableActions));
         _editor?.RefreshText();
     }
 
     private void RefreshHistory()
     {
+        HistoryEntries = _controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)).ToArray();
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistoryDescription));
         CommandManager.InvalidateRequerySuggested();
@@ -330,11 +405,11 @@ public sealed class SettingsViewModel : ObservableObject
     {
         foreach (var name in new[]
                  {
-                     nameof(StartWithWindows), nameof(GestureEnabled), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge),
-                     nameof(Sensitivity), nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(RemoveAfterDragOut),
-                     nameof(CloseWhenEmpty), nameof(Theme), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription),
-                     nameof(HotkeyHasError), nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(ActionLayout),
-                     nameof(StartupDescription), nameof(AccentDescription), nameof(Version), nameof(HistoryDescription)
+                     nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity),
+                     nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseAfterDragOut), nameof(CloseWhenEmpty),
+                     nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
+                     nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(ShowGettingStarted), nameof(ActionLayout),
+                     nameof(StartupDescription), nameof(Version), nameof(HistoryDescription)
                  })
             OnPropertyChanged(name);
         RefreshActions();
@@ -369,13 +444,11 @@ public sealed class CustomActionEditorViewModel : ObservableObject
     private string _arguments;
     private bool _showErrors;
 
-    public CustomActionEditorViewModel(CustomQuickAction action, bool isNew, int? targetSlot,
-        Action<CustomActionEditorViewModel> save, Action cancel)
+    public CustomActionEditorViewModel(CustomQuickAction action, bool isNew, Action<CustomActionEditorViewModel> save, Action cancel)
     {
         _original = action;
         _save = save;
         IsNew = isNew;
-        TargetSlot = targetSlot;
         _kind = action.Kind;
         _name = action.Name ?? string.Empty;
         _folder = action.Folder ?? string.Empty;
@@ -388,7 +461,6 @@ public sealed class CustomActionEditorViewModel : ObservableObject
     }
 
     public bool IsNew { get; }
-    public int? TargetSlot { get; }
     public ICommand SaveCommand { get; }
     public ICommand CancelCommand { get; }
 

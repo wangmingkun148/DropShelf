@@ -118,6 +118,9 @@ public sealed class ShelfViewModel : ObservableObject
 
     public event EventHandler<ShelfToast>? ToastRequested;
 
+    /// <summary>操作生成了新文件（如压缩包），需要放进另一个新的置物架。</summary>
+    public event EventHandler<IReadOnlyList<string>>? NewItemsProduced;
+
     public void Notify(string message, bool success = true) => ToastRequested?.Invoke(this, new ShelfToast(message, success));
 
     public ShelfAddSummary AddFiles(IEnumerable<string> paths, bool temporary = false) =>
@@ -325,7 +328,12 @@ public sealed class ShelfViewModel : ObservableObject
         if (result.KeepsTemporaryFiles) _delayCacheCleanup = true;
         if (result.Moves is { Count: > 0 } moves) ApplyMoves(moves);
         if (result.Replacements is { Count: > 0 } replacements) ApplyReplacements(replacements);
-        if (result is { ProducedNewItems: true, OutputPaths: { Count: > 0 } outputs }) AddFiles(outputs);
+        if (result is { ProducedNewItems: true, OutputPaths: { Count: > 0 } outputs })
+        {
+            // 空置物架直接放入；已有内容时放进新的置物架，不和原来的项目混在一起。
+            if (IsEmpty) AddFiles(outputs);
+            else NewItemsProduced?.Invoke(this, outputs);
+        }
         if (!result.Cancelled) Notify(result.Message, result.Succeeded);
         return result;
     }

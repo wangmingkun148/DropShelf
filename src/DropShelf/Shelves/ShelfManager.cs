@@ -96,6 +96,29 @@ public sealed class ShelfManager : IShelfHost
             summary.Added > 0);
     }
 
+    /// <summary>在指定置物架旁边打开新的置物架并放入文件；右侧放不下时放在左侧。</summary>
+    public void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(source).Handle;
+        var center = NativeMethods.GetWindowRect(handle, out var rect) ? BesideCenter(rect) : WindowPlacement.GetCursor();
+        var shelf = _spare ?? CreateWindow();
+        _spare = null;
+        _open.Add(shelf);
+        ShelvesChanged?.Invoke(this, EventArgs.Empty);
+        shelf.ViewModel.AddFiles(paths);
+        shelf.ShowAt(center, activate: false);
+        Prewarm();
+    }
+
+    private static POINT BesideCenter(RECT rect)
+    {
+        var (work, scale) = WindowPlacement.GetMonitor(new POINT(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2));
+        var gap = (int)Math.Round(12 * scale);
+        var y = rect.Top + rect.Height / 2;
+        var right = rect.Right + gap + rect.Width / 2;
+        return right + rect.Width / 2 <= work.Right ? new POINT(right, y) : new POINT(rect.Left - gap - rect.Width / 2, y);
+    }
+
     public void SetDragOutMode(TransferMode mode) => _updateSettings(settings => settings.DragOutMode = mode);
 
     public void ApplySettings(AppSettings settings)

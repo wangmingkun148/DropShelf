@@ -16,6 +16,11 @@ public partial class App : System.Windows.Application
     private Task? _listenerTask;
     private AppController? _controller;
 
+    private const long ErrorQuietMilliseconds = 10_000;
+    private static bool _showingError;
+    private static string? _lastError;
+    private static long _lastErrorTick;
+
     private static string MutexName => @"Local\DropShelf.SingleInstance.v1" + AppController.InstanceSuffix;
     private static string ShowWindowEventName => @"Local\DropShelf.ShowMainWindow.v1" + AppController.InstanceSuffix;
 
@@ -111,11 +116,31 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// 同一个错误常在每次布局、渲染或计时器触发时重复出现。提示框打开期间仍在处理消息，
+    /// 再出错时不能叠加新的提示框，否则会层层嵌套直到程序崩溃；短时间内重复的错误只记录和提示一次。
+    /// </summary>
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        LogService.Error("未处理的界面异常", e.Exception);
-        System.Windows.MessageBox.Show(Strings.UnexpectedError, "DropShelf", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
+        var now = Environment.TickCount64;
+        var error = e.Exception.ToString();
+        var repeated = error == _lastError && now - _lastErrorTick < ErrorQuietMilliseconds;
+        _lastError = error;
+        _lastErrorTick = now;
+        if (repeated) return;
+
+        LogService.Error("未处理的界面异常", e.Exception);
+        if (_showingError) return;
+        _showingError = true;
+        try
+        {
+            System.Windows.MessageBox.Show(Strings.UnexpectedError, "DropShelf", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _showingError = false;
+        }
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)

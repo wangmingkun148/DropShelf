@@ -9,6 +9,7 @@
     <SolidColorBrush x:Key="AccentSubtleBrush" Color="#1F0067C0" />
     <SolidColorBrush x:Key="AccentFaintBrush" Color="#100067C0" />
     <Color x:Key="AccentColor">#0067C0</Color>
+    <SolidColorBrush x:Key="SystemAccentBrush" Color="#0078D4" />
 
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E4000000" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#9E000000" />
@@ -108,4 +109,5 @@
     <sys:String x:Key="Glyph.History">&#xE81C;</sys:String>
     <sys:String x:Key="Glyph.Edit">&#xE70F;</sys:String>
     <sys:String x:Key="Glyph.Timer">&#xE823;</sys:String>
+    <sys:String x:Key="Glyph.Swap">&#xE8AB;</sys:String>
 </ResourceDictionary>

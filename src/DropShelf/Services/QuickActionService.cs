@@ -25,7 +25,7 @@ public sealed record QuickActionResult(
     /// <summary>处理后的新文件替换置物架中的原项目（如压缩后的图片），原文件保留在磁盘上。</summary>
     public IReadOnlyList<(string Source, string Output)>? Replacements { get; init; }
 
-    /// <summary>操作生成了新文件（如压缩包），适合放回置物架方便继续拖走。</summary>
+    /// <summary>操作生成了新文件（如压缩包），放进新的置物架方便继续拖走。</summary>
     public bool ProducedNewItems { get; init; }
 
     /// <summary>其他程序稍后才会读取文件（属性窗口、用程序打开），临时附件需要晚一些再清理。</summary>
