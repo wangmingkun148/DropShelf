@@ -76,7 +76,7 @@ public sealed class MessageWindow : IDisposable
     public void Dispose() => _source.Dispose();
 }
 
-public sealed record TrayMenuState(bool GestureEnabled, string Hotkey, IReadOnlyList<ShelfHistoryEntry> History);
+public sealed record TrayMenuState(string Hotkey, IReadOnlyList<ShelfHistoryEntry> History);
 
 public sealed class TrayIconService : IDisposable
 {
@@ -87,7 +87,6 @@ public sealed class TrayIconService : IDisposable
     private readonly Func<TrayMenuState> _getState;
     private readonly Action _showWindow;
     private readonly Action _newShelf;
-    private readonly Action<bool> _setGestureEnabled;
     private readonly Action<ShelfHistoryEntry> _restore;
     private readonly Action _clearHistory;
     private readonly Action _exit;
@@ -97,13 +96,12 @@ public sealed class TrayIconService : IDisposable
     private ContextMenu? _menu;
 
     public TrayIconService(MessageWindow window, Func<TrayMenuState> getState, Action showWindow, Action newShelf,
-        Action<bool> setGestureEnabled, Action<ShelfHistoryEntry> restore, Action clearHistory, Action exit)
+        Action<ShelfHistoryEntry> restore, Action clearHistory, Action exit)
     {
         _window = window;
         _getState = getState;
         _showWindow = showWindow;
         _newShelf = newShelf;
-        _setGestureEnabled = setGestureEnabled;
         _restore = restore;
         _clearHistory = clearHistory;
         _exit = exit;
@@ -210,10 +208,6 @@ public sealed class TrayIconService : IDisposable
             empty.IsEnabled = false;
             _menu.Items.Add(empty);
         }
-        var pause = CreateItem(Strings.PauseShake, "", () => _setGestureEnabled(!state.GestureEnabled));
-        pause.IsCheckable = true;
-        pause.IsChecked = !state.GestureEnabled;
-        _menu.Items.Add(pause);
         _menu.Items.Add(new Separator());
         _menu.Items.Add(CreateItem(Strings.OpenSettings, "", _showWindow));
         _menu.Items.Add(CreateItem(Strings.QuitApp, "", _exit));

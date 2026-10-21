@@ -12,11 +12,9 @@ public sealed class AppSettings
     public int Version { get; set; } = CurrentVersion;
     public double WindowLeft { get; set; } = double.NaN;
     public double WindowTop { get; set; } = double.NaN;
-    public double WindowWidth { get; set; } = 900;
+    public double WindowWidth { get; set; } = 860;
     public double WindowHeight { get; set; } = 640;
 
-    /// <summary>拖动时自动弹出置物架；托盘菜单中的“暂停”切换的就是它。</summary>
-    public bool GestureEnabled { get; set; } = true;
     public AutoOpenTrigger AutoOpenTrigger { get; set; } = AutoOpenTrigger.Both;
     public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
     public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
@@ -150,8 +148,8 @@ public sealed class SettingsService
             hotkey = HotkeyGesture.Default;
         settings.Hotkey = hotkey.ToString();
 
-        if (!double.IsFinite(settings.WindowWidth) || settings.WindowWidth < 760) settings.WindowWidth = 900;
-        if (!double.IsFinite(settings.WindowHeight) || settings.WindowHeight < 540) settings.WindowHeight = 640;
+        if (!double.IsFinite(settings.WindowWidth) || settings.WindowWidth < 640) settings.WindowWidth = 860;
+        if (!double.IsFinite(settings.WindowHeight) || settings.WindowHeight < 520) settings.WindowHeight = 640;
         settings.Version = AppSettings.CurrentVersion;
         return settings;
     }

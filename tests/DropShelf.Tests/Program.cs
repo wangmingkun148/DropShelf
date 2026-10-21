@@ -143,7 +143,7 @@ internal static class Program
     {
         var service = new SettingsService();
         var defaults = service.Load();
-        Assert(defaults.GestureEnabled && defaults.CloseAfterDragOut && defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
+        Assert(defaults.CloseAfterDragOut && defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
         Assert(defaults.AccentColor is null, "默认强调色应跟随 Windows");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
@@ -276,7 +276,7 @@ internal static class Program
         Assert(image.Kind == CustomActionKind.CompressImage && image.ImageSizeKb == CustomQuickAction.MinimumImageSizeKb && image.Name is null,
             "自定义操作没有规范化");
         Assert(normalized.Hotkey == HotkeyGesture.Default.ToString(), "无效快捷键没有恢复默认值");
-        Assert(normalized.WindowWidth >= 760 && normalized.WindowHeight >= 540, "异常窗口尺寸没有恢复默认值");
+        Assert(normalized.WindowWidth >= 640 && normalized.WindowHeight >= 520, "异常窗口尺寸没有恢复默认值");
         Assert((int)invalid.Theme == 999, "规范化时修改了原设置对象");
     }
 
@@ -592,13 +592,12 @@ internal static class Program
 
     private static void TestGestureServiceLifecycle()
     {
-        var service = new GestureService(Dispatcher.CurrentDispatcher, GestureSensitivity.Balanced, enabled: true);
+        var service = new GestureService(Dispatcher.CurrentDispatcher, GestureSensitivity.Balanced);
         service.Start();
         Assert(service.IsRunning, "鼠标原始输入没有注册");
         service.SetSensitivity(GestureSensitivity.Steady);
         service.SetTrigger(AutoOpenTrigger.Edge);
         service.SetEdgeDwell(EdgeDwellTime.Short);
-        service.Enabled = false;
         service.Dispose();
         Thread.Sleep(100);
         Assert(!service.IsRunning, "停止后仍在监听鼠标输入");
@@ -1390,15 +1389,20 @@ internal static class Program
         window.Show();
         Pump(200);
 
-        foreach (var name in new[] { "NavList", "ExitApplicationButton", "StatusIndicator", "GettingStartedSection", "HistoryList",
+        foreach (var name in new[] { "PageCards", "VersionButton", "StatusIndicator", "GettingStartedSection", "HistorySection", "HistoryList",
                      "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector",
                      "ShelfSizeSelector", "DragOutModeSelector", "CloseAfterDragOutBox", "ClearHistoryButton", "ThemeSelector",
                      "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
-        ((System.Windows.Controls.ListBox)window.FindName("NavList")!).SelectedIndex = 2;
+        controller.History.Clear();
+        var pageCards = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("PageCards")!;
+        Assert(pageCards.Children.Count == 4, "概览页应有四张设置卡片");
+        ((System.Windows.Controls.Button)pageCards.Children[1]).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(100);
-        Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible, "导航没有切换页面");
+        Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible &&
+               ((FrameworkElement)window.FindName("OverviewPage")!).Visibility == Visibility.Collapsed, "点击设置卡片没有切换页面");
+        Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Collapsed, "没有记录时不应显示最近关闭");
 
         var viewModel = (SettingsViewModel)window.DataContext;
         ((System.Windows.Controls.ListBox)window.FindName("SensitivitySelector")!).SelectedValue = GestureSensitivity.Steady;
@@ -1411,8 +1415,9 @@ internal static class Program
         ((System.Windows.Controls.ListBox)window.FindName("AccentSelector")!).SelectedValue = "#038387";
         ((System.Windows.Controls.ListBox)window.FindName("ActionLayoutSelector")!).SelectedValue = QuickActionLayout.Two;
         ((System.Windows.Controls.CheckBox)window.FindName("CloseAfterDragOutBox")!).IsChecked = false;
-        controller.UpdateSettings(settings => settings.GestureEnabled = false);
         viewModel.AssignSlot(1, "Reveal");
+        Assert(viewModel.ShelfSummary == "屏幕边缘呼出 · 拖出时复制" && viewModel.ActionsSummary == "压缩、显示位置" &&
+               viewModel.AppearanceSummary == "深色 · 自选强调色", "设置卡片上的摘要不正确");
         Assert(viewModel.VisibleSlots.Select(slot => slot.Position).SequenceEqual(["左", "右"]), "两个操作时位置应为左、右");
         Assert(viewModel.MoreActions.All(card => viewModel.VisibleSlots.All(slot => slot.Action.Id != card.Action.Id)) &&
                viewModel.MoreActions.Count == QuickActions.Available(controller.Settings.CustomActions).Count - 2, "更多操作应列出其余全部操作");
@@ -1420,6 +1425,21 @@ internal static class Program
         viewModel.DismissGettingStartedCommand.Execute(null);
         Pump(50);
         Assert(((FrameworkElement)window.FindName("GettingStartedSection")!).Visibility == Visibility.Collapsed, "快速上手关闭后仍显示");
+
+        var historyFolder = CreateFolder("main-history");
+        for (var index = 0; index < 5; index++)
+        {
+            var path = Path.Combine(historyFolder, $"{index}.txt");
+            File.WriteAllText(path, "x");
+            controller.History.Record([new ShelfItem { Id = $"h{index}", Kind = ShelfItemKind.File, Value = path }]);
+        }
+        Pump(50);
+        Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Visible &&
+               viewModel.VisibleHistory.Count == 4 && viewModel.HasMoreHistory, "最近关闭默认应只显示一行");
+        viewModel.ToggleHistoryCommand.Execute(null);
+        Assert(viewModel.VisibleHistory.Count == 5 && viewModel.ToggleHistoryText == "收起", "最近关闭没有展开全部");
+        Assert(viewModel.VisibleHistory[0].Stack0 is { Glyph.Length: 1 } && viewModel.VisibleHistory[0].Stack1 is null, "历史卡片的缩略图堆叠不正确");
+        controller.History.Clear();
 
         viewModel.BeginNewCustomAction();
         Assert(viewModel.IsEditorOpen && ((FrameworkElement)window.FindName("EditorOverlay")!).Visibility == Visibility.Visible, "自定义操作对话框没有打开");
@@ -1437,7 +1457,7 @@ internal static class Program
         Assert(saved.DragOutMode == TransferMode.Copy, "拖出方式没有保存");
         Assert(saved.QuickShelfSize == QuickShelfSize.Small, "尺寸没有立即保存");
         Assert(saved.Theme == AppTheme.Dark && ThemeService.IsDark, "主题没有保存或生效");
-        Assert(!saved.GestureEnabled && !saved.CloseAfterDragOut && !saved.ShowGettingStarted, "开关设置没有保存");
+        Assert(!saved.CloseAfterDragOut && !saved.ShowGettingStarted, "开关设置没有保存");
         Assert(saved.AccentColor == "#038387" && ThemeService.Accent.Base == ThemeService.ParseAccent("#038387"), "强调色没有保存或生效");
         Assert(saved.QuickActionLayout == QuickActionLayout.Two && viewModel.VisibleSlots.Count == 2, "按钮数量没有保存");
         var created = saved.CustomActions!.Single(action => action.ImageSizeKb == 200);
@@ -1445,7 +1465,6 @@ internal static class Program
         viewModel.AssignSlot(0, created.Id);
         Assert(service.Load().QuickActionSlots![0] == created.Id && service.Load().QuickActionSlots![1] == "Reveal", "拖到位置上的操作没有保存");
         Assert(saved.Hotkey == "Ctrl+Alt+D", "快捷键没有保存");
-        Assert(viewModel.StatusTitle == "自动弹出已暂停", "状态没有反映暂停");
 
         viewModel.EditCustomAction(created);
         viewModel.Editor!.Name = "压缩证件照";
@@ -1455,18 +1474,18 @@ internal static class Program
         Assert(service.Load().CustomActions!.All(action => action.Id != created.Id) && !service.Load().QuickActionSlots!.Contains(created.Id),
             "删除的自定义操作仍在置物架上");
 
-        var navList = (System.Windows.Controls.ListBox)window.FindName("NavList")!;
-        var overviewLabel = (System.Windows.Controls.TextBlock)((StackPanel)((ListBoxItem)navList.Items[0]).Content).Children[1];
-        Assert(overviewLabel.Text == "概览", "导航文字不正确");
+        var generalCard = (Grid)((System.Windows.Controls.Button)pageCards.Children[0]).Content;
+        var generalLabel = (System.Windows.Controls.TextBlock)((StackPanel)generalCard.Children[1]).Children[0];
+        Assert(generalLabel.Text == "常规", "设置卡片文字不正确");
         try
         {
             ((System.Windows.Controls.ListBox)window.FindName("LanguageSelector")!).SelectedValue = AppLanguage.English;
             Pump(50);
             Assert(service.Load().Language == AppLanguage.English && !LanguageService.IsChinese, "语言设置没有保存或生效");
-            Assert(overviewLabel.Text == "Overview" && viewModel.StatusTitle == "Auto open is paused", "切换语言后主窗口文字没有更新");
+            Assert(generalLabel.Text == "General" && viewModel.GeneralSummary.StartsWith("English"), "切换语言后主窗口文字没有更新");
             viewModel.Language = AppLanguage.Chinese;
             Pump(50);
-            Assert(overviewLabel.Text == "概览" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
+            Assert(generalLabel.Text == "常规" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
         }
         finally
         {

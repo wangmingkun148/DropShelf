@@ -41,16 +41,45 @@ public static class Strings
     public static string QuickActionsTitle => T("快速操作", "Quick actions");
     public static string Appearance => T("外观", "Appearance");
     public static string About => T("关于", "About");
-    public static string QuitTooltip => T("停止手势识别并退出，关闭所有置物架", "Stop gesture detection, close all shelves and quit");
+    public static string BackTooltip => T("返回", "Back");
+    public static string AboutTooltip => T("关于 DropShelf", "About DropShelf");
+    public static string SettingsSection => T("设置", "Settings");
+    public static string ShowAllHistory => T("显示全部", "Show all");
+    public static string ShowLessHistory => T("收起", "Show less");
+    public static string ProgramLocation => T("程序位置", "Program location");
+    public static string Uninstall => T("卸载", "Uninstall");
+    public static string UninstallHeader => T("卸载 DropShelf", "Uninstall DropShelf");
+    public static string UninstallDescription => T("打开卸载程序并退出 DropShelf，设置和日志会保留", "Opens the uninstaller and quits DropShelf. Settings and logs are kept");
+    public static string UninstallPortable => T("便携版或开发版无需卸载：退出后删除程序所在的文件夹即可",
+        "The portable or development version doesn't need uninstalling. Quit and delete its folder");
+    public static string UninstallFailed => T("无法启动卸载程序，请从 Windows 设置中卸载", "Couldn't start the uninstaller. Uninstall DropShelf from Windows Settings instead");
+    public static string QuitDescription => T("关闭所有置物架，不再响应拖动", "Closes every shelf and stops responding to drags");
+    public static string Quit => T("退出", "Quit");
 
-    public static string StatusPaused => T("自动弹出已暂停", "Auto open is paused");
+    public static string GeneralSummary(AppLanguage language, bool startWithWindows, HotkeyGesture hotkey) => string.Join(" · ",
+        language switch { AppLanguage.Chinese => "中文", AppLanguage.English => "English", _ => T("语言跟随系统", "System language") },
+        startWithWindows ? T("开机启动", "Starts with Windows") : T("不开机启动", "Doesn't start with Windows"),
+        hotkey.IsEmpty ? HotkeyNotSet : hotkey.ToString());
+
+    public static string ShelfSummary(AutoOpenTrigger trigger, TransferMode mode) => string.Join(" · ",
+        trigger switch
+        {
+            AutoOpenTrigger.Shake => T("晃动呼出", "Shake to open"),
+            AutoOpenTrigger.Edge => T("屏幕边缘呼出", "Screen edge to open"),
+            _ => T("晃动或屏幕边缘呼出", "Shake or screen edge to open")
+        },
+        mode == TransferMode.Copy ? T("拖出时复制", "Drag out copies") : T("拖出时移动", "Drag out moves"));
+
+    public static string ActionsSummary(IEnumerable<string> labels) =>
+        string.Join(T("、", ", "), labels) is { Length: > 0 } text ? text : T("不显示快速操作", "Quick actions are off");
+
+    public static string AppearanceSummary(AppTheme theme, bool customAccent) => string.Join(" · ",
+        theme switch { AppTheme.Light => ThemeLight, AppTheme.Dark => ThemeDark, _ => T("主题跟随系统", "System theme") },
+        customAccent ? T("自选强调色", "Custom accent color") : T("Windows 强调色", "Windows accent color"));
+
     public static string StatusRunning => T("正在运行", "Running");
     public static string StatusGestureFailed => T("手势识别未能启动", "Gesture detection couldn't start");
     public static string StatusGestureFailedDetail => T("请重新启动 DropShelf；置物架和快捷键仍可使用", "Restart DropShelf. Shelves and the shortcut still work");
-
-    public static string StatusPausedDetail(string? hotkey) => T(
-        $"可在通知区域图标的菜单中重新开启{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
-        $"Turn it back on from the notification area icon{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}");
 
     public static string StatusRunningDetail(AutoOpenTrigger trigger, string? hotkey) => trigger switch
     {
@@ -72,7 +101,6 @@ public static class Strings
         "Drag the thumbnail stack to take every file at once, or expand the list from the ⋯ menu to drag out one or several.");
     public static string TipActionsBody => T("拖动文件到置物架底部，按钮展开后放到其中一个上，直接压缩、复制路径或移动。",
         "Drag files to the bottom of the shelf. When the buttons expand, drop on one to compress, copy paths or move them.");
-    public static string HistoryOverviewEmpty => T("关闭的置物架会出现在这里，可以随时恢复", "Shelves you close appear here, ready to reopen");
     public static string RestoreShelf => T("恢复", "Reopen");
     public static string RemoveHistoryTooltip => T("删除这条记录", "Remove from history");
 
@@ -206,7 +234,6 @@ public static class Strings
     public static string StillRunningTitle => T("DropShelf 仍在运行", "DropShelf is still running");
     public static string StillRunningBody => T("拖动文件时晃一晃或拖到屏幕边缘，即可呼出置物架。可从通知区域重新打开设置。",
         "While dragging files, shake or pause at the screen edge to open a shelf. You can reopen Settings from the notification area.");
-    public static string PauseShake => T("暂停自动弹出", "Pause auto open");
 
     // ───────────── 置物架 ─────────────
 

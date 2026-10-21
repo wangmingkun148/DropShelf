@@ -96,28 +96,23 @@ public sealed class ShelfManager : IShelfHost
             summary.Added > 0);
     }
 
-    /// <summary>在指定置物架旁边打开新的置物架并放入文件；右侧放不下时放在左侧。</summary>
-    public void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths)
+    /// <summary>在窗口旁边打开置物架：优先放在右侧，放不下时放在左侧，两侧都放不下时贴着窗口右边缘。</summary>
+    public ShelfWindow OpenNextTo(System.Windows.Window anchor, bool activate)
     {
-        var handle = new System.Windows.Interop.WindowInteropHelper(source).Handle;
-        var center = NativeMethods.GetWindowRect(handle, out var rect) ? BesideCenter(rect) : WindowPlacement.GetCursor();
-        var shelf = _spare ?? CreateWindow();
-        _spare = null;
-        _open.Add(shelf);
-        ShelvesChanged?.Invoke(this, EventArgs.Empty);
-        shelf.ViewModel.AddFiles(paths);
-        shelf.ShowAt(center, activate: false);
-        Prewarm();
+        var handle = new System.Windows.Interop.WindowInteropHelper(anchor).Handle;
+        if (!NativeMethods.GetWindowRect(handle, out var rect)) return OpenAtCursor(activate);
+        var (work, scale) = WindowPlacement.GetMonitor(new POINT(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2));
+        var width = (int)Math.Round(QuickShelfSizeOptions.ResolveWidth(Settings.QuickShelfSize) * scale);
+        var gap = (int)Math.Round(12 * scale);
+        var x = rect.Right + gap + width <= work.Right ? rect.Right + gap + width / 2
+            : rect.Left - gap - width >= work.Left ? rect.Left - gap - width / 2
+            : rect.Right - gap - width / 2;
+        return OpenAt(new POINT(x, rect.Top + rect.Height / 2), openedByGesture: false, activate);
     }
 
-    private static POINT BesideCenter(RECT rect)
-    {
-        var (work, scale) = WindowPlacement.GetMonitor(new POINT(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2));
-        var gap = (int)Math.Round(12 * scale);
-        var y = rect.Top + rect.Height / 2;
-        var right = rect.Right + gap + rect.Width / 2;
-        return right + rect.Width / 2 <= work.Right ? new POINT(right, y) : new POINT(rect.Left - gap - rect.Width / 2, y);
-    }
+    /// <summary>操作生成的新文件放进旁边的新置物架。</summary>
+    public void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths) =>
+        OpenNextTo(source, activate: false).ViewModel.AddFiles(paths);
 
     public void SetDragOutMode(TransferMode mode) => _updateSettings(settings => settings.DragOutMode = mode);
 

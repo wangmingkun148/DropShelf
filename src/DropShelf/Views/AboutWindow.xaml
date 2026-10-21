@@ -1,0 +1,46 @@
+<Window x:Class="DropShelf.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:DropShelf.Views.Controls"
+        xmlns:l="clr-namespace:DropShelf.Localization"
+        Title="{l:Loc AboutTooltip}" Style="{StaticResource AppWindowStyle}"
+        Width="580" SizeToContent="Height" ResizeMode="NoResize" ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" GlassFrameThickness="-1" ResizeBorderThickness="0" CornerRadius="0"
+                      UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+
+    <StackPanel Margin="28,44,28,28">
+        <StackPanel Orientation="Horizontal">
+            <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="48" Height="48"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="DropShelf for Windows" Style="{StaticResource SubtitleTextStyle}" FontSize="18" />
+                <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,3,0,0">
+                    <Run Text="{Binding Version, Mode=OneWay}" />
+                    <Run Text="·" />
+                    <Run Text="{l:Loc AboutTagline}" />
+                </TextBlock>
+            </StackPanel>
+        </StackPanel>
+
+        <TextBlock Text="{l:Loc DataLocations}" Style="{StaticResource SectionHeaderTextStyle}" />
+        <controls:SettingsCard Icon="{StaticResource Glyph.FolderOpen}" Header="{l:Loc ProgramLocation}" Description="{Binding ProgramDirectory}">
+            <Button Content="{l:Loc OpenFolder}" Command="{Binding OpenProgramFolderCommand}" />
+        </controls:SettingsCard>
+        <controls:SettingsCard Icon="{StaticResource Glyph.Settings}" Header="{l:Loc SettingsFile}" Description="{Binding SettingsPath}">
+            <Button Content="{l:Loc OpenFolder}" Command="{Binding OpenSettingsFolderCommand}" />
+        </controls:SettingsCard>
+        <controls:SettingsCard Icon="{StaticResource Glyph.Document}" Header="{l:Loc Logs}" Description="{Binding LogDirectory}">
+            <Button Content="{l:Loc OpenFolder}" Command="{Binding OpenLogFolderCommand}" />
+        </controls:SettingsCard>
+
+        <TextBlock Text="{l:Loc General}" Style="{StaticResource SectionHeaderTextStyle}" />
+        <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc QuitApp}" Description="{l:Loc QuitDescription}">
+            <Button x:Name="QuitButton" Content="{l:Loc Quit}" Command="{Binding ExitCommand}" MinWidth="96" />
+        </controls:SettingsCard>
+        <controls:SettingsCard Icon="{StaticResource Glyph.Delete}" Header="{l:Loc UninstallHeader}" Description="{Binding UninstallDescription}">
+            <Button x:Name="UninstallButton" Content="{l:Loc Uninstall}" Command="{Binding UninstallCommand}" MinWidth="96" />
+        </controls:SettingsCard>
+    </StackPanel>
+</Window>

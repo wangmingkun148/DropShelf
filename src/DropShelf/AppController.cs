@@ -74,10 +74,8 @@ public sealed class AppController : IDisposable
         _messageWindow = new MessageWindow(MessageWindowTitle);
         _messageWindow.ArgumentsReceived += HandleArguments;
         _tray = new TrayIconService(_messageWindow,
-            () => new TrayMenuState(_settings.GestureEnabled, _settings.HotkeyGesture.ToString(), History.Entries),
-            ShowMainWindow, () => Shelves.OpenAtCursor(activate: true),
-            enabled => UpdateSettings(settings => settings.GestureEnabled = enabled),
-            entry => Shelves.Restore(entry), History.Clear, Exit);
+            () => new TrayMenuState(_settings.HotkeyGesture.ToString(), History.Entries),
+            ShowMainWindow, () => Shelves.OpenAtCursor(activate: true), entry => Shelves.Restore(entry), History.Clear, Exit);
         _hotkey = new HotkeyService(_messageWindow);
         _hotkey.Pressed += (_, _) => Shelves.OpenAtCursor(activate: true);
         IsHotkeyRegistered = _hotkey.Register(_settings.HotkeyGesture);
@@ -88,7 +86,7 @@ public sealed class AppController : IDisposable
             Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false, _pendingEdge);
             if (_pendingEdge != ScreenEdge.None) _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
         };
-        _gestures = new GestureService(_dispatcher, _settings.MouseGestureSensitivity, _settings.GestureEnabled);
+        _gestures = new GestureService(_dispatcher, _settings.MouseGestureSensitivity);
         _gestures.SetTrigger(_settings.AutoOpenTrigger);
         _gestures.SetEdgeDwell(_settings.EdgeDwell);
         _gestures.ShakeDetected += OnShakeDetected;
@@ -195,16 +193,12 @@ public sealed class AppController : IDisposable
         _onboarding.Show();
     }
 
-    public void OpenShelfNearMainWindow()
-    {
-        if (_mainWindow is { IsVisible: true } window && new System.Windows.Interop.WindowInteropHelper(window).Handle is var handle &&
-            NativeMethods.GetWindowRect(handle, out var rect))
-        {
-            Shelves.OpenAt(new POINT(rect.Right - 150, rect.Top + rect.Height / 2), openedByGesture: false, activate: true);
-            return;
-        }
-        Shelves.OpenAtCursor(activate: true);
-    }
+    public ShelfWindow OpenShelfNearMainWindow() => _mainWindow is { IsVisible: true } window
+        ? Shelves.OpenNextTo(window, activate: true)
+        : Shelves.OpenAtCursor(activate: true);
+
+    /// <summary>从设置窗口恢复最近关闭的置物架，在主窗口旁边打开。</summary>
+    public void RestoreNearMainWindow(ShelfHistoryEntry entry) => Shelves.Restore(entry, OpenShelfNearMainWindow());
 
     public void Exit()
     {
@@ -245,7 +239,6 @@ public sealed class AppController : IDisposable
         }
         if (_gestures is not null)
         {
-            _gestures.Enabled = current.GestureEnabled;
             _gestures.SetSensitivity(current.MouseGestureSensitivity);
             _gestures.SetTrigger(current.AutoOpenTrigger);
             _gestures.SetEdgeDwell(current.EdgeDwell);
@@ -265,7 +258,7 @@ public sealed class AppController : IDisposable
 
     private void OnShakeDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting || !_settings.GestureEnabled) return;
+        if (_exiting) return;
         LogService.Trace($"识别到晃动 ({e.X}, {e.Y})，显示探针窗口");
         _pendingEdge = ScreenEdge.None;
         _probe?.ShowAt(new POINT(e.X, e.Y));
@@ -273,7 +266,7 @@ public sealed class AppController : IDisposable
 
     private void OnEdgeDwellDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting || !_settings.GestureEnabled) return;
+        if (_exiting) return;
         LogService.Trace($"在屏幕边缘停留 ({e.X}, {e.Y}, {e.Edge})，显示探针窗口");
         _pendingEdge = e.Edge;
         _probe?.ShowAt(new POINT(e.X, e.Y));

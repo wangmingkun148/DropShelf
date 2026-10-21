@@ -63,18 +63,25 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) editor.ProgramPath = dialog.FileName;
     }
 
-    private void OnNavigationChanged(object sender, SelectionChangedEventArgs e)
+    private void OnPageCardClick(object sender, RoutedEventArgs e)
     {
-        // 初始化 XAML 时就会触发一次，此时页面元素尚未创建。
-        if (PageScroll is null || NavList.SelectedItem is not ListBoxItem { Tag: string page }) return;
+        if (sender is FrameworkElement { Tag: string page }) ShowPage(page);
+    }
+
+    private void OnBackClick(object sender, RoutedEventArgs e) => ShowPage("Overview");
+
+    /// <summary>概览页列出各项设置，点进去显示对应页面，左上角返回。</summary>
+    private void ShowPage(string page)
+    {
         OverviewPage.Visibility = page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         GeneralPage.Visibility = page == "General" ? Visibility.Visible : Visibility.Collapsed;
         ShelfPage.Visibility = page == "Shelf" ? Visibility.Visible : Visibility.Collapsed;
         ActionsPage.Visibility = page == "Actions" ? Visibility.Visible : Visibility.Collapsed;
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        AboutPage.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
         PageScroll.ScrollToTop();
     }
+
+    private void OnVersionClick(object sender, RoutedEventArgs e) => new AboutWindow(ViewModel) { Owner = this }.ShowDialog();
 
     // ───────────── 拖动更换快速操作 ─────────────
 

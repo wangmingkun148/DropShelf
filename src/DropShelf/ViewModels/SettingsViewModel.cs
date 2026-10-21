@@ -54,14 +54,56 @@ public sealed class ActionSlotViewModel(int index, string position, QuickActionI
     public bool IsDropTarget => _dropHint is not null;
 }
 
-/// <summary>概览页中的一个最近关闭的置物架。</summary>
-public sealed class HistoryEntryViewModel(ShelfHistoryEntry entry, AppController controller)
+/// <summary>历史卡片上的一张缩略图；读取不到时显示文件或文件夹图标。</summary>
+public sealed class HistoryThumbnailViewModel : ObservableObject
 {
-    public string Title { get; } = Strings.HistoryEntryTitle(entry);
-    public string Detail { get; } = $"{Strings.ItemCount(entry.Items.Count)} · {Strings.HistoryEntryTime(entry.ClosedAt)}";
-    public string Glyph { get; } = entry.Items.Count == 1 ? "" : "";
-    public ICommand RestoreCommand { get; } = new RelayCommand(_ => controller.Shelves.Restore(entry));
-    public ICommand RemoveCommand { get; } = new RelayCommand(_ => controller.History.Remove(entry));
+    private ImageSource? _image;
+
+    public HistoryThumbnailViewModel(string path)
+    {
+        Glyph = Directory.Exists(path) ? "" : "";
+        _ = LoadAsync(path);
+    }
+
+    public string Glyph { get; }
+
+    public ImageSource? Image
+    {
+        get => _image;
+        private set
+        {
+            if (SetField(ref _image, value)) OnPropertyChanged(nameof(HasImage));
+        }
+    }
+
+    public bool HasImage => _image is not null;
+
+    private async Task LoadAsync(string path) => Image = await ShellThumbnailService.LoadAsync(path, 96);
+}
+
+/// <summary>概览页中的一个最近关闭的置物架，用缩略图堆叠表示，与置物架本身的样子一致。</summary>
+public sealed class HistoryEntryViewModel
+{
+    public HistoryEntryViewModel(ShelfHistoryEntry entry, AppController controller)
+    {
+        Title = Strings.HistoryEntryTitle(entry);
+        Detail = $"{Strings.ItemCount(entry.Items.Count)} · {Strings.HistoryEntryTime(entry.ClosedAt)}";
+        // 最后放入的项目在最上面。
+        var top = entry.Items.TakeLast(3).Reverse().Select(item => new HistoryThumbnailViewModel(item.Path)).ToArray();
+        Stack0 = top.ElementAtOrDefault(0);
+        Stack1 = top.ElementAtOrDefault(1);
+        Stack2 = top.ElementAtOrDefault(2);
+        RestoreCommand = new RelayCommand(_ => controller.RestoreNearMainWindow(entry));
+        RemoveCommand = new RelayCommand(_ => controller.History.Remove(entry));
+    }
+
+    public string Title { get; }
+    public string Detail { get; }
+    public HistoryThumbnailViewModel? Stack0 { get; }
+    public HistoryThumbnailViewModel? Stack1 { get; }
+    public HistoryThumbnailViewModel? Stack2 { get; }
+    public ICommand RestoreCommand { get; }
+    public ICommand RemoveCommand { get; }
 }
 
 /// <summary>强调色选项；Value 为空字符串表示跟随 Windows，色块使用主题资源中的系统强调色。</summary>
@@ -82,8 +124,12 @@ public sealed record AccentOption(string Value, SolidColorBrush? Brush)
 
 public sealed class SettingsViewModel : ObservableObject
 {
+    /// <summary>概览页一行显示的最近关闭的置物架数量，其余的展开后显示。</summary>
+    private const int HistoryPreviewCount = 4;
+
     private readonly AppController _controller;
     private bool _startupFailed;
+    private bool _showAllHistory;
     private CustomActionEditorViewModel? _editor;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
@@ -96,7 +142,7 @@ public sealed class SettingsViewModel : ObservableObject
         controller.History.Changed += (_, _) => RefreshHistory();
         LanguageService.LanguageChanged += (_, _) =>
         {
-            RefreshActions();
+            RefreshAll();
             RefreshHistory();
         };
 
@@ -104,7 +150,14 @@ public sealed class SettingsViewModel : ObservableObject
         ShowTutorialCommand = new RelayCommand(_ => controller.ShowOnboarding());
         DismissGettingStartedCommand = new RelayCommand(_ => Update(settings => settings.ShowGettingStarted = false));
         ExitCommand = new RelayCommand(_ => controller.Exit());
+        UninstallCommand = new RelayCommand(_ => Uninstall(), _ => CanUninstall);
+        ToggleHistoryCommand = new RelayCommand(_ =>
+        {
+            _showAllHistory = !_showAllHistory;
+            RefreshHistoryView();
+        });
         OpenLogFolderCommand = new RelayCommand(_ => OpenFolder(LogService.LogDirectory));
+        OpenProgramFolderCommand = new RelayCommand(_ => OpenFolder(ProgramDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
@@ -118,7 +171,10 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand ShowTutorialCommand { get; }
     public ICommand DismissGettingStartedCommand { get; }
     public ICommand ExitCommand { get; }
+    public ICommand UninstallCommand { get; }
+    public ICommand ToggleHistoryCommand { get; }
     public ICommand OpenLogFolderCommand { get; }
+    public ICommand OpenProgramFolderCommand { get; }
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
     public ICommand ClearHistoryCommand { get; }
@@ -127,36 +183,37 @@ public sealed class SettingsViewModel : ObservableObject
     public string Version => Strings.Version(VersionNumber);
     public string SettingsPath => _controller.SettingsPath;
     public string LogDirectory => LogService.LogDirectory;
+    public string ProgramDirectory => AppContext.BaseDirectory;
+
+    /// <summary>安装版的卸载程序与主程序在同一文件夹；便携版和开发版没有。</summary>
+    private static string UninstallerPath => Path.Combine(AppContext.BaseDirectory, "unins000.exe");
+
+    public bool CanUninstall => File.Exists(UninstallerPath);
+    public string UninstallDescription => CanUninstall ? Strings.UninstallDescription : Strings.UninstallPortable;
 
     // ───────────── 运行状态与概览 ─────────────
 
-    public bool IsHealthy => Settings.GestureEnabled && _controller.IsGestureRunning;
+    public bool IsHealthy => _controller.IsGestureRunning;
 
-    public string StatusTitle => !Settings.GestureEnabled
-        ? Strings.StatusPaused
-        : _controller.IsGestureRunning ? Strings.StatusRunning : Strings.StatusGestureFailed;
+    public string StatusTitle => IsHealthy ? Strings.StatusRunning : Strings.StatusGestureFailed;
 
-    public string StatusDetail
-    {
-        get
-        {
-            var hotkey = Settings.HotkeyGesture;
-            var hotkeyText = hotkey.IsEmpty ? null : hotkey.ToString();
-            return !Settings.GestureEnabled
-                ? Strings.StatusPausedDetail(hotkeyText)
-                : _controller.IsGestureRunning
-                    ? Strings.StatusRunningDetail(Settings.AutoOpenTrigger, hotkeyText)
-                    : Strings.StatusGestureFailedDetail;
-        }
-    }
+    public string StatusDetail => IsHealthy
+        ? Strings.StatusRunningDetail(Settings.AutoOpenTrigger, Settings.HotkeyGesture is { IsEmpty: false } hotkey ? hotkey.ToString() : null)
+        : Strings.StatusGestureFailedDetail;
 
     public bool ShowGettingStarted => Settings.ShowGettingStarted;
 
-    public IReadOnlyList<HistoryEntryViewModel> HistoryEntries
-    {
-        get => _historyEntries;
-        private set => SetField(ref _historyEntries, value);
-    }
+    // 概览页四张设置卡片上显示的当前设置。
+    public string GeneralSummary => Strings.GeneralSummary(Settings.Language, Settings.StartWithWindows, Settings.HotkeyGesture);
+    public string ShelfSummary => Strings.ShelfSummary(Settings.AutoOpenTrigger, Settings.DragOutMode);
+    public string ActionsSummary => Strings.ActionsSummary(QuickActions.Visible(Settings).Select(info => info.Label));
+    public string AppearanceSummary => Strings.AppearanceSummary(Settings.Theme, Settings.AccentColor is not null);
+
+    /// <summary>概览页显示的最近关闭的置物架：默认一行，展开后显示全部。</summary>
+    public IReadOnlyList<HistoryEntryViewModel> VisibleHistory => _showAllHistory ? _historyEntries : _historyEntries.Take(HistoryPreviewCount).ToArray();
+
+    public bool HasMoreHistory => _historyEntries.Count > HistoryPreviewCount;
+    public string ToggleHistoryText => _showAllHistory ? Strings.ShowLessHistory : Strings.ShowAllHistory;
 
     public bool HasHistory => _controller.History.Entries.Count > 0;
 
@@ -395,10 +452,33 @@ public sealed class SettingsViewModel : ObservableObject
 
     private void RefreshHistory()
     {
-        HistoryEntries = _controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)).ToArray();
+        _historyEntries = _controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)).ToArray();
+        RefreshHistoryView();
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistoryDescription));
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void RefreshHistoryView()
+    {
+        OnPropertyChanged(nameof(VisibleHistory));
+        OnPropertyChanged(nameof(HasMoreHistory));
+        OnPropertyChanged(nameof(ToggleHistoryText));
+    }
+
+    /// <summary>启动卸载程序后退出，卸载时文件不会被占用。</summary>
+    private void Uninstall()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(UninstallerPath) { UseShellExecute = true, WorkingDirectory = ProgramDirectory });
+            _controller.Exit();
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("启动卸载程序失败", exception);
+            System.Windows.MessageBox.Show(Strings.UninstallFailed, "DropShelf", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
     }
 
     private void RefreshAll()
@@ -409,7 +489,8 @@ public sealed class SettingsViewModel : ObservableObject
                      nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseAfterDragOut), nameof(CloseWhenEmpty),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(ShowGettingStarted), nameof(ActionLayout),
-                     nameof(StartupDescription), nameof(Version), nameof(HistoryDescription)
+                     nameof(StartupDescription), nameof(Version), nameof(HistoryDescription), nameof(GeneralSummary),
+                     nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription)
                  })
             OnPropertyChanged(name);
         RefreshActions();

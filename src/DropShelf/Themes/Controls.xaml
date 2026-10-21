@@ -661,51 +661,6 @@
         </Setter>
     </Style>
 
-    <!-- 侧边导航 -->
-    <Style x:Key="NavItemStyle" TargetType="ListBoxItem">
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="Height" Value="38" />
-        <Setter Property="Margin" Value="0,1" />
-        <Setter Property="Padding" Value="14,0" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="ListBoxItem">
-                    <Grid>
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" />
-                        <Border x:Name="Indicator" Width="3" Height="16" CornerRadius="1.5" HorizontalAlignment="Left"
-                                Background="{DynamicResource AccentBrush}" Visibility="Hidden" />
-                        <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" />
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
-                        </Trigger>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleSelectedBrush}" />
-                            <Setter TargetName="Indicator" Property="Visibility" Value="Visible" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <Style x:Key="NavListStyle" TargetType="ListBox">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="ItemContainerStyle" Value="{StaticResource NavItemStyle}" />
-        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="ListBox">
-                    <ItemsPresenter />
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
     <!-- 设置卡片 -->
     <Style TargetType="controls:SettingsCard">
         <Setter Property="Background" Value="{DynamicResource CardBrush}" />
