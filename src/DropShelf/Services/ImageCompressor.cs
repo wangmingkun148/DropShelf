@@ -1,0 +1,233 @@
+using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+
+namespace DropShelf.Services;
+
+public enum ImageCompressionStatus
+{
+    Compressed,
+    AlreadySmall,
+    NotImage,
+    Failed
+}
+
+public sealed record ImageCompressionResult(string Source, string? Output, ImageCompressionStatus Status);
+
+/// <summary>
+/// 把图片压缩为不超过指定大小的 JPG，常用于网页表单和聊天软件的上传限制。
+/// 先在保持尺寸的前提下降低画质，仍然过大时再按比例缩小；原文件不会改变。
+/// </summary>
+public static class ImageCompressor
+{
+    private const int MaximumQuality = 92;
+    private const int MinimumQuality = 40;
+    private const int MinimumEdge = 32;
+    private const long MaximumWorkingPixels = 40_000_000;
+
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".jfif", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp", ".heic", ".heif", ".avif"
+    };
+
+    /// <summary>网页和聊天软件普遍接受的格式；已经足够小时不需要转换。</summary>
+    private static readonly HashSet<string> WidelySupported = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png" };
+
+    public static bool IsImagePath(string path) => ImageExtensions.Contains(Path.GetExtension(path));
+
+    public static IReadOnlyList<ImageCompressionResult> CompressAll(IReadOnlyList<string> paths, long maximumBytes, string? outputDirectory) =>
+        paths.Select(path => Compress(path, maximumBytes, outputDirectory)).ToArray();
+
+    public static ImageCompressionResult Compress(string source, long maximumBytes, string? outputDirectory = null)
+    {
+        if (!File.Exists(source) || !IsImagePath(source)) return new ImageCompressionResult(source, null, ImageCompressionStatus.NotImage);
+        string? temporaryPath = null;
+        try
+        {
+            if (new FileInfo(source).Length <= maximumBytes && WidelySupported.Contains(Path.GetExtension(source)))
+                return new ImageCompressionResult(source, null, ImageCompressionStatus.AlreadySmall);
+
+            var bytes = EncodeWithinLimit(Load(source), maximumBytes);
+            var directory = string.IsNullOrWhiteSpace(outputDirectory)
+                ? Path.GetDirectoryName(source) ?? throw new IOException("无法确定输出文件保存位置")
+                : outputDirectory;
+            Directory.CreateDirectory(directory);
+            var output = GetAvailablePath(directory, $"{Path.GetFileNameWithoutExtension(source)}-{FormatLimit(maximumBytes)}", ".jpg");
+            temporaryPath = Path.Combine(directory, $".dropshelf-{Guid.NewGuid():N}.tmp");
+            File.WriteAllBytes(temporaryPath, bytes);
+            File.Move(temporaryPath, output);
+            temporaryPath = null;
+            return new ImageCompressionResult(source, output, ImageCompressionStatus.Compressed);
+        }
+        catch (Exception exception)
+        {
+            LogService.Error($"压缩图片失败：{source}", exception);
+            return new ImageCompressionResult(source, null, ImageCompressionStatus.Failed);
+        }
+        finally
+        {
+            if (temporaryPath is not null)
+            {
+                try { File.Delete(temporaryPath); }
+                catch { }
+            }
+        }
+    }
+
+    /// <summary>找出不超过上限的最高画质；最低画质仍然过大时按比例缩小后重试。</summary>
+    public static byte[] EncodeWithinLimit(BitmapSource image, long maximumBytes)
+    {
+        var current = image;
+        for (var round = 0; round < 10; round++)
+        {
+            var best = Encode(current, MaximumQuality);
+            if (best.Length <= maximumBytes) return best;
+
+            var smallest = Encode(current, MinimumQuality);
+            if (smallest.Length <= maximumBytes)
+            {
+                best = smallest;
+                var low = MinimumQuality;
+                var high = MaximumQuality - 1;
+                while (low < high)
+                {
+                    var middle = (low + high + 1) / 2;
+                    var candidate = Encode(current, middle);
+                    if (candidate.Length <= maximumBytes)
+                    {
+                        best = candidate;
+                        low = middle;
+                    }
+                    else
+                    {
+                        high = middle - 1;
+                    }
+                }
+                return best;
+            }
+
+            // 文件大小与像素数大致成正比，按面积比例缩小并多留一点余量。
+            var ratio = Math.Clamp(Math.Sqrt((double)maximumBytes / smallest.Length) * 0.92, 0.2, 0.92);
+            if (current.PixelWidth * ratio < MinimumEdge || current.PixelHeight * ratio < MinimumEdge) return smallest;
+            current = Resize(current, ratio);
+        }
+        return Encode(current, MinimumQuality);
+    }
+
+    /// <summary>读取图片：按拍摄方向转正，透明部分铺白色背景（JPG 不支持透明）。</summary>
+    public static BitmapSource Load(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        BitmapSource bitmap = decoder.Frames[0];
+        var pixels = (long)bitmap.PixelWidth * bitmap.PixelHeight;
+        if (pixels > MaximumWorkingPixels)
+            bitmap = Resize(new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0), Math.Sqrt((double)MaximumWorkingPixels / pixels));
+        bitmap = ApplyOrientation(bitmap, ReadOrientation(decoder.Frames[0]));
+        return Flatten(bitmap);
+    }
+
+    private static byte[] Encode(BitmapSource bitmap, int quality)
+    {
+        var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    private static BitmapSource Resize(BitmapSource bitmap, double ratio)
+    {
+        var scaled = new TransformedBitmap(bitmap, new ScaleTransform(ratio, ratio));
+        scaled.Freeze();
+        return Materialize(scaled, scaled.Format);
+    }
+
+    private static int ReadOrientation(BitmapFrame frame)
+    {
+        try
+        {
+            if (frame.Metadata is BitmapMetadata metadata && metadata.GetQuery("System.Photo.Orientation") is { } value)
+                return Convert.ToInt32(value);
+        }
+        catch
+        {
+            // 部分格式没有方向信息或不支持查询。
+        }
+        return 1;
+    }
+
+    /// <summary>按 EXIF 方向值转正：2/4 为镜像，3 为旋转 180°，5–8 为旋转 90° 的组合。</summary>
+    private static BitmapSource ApplyOrientation(BitmapSource bitmap, int orientation)
+    {
+        Transform? transform = orientation switch
+        {
+            2 => new ScaleTransform(-1, 1),
+            3 => new RotateTransform(180),
+            4 => new ScaleTransform(1, -1),
+            5 => new TransformGroup { Children = { new RotateTransform(90), new ScaleTransform(-1, 1) } },
+            6 => new RotateTransform(90),
+            7 => new TransformGroup { Children = { new RotateTransform(270), new ScaleTransform(-1, 1) } },
+            8 => new RotateTransform(270),
+            _ => null
+        };
+        if (transform is null) return bitmap;
+        var oriented = new TransformedBitmap(bitmap, transform);
+        oriented.Freeze();
+        return oriented;
+    }
+
+    private static BitmapSource Flatten(BitmapSource bitmap)
+    {
+        var source = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
+        var width = source.PixelWidth;
+        var height = source.PixelHeight;
+        var input = new byte[width * height * 4];
+        source.CopyPixels(input, width * 4, 0);
+
+        var stride = (width * 3 + 3) & ~3;
+        var output = new byte[stride * height];
+        for (var y = 0; y < height; y++)
+        {
+            var from = y * width * 4;
+            var to = y * stride;
+            for (var x = 0; x < width; x++, from += 4, to += 3)
+            {
+                var alpha = input[from + 3];
+                var inverse = 255 - alpha;
+                output[to] = (byte)((input[from] * alpha + 255 * inverse) / 255);
+                output[to + 1] = (byte)((input[from + 1] * alpha + 255 * inverse) / 255);
+                output[to + 2] = (byte)((input[from + 2] * alpha + 255 * inverse) / 255);
+            }
+        }
+
+        var flattened = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgr24, null, output, stride);
+        flattened.Freeze();
+        return flattened;
+    }
+
+    private static BitmapSource Materialize(BitmapSource bitmap, PixelFormat format)
+    {
+        var stride = (bitmap.PixelWidth * format.BitsPerPixel + 31) / 32 * 4;
+        var pixels = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, stride, 0);
+        var copy = BitmapSource.Create(bitmap.PixelWidth, bitmap.PixelHeight, 96, 96, format, bitmap.Palette, pixels, stride);
+        copy.Freeze();
+        return copy;
+    }
+
+    /// <summary>输出文件名中的大小，例如 500KB、2MB。</summary>
+    public static string FormatLimit(long maximumBytes)
+    {
+        var kilobytes = maximumBytes / 1024;
+        return kilobytes >= 1024 && kilobytes % 1024 == 0 ? $"{kilobytes / 1024}MB" : $"{kilobytes}KB";
+    }
+
+    private static string GetAvailablePath(string directory, string baseName, string extension)
+    {
+        var candidate = Path.Combine(directory, baseName + extension);
+        for (var suffix = 2; File.Exists(candidate) || Directory.Exists(candidate); suffix++)
+            candidate = Path.Combine(directory, $"{baseName} ({suffix}){extension}");
+        return candidate;
+    }
+}

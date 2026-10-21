@@ -7,24 +7,41 @@ namespace DropShelf.Services;
 
 public sealed class AppSettings
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public int Version { get; set; } = CurrentVersion;
     public double WindowLeft { get; set; } = double.NaN;
     public double WindowTop { get; set; } = double.NaN;
     public double WindowWidth { get; set; } = 900;
     public double WindowHeight { get; set; } = 640;
+
+    /// <summary>拖动时自动弹出置物架；托盘菜单中的“暂停”切换的就是它。</summary>
     public bool GestureEnabled { get; set; } = true;
+    public AutoOpenTrigger AutoOpenTrigger { get; set; } = AutoOpenTrigger.Both;
     public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
+    public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
+
     public AppTheme Theme { get; set; } = AppTheme.System;
     public AppLanguage Language { get; set; } = AppLanguage.System;
     public bool StartWithWindows { get; set; }
     public QuickShelfSize QuickShelfSize { get; set; } = QuickShelfSize.Medium;
 
-    /// <summary>置物架底部显示的快速操作（按固定顺序，最多四个）。</summary>
+    /// <summary>从置物架拖出文件时默认移动还是复制；目标程序只接受复制时仍会复制。</summary>
+    public TransferMode DragOutMode { get; set; } = TransferMode.Move;
+
+    public QuickActionLayout QuickActionLayout { get; set; } = QuickActionLayout.Four;
+
+    /// <summary>四个位置上的快速操作标识，按从左到右的顺序；只显示两个时使用前两个。</summary>
+    public List<string>? QuickActionSlots { get; set; }
+
+    public List<CustomQuickAction>? CustomActions { get; set; }
+
+    /// <summary>2.0 版本的快速操作列表，仅用于迁移旧设置。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<QuickActionType>? QuickActions { get; set; }
 
     /// <summary>1.0 版本只能选择一个快速操作，仅用于迁移旧设置。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public QuickActionType QuickAction { get; set; } = QuickActionType.Properties;
 
     public bool RemoveAfterDragOut { get; set; } = true;
@@ -40,6 +57,8 @@ public sealed class AppSettings
     {
         var clone = (AppSettings)MemberwiseClone();
         clone.QuickActions = QuickActions is null ? null : [.. QuickActions];
+        clone.QuickActionSlots = QuickActionSlots is null ? null : [.. QuickActionSlots];
+        clone.CustomActions = CustomActions?.Select(action => action.Clone()).ToList();
         return clone;
     }
 }
@@ -57,6 +76,9 @@ public sealed class SettingsService
         Environment.GetEnvironmentVariable("DROPSHELF_SETTINGS_PATH") is { Length: > 0 } customPath
             ? customPath
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DropShelf", "settings.json");
+
+    /// <summary>设置、最近关闭的置物架等数据所在的文件夹。</summary>
+    public string DataDirectory => Path.GetDirectoryName(SettingsPath) ?? string.Empty;
 
     public AppSettings Load()
     {
@@ -93,20 +115,26 @@ public sealed class SettingsService
     {
         if (!Enum.IsDefined(settings.MouseGestureSensitivity))
             settings.MouseGestureSensitivity = GestureSensitivity.Balanced;
+        if (!Enum.IsDefined(settings.AutoOpenTrigger))
+            settings.AutoOpenTrigger = AutoOpenTrigger.Both;
+        if (!Enum.IsDefined(settings.EdgeDwell))
+            settings.EdgeDwell = EdgeDwellTime.Medium;
         if (!Enum.IsDefined(settings.Theme))
             settings.Theme = AppTheme.System;
         if (!Enum.IsDefined(settings.Language))
             settings.Language = AppLanguage.System;
         if (!Enum.IsDefined(settings.QuickShelfSize))
             settings.QuickShelfSize = QuickShelfSize.Medium;
+        if (!Enum.IsDefined(settings.DragOutMode))
+            settings.DragOutMode = TransferMode.Move;
+        if (!Enum.IsDefined(settings.QuickActionLayout))
+            settings.QuickActionLayout = QuickActionLayout.Four;
 
-        if (settings.QuickActions is null)
-        {
-            // 1.0 只有一个快速操作：关闭时保持关闭，其余情况启用新的默认组合。
-            settings.QuickActions = settings.QuickAction == QuickActionType.None ? [] : [.. QuickActions.Defaults];
-        }
-        settings.QuickActions = QuickActions.Normalize(settings.QuickActions);
-        settings.QuickAction = settings.QuickActions.FirstOrDefault();
+        settings.CustomActions = NormalizeCustomActions(settings.CustomActions);
+        if (settings.QuickActionSlots is null) MigrateQuickActions(settings);
+        settings.QuickActionSlots = Models.QuickActions.NormalizeSlots(settings.QuickActionSlots, settings.CustomActions);
+        settings.QuickActions = null;
+        settings.QuickAction = QuickActionType.None;
 
         if (!HotkeyGesture.TryParse(settings.Hotkey, out var hotkey))
             hotkey = HotkeyGesture.Default;
@@ -116,5 +144,54 @@ public sealed class SettingsService
         if (!double.IsFinite(settings.WindowHeight) || settings.WindowHeight < 540) settings.WindowHeight = 640;
         settings.Version = AppSettings.CurrentVersion;
         return settings;
+    }
+
+    /// <summary>首次运行时提供一个压缩图片的示例操作，用户可以直接放到置物架上。</summary>
+    public static CustomQuickAction CreateDefaultImageAction() => new() { Kind = CustomActionKind.CompressImage };
+
+    /// <summary>
+    /// 旧版本的快速操作迁移为四个位置：1.0 只有一个操作，关闭时保持关闭，其余情况使用默认组合；
+    /// 2.0 选择的操作按原顺序放在前面，选了一两个时改为显示两个大按钮。
+    /// </summary>
+    private static void MigrateQuickActions(AppSettings settings)
+    {
+        var legacy = settings.QuickActions is not null
+            ? Models.QuickActions.Normalize(settings.QuickActions)
+            : settings.QuickAction == QuickActionType.None ? [] : [.. Models.QuickActions.Defaults];
+        settings.QuickActionLayout = legacy.Count switch
+        {
+            0 => QuickActionLayout.Off,
+            <= 2 => QuickActionLayout.Two,
+            _ => QuickActionLayout.Four
+        };
+        settings.QuickActionSlots = legacy.Select(type => type.ToString()).ToList();
+    }
+
+    private static List<CustomQuickAction> NormalizeCustomActions(List<CustomQuickAction>? actions)
+    {
+        if (actions is null) return [CreateDefaultImageAction()];
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<CustomQuickAction>();
+        foreach (var action in actions)
+        {
+            if (action is null || !Enum.IsDefined(action.Kind) || !action.IsComplete) continue;
+            if (string.IsNullOrWhiteSpace(action.Id) || Models.QuickActions.IsBuiltInId(action.Id) || ids.Contains(action.Id))
+                action.Id = CustomQuickAction.NewId();
+            ids.Add(action.Id);
+
+            var name = action.Name?.Trim();
+            action.Name = string.IsNullOrEmpty(name)
+                ? null
+                : name.Length > CustomQuickAction.MaximumNameLength ? name[..CustomQuickAction.MaximumNameLength] : name;
+            if (!Enum.IsDefined(action.FolderMode)) action.FolderMode = TransferMode.Move;
+            action.ImageSizeKb = Math.Clamp(action.ImageSizeKb, CustomQuickAction.MinimumImageSizeKb, CustomQuickAction.MaximumImageSizeKb);
+            action.Folder = action.Folder?.Trim();
+            action.ProgramPath = action.ProgramPath?.Trim().Trim('"');
+            action.Arguments = string.IsNullOrWhiteSpace(action.Arguments) ? null : action.Arguments.Trim();
+
+            result.Add(action);
+            if (result.Count == Models.QuickActions.MaximumCustomActions) break;
+        }
+        return result;
     }
 }

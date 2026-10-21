@@ -31,7 +31,8 @@ public static class ShelfDragService
     private const int EffectLink = 4;
     private const int InvalidArgument = unchecked((int)0x80070057);
 
-    public static DragOutResult DoDragDrop(Window owner, IReadOnlyList<ShelfItem> items, string shelfId, int button = NativeMethods.MK_LBUTTON)
+    public static DragOutResult DoDragDrop(Window owner, IReadOnlyList<ShelfItem> items, string shelfId,
+        TransferMode mode = TransferMode.Move, int button = NativeMethods.MK_LBUTTON)
     {
         var files = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
         var others = items.Where(item => !item.IsFileSystem).ToList();
@@ -42,9 +43,9 @@ public static class ShelfDragService
         if (files.Count > 0)
         {
             data = ShellInterop.CreateFileDataObject(files.Select(item => item.Value).ToArray());
-            allowedEffects = files.Any(item => item.IsTemporaryAttachment)
-                ? EffectCopy | EffectMove
-                : EffectCopy | EffectMove | EffectLink;
+            allowedEffects = GetAllowedEffects(mode, files.Any(item => item.IsTemporaryAttachment));
+            // 告诉资源管理器默认移动还是复制（跨磁盘时也一样）；按住 Ctrl 或 Shift 仍可临时切换。
+            if (data is not null) ShellInterop.TrySetInt32(data, "Preferred DropEffect", mode == TransferMode.Move ? EffectMove : EffectCopy);
             dragged = files;
         }
         else if (others.Count > 0)
@@ -94,6 +95,18 @@ public static class ShelfDragService
             if (helper is not null) Marshal.ReleaseComObject(helper);
             Marshal.ReleaseComObject(data);
         }
+    }
+
+    /// <summary>
+    /// 允许的拖放效果。移动模式下仍允许复制：聊天软件和浏览器只接受复制，否则会拒绝放下。
+    /// 复制模式下不允许移动，资源管理器在同一磁盘内也会复制。临时附件不提供快捷方式。
+    /// </summary>
+    public static int GetAllowedEffects(TransferMode mode, bool hasTemporaryFiles)
+    {
+        var effects = EffectCopy;
+        if (mode == TransferMode.Move) effects |= EffectMove;
+        if (!hasTemporaryFiles) effects |= EffectLink;
+        return effects;
     }
 
     /// <summary>

@@ -25,12 +25,14 @@ public sealed class AppController : IDisposable
     private OnboardingWindow? _onboarding;
     private bool _hasShownTrayHint;
     private bool _exiting;
+    private ScreenEdge _pendingEdge;
 
     public AppController(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
         _settings = _settingsService.Load();
-        Shelves = new ShelfManager(() => _settings, ShowMainWindow, dispatcher);
+        History = new ShelfHistoryService(System.IO.Path.Combine(_settingsService.DataDirectory, "history.json"));
+        Shelves = new ShelfManager(() => _settings, ShowMainWindow, UpdateSettings, History, dispatcher);
         Current = this;
     }
 
@@ -54,6 +56,7 @@ public sealed class AppController : IDisposable
 
     public AppSettings Settings => _settings;
     public ShelfManager Shelves { get; }
+    public ShelfHistoryService History { get; }
     public bool IsGestureRunning => _gestures?.IsRunning == true;
     public bool IsHotkeyRegistered { get; private set; }
     public string SettingsPath => _settingsService.SettingsPath;
@@ -71,17 +74,25 @@ public sealed class AppController : IDisposable
         _messageWindow = new MessageWindow(MessageWindowTitle);
         _messageWindow.ArgumentsReceived += HandleArguments;
         _tray = new TrayIconService(_messageWindow,
-            () => new TrayMenuState(_settings.GestureEnabled, _settings.HotkeyGesture.ToString()),
+            () => new TrayMenuState(_settings.GestureEnabled, _settings.HotkeyGesture.ToString(), History.Entries),
             ShowMainWindow, () => Shelves.OpenAtCursor(activate: true),
-            enabled => UpdateSettings(settings => settings.GestureEnabled = enabled), Exit);
+            enabled => UpdateSettings(settings => settings.GestureEnabled = enabled),
+            entry => Shelves.Restore(entry), History.Clear, Exit);
         _hotkey = new HotkeyService(_messageWindow);
         _hotkey.Pressed += (_, _) => Shelves.OpenAtCursor(activate: true);
         IsHotkeyRegistered = _hotkey.Register(_settings.HotkeyGesture);
 
         _probe = new ProbeWindow();
-        _probe.DragDetected += (_, _) => Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false);
+        _probe.DragDetected += (_, _) =>
+        {
+            Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false, _pendingEdge);
+            if (_pendingEdge != ScreenEdge.None) _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
+        };
         _gestures = new GestureService(_dispatcher, _settings.MouseGestureSensitivity, _settings.GestureEnabled);
+        _gestures.SetTrigger(_settings.AutoOpenTrigger);
+        _gestures.SetEdgeDwell(_settings.EdgeDwell);
         _gestures.ShakeDetected += OnShakeDetected;
+        _gestures.EdgeDwellDetected += OnEdgeDwellDetected;
         _gestures.DragReleased += OnDragReleased;
         _gestures.Start();
 
@@ -235,19 +246,37 @@ public sealed class AppController : IDisposable
         {
             _gestures.Enabled = current.GestureEnabled;
             _gestures.SetSensitivity(current.MouseGestureSensitivity);
+            _gestures.SetTrigger(current.AutoOpenTrigger);
+            _gestures.SetEdgeDwell(current.EdgeDwell);
         }
         if (previous.Hotkey != current.Hotkey && _hotkey is not null)
             IsHotkeyRegistered = _hotkey.Register(current.HotkeyGesture);
-        if (previous.QuickShelfSize != current.QuickShelfSize ||
-            !previous.QuickActions!.SequenceEqual(current.QuickActions!))
-            Shelves.ApplySettings(current);
+        if (ShelfAppearanceChanged(previous, current)) Shelves.ApplySettings(current);
     }
+
+    /// <summary>尺寸、快速操作或拖出方式变化时，已打开的置物架需要立即更新。</summary>
+    private static bool ShelfAppearanceChanged(AppSettings previous, AppSettings current) =>
+        previous.QuickShelfSize != current.QuickShelfSize ||
+        previous.DragOutMode != current.DragOutMode ||
+        previous.QuickActionLayout != current.QuickActionLayout ||
+        !previous.QuickActionSlots!.SequenceEqual(current.QuickActionSlots!) ||
+        !System.Text.Json.JsonSerializer.Serialize(previous.CustomActions).Equals(System.Text.Json.JsonSerializer.Serialize(current.CustomActions));
 
     private void OnShakeDetected(object? sender, GestureTriggeredEventArgs e)
     {
         if (_exiting || !_settings.GestureEnabled) return;
         LogService.Trace($"识别到晃动 ({e.X}, {e.Y})，显示探针窗口");
+        _pendingEdge = ScreenEdge.None;
         _probe?.ShowAt(new POINT(e.X, e.Y));
+    }
+
+    private void OnEdgeDwellDetected(object? sender, GestureTriggeredEventArgs e)
+    {
+        if (_exiting || !_settings.GestureEnabled) return;
+        LogService.Trace($"在屏幕边缘停留 ({e.X}, {e.Y}, {e.Edge})，显示探针窗口");
+        _pendingEdge = e.Edge;
+        _probe?.ShowAt(new POINT(e.X, e.Y));
+        _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
     }
 
     private void OnDragReleased(object? sender, EventArgs e)

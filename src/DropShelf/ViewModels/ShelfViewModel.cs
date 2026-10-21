@@ -259,7 +259,7 @@ public sealed class ShelfViewModel : ObservableObject
         }
     }
 
-    public async Task<QuickActionResult> RunActionAsync(QuickActionType type, IReadOnlyList<ShelfItem> targets, IntPtr owner,
+    public async Task<QuickActionResult> RunActionAsync(QuickActionInfo action, IReadOnlyList<ShelfItem> targets, IntPtr owner,
         Func<string?>? pickFolder)
     {
         var available = targets.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
@@ -269,11 +269,11 @@ public sealed class ShelfViewModel : ObservableObject
             Notify(empty.Message, false);
             return empty;
         }
-        return await RunActionCoreAsync(type, available.Select(item => item.Value).ToArray(),
+        return await RunActionCoreAsync(action, available.Select(item => item.Value).ToArray(),
             available.Any(item => item.IsTemporaryAttachment), owner, pickFolder);
     }
 
-    public async Task<QuickActionResult> RunActionAsync(QuickActionType type, DropReadResult dropped, IntPtr owner,
+    public async Task<QuickActionResult> RunActionAsync(QuickActionInfo action, DropReadResult dropped, IntPtr owner,
         Func<string?>? pickFolder)
     {
         foreach (var cache in dropped.CacheDirectories) RegisterCache(cache);
@@ -283,30 +283,30 @@ public sealed class ShelfViewModel : ObservableObject
             Notify(failed.Message, false);
             return failed;
         }
-        return await RunActionCoreAsync(type, dropped.FilePaths, dropped.HasTemporaryFiles, owner, pickFolder);
+        return await RunActionCoreAsync(action, dropped.FilePaths, dropped.HasTemporaryFiles, owner, pickFolder);
     }
 
-    private async Task<QuickActionResult> RunActionCoreAsync(QuickActionType type, IReadOnlyList<string> paths, bool temporary,
+    private async Task<QuickActionResult> RunActionCoreAsync(QuickActionInfo action, IReadOnlyList<string> paths, bool temporary,
         IntPtr owner, Func<string?>? pickFolder)
     {
         HasInteracted = true;
-        var info = QuickActions.Get(type);
-        var showBusy = type is QuickActionType.CompressZip or QuickActionType.MoveTo;
+        // “移动到”先弹出文件夹选择，选好后才显示进度。
+        var asksForFolder = action.Type == QuickActionType.MoveTo;
         QuickActionResult result;
         try
         {
-            if (showBusy && type != QuickActionType.MoveTo)
+            if (action.ShowsProgress && !asksForFolder)
             {
-                BusyText = info.BusyText;
+                BusyText = action.BusyText;
                 IsBusy = true;
             }
-            result = await QuickActionService.ExecuteAsync(new QuickActionRequest(type, paths, temporary, owner,
+            result = await QuickActionService.ExecuteAsync(new QuickActionRequest(action, paths, temporary, owner,
                 pickFolder is null ? null : () =>
                 {
                     var folder = pickFolder();
-                    if (folder is not null && showBusy)
+                    if (folder is not null && action.ShowsProgress)
                     {
-                        BusyText = info.BusyText;
+                        BusyText = action.BusyText;
                         IsBusy = true;
                     }
                     return folder;
@@ -314,7 +314,7 @@ public sealed class ShelfViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            LogService.Error($"快速操作“{info.Label}”失败", exception);
+            LogService.Error($"快速操作“{action.Label}”失败", exception);
             result = new QuickActionResult(false, Strings.ActionFailed);
         }
         finally
@@ -322,12 +322,42 @@ public sealed class ShelfViewModel : ObservableObject
             IsBusy = false;
         }
 
-        if (type == QuickActionType.Properties && temporary) _delayCacheCleanup = true;
+        if (result.KeepsTemporaryFiles) _delayCacheCleanup = true;
         if (result.Moves is { Count: > 0 } moves) ApplyMoves(moves);
+        if (result.Replacements is { Count: > 0 } replacements) ApplyReplacements(replacements);
         if (result is { ProducedNewItems: true, OutputPaths: { Count: > 0 } outputs }) AddFiles(outputs);
         if (!result.Cancelled) Notify(result.Message, result.Succeeded);
         return result;
     }
+
+    /// <summary>用处理后的文件替换置物架中的原项目；原项目不在置物架上时（直接拖到按钮上）把新文件放进来。</summary>
+    public void ApplyReplacements(IReadOnlyList<(string Source, string Output)> replacements)
+    {
+        var additions = new List<string>();
+        foreach (var (source, output) in replacements)
+        {
+            var index = IndexOfPath(source);
+            if (index < 0 || IndexOfPath(output) >= 0)
+            {
+                additions.Add(output);
+                continue;
+            }
+            var item = new ShelfItem
+            {
+                Id = Items[index].Id,
+                Kind = ShelfItemKind.File,
+                Value = output,
+                SizeBytes = ShellFileInfo.TryGetFileSize(output),
+                TypeName = ShellFileInfo.GetTypeName(output)
+            };
+            Items[index] = item;
+            _ = LoadThumbnailAsync(item);
+        }
+        if (additions.Count > 0) AddFiles(additions);
+    }
+
+    /// <summary>临时附件已交给其他程序（拖出到聊天软件、用程序打开），关闭置物架后稍晚再清理，避免对方读取时文件已被删除。</summary>
+    public void KeepTemporaryFilesForAWhile() => _delayCacheCleanup = true;
 
     public bool CopyToClipboard(IReadOnlyList<ShelfItem> items)
     {

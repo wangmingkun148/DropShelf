@@ -24,7 +24,7 @@ public static class VirtualFileDropService
     private const int FileAttributeDirectory = 0x10;
     private const uint FileDescriptorAttributesValid = 0x00000004;
     private const uint FileDescriptorWriteTimeValid = 0x00000020;
-    private static readonly string CacheRoot = Path.Combine(Path.GetTempPath(), "DropShelf", "Attachments");
+    internal static readonly string CacheRoot = Path.Combine(Path.GetTempPath(), "DropShelf", "Attachments");
 
     public static bool CanImport(WpfDataObject data) =>
         data.GetDataPresent(FileDescriptorUnicodeFormat, false) ||
@@ -369,7 +369,7 @@ public static class VirtualFileDropService
         }
     }
 
-    private static string CreateUniqueSafeName(string suppliedName, ISet<string> usedNames)
+    internal static string CreateUniqueSafeName(string suppliedName, ISet<string> usedNames)
     {
         var name = Path.GetFileName(suppliedName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
         foreach (var invalid in Path.GetInvalidFileNameChars()) name = name.Replace(invalid, '_');
@@ -402,7 +402,7 @@ public static class VirtualFileDropService
         catch { return null; }
     }
 
-    private static bool IsOwnedCacheDirectory(string? path)
+    internal static bool IsOwnedCacheDirectory(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
         try

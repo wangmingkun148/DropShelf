@@ -1,3 +1,4 @@
+using System.Globalization;
 using DropShelf.Models;
 using DropShelf.Services;
 
@@ -42,7 +43,7 @@ public static class Strings
     public static string About => T("关于", "About");
     public static string QuitTooltip => T("停止手势识别并退出，关闭所有置物架", "Stop gesture detection, close all shelves and quit");
 
-    public static string StatusPaused => T("晃动呼出已暂停", "Shake to open is paused");
+    public static string StatusPaused => T("自动弹出已暂停", "Auto open is paused");
     public static string StatusRunning => T("正在后台运行", "Running in the background");
     public static string StatusGestureFailed => T("手势识别未能启动", "Gesture detection couldn't start");
     public static string StatusGestureFailedDetail => T("请重新启动 DropShelf；置物架和快捷键仍可使用", "Restart DropShelf. Shelves and the shortcut still work");
@@ -51,14 +52,20 @@ public static class Strings
         $"可在“{GesturesAndShelf}”中重新开启{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
         $"Turn it back on in {GesturesAndShelf}{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}");
 
-    public static string StatusRunningDetail(string? hotkey) => T(
-        $"拖住文件并快速晃动鼠标{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
-        $"Drag a file and shake the mouse quickly{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}");
+    public static string StatusRunningDetail(AutoOpenTrigger trigger, string? hotkey) => trigger switch
+    {
+        AutoOpenTrigger.Shake => T($"拖住文件并快速晃动鼠标{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
+            $"Drag a file and shake the mouse{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}"),
+        AutoOpenTrigger.Edge => T($"把文件拖到屏幕边缘停一下{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",
+            $"Drag a file to the edge of the screen and pause{(hotkey is null ? null : $", or press {hotkey} to open a shelf")}"),
+        _ => T($"拖住文件晃一晃，或拖到屏幕边缘停一下{(hotkey is null ? null : $"；也可以按 {hotkey}")}",
+            $"Drag a file and shake it, or pause at the screen edge{(hotkey is null ? null : $". You can also press {hotkey}")}")
+    };
 
     public static string GettingStarted => T("快速上手", "Get started");
     public static string TipShakeTitle => T("拖住并晃动", "Drag and shake");
-    public static string TipShakeBody => T("拖住文件后左右快速晃动鼠标，置物架会出现在光标处。",
-        "While dragging a file, shake the mouse quickly left and right and a shelf appears at the cursor.");
+    public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
+        "While dragging a file, shake the mouse or pause at the edge of the screen and a shelf appears.");
     public static string TipStackTitle => T("整摞拖出", "Drag out the stack");
     public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；点开后也能单独或多选拖出。",
         "Drag the thumbnail stack to take every file at once, or click it to drag out one or several.");
@@ -79,32 +86,60 @@ public static class Strings
     public static string TutorialDescription => T("用动画快速了解晃动呼出、整摞拖出和快速操作", "Short animations of shake to open, dragging out the stack and quick actions");
     public static string ViewTutorial => T("查看教程", "View tutorial");
 
-    public static string ShakeToOpen => T("晃动呼出", "Shake to open");
-    public static string ShakeToOpenHeader => T("晃动鼠标呼出置物架", "Shake the mouse to open a shelf");
-    public static string ShakeToOpenDescription => T("拖住文件、附件、图片或文本时，快速来回晃动鼠标",
-        "While dragging files, attachments, images or text, shake the mouse quickly back and forth");
-    public static string Sensitivity => T("灵敏度", "Sensitivity");
-    public static string SensitivityDescription => T("灵敏只需小幅晃动；稳健需要更明确的晃动，误触更少",
-        "Responsive needs only a small shake. Steady needs a clearer shake and triggers by accident less often");
+    public static string AutoOpen => T("自动弹出", "Auto open");
+    public static string AutoOpenHeader => T("拖动时自动弹出", "Open while dragging");
+    public static string AutoOpenDescription => T("拖住文件、图片或文本时弹出置物架", "Opens a shelf while you drag files, images or text");
+    public static string TriggerHeader => T("呼出方式", "How to open");
+    public static string TriggerDescription => T("晃动鼠标，或拖到屏幕边缘停一下", "Shake the mouse, or pause at the edge of the screen");
+    public static string TriggerShake => T("晃动", "Shake");
+    public static string TriggerEdge => T("屏幕边缘", "Screen edge");
+    public static string TriggerBoth => T("两者", "Both");
+    public static string ShakeSensitivity => T("晃动灵敏度", "Shake sensitivity");
+    public static string SensitivityDescription => T("灵敏只需轻轻晃动，稳健误触更少", "Responsive needs only a small shake. Steady avoids accidental opens");
     public static string SensitivityResponsive => T("灵敏", "Responsive");
     public static string SensitivityBalanced => T("均衡", "Balanced");
     public static string SensitivitySteady => T("稳健", "Steady");
+    public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
+    public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘，停留多久后弹出", "How long to pause at the left, right or top edge");
+    public static string DwellShort => T("0.3 秒", "0.3 s");
+    public static string DwellMedium => T("0.6 秒", "0.6 s");
+    public static string DwellLong => T("1 秒", "1 s");
     public static string Size => T("尺寸", "Size");
     public static string SizeDescription => T("三档尺寸保持相同的比例和布局", "All three sizes keep the same proportions and layout");
     public static string SizeSmall => T("小", "Small");
     public static string SizeMedium => T("中", "Medium");
     public static string SizeLarge => T("大", "Large");
+    public static string DragOutModeHeader => T("拖出方式", "When dragging out");
+    public static string DragOutModeDescription => T("也可以在置物架顶部随时切换", "You can also switch it at the top of a shelf");
+    public static string TransferMove => T("移动", "Move");
+    public static string TransferCopy => T("复制", "Copy");
     public static string RemoveAfterDragOut => T("拖出后从置物架移除", "Remove from the shelf after dragging out");
     public static string RemoveAfterDragOutDescription => T("关闭后可以把同一批文件依次拖到多个地方", "Turn off to drag the same files to several places in turn");
     public static string CloseWhenEmpty => T("清空后自动关闭", "Close when empty");
     public static string CloseWhenEmptyDescription => T("项目全部拖出或移除后关闭置物架；钉住的置物架会保持打开",
         "Closes the shelf once every item is dragged out or removed. Pinned shelves stay open");
+    public static string RecentShelves => T("最近关闭的置物架", "Recently closed shelves");
+    public static string HistoryEmpty => T("关闭的置物架会保留在这里，可从托盘菜单重新打开", "Closed shelves are kept so you can reopen them from the tray menu");
+    public static string HistoryCount(int count) => T($"已保留 {count} 个，可从托盘菜单重新打开", $"{count} kept. Reopen them from the tray menu");
+    public static string ClearHistory => T("清除记录", "Clear history");
 
-    public static string ActionsPageDescription => T(
-        "显示在置物架底部。点击按钮处理置物架中的项目（展开后只处理选中项）；拖动文件时，也可以直接放到对应按钮上。",
-        "Shown at the bottom of the shelf. Click a button to apply it to the items on the shelf (only the selected ones when the list is expanded), or drop files straight onto a button while dragging.");
-    public static string ActionsOff => T("已关闭快速操作，置物架底部不显示按钮", "Quick actions are off, so the shelf shows no buttons at the bottom");
-    public static string ActionsSelected(int count, int maximum) => T($"已选择 {count} 个，最多 {maximum} 个", $"{count} selected, up to {maximum}");
+    public static string ActionsPageDescription => T("显示在置物架底部。点按处理置物架中的项目，拖动文件时也可以直接放到按钮上。",
+        "Shown at the bottom of a shelf. Click one to use it on the shelf's items, or drop files right onto it.");
+    public static string ActionLayoutHeader => T("按钮数量", "Buttons");
+    public static string ActionLayoutDescription => T("两个时按钮更大，并显示名称", "With two, the buttons are larger and show their names");
+    public static string ActionLayoutOffDescription => T("不显示按钮，整个置物架都可以放入文件", "No buttons, so you can drop files anywhere on the shelf");
+    public static string LayoutOff => T("关闭", "Off");
+    public static string LayoutTwo => T("2 个", "2");
+    public static string LayoutFour => T("4 个", "4");
+    public static string CurrentButtons => T("当前按钮", "Current buttons");
+    public static string ChangeAction => T("更换", "Change");
+    public static string NewCustomActionMenu => T("新建自定义操作…", "New custom action…");
+    public static string CustomActionsSection => T("自定义操作", "Custom actions");
+    public static string CustomActionsHint => T("添加后，在上方“更换”中选择即可放到置物架上", "After adding one, pick it under Change above to put it on the shelf");
+    public static string AddCustomAction => T("添加自定义操作", "Add custom action");
+    public static string EditCustomAction => T("编辑自定义操作", "Edit custom action");
+    public static string EditTooltip => T("编辑", "Edit");
+    public static string DeleteTooltip => T("删除", "Delete");
 
     public static string Theme => T("主题", "Theme");
     public static string ThemeLight => T("浅色", "Light");
@@ -135,8 +170,8 @@ public static class Strings
     public static string OnboardingWelcomeBody => T("一个随叫随到的临时置物架：把文件先放进来，换个窗口、换个文件夹，再从这里拖出去。",
         "A temporary shelf that's there whenever you need it: put files on it, switch to another window or folder, then drag them back out.");
     public static string OnboardingShakeTitle => T("拖住文件，晃一晃", "Drag a file and shake");
-    public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。",
-        "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor.");
+    public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。",
+        "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
     public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点开堆叠后也能多选，只拖走需要的部分。",
         "Release to hold the files. Drag the thumbnail stack to take everything at once, or click the stack to pick only the files you need.");
@@ -158,11 +193,11 @@ public static class Strings
 
     // ───────────── 托盘 ─────────────
 
-    public static string TrayTip => T("DropShelf · 拖住文件并晃动鼠标", "DropShelf · Drag a file and shake the mouse");
+    public static string TrayTip => T("DropShelf · 拖动文件时呼出置物架", "DropShelf · Open a shelf while dragging files");
     public static string StillRunningTitle => T("DropShelf 仍在运行", "DropShelf is still running");
-    public static string StillRunningBody => T("拖住文件并晃动鼠标即可呼出置物架。可从任务栏通知区域重新打开设置。",
-        "Drag a file and shake the mouse to open a shelf. You can reopen Settings from the notification area.");
-    public static string PauseShake => T("暂停晃动呼出", "Pause shake to open");
+    public static string StillRunningBody => T("拖动文件时晃一晃或拖到屏幕边缘，即可呼出置物架。可从通知区域重新打开设置。",
+        "While dragging files, shake or pause at the screen edge to open a shelf. You can reopen Settings from the notification area.");
+    public static string PauseShake => T("暂停自动弹出", "Pause auto open");
 
     // ───────────── 置物架 ─────────────
 
@@ -176,6 +211,35 @@ public static class Strings
     public static string RemoveItemTooltip => T("从置物架移除（不会删除文件）", "Remove from shelf (doesn't delete the file)");
     public static string ReleaseToAdd => T("松开以添加", "Release to add");
     public static string ReleaseToHold => T("松开以暂存", "Release to hold");
+    public static string RestoreLastShelf => T("恢复上次的置物架", "Reopen last shelf");
+
+    public static string DragOutModeTooltip(TransferMode mode) => mode == TransferMode.Copy
+        ? T("拖出时复制文件，点按改为移动", "Dragging out copies files. Click to move instead")
+        : T("拖出时移动文件，点按改为复制", "Dragging out moves files. Click to copy instead");
+
+    public static string DragOutModeChanged(TransferMode mode) => mode == TransferMode.Copy
+        ? T("拖出时将复制文件", "Dragging out now copies files")
+        : T("拖出时将移动文件", "Dragging out now moves files");
+
+    public static string Restored(int added, int unavailable) => T(
+        $"已恢复 {added} 项{(unavailable > 0 ? $"，{unavailable} 项已不存在" : null)}",
+        $"Reopened {Count(added, "item", "items")}{(unavailable > 0 ? $", {unavailable} no longer {(unavailable == 1 ? "exists" : "exist")}" : null)}");
+
+    public static string RestoreUnavailable => T("这些项目已被移动或删除", "These items were moved or deleted");
+
+    public static string HistoryEntryTitle(ShelfHistoryEntry entry)
+    {
+        var first = entry.Items.Count > 0 ? entry.Items[0].Name : Shelf;
+        return entry.Items.Count <= 1 ? first : T($"{first} 等 {entry.Items.Count} 项", $"{first} and {entry.Items.Count - 1} more");
+    }
+
+    public static string HistoryEntryTime(DateTime closedAt)
+    {
+        var time = closedAt.ToString("HH:mm", CultureInfo.InvariantCulture);
+        if (closedAt.Date == DateTime.Today) return time;
+        if (closedAt.Date == DateTime.Today.AddDays(-1)) return T($"昨天 {time}", $"Yesterday {time}");
+        return T($"{closedAt.Month}月{closedAt.Day}日", closedAt.ToString("MMM d", CultureInfo.GetCultureInfo("en-US")));
+    }
 
     public static string PleaseWait => T("请稍候", "Please wait");
     public static string UnsupportedContent => T("不支持此内容", "Not supported");
@@ -272,6 +336,94 @@ public static class Strings
     };
 
     public static string QuickActionTooltip(string label, string description) => T($"{label}：{description}", $"{label}: {description}");
+
+    // ───────────── 自定义操作 ─────────────
+
+    public static string KindFolder => T("文件夹", "Folder");
+    public static string KindCompressImage => T("压缩图片", "Compress image");
+    public static string KindOpenWith => T("用程序打开", "Open with");
+    public static string ActionKind => T("类型", "Type");
+    public static string FolderLabel => T("目标文件夹", "Folder");
+    public static string FolderModeLabel => T("移动还是复制", "Move or copy");
+    public static string ImageSizeLabel => T("最大文件大小", "Maximum file size");
+    public static string ImageSizeHint => T("保存为尽量清晰的 JPG，原图保持不变", "Saves a JPG as sharp as the limit allows. The original stays unchanged");
+    public static string ProgramLabel => T("程序", "Program");
+    public static string ArgumentsLabel => T("参数（可选）", "Arguments (optional)");
+    public static string ArgumentsHint => T("用 {files} 指定文件的位置，留空时放在最后", "Use {files} to place the files. Without it they go at the end");
+    public static string NameLabel => T("按钮名称（可选）", "Button name (optional)");
+    public static string Browse => T("浏览…", "Browse…");
+    public static string Save => T("保存", "Save");
+    public static string Cancel => T("取消", "Cancel");
+    public static string ChooseTargetFolder => T("选择文件夹", "Choose a folder");
+    public static string ChooseProgram => T("选择程序", "Choose a program");
+    public static string ProgramFilter => T("程序|*.exe;*.bat;*.cmd;*.lnk|所有文件|*.*", "Programs|*.exe;*.bat;*.cmd;*.lnk|All files|*.*");
+    public static string ChooseFolderFirst => T("请选择文件夹", "Choose a folder");
+    public static string FolderNotFoundShort => T("找不到这个文件夹", "This folder doesn't exist");
+    public static string ChooseProgramFirst => T("请选择程序", "Choose a program");
+    public static string ProgramNotFoundShort => T("找不到这个程序", "This program doesn't exist");
+    public static string ImageSizeInvalid(int minimum, int maximum) => T($"请输入 {minimum} 到 {maximum} 之间的整数", $"Enter a whole number from {minimum} to {maximum}");
+
+    /// <summary>500 KB、2 MB 等大小文字。</summary>
+    public static string ImageSizeText(int kilobytes) =>
+        kilobytes >= 1024 && kilobytes % 1024 == 0 ? $"{kilobytes / 1024} MB" : $"{kilobytes} KB";
+
+    /// <summary>置物架按钮上的名称：用户填写的名称，或按内容生成的简短名称。</summary>
+    public static string CustomActionLabel(CustomQuickAction action) => action.Name ?? CustomActionAutoName(action);
+
+    public static string CustomActionAutoName(CustomQuickAction action) => action.Kind switch
+    {
+        CustomActionKind.Folder => string.IsNullOrWhiteSpace(action.Folder) ? KindFolder : QuickActionService.GetFolderName(action.Folder),
+        CustomActionKind.CompressImage => $"≤ {ImageSizeText(action.ImageSizeKb)}",
+        _ => string.IsNullOrWhiteSpace(action.ProgramPath) ? KindOpenWith : ShellFileInfo.GetProgramName(action.ProgramPath)
+    };
+
+    /// <summary>设置页和菜单中的完整名称。</summary>
+    public static string CustomActionTitle(CustomQuickAction action)
+    {
+        if (action.Name is { } name) return name;
+        var label = CustomActionAutoName(action);
+        return action.Kind switch
+        {
+            CustomActionKind.Folder => action.FolderMode == TransferMode.Copy
+                ? T($"复制到“{label}”", $"Copy to {label}")
+                : T($"移动到“{label}”", $"Move to {label}"),
+            CustomActionKind.CompressImage => T($"压缩图片到 {ImageSizeText(action.ImageSizeKb)}", $"Compress images to {ImageSizeText(action.ImageSizeKb)}"),
+            _ => T($"用 {label} 打开", $"Open with {label}")
+        };
+    }
+
+    public static string CustomActionDescription(CustomQuickAction action) => action.Kind switch
+    {
+        CustomActionKind.Folder => action.FolderMode == TransferMode.Copy
+            ? T($"复制到 {action.Folder}", $"Copies items to {action.Folder}")
+            : T($"移动到 {action.Folder}", $"Moves items to {action.Folder}"),
+        CustomActionKind.CompressImage => T($"压缩为不超过 {ImageSizeText(action.ImageSizeKb)} 的 JPG，原图保持不变",
+            $"Saves a JPG under {ImageSizeText(action.ImageSizeKb)}. The original stays unchanged"),
+        _ => T($"用 {action.ProgramPath} 打开", $"Opens with {action.ProgramPath}")
+    };
+
+    public static string CustomActionBusyText(CustomQuickAction action) => action.Kind switch
+    {
+        CustomActionKind.Folder => action.FolderMode == TransferMode.Copy ? T("正在复制…", "Copying…") : T("正在移动…", "Moving…"),
+        CustomActionKind.CompressImage => T("正在压缩图片…", "Compressing images…"),
+        _ => T("正在打开…", "Opening…")
+    };
+
+    public static string FolderMissing(string name) => T($"找不到文件夹“{name}”", $"Couldn't find the folder \"{name}\"");
+    public static string CopiedTo(int count, string folder) => T($"已复制 {count} 项到 {folder}", $"Copied {Count(count, "item", "items")} to {folder}");
+    public static string CopyFailed => T("复制失败，原项目保持不变", "Copy failed. The items are unchanged");
+    public static string CopiedPartially(int copied, int failed) => T($"已复制 {copied} 项，{failed} 项未能复制",
+        $"Copied {Count(copied, "item", "items")}; {failed} couldn't be copied");
+    public static string ImageCompressFailed => T("图片压缩失败，原图没有改变", "Couldn't compress the images. The originals are unchanged");
+    public static string NoImagesToCompress => T("没有可压缩的图片", "No images to compress");
+    public static string ImagesAlreadySmall(string size) => T($"图片已小于 {size}，无需压缩", $"The images are already under {size}");
+    public static string ImagesCompressed(int count, string size) => T($"已压缩 {count} 张图片到 {size} 以内",
+        $"Compressed {Count(count, "image", "images")} to under {size}");
+    public static string ImagesSkippedSmall(int count) => T($"，{count} 张本来就符合", $", {count} already {(count == 1 ? "fits" : "fit")}");
+    public static string ImagesFailed(int count) => T($"，{count} 张无法读取", $", {count} couldn't be read");
+    public static string ProgramMissing(string name) => T($"找不到程序“{name}”", $"Couldn't find {name}");
+    public static string OpenedWith(int count, string name) => T($"已用 {name} 打开 {count} 项", $"Opened {Count(count, "item", "items")} with {name}");
+    public static string OpenWithFailed(string name) => T($"{name} 没能打开这些文件", $"{name} couldn't open these files");
 
     public static string NoFilesToProcess => T("没有可操作的文件", "No files to work with");
     public static string OutputFolderUnavailable => T("无法使用输出文件夹，原文件没有改变", "Couldn't use the output folder. The original files are unchanged");

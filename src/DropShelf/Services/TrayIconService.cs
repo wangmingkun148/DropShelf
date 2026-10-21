@@ -76,7 +76,7 @@ public sealed class MessageWindow : IDisposable
     public void Dispose() => _source.Dispose();
 }
 
-public sealed record TrayMenuState(bool GestureEnabled, string Hotkey);
+public sealed record TrayMenuState(bool GestureEnabled, string Hotkey, IReadOnlyList<ShelfHistoryEntry> History);
 
 public sealed class TrayIconService : IDisposable
 {
@@ -88,6 +88,8 @@ public sealed class TrayIconService : IDisposable
     private readonly Action _showWindow;
     private readonly Action _newShelf;
     private readonly Action<bool> _setGestureEnabled;
+    private readonly Action<ShelfHistoryEntry> _restore;
+    private readonly Action _clearHistory;
     private readonly Action _exit;
     private IntPtr _icon;
     private bool _added;
@@ -95,13 +97,15 @@ public sealed class TrayIconService : IDisposable
     private ContextMenu? _menu;
 
     public TrayIconService(MessageWindow window, Func<TrayMenuState> getState, Action showWindow, Action newShelf,
-        Action<bool> setGestureEnabled, Action exit)
+        Action<bool> setGestureEnabled, Action<ShelfHistoryEntry> restore, Action clearHistory, Action exit)
     {
         _window = window;
         _getState = getState;
         _showWindow = showWindow;
         _newShelf = newShelf;
         _setGestureEnabled = setGestureEnabled;
+        _restore = restore;
+        _clearHistory = clearHistory;
         _exit = exit;
         _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
         _icon = LoadTrayIcon();
@@ -196,6 +200,16 @@ public sealed class TrayIconService : IDisposable
         var state = _getState();
         _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         _menu.Items.Add(CreateItem(Strings.NewShelf, "", _newShelf, state.Hotkey));
+        if (state.History.Count > 0)
+        {
+            _menu.Items.Add(Views.HistoryMenu.Create(state.History, _restore, _clearHistory));
+        }
+        else
+        {
+            var empty = CreateItem(Strings.RecentShelves, "\uE81C", () => { });
+            empty.IsEnabled = false;
+            _menu.Items.Add(empty);
+        }
         var pause = CreateItem(Strings.PauseShake, "", () => _setGestureEnabled(!state.GestureEnabled));
         pause.IsCheckable = true;
         pause.IsChecked = !state.GestureEnabled;

@@ -25,6 +25,10 @@ internal static class Program
     private static int _failed;
     private static string _root = string.Empty;
 
+    /// <summary>临时文件夹以外的测试目录：临时文件夹中拖入的文件会被当作聊天软件的临时文件另存一份。</summary>
+    private static readonly string _stableRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DropShelf.Tests", Guid.NewGuid().ToString("N"));
+
     [STAThread]
     private static int Main()
     {
@@ -50,6 +54,7 @@ internal static class Program
         Run("异常设置恢复为默认值", TestSettingsNormalization);
         Run("快捷键解析与显示", TestHotkeyGesture);
         Run("快速操作去重、排序且最多四个", TestQuickActionNormalize);
+        Run("快速操作位置可替换并互换", TestQuickActionSlots);
         Run("置物架项目名称与说明", TestShelfItemText);
         Run("三档尺寸保持比例", TestShelfSizes);
         Run("小窗以鼠标为中心并保持在屏幕内", TestQuickShelfPositioning);
@@ -70,6 +75,7 @@ internal static class Program
         Run("高回报率鼠标的普通移动不会触发", TestHighRateNormalMovement);
         Run("掉头时的细小侧移不会打断手势", TestTurnaroundJitter);
         Run("低级鼠标钩子可以启动和停止", TestGestureServiceLifecycle);
+        Run("拖到屏幕边缘停留后触发", TestEdgeDwellDetector);
 
         // 置物架逻辑
         Run("100 个文件与重复路径", TestOneHundredFilesAndDuplicates);
@@ -80,6 +86,8 @@ internal static class Program
         Run("拖出结果按设置移除或保留", TestApplyDragOut);
         Run("拖出结果判定（含资源管理器优化移动）", TestResolveDragOut);
         Run("移动后更新置物架中的路径", TestApplyMoves);
+        Run("最近关闭的置物架只记录路径和名称", TestShelfHistory);
+        Run("拖出时按设置移动或复制", TestDragOutEffects);
 
         // 拖放与剪贴板数据
         Run("识别拖入内容类型", TestClassifyDropData);
@@ -87,6 +95,8 @@ internal static class Program
         Run("识别来自置物架自身的拖动", TestSourceShelfId);
         Run("拖出数据包含不同文件夹中的全部文件", TestShellDataObject);
         Run("未落盘附件可接收为实际文件", TestVirtualAttachmentImport);
+        Run("聊天软件的临时文件会立即保存一份", TestVolatileFileSnapshot);
+        Run("聊天软件提供的图片格式与富文本图片", TestChatAppImageFormats);
 
         // 文件与快速操作
         Run("同名复制不覆盖", TestCopyDoesNotOverwrite);
@@ -98,6 +108,10 @@ internal static class Program
         Run("移动到所选文件夹并可取消", TestMoveToAction);
         Run("压缩结果放回置物架", TestArchiveAddsOutputToShelf);
         Run("复制文件到剪贴板", TestCopyFilesToClipboard);
+        Run("自定义操作：复制或移动到文件夹", TestCustomFolderAction);
+        Run("自定义操作：压缩图片到指定大小", TestImageCompression);
+        Run("压缩后的图片替换置物架中的原图", TestCompressImageReplacesItems);
+        Run("自定义操作：用程序打开的参数", TestOpenWithArguments);
 
         // 系统集成
         Run("文件使用 Windows 系统缩略图和类型名称", TestShellThumbnail);
@@ -114,6 +128,9 @@ internal static class Program
         Run("教程可以逐步切换", TestOnboardingSteps);
         Run("探针窗口可以显示和隐藏", TestProbeWindow);
 
+        try { if (Directory.Exists(_stableRoot)) Directory.Delete(_stableRoot, true); }
+        catch { }
+
         Console.WriteLine();
         Console.WriteLine($"结果：通过 {_passed}，失败 {_failed}");
         Console.WriteLine($"测试样本保留在：{_root}");
@@ -128,15 +145,26 @@ internal static class Program
         var defaults = service.Load();
         Assert(defaults.GestureEnabled && defaults.RemoveAfterDragOut && defaults.CloseWhenEmpty, "默认开关不正确");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
-        Assert(defaults.QuickActions!.SequenceEqual(QuickActions.Defaults), "默认快速操作不正确");
+        Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
+               defaults.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "默认快速操作不正确");
+        Assert(defaults.CustomActions!.Single().Kind == CustomActionKind.CompressImage, "没有提供压缩图片的示例操作");
+        Assert(defaults.AutoOpenTrigger == AutoOpenTrigger.Both && defaults.EdgeDwell == EdgeDwellTime.Medium, "默认呼出方式不正确");
+        Assert(defaults.DragOutMode == TransferMode.Move, "默认拖出方式应为移动");
         Assert(defaults.Hotkey == "Ctrl+Shift+Space", "默认快捷键不正确");
         Assert(defaults.Language == AppLanguage.System, "默认语言应跟随系统");
 
+        var folder = CreateFolder("settings-custom");
         defaults.MouseGestureSensitivity = GestureSensitivity.Steady;
+        defaults.AutoOpenTrigger = AutoOpenTrigger.Edge;
+        defaults.EdgeDwell = EdgeDwellTime.Long;
+        defaults.DragOutMode = TransferMode.Copy;
         defaults.Theme = AppTheme.Dark;
         defaults.Language = AppLanguage.English;
         defaults.QuickShelfSize = QuickShelfSize.Large;
-        defaults.QuickActions = [QuickActionType.Reveal, QuickActionType.CopyFullPath];
+        defaults.QuickActionLayout = QuickActionLayout.Two;
+        var custom = new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = folder, FolderMode = TransferMode.Copy, Name = "素材" };
+        defaults.CustomActions!.Add(custom);
+        defaults.QuickActionSlots = ["Reveal", custom.Id, "CopyFullPath", "MoveTo"];
         defaults.RemoveAfterDragOut = false;
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
@@ -144,17 +172,25 @@ internal static class Program
 
         var loaded = service.Load();
         Assert(loaded.MouseGestureSensitivity == GestureSensitivity.Steady, "灵敏度未恢复");
+        Assert(loaded.AutoOpenTrigger == AutoOpenTrigger.Edge && loaded.EdgeDwell == EdgeDwellTime.Long, "呼出方式未恢复");
+        Assert(loaded.DragOutMode == TransferMode.Copy, "拖出方式未恢复");
         Assert(loaded.Theme == AppTheme.Dark, "主题未恢复");
         Assert(loaded.Language == AppLanguage.English, "语言未恢复");
         Assert(loaded.QuickShelfSize == QuickShelfSize.Large, "尺寸未恢复");
-        Assert(loaded.QuickActions!.SequenceEqual([QuickActionType.CopyFullPath, QuickActionType.Reveal]), "快速操作未按固定顺序恢复");
+        Assert(loaded.QuickActionLayout == QuickActionLayout.Two, "按钮数量未恢复");
+        Assert(loaded.QuickActionSlots!.SequenceEqual(["Reveal", custom.Id, "CopyFullPath", "MoveTo"]), "快速操作位置没有按原顺序恢复");
+        var restored = loaded.CustomActions!.Single(action => action.Id == custom.Id);
+        Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
+        Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
         Assert(!loaded.RemoveAfterDragOut, "拖出后移除设置未恢复");
         Assert(loaded.Hotkey == "Ctrl+Alt+D", "快捷键未恢复");
         Assert(loaded.HasCompletedFirstRun, "首次运行状态未恢复");
+        Assert(!File.ReadAllText(service.SettingsPath).Contains("\"QuickActions\""), "已迁移的旧版快速操作仍写入了设置文件");
 
         var clone = loaded.Clone();
-        clone.QuickActions!.Clear();
-        Assert(loaded.QuickActions!.Count == 2, "复制设置时共享了快速操作列表");
+        clone.QuickActionSlots!.Clear();
+        clone.CustomActions![0].Name = "changed";
+        Assert(loaded.QuickActionSlots!.Count == 4 && loaded.CustomActions![0].Name != "changed", "复制设置时共享了快速操作");
         File.Delete(service.SettingsPath);
     }
 
@@ -178,14 +214,24 @@ internal static class Program
         Assert(migrated.Version == AppSettings.CurrentVersion, "版本号没有更新");
         Assert(migrated.MouseGestureSensitivity == GestureSensitivity.Responsive && migrated.QuickShelfSize == QuickShelfSize.Small,
             "旧设置没有保留");
-        Assert(migrated.QuickActions!.SequenceEqual(QuickActions.Defaults), "旧的单个快速操作没有迁移为默认组合");
+        Assert(migrated.QuickActionLayout == QuickActionLayout.Four &&
+               migrated.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "旧的单个快速操作没有迁移为默认组合");
         Assert(migrated.WindowLeft == 624 && migrated.HasCompletedFirstRun, "窗口位置或首次运行状态丢失");
+        Assert(migrated.AutoOpenTrigger == AutoOpenTrigger.Both && migrated.DragOutMode == TransferMode.Move, "新增设置没有使用默认值");
 
         File.WriteAllText(service.SettingsPath, """{ "QuickAction": "None" }""");
-        Assert(service.Load().QuickActions!.Count == 0, "关闭快速操作的旧设置没有保持关闭");
+        Assert(service.Load().QuickActionLayout == QuickActionLayout.Off, "关闭快速操作的旧设置没有保持关闭");
 
         File.WriteAllText(service.SettingsPath, """{ "QuickAction": "ConvertPng" }""");
-        Assert(service.Load().QuickActions!.SequenceEqual(QuickActions.Defaults), "已移除的图片转换设置没有恢复默认");
+        Assert(service.Load().QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "已移除的图片转换设置没有恢复默认");
+
+        // 2.0：选了两个操作时改为显示两个大按钮，原来的操作排在前面。
+        File.WriteAllText(service.SettingsPath, """{ "Version": 2, "QuickActions": ["Reveal", "CopyFullPath"] }""");
+        var two = service.Load();
+        Assert(two.QuickActionLayout == QuickActionLayout.Two && two.QuickActionSlots!.Take(2).SequenceEqual(["CopyFullPath", "Reveal"]),
+            "2.0 版的快速操作没有正确迁移");
+        File.WriteAllText(service.SettingsPath, """{ "Version": 2, "QuickActions": [] }""");
+        Assert(service.Load().QuickActionLayout == QuickActionLayout.Off, "2.0 版关闭的快速操作没有保持关闭");
         File.Delete(service.SettingsPath);
     }
 
@@ -194,21 +240,36 @@ internal static class Program
         var invalid = new AppSettings
         {
             MouseGestureSensitivity = (GestureSensitivity)999,
+            AutoOpenTrigger = (AutoOpenTrigger)999,
+            EdgeDwell = (EdgeDwellTime)999,
+            DragOutMode = (TransferMode)999,
             Theme = (AppTheme)999,
             Language = (AppLanguage)999,
             QuickShelfSize = (QuickShelfSize)999,
-            QuickActions = [QuickActionType.ConvertJpeg, QuickActionType.Properties, QuickActionType.Properties, QuickActionType.Reveal,
-                QuickActionType.MoveTo, QuickActionType.CopyFullPath, QuickActionType.CompressZip],
+            QuickActionLayout = (QuickActionLayout)3,
+            QuickActionSlots = ["Properties", "Properties", "ConvertJpeg", "nope"],
+            CustomActions =
+            [
+                new CustomQuickAction { Kind = CustomActionKind.Folder },
+                new CustomQuickAction { Kind = CustomActionKind.CompressImage, ImageSizeKb = 1, Name = "   " },
+                new CustomQuickAction { Kind = (CustomActionKind)999 }
+            ],
             Hotkey = "Shift+A",
             WindowWidth = 10,
             WindowHeight = double.NaN
         };
         var normalized = SettingsService.Normalize(invalid.Clone());
         Assert(normalized.MouseGestureSensitivity == GestureSensitivity.Balanced, "异常灵敏度没有恢复默认值");
+        Assert(normalized.AutoOpenTrigger == AutoOpenTrigger.Both && normalized.EdgeDwell == EdgeDwellTime.Medium, "异常呼出方式没有恢复默认值");
+        Assert(normalized.DragOutMode == TransferMode.Move, "异常拖出方式没有恢复默认值");
         Assert(normalized.Theme == AppTheme.System, "异常主题没有恢复默认值");
         Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
-        Assert(normalized.QuickActions!.Count == 4 && !normalized.QuickActions.Contains(QuickActionType.ConvertJpeg), "快速操作没有规范化");
+        Assert(normalized.QuickActionLayout == QuickActionLayout.Four, "异常按钮数量没有恢复默认值");
+        Assert(normalized.QuickActionSlots!.SequenceEqual(["Properties", "CompressZip", "CopyFullPath", "MoveTo"]), "快速操作位置没有规范化");
+        var image = normalized.CustomActions!.Single();
+        Assert(image.Kind == CustomActionKind.CompressImage && image.ImageSizeKb == CustomQuickAction.MinimumImageSizeKb && image.Name is null,
+            "自定义操作没有规范化");
         Assert(normalized.Hotkey == HotkeyGesture.Default.ToString(), "无效快捷键没有恢复默认值");
         Assert(normalized.WindowWidth >= 760 && normalized.WindowHeight >= 540, "异常窗口尺寸没有恢复默认值");
         Assert((int)invalid.Theme == 999, "规范化时修改了原设置对象");
@@ -233,6 +294,31 @@ internal static class Program
             "快速操作顺序或数量不正确");
         Assert(QuickActions.Normalize(null).Count == 0, "空列表处理不正确");
         Assert(QuickActions.All.All(info => info.Glyph.Length == 1 && info.Label.Length > 0), "快速操作缺少图标或名称");
+
+        var custom = new CustomQuickAction { Kind = CustomActionKind.CompressImage, ImageSizeKb = 200 };
+        var slots = QuickActions.NormalizeSlots(["Reveal", "Reveal", "nope", custom.Id], [custom]);
+        Assert(slots.SequenceEqual(["Reveal", custom.Id, "CompressZip", "CopyFullPath"]), "快速操作位置没有去重或补齐");
+        Assert(QuickActions.NormalizeSlots([custom.Id], []).SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())),
+            "已删除的自定义操作没有被替换");
+        var info = QuickActions.Find(custom.Id, [custom])!;
+        Assert(info.IsCustom && info.Label == "≤ 200 KB" && info.Title == "压缩图片到 200 KB" && info.ShowsProgress, "自定义操作名称不正确");
+        Assert(QuickActions.Available([custom]).Count == QuickActions.All.Count + 1, "可选操作列表不完整");
+    }
+
+    private static void TestQuickActionSlots()
+    {
+        var controller = new AppController(Dispatcher.CurrentDispatcher);
+        var viewModel = new SettingsViewModel(controller);
+        controller.UpdateSettings(settings => settings.QuickActionSlots = ["CompressZip", "CopyFullPath", "MoveTo", "Properties"]);
+        viewModel.AssignSlot(0, "Reveal");
+        Assert(controller.Settings.QuickActionSlots!.SequenceEqual(["Reveal", "CopyFullPath", "MoveTo", "Properties"]), "替换快速操作不正确");
+        viewModel.AssignSlot(3, "Reveal");
+        Assert(controller.Settings.QuickActionSlots!.SequenceEqual(["Properties", "CopyFullPath", "MoveTo", "Reveal"]), "已在其他位置的操作没有互换");
+        viewModel.ActionLayout = QuickActionLayout.Two;
+        Assert(viewModel.VisibleSlots.Count == 2 && viewModel.VisibleSlots[1].Action.Id == "CopyFullPath", "两个按钮时显示的位置不正确");
+        viewModel.ActionLayout = QuickActionLayout.Off;
+        Assert(viewModel.VisibleSlots.Count == 0 && !viewModel.HasActionSlots, "关闭后仍显示按钮位置");
+        File.Delete(new SettingsService().SettingsPath);
     }
 
     private static void TestStringTables()
@@ -496,10 +582,28 @@ internal static class Program
         service.Start();
         Assert(service.IsRunning, "低级鼠标钩子没有安装");
         service.SetSensitivity(GestureSensitivity.Steady);
+        service.SetTrigger(AutoOpenTrigger.Edge);
+        service.SetEdgeDwell(EdgeDwellTime.Short);
         service.Enabled = false;
         service.Dispose();
         Thread.Sleep(100);
         Assert(!service.IsRunning, "停止后钩子仍然存在");
+    }
+
+    private static void TestEdgeDwellDetector()
+    {
+        var detector = new EdgeDwellDetector(AutoOpenTriggers.DwellMilliseconds(EdgeDwellTime.Medium));
+        Assert(!detector.Update(ScreenEdge.Left, 0, 300, 0) && !detector.Update(ScreenEdge.Left, 0, 310, 300) &&
+               detector.Update(ScreenEdge.Left, 0, 320, 600), "在左边缘停留 0.6 秒没有触发");
+        Assert(!detector.Update(ScreenEdge.Left, 0, 300, 1000) && !detector.Update(ScreenEdge.None, 40, 300, 1300) &&
+               !detector.Update(ScreenEdge.Left, 0, 300, 1400) && !detector.Update(ScreenEdge.Left, 0, 300, 1900), "离开边缘后没有重新计时");
+        Assert(!detector.Update(ScreenEdge.Right, 1919, 300, 3000) && !detector.Update(ScreenEdge.Right, 1919, 300 + EdgeDwellDetector.MaximumDrift + 1, 3500) &&
+               !detector.Update(ScreenEdge.Right, 1919, 400, 4000), "沿边缘大幅移动后没有重新计时");
+        Assert(!detector.Update(ScreenEdge.Top, 100, 0, 5000) && !detector.Update(ScreenEdge.Left, 0, 0, 5400), "换到另一条边缘时没有重新计时");
+        detector.DwellMilliseconds = AutoOpenTriggers.DwellMilliseconds(EdgeDwellTime.Short);
+        Assert(detector.Update(ScreenEdge.Left, 0, 0, 5700), "停留时间调整后没有生效");
+        Assert(AutoOpenTriggers.UsesShake(AutoOpenTrigger.Both) && AutoOpenTriggers.UsesEdge(AutoOpenTrigger.Both) &&
+               !AutoOpenTriggers.UsesShake(AutoOpenTrigger.Edge) && !AutoOpenTriggers.UsesEdge(AutoOpenTrigger.Shake), "呼出方式判断不正确");
     }
 
     // ───────────── 置物架逻辑 ─────────────
@@ -624,6 +728,61 @@ internal static class Program
         Assert(viewModel.Items.Count == 1 && viewModel.Items[0].Value.EndsWith("after.txt") && viewModel.Items[0].Id == id, "移动后路径没有更新");
     }
 
+    private static void TestShelfHistory()
+    {
+        var folder = CreateFolder("history");
+        var files = Enumerable.Range(1, 3).Select(index =>
+        {
+            var path = Path.Combine(folder, $"h{index}.txt");
+            File.WriteAllText(path, "x");
+            return path;
+        }).ToArray();
+        var historyPath = Path.Combine(_root, "history-test.json");
+        var history = new ShelfHistoryService(historyPath);
+
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles(files);
+        viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "secret text"), new DroppedEntry(ShelfItemKind.Link, "https://example.com")]);
+        viewModel.AddFiles([files[0] + ".tmp-copy"]);
+        var temporary = Path.Combine(folder, "attachment.txt");
+        File.WriteAllText(temporary, "x");
+        viewModel.AddFiles([temporary], temporary: true);
+
+        Assert(history.Record(viewModel.Items), "没有记录关闭的置物架");
+        var entry = history.Latest!;
+        Assert(entry.Items.Select(item => item.Path).SequenceEqual(files) && entry.Items[0].Name == "h1.txt", "记录的路径或名称不正确");
+        var json = File.ReadAllText(historyPath);
+        Assert(!json.Contains("secret text") && !json.Contains("example.com") && !json.Contains("attachment.txt"), "记录中包含了文本、链接或临时附件");
+        Assert(!history.Record([]), "空置物架不应记录");
+
+        history.Record(viewModel.Items.Reverse());
+        Assert(history.Entries.Count == 1, "相同内容的置物架重复记录");
+        for (var index = 0; index < 12; index++)
+        {
+            var path = Path.Combine(folder, $"single-{index}.txt");
+            File.WriteAllText(path, "x");
+            var single = new ShelfViewModel();
+            single.AddFiles([path]);
+            history.Record(single.Items);
+        }
+        Assert(history.Entries.Count == ShelfHistoryService.Capacity && history.Latest!.Items[0].Name == "single-11.txt", "最多保留 10 个");
+
+        var reloaded = new ShelfHistoryService(historyPath);
+        Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity && reloaded.Latest!.Items[0].Path.EndsWith("single-11.txt"), "重新启动后记录丢失");
+        reloaded.Remove(reloaded.Latest!);
+        Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity - 1, "恢复后记录没有移除");
+        reloaded.Clear();
+        Assert(new ShelfHistoryService(historyPath).Entries.Count == 0, "清除记录没有保存");
+    }
+
+    private static void TestDragOutEffects()
+    {
+        Assert(ShelfDragService.GetAllowedEffects(TransferMode.Move, false) == 7, "移动模式应同时允许复制，便于拖到聊天软件");
+        Assert(ShelfDragService.GetAllowedEffects(TransferMode.Copy, false) == 5, "复制模式不应允许移动");
+        Assert(ShelfDragService.GetAllowedEffects(TransferMode.Move, true) == 3 && ShelfDragService.GetAllowedEffects(TransferMode.Copy, true) == 1,
+            "临时附件不应提供快捷方式");
+    }
+
     // ───────────── 拖放与剪贴板数据 ─────────────
 
     private static void TestClassifyDropData()
@@ -746,6 +905,57 @@ internal static class Program
         Assert(!Directory.Exists(result.CacheDirectories[0]), "关闭置物架后临时附件没有清理");
     }
 
+    private static async Task TestVolatileFileSnapshot()
+    {
+        var temporary = Path.Combine(Path.GetTempPath(), "DropShelf.Tests.Chat", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        var source = Path.Combine(temporary, "聊天图片.png");
+        File.WriteAllBytes(source, CreatePng());
+        var stable = Path.Combine(CreateStableFolder("volatile-stable"), "keep.txt");
+        File.WriteAllText(stable, "keep");
+        Assert(ChatAppCompatibility.IsVolatilePath(source) && !ChatAppCompatibility.IsVolatilePath(stable), "临时文件判断不正确");
+        Assert(ChatAppCompatibility.IsVolatilePath(@"C:\Users\me\Documents\WeChat Files\wxid\FileStorage\Temp\a.jpg") &&
+               !ChatAppCompatibility.IsVolatilePath(@"C:\Users\me\Documents\WeChat Files\wxid\FileStorage\File\a.pdf"), "聊天软件临时目录判断不正确");
+
+        var data = new WpfDataObject();
+        data.SetData(System.Windows.DataFormats.FileDrop, new[] { source, stable });
+        var read = await DropDataReader.ReadAsync(data);
+        Directory.Delete(temporary, true);
+        Assert(read.Entries.Count == 2 && read.Entries[0].IsTemporary && read.Entries[0].Value != source, "临时文件没有保存到置物架缓存");
+        Assert(File.Exists(read.Entries[0].Value) && Path.GetFileName(read.Entries[0].Value) == "聊天图片.png", "来源程序删除临时文件后内容丢失");
+        Assert(!read.Entries[1].IsTemporary && read.Entries[1].Value == stable, "普通文件不应复制");
+        foreach (var cache in read.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+    }
+
+    private static async Task TestChatAppImageFormats()
+    {
+        var mime = new WpfDataObject();
+        mime.SetData("image/png", new MemoryStream(CreatePng()));
+        mime.SetData("UniformResourceLocatorW", new MemoryStream(Encoding.Unicode.GetBytes("https://example.com/a.png\0")));
+        Assert(DropDataReader.Classify(mime) == DropContentKind.Image, "带有图片数据的拖动被当成了链接");
+        var picture = await DropDataReader.ReadAsync(mime);
+        Assert(picture.Entries.Single().Value.EndsWith(".png") && File.Exists(picture.Entries[0].Value), "image/png 图片没有保存");
+        foreach (var cache in picture.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+
+        var folder = CreateStableFolder("chat-images");
+        var image = Path.Combine(folder, "qq-image.png");
+        File.WriteAllBytes(image, CreatePng());
+        var qq = new WpfDataObject();
+        qq.SetData("QQ_Unicode_RichEdit_Format", new MemoryStream(Encoding.UTF8.GetBytes(
+            $"<QQRichEditFormat><Info version=\"1001\"></Info><EditElement type=\"1\" filepath=\"{image}\" shortcut=\"\"></EditElement></QQRichEditFormat>")));
+        qq.SetData(System.Windows.DataFormats.UnicodeText, "[图片]");
+        Assert(DropDataReader.Classify(qq) == DropContentKind.Files, "旧版 QQ 拖出的图片没有识别");
+        Assert((await DropDataReader.ReadAsync(qq)).Entries.Single().Value == image, "旧版 QQ 拖出的图片路径不正确");
+
+        var html = new WpfDataObject();
+        html.SetData(System.Windows.DataFormats.Html, $"<html><body><!--StartFragment--><img src=\"{new Uri(image).AbsoluteUri}\"><!--EndFragment--></body></html>");
+        Assert(DropDataReader.Classify(html) == DropContentKind.Files, "只含本地图片的网页片段没有识别为文件");
+        var withText = new WpfDataObject();
+        withText.SetData(System.Windows.DataFormats.Html, $"<!--StartFragment-->说明<img src=\"{new Uri(image).AbsoluteUri}\"><!--EndFragment-->");
+        withText.SetData(System.Windows.DataFormats.UnicodeText, "说明");
+        Assert(DropDataReader.Classify(withText) == DropContentKind.Text, "带文字的网页片段不应只取图片");
+    }
+
     // ───────────── 文件与快速操作 ─────────────
 
     private static async Task TestCopyDoesNotOverwrite()
@@ -849,7 +1059,7 @@ internal static class Program
         var b = Path.Combine(folder, "b.txt");
         File.WriteAllText(a, "a");
         File.WriteAllText(b, "b");
-        var result = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActionType.CopyFullPath, [a, b], false, IntPtr.Zero));
+        var result = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActions.Get(QuickActionType.CopyFullPath), [a, b], false, IntPtr.Zero));
         Assert(result.Succeeded, result.Message);
         Assert(System.Windows.Clipboard.GetText() == a + Environment.NewLine + b, "剪贴板中的路径不正确");
     }
@@ -861,10 +1071,10 @@ internal static class Program
         var source = Path.Combine(folder, "move-me.txt");
         File.WriteAllText(source, "move");
 
-        var cancelled = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActionType.MoveTo, [source], false, IntPtr.Zero, () => null));
+        var cancelled = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActions.Get(QuickActionType.MoveTo), [source], false, IntPtr.Zero, () => null));
         Assert(cancelled.Cancelled && File.Exists(source), "取消选择文件夹后仍然移动了文件");
 
-        var moved = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActionType.MoveTo, [source], false, IntPtr.Zero, () => destination));
+        var moved = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActions.Get(QuickActionType.MoveTo), [source], false, IntPtr.Zero, () => destination));
         Assert(moved.Succeeded && moved.Moves!.Single().Destination == Path.Combine(destination, "move-me.txt"), moved.Message);
         Assert(!File.Exists(source) && File.ReadAllText(Path.Combine(destination, "move-me.txt")) == "move", "文件没有移动到目标位置");
     }
@@ -878,11 +1088,11 @@ internal static class Program
         viewModel.AddFiles([source]);
         var toasts = new List<ShelfToast>();
         viewModel.ToastRequested += (_, toast) => toasts.Add(toast);
-        var result = await viewModel.RunActionAsync(QuickActionType.CompressZip, viewModel.Items.ToArray(), IntPtr.Zero, null);
+        var result = await viewModel.RunActionAsync(QuickActions.Get(QuickActionType.CompressZip), viewModel.Items.ToArray(), IntPtr.Zero, null);
         Assert(result.Succeeded && viewModel.Items.Count == 2 && viewModel.Items[1].Value.EndsWith("report.zip"), "压缩结果没有放回置物架");
         Assert(toasts.Single().Success && !viewModel.IsBusy, "操作结果没有提示");
 
-        var empty = await new ShelfViewModel().RunActionAsync(QuickActionType.CompressZip, [], IntPtr.Zero, null);
+        var empty = await new ShelfViewModel().RunActionAsync(QuickActions.Get(QuickActionType.CompressZip), [], IntPtr.Zero, null);
         Assert(!empty.Succeeded, "空置物架执行操作没有提示");
     }
 
@@ -896,6 +1106,83 @@ internal static class Program
         Assert(viewModel.CopyToClipboard(viewModel.Items.ToArray()), "复制文件失败");
         var list = System.Windows.Clipboard.GetFileDropList();
         Assert(list.Count == 1 && list[0] == file, "剪贴板中没有文件");
+    }
+
+    private static async Task TestCustomFolderAction()
+    {
+        var folder = CreateFolder("custom-folder-source");
+        var target = CreateFolder("custom-folder-target");
+        var copySource = Path.Combine(folder, "copy.txt");
+        var moveSource = Path.Combine(folder, "move.txt");
+        File.WriteAllText(copySource, "copy");
+        File.WriteAllText(moveSource, "move");
+
+        var copy = QuickActionInfo.ForCustom(new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = target, FolderMode = TransferMode.Copy });
+        var copied = await QuickActionService.ExecuteAsync(new QuickActionRequest(copy, [copySource], false, IntPtr.Zero));
+        Assert(copied.Succeeded && File.Exists(copySource) && File.ReadAllText(Path.Combine(target, "copy.txt")) == "copy", copied.Message);
+
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles([moveSource]);
+        var move = QuickActionInfo.ForCustom(new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = target });
+        var moved = await viewModel.RunActionAsync(move, viewModel.Items.ToArray(), IntPtr.Zero, null);
+        Assert(moved.Succeeded && !File.Exists(moveSource) && viewModel.Items.Single().Value == Path.Combine(target, "move.txt"), moved.Message);
+
+        var again = await viewModel.RunActionAsync(move, viewModel.Items.ToArray(), IntPtr.Zero, null);
+        Assert(again.Succeeded && !File.Exists(Path.Combine(target, "move (2).txt")), "已在目标文件夹中的项目被重命名");
+
+        var missing = QuickActionInfo.ForCustom(new CustomQuickAction { Kind = CustomActionKind.Folder, Folder = Path.Combine(target, "gone") });
+        Assert(!(await QuickActionService.ExecuteAsync(new QuickActionRequest(missing, [copySource], false, IntPtr.Zero))).Succeeded,
+            "目标文件夹不存在时没有提示");
+    }
+
+    private static void TestImageCompression()
+    {
+        var folder = CreateFolder("compress-image");
+        var large = Path.Combine(folder, "photo.png");
+        File.WriteAllBytes(large, CreateNoisyPng(900, 700));
+        const long limit = 80 * 1024;
+        Assert(new FileInfo(large).Length > limit, "测试图片不够大");
+
+        var result = ImageCompressor.Compress(large, limit);
+        Assert(result.Status == ImageCompressionStatus.Compressed && result.Output is not null, "图片没有压缩");
+        Assert(Path.GetFileName(result.Output!) == "photo-80KB.jpg" && new FileInfo(result.Output!).Length <= limit, "压缩后的图片超过了限制");
+        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(result.Output!), System.Windows.Media.Imaging.BitmapCreateOptions.None,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        Assert(decoder is System.Windows.Media.Imaging.JpegBitmapDecoder && decoder.Frames[0].PixelWidth <= 900, "输出不是 JPG");
+        Assert(File.Exists(large), "原图被改动");
+
+        Assert(ImageCompressor.Compress(result.Output!, limit).Status == ImageCompressionStatus.AlreadySmall, "已经足够小的图片不应再压缩");
+        var text = Path.Combine(folder, "note.txt");
+        File.WriteAllText(text, "x");
+        Assert(ImageCompressor.Compress(text, limit).Status == ImageCompressionStatus.NotImage, "非图片文件没有跳过");
+        var broken = Path.Combine(folder, "broken.jpg");
+        File.WriteAllText(broken, new string('x', 200_000));
+        Assert(ImageCompressor.Compress(broken, limit).Status == ImageCompressionStatus.Failed, "损坏的图片没有报告失败");
+        Assert(ImageCompressor.FormatLimit(2 * 1024 * 1024) == "2MB" && Strings.ImageSizeText(2048) == "2 MB", "大小文字不正确");
+    }
+
+    private static async Task TestCompressImageReplacesItems()
+    {
+        var folder = CreateFolder("compress-replace");
+        var large = Path.Combine(folder, "scan.png");
+        File.WriteAllBytes(large, CreateNoisyPng(800, 600));
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles([large]);
+        var id = viewModel.Items[0].Id;
+        var action = QuickActionInfo.ForCustom(new CustomQuickAction { Kind = CustomActionKind.CompressImage, ImageSizeKb = 60 });
+        var result = await viewModel.RunActionAsync(action, viewModel.Items.ToArray(), IntPtr.Zero, null);
+        Assert(result.Succeeded && viewModel.Items.Count == 1 && viewModel.Items[0].Value.EndsWith("scan-60KB.jpg") && viewModel.Items[0].Id == id,
+            $"压缩后的图片没有替换原图：{result.Message}");
+        Assert(File.Exists(large), "原图被删除");
+    }
+
+    private static void TestOpenWithArguments()
+    {
+        Assert(QuickActionService.BuildArguments(null, [@"C:\a b\x.png", @"D:\"]) == "\"C:\\a b\\x.png\" \"D:\\\\\"", "路径引号不正确");
+        Assert(QuickActionService.BuildArguments("-q 80 {files} --out", [@"C:\x.png"]) == "-q 80 \"C:\\x.png\" --out", "{files} 没有替换");
+        Assert(QuickActionService.BuildArguments("--edit", [@"C:\x.png"]) == "--edit \"C:\\x.png\"", "没有 {files} 时文件应放在最后");
+        var program = new CustomQuickAction { Kind = CustomActionKind.OpenWith, ProgramPath = @"C:\Windows\System32\notepad.exe" };
+        Assert(QuickActionInfo.ForCustom(program).Label.Length > 0, "程序名称为空");
     }
 
     // ───────────── 系统集成 ─────────────
@@ -990,23 +1277,37 @@ internal static class Program
         window.Show();
         Pump(150);
         var bar = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("ActionBar")!;
-        Assert(bar.Children.Count == controller.Settings.QuickActions!.Count, "快速操作按钮数量不正确");
+        Assert(bar.Children.Count == (int)controller.Settings.QuickActionLayout, "快速操作按钮数量不正确");
         Assert(window.IsReusable, "空置物架应可复用");
         Assert(window.Title == "DropShelf 置物架 - 置物架", "置物架窗口标题不正确");
+        var modeText = (System.Windows.Controls.TextBlock)window.FindName("TransferModeText")!;
+        Assert(modeText.Text == "移动", "默认拖出方式应显示为移动");
 
         LanguageService.SetMode(AppLanguage.English);
         try
         {
             Assert(((System.Windows.Controls.Button)bar.Children[0]).ToolTip is string tip && tip.StartsWith("Compress: "),
                 "切换语言后快速操作提示没有更新");
-            Assert(window.Title == "DropShelf shelf - Shelf", "切换语言后置物架标题没有更新");
+            Assert(window.Title == "DropShelf shelf - Shelf" && modeText.Text == "Move", "切换语言后置物架文字没有更新");
         }
         finally
         {
             LanguageService.SetMode(AppLanguage.Chinese);
         }
 
-        controller.Settings.QuickActions = [];
+        controller.Settings.DragOutMode = TransferMode.Copy;
+        controller.Settings.QuickActionLayout = QuickActionLayout.Two;
+        window.ApplySettings(controller.Settings);
+        var tiles = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("ActionTiles")!;
+        Assert(modeText.Text == "复制", "拖出方式没有更新");
+        Assert(bar.Children.Count == 2 && ((System.Windows.Controls.Button)bar.Children[0]).Content is DockPanel && tiles.Rows == 1,
+            "两个按钮时应显示名称并使用更大的拖放区域");
+        var twoHeight = window.Height;
+        controller.Settings.QuickActionLayout = QuickActionLayout.Four;
+        window.ApplySettings(controller.Settings);
+        Assert(Math.Abs(window.Height - twoHeight) < 0.5, "两个和四个按钮的置物架高度应相同");
+
+        controller.Settings.QuickActionLayout = QuickActionLayout.Off;
         window.ApplySettings(controller.Settings);
         Assert(bar.Children.Count == 0 && ((FrameworkElement)window.FindName("ActionBarHost")!).Visibility == Visibility.Collapsed,
             "关闭快速操作后仍显示按钮");
@@ -1022,6 +1323,18 @@ internal static class Program
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
         window.Close();
         Assert(window.ViewModel.Items.Count == 0, "关闭后没有释放项目");
+
+        var latest = controller.History.Latest;
+        Assert(latest is not null && latest.Items.Select(item => item.Path).SequenceEqual([file, folder]), "关闭的置物架没有记入最近关闭");
+        controller.Shelves.Restore(latest!);
+        Pump(150);
+        var reopened = controller.Shelves.OpenShelves.Last();
+        Assert(reopened.ViewModel.Items.Count == 2 && controller.History.Entries.All(entry => entry != latest), "最近关闭的置物架没有恢复");
+        Assert(((FrameworkElement)reopened.FindName("RestoreButton")!).Visibility == Visibility.Visible ||
+               controller.History.Latest is null, "有记录时空置物架应显示恢复按钮");
+        reopened.Close();
+        controller.History.Clear();
+        File.Delete(new SettingsService().SettingsPath);
     }
 
     private static void TestMainWindowSettings()
@@ -1034,38 +1347,58 @@ internal static class Program
         Pump(200);
 
         foreach (var name in new[] { "NavList", "ExitApplicationButton", "LanguageSelector", "StartupEnabledBox", "HotkeyEditor",
-                     "GestureEnabledBox", "SensitivitySelector", "ShelfSizeSelector", "ThemeSelector", "ActionOptionsList" })
+                     "GestureEnabledBox", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector", "ShelfSizeSelector",
+                     "DragOutModeSelector", "ClearHistoryButton", "ThemeSelector", "ActionLayoutSelector", "ActionSlotsList",
+                     "CustomActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
         ((System.Windows.Controls.ListBox)window.FindName("NavList")!).SelectedIndex = 1;
         Pump(100);
         Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible, "导航没有切换页面");
 
+        var viewModel = (SettingsViewModel)window.DataContext;
         ((System.Windows.Controls.ListBox)window.FindName("SensitivitySelector")!).SelectedValue = GestureSensitivity.Steady;
+        ((System.Windows.Controls.ListBox)window.FindName("TriggerSelector")!).SelectedValue = AutoOpenTrigger.Edge;
+        Assert(!viewModel.UsesShake && viewModel.UsesEdge, "只用屏幕边缘时不应显示晃动灵敏度");
+        ((System.Windows.Controls.ListBox)window.FindName("EdgeDwellSelector")!).SelectedValue = EdgeDwellTime.Long;
+        ((System.Windows.Controls.ListBox)window.FindName("DragOutModeSelector")!).SelectedValue = TransferMode.Copy;
         ((System.Windows.Controls.ListBox)window.FindName("ShelfSizeSelector")!).SelectedValue = QuickShelfSize.Small;
         ((System.Windows.Controls.ListBox)window.FindName("ThemeSelector")!).SelectedValue = AppTheme.Dark;
+        ((System.Windows.Controls.ListBox)window.FindName("ActionLayoutSelector")!).SelectedValue = QuickActionLayout.Two;
         ((System.Windows.Controls.CheckBox)window.FindName("GestureEnabledBox")!).IsChecked = false;
-        var viewModel = (SettingsViewModel)window.DataContext;
-        var reveal = viewModel.ActionOptions.Single(option => option.Info.Type == QuickActionType.Reveal);
-        Assert(!reveal.CanToggle, "已选满四个时不应再开启新的快速操作");
-        reveal.IsEnabled = true;
-        Assert(!reveal.IsEnabled, "已选满四个时仍开启了新的快速操作");
-        viewModel.ActionOptions.Single(option => option.Info.Type == QuickActionType.Properties).IsEnabled = false;
-        Assert(reveal.CanToggle, "关闭一个后应可以开启其他快速操作");
-        reveal.IsEnabled = true;
+        viewModel.AssignSlot(1, "Reveal");
         viewModel.Hotkey = new HotkeyGesture(ModifierKeys.Control | ModifierKeys.Alt, Key.D);
+
+        viewModel.BeginNewCustomAction(0);
+        Assert(viewModel.IsEditorOpen && ((FrameworkElement)window.FindName("EditorOverlay")!).Visibility == Visibility.Visible, "自定义操作对话框没有打开");
+        var editor = viewModel.Editor!;
+        Assert(!editor.TrySave() && editor.Error is not null, "没有选择文件夹时不应保存");
+        editor.Kind = CustomActionKind.CompressImage;
+        editor.SizeText = "abc";
+        Assert(!editor.TrySave(), "无效大小不应保存");
+        editor.SizeText = "200";
+        Assert(editor.NamePlaceholder == "≤ 200 KB" && editor.TrySave() && !viewModel.IsEditorOpen, "自定义操作没有保存");
 
         var saved = service.Load();
         Assert(saved.MouseGestureSensitivity == GestureSensitivity.Steady, "灵敏度没有立即保存");
+        Assert(saved.AutoOpenTrigger == AutoOpenTrigger.Edge && saved.EdgeDwell == EdgeDwellTime.Long, "呼出方式没有保存");
+        Assert(saved.DragOutMode == TransferMode.Copy, "拖出方式没有保存");
         Assert(saved.QuickShelfSize == QuickShelfSize.Small, "尺寸没有立即保存");
         Assert(saved.Theme == AppTheme.Dark && ThemeService.IsDark, "主题没有保存或生效");
         Assert(!saved.GestureEnabled, "手势开关没有保存");
-        Assert(saved.QuickActions!.Contains(QuickActionType.Reveal) && !saved.QuickActions.Contains(QuickActionType.Properties), "快速操作选择没有保存");
+        Assert(saved.QuickActionLayout == QuickActionLayout.Two && viewModel.VisibleSlots.Count == 2, "按钮数量没有保存");
+        var created = saved.CustomActions!.Single(action => action.ImageSizeKb == 200);
+        Assert(saved.QuickActionSlots![0] == created.Id && saved.QuickActionSlots[1] == "Reveal", "新建的操作没有放到所选位置");
         Assert(saved.Hotkey == "Ctrl+Alt+D", "快捷键没有保存");
-        Assert(viewModel.ActionOptions.Count(option => !option.CanToggle) == 1, "选满四个后其余操作应暂时不可开启");
-        Assert(saved.QuickActions.SequenceEqual([QuickActionType.CompressZip, QuickActionType.CopyFullPath, QuickActionType.MoveTo, QuickActionType.Reveal]),
-            "快速操作顺序不正确");
-        Assert(viewModel.StatusTitle == "晃动呼出已暂停", "状态没有反映暂停");
+        Assert(viewModel.StatusTitle == "自动弹出已暂停", "状态没有反映暂停");
+
+        viewModel.EditCustomAction(created);
+        viewModel.Editor!.Name = "压缩证件照";
+        viewModel.Editor.TrySave();
+        Assert(service.Load().CustomActions!.Single(action => action.Id == created.Id).Name == "压缩证件照", "编辑自定义操作没有保存");
+        viewModel.DeleteCustomAction(created);
+        Assert(service.Load().CustomActions!.All(action => action.Id != created.Id) && !service.Load().QuickActionSlots!.Contains(created.Id),
+            "删除的自定义操作仍在置物架上");
 
         var navList = (System.Windows.Controls.ListBox)window.FindName("NavList")!;
         var overviewLabel = (System.Windows.Controls.TextBlock)((StackPanel)((ListBoxItem)navList.Items[0]).Content).Children[1];
@@ -1075,7 +1408,7 @@ internal static class Program
             ((System.Windows.Controls.ListBox)window.FindName("LanguageSelector")!).SelectedValue = AppLanguage.English;
             Pump(50);
             Assert(service.Load().Language == AppLanguage.English && !LanguageService.IsChinese, "语言设置没有保存或生效");
-            Assert(overviewLabel.Text == "Overview" && viewModel.StatusTitle == "Shake to open is paused", "切换语言后主窗口文字没有更新");
+            Assert(overviewLabel.Text == "Overview" && viewModel.StatusTitle == "Auto open is paused", "切换语言后主窗口文字没有更新");
             viewModel.Language = AppLanguage.Chinese;
             Pump(50);
             Assert(overviewLabel.Text == "概览" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
@@ -1141,6 +1474,21 @@ internal static class Program
         return stream.ToArray();
     }
 
+    /// <summary>随机噪点图片几乎无法压缩，用来确认压缩到指定大小的逻辑。带有透明度，也能检查透明部分的处理。</summary>
+    private static byte[] CreateNoisyPng(int width, int height)
+    {
+        var random = new Random(42);
+        var pixels = new byte[width * height * 4];
+        random.NextBytes(pixels);
+        var bitmap = System.Windows.Media.Imaging.BitmapSource.Create(width, height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null,
+            pixels, width * 4);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     private static void Pump(int milliseconds)
     {
         var end = Environment.TickCount64 + milliseconds;
@@ -1184,6 +1532,13 @@ internal static class Program
     private static string CreateFolder(string name)
     {
         var path = Path.Combine(_root, name);
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static string CreateStableFolder(string name)
+    {
+        var path = Path.Combine(_stableRoot, name);
         Directory.CreateDirectory(path);
         return path;
     }

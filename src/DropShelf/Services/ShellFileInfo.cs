@@ -9,6 +9,7 @@ namespace DropShelf.Services;
 public static class ShellFileInfo
 {
     private static readonly ConcurrentDictionary<string, string?> TypeNames = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, string> ProgramNames = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>取得 Windows 显示的文件类型名称，例如“PDF 文件”。只按扩展名查询，不访问磁盘。</summary>
     public static string GetTypeName(string path)
@@ -31,6 +32,20 @@ public static class ShellFileInfo
             return null;
         }) ?? Strings.FileType(extension.TrimStart('.').ToUpperInvariant());
     }
+
+    /// <summary>程序的显示名称：较短的文件说明（如“Paint”），否则用文件名。</summary>
+    public static string GetProgramName(string path) => ProgramNames.GetOrAdd(path, static program =>
+    {
+        try
+        {
+            if (File.Exists(program) && System.Diagnostics.FileVersionInfo.GetVersionInfo(program).FileDescription?.Trim() is { Length: > 0 and <= 24 } description)
+                return description;
+        }
+        catch
+        {
+        }
+        return Path.GetFileNameWithoutExtension(program);
+    });
 
     public static long? TryGetFileSize(string path)
     {

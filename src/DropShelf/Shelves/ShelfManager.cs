@@ -1,5 +1,7 @@
 using System.Windows.Threading;
 using DropShelf.Interop;
+using DropShelf.Localization;
+using DropShelf.Models;
 using DropShelf.Services;
 using DropShelf.ViewModels;
 using DropShelf.Views;
@@ -11,19 +13,24 @@ public sealed class ShelfManager : IShelfHost
 {
     private readonly Func<AppSettings> _settings;
     private readonly Action _showSettings;
+    private readonly Action<Action<AppSettings>> _updateSettings;
     private readonly Dispatcher _dispatcher;
     private readonly List<ShelfWindow> _open = [];
     private ShelfWindow? _spare;
     private bool _shuttingDown;
 
-    public ShelfManager(Func<AppSettings> settings, Action showSettings, Dispatcher dispatcher)
+    public ShelfManager(Func<AppSettings> settings, Action showSettings, Action<Action<AppSettings>> updateSettings,
+        ShelfHistoryService? history, Dispatcher dispatcher)
     {
         _settings = settings;
         _showSettings = showSettings;
+        _updateSettings = updateSettings;
+        History = history;
         _dispatcher = dispatcher;
     }
 
     public AppSettings Settings => _settings();
+    public ShelfHistoryService? History { get; }
     public IReadOnlyList<ShelfWindow> OpenShelves => _open;
 
     public event EventHandler? ShelvesChanged;
@@ -40,8 +47,11 @@ public sealed class ShelfManager : IShelfHost
         }, DispatcherPriority.ApplicationIdle);
     }
 
-    /// <summary>在光标位置打开置物架；晃动打开的空置物架会被复用，避免越开越多。</summary>
-    public ShelfWindow OpenAt(POINT center, bool openedByGesture, bool activate)
+    /// <summary>
+    /// 在光标位置打开置物架；晃动打开的空置物架会被复用，避免越开越多。
+    /// 从屏幕边缘呼出时传入对应的边缘，置物架会从那一侧滑入。
+    /// </summary>
+    public ShelfWindow OpenAt(POINT center, bool openedByGesture, bool activate, ScreenEdge edge = ScreenEdge.None)
     {
         var shelf = _open.FirstOrDefault(window => window.IsReusable && window.IsVisible);
         if (shelf is null)
@@ -53,7 +63,7 @@ public sealed class ShelfManager : IShelfHost
         }
 
         shelf.ViewModel.OpenedByGesture = openedByGesture;
-        shelf.ShowAt(center, activate);
+        shelf.ShowAt(center, activate, openedByGesture ? edge == ScreenEdge.None ? ShelfEntrance.Shake : ShelfEntrance.FromEdge(edge) : ShelfEntrance.Plain);
         Prewarm();
         return shelf;
     }
@@ -75,6 +85,19 @@ public sealed class ShelfManager : IShelfHost
         });
     }
 
+    /// <summary>重新打开最近关闭的置物架：放进指定的置物架，或在光标处打开一个。已不存在的文件会跳过。</summary>
+    public void Restore(ShelfHistoryEntry entry, ShelfWindow? target = null)
+    {
+        var shelf = target is { IsClosing: false } ? target : OpenAtCursor(activate: true);
+        var summary = shelf.ViewModel.AddFiles(entry.Items.Select(item => item.Path));
+        History?.Remove(entry);
+        shelf.ViewModel.HasInteracted = true;
+        shelf.ViewModel.Notify(summary.Added > 0 ? Strings.Restored(summary.Added, summary.Unavailable) : Strings.RestoreUnavailable,
+            summary.Added > 0);
+    }
+
+    public void SetDragOutMode(TransferMode mode) => _updateSettings(settings => settings.DragOutMode = mode);
+
     public void ApplySettings(AppSettings settings)
     {
         foreach (var shelf in _open) shelf.ApplySettings(settings);
@@ -90,8 +113,10 @@ public sealed class ShelfManager : IShelfHost
         _spare = null;
     }
 
-    public void OnShelfClosed(ShelfWindow window)
+    public void OnShelfClosed(ShelfWindow window, IReadOnlyList<ShelfItem> items)
     {
+        // 关闭时仍有文件的置物架记入最近关闭，误关或退出后可以恢复。
+        if (items.Count > 0) History?.Record(items);
         if (ReferenceEquals(window, _spare)) _spare = null;
         if (_open.Remove(window)) ShelvesChanged?.Invoke(this, EventArgs.Empty);
     }

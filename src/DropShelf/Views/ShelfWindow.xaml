@@ -40,6 +40,17 @@
             </Setter>
         </Style>
 
+        <!-- 标题栏中的“移动/复制”切换 -->
+        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="7,0,9,1" />
+            <Setter Property="Margin" Value="2,0,0,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
+        </Style>
+
         <Style x:Key="StackCardStyle" TargetType="Border">
             <Setter Property="Width" Value="84" />
             <Setter Property="Height" Value="84" />
@@ -83,7 +94,10 @@
     <Border x:Name="Root" Background="{DynamicResource ShelfSolidBrush}">
         <Grid x:Name="Surface" RenderTransformOrigin="0.5,0.4">
             <Grid.RenderTransform>
-                <ScaleTransform x:Name="SurfaceScale" />
+                <TransformGroup>
+                    <ScaleTransform x:Name="SurfaceScale" />
+                    <TranslateTransform x:Name="SurfaceOffset" />
+                </TransformGroup>
             </Grid.RenderTransform>
             <Grid.RowDefinitions>
                 <RowDefinition Height="40" />
@@ -114,9 +128,19 @@
                     <Button x:Name="CollapseButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="13"
                             Content="{StaticResource Glyph.ViewAll}" ToolTip="{l:Loc CollapseTooltip}" Click="OnCollapseClick"
                             Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
+                    <Button x:Name="TransferModeButton" Style="{StaticResource ModeChipStyle}" Click="OnTransferModeClick">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="TransferModeGlyph" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                       VerticalAlignment="Center" Margin="0,1,5,0" />
+                            <TextBlock x:Name="TransferModeText" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
+                <!-- 收起时堆叠下方已显示名称和数量，标题只在展开列表时显示 -->
                 <TextBlock x:Name="TitleText" Text="{Binding Title}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False" />
+                           FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False"
+                           MaxWidth="80" TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="14"
                             Content="{StaticResource Glyph.More}" ToolTip="{l:Loc MoreTooltip}" Click="OnMoreClick" />
@@ -139,6 +163,15 @@
                                    Foreground="{DynamicResource TextPrimaryBrush}" />
                         <TextBlock Text="{l:Loc OrPaste}" Margin="0,3,0,0" FontSize="11" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <Button x:Name="RestoreButton" Style="{StaticResource SubtleButtonStyle}" Margin="0,12,0,0" Padding="8,3,10,4"
+                                MinHeight="0" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}"
+                                Visibility="Collapsed" Click="OnRestoreClick">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.History}" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,1,6,0" />
+                                <TextBlock Text="{l:Loc RestoreLastShelf}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </Grid>
 

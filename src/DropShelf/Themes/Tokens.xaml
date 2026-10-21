@@ -105,4 +105,7 @@
     <sys:String x:Key="Glyph.View">&#xE890;</sys:String>
     <sys:String x:Key="Glyph.Lock">&#xE72E;</sys:String>
     <sys:String x:Key="Glyph.Language">&#xE775;</sys:String>
+    <sys:String x:Key="Glyph.History">&#xE81C;</sys:String>
+    <sys:String x:Key="Glyph.Edit">&#xE70F;</sys:String>
+    <sys:String x:Key="Glyph.Timer">&#xE823;</sys:String>
 </ResourceDictionary>

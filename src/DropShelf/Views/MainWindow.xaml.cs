@@ -1,7 +1,10 @@
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using DropShelf.Interop;
+using DropShelf.Localization;
 using DropShelf.Services;
 using DropShelf.ViewModels;
 
@@ -39,6 +42,49 @@ public partial class MainWindow : Window
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
+
+    private SettingsViewModel ViewModel => (SettingsViewModel)DataContext;
+
+    /// <summary>“更换”菜单：列出全部操作，当前的打勾；最后一项新建自定义操作并直接放到这个位置。</summary>
+    private void OnChangeSlotClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: int index } button) return;
+        var current = ViewModel.VisibleSlots.FirstOrDefault(slot => slot.Index == index)?.Action.Id;
+        var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
+        foreach (var action in ViewModel.AvailableActions)
+        {
+            var item = new MenuItem
+            {
+                Header = new TextBlock { Text = action.Title, MaxWidth = 280, TextTrimming = TextTrimming.CharacterEllipsis },
+                Icon = new TextBlock { Text = action.Glyph },
+                IsChecked = action.Id == current
+            };
+            var id = action.Id;
+            item.Click += (_, _) => ViewModel.AssignSlot(index, id);
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator());
+        var create = new MenuItem { Header = Strings.NewCustomActionMenu, Icon = new TextBlock { Text = "\uE710" }, IsEnabled = ViewModel.CanAddCustomAction };
+        create.Click += (_, _) => ViewModel.BeginNewCustomAction(index);
+        menu.Items.Add(create);
+        menu.IsOpen = true;
+    }
+
+    private void OnBrowseFolderClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Editor is not { } editor) return;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Strings.ChooseTargetFolder, Multiselect = false };
+        if (Directory.Exists(editor.Folder)) dialog.InitialDirectory = editor.Folder;
+        if (dialog.ShowDialog(this) == true) editor.Folder = dialog.FolderName;
+    }
+
+    private void OnBrowseProgramClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Editor is not { } editor) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = Strings.ChooseProgram, Filter = Strings.ProgramFilter, DereferenceLinks = true };
+        if (File.Exists(editor.ProgramPath)) dialog.InitialDirectory = Path.GetDirectoryName(editor.ProgramPath);
+        if (dialog.ShowDialog(this) == true) editor.ProgramPath = dialog.FileName;
+    }
 
     private void OnNavigationChanged(object sender, SelectionChangedEventArgs e)
     {

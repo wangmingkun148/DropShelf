@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -21,8 +22,30 @@ namespace DropShelf.Views;
 public interface IShelfHost
 {
     AppSettings Settings { get; }
-    void OnShelfClosed(ShelfWindow window);
+    ShelfHistoryService? History { get; }
+    void OnShelfClosed(ShelfWindow window, IReadOnlyList<ShelfItem> items);
     void ShowSettings();
+    void SetDragOutMode(TransferMode mode);
+    void Restore(ShelfHistoryEntry entry, ShelfWindow? target);
+}
+
+public enum ShelfEntranceKind
+{
+    /// <summary>快捷键、托盘菜单等主动打开：轻微浮现。</summary>
+    Plain,
+
+    /// <summary>晃动呼出：从光标处弹出。</summary>
+    Shake,
+
+    /// <summary>拖到屏幕边缘呼出：从该边缘滑入。</summary>
+    Edge
+}
+
+public readonly record struct ShelfEntrance(ShelfEntranceKind Kind, ScreenEdge Edge)
+{
+    public static ShelfEntrance Plain => new(ShelfEntranceKind.Plain, ScreenEdge.None);
+    public static ShelfEntrance Shake => new(ShelfEntranceKind.Shake, ScreenEdge.None);
+    public static ShelfEntrance FromEdge(ScreenEdge edge) => new(ShelfEntranceKind.Edge, edge);
 }
 
 public partial class ShelfWindow : Window
@@ -42,6 +65,9 @@ public partial class ShelfWindow : Window
     private readonly DispatcherTimer _leaveCheck;
     private readonly List<(Border Tile, TextBlock Glyph, TextBlock Label, QuickActionInfo Info)> _tiles = [];
     private QuickShelfSize _size;
+    private TransferMode _dragOutMode;
+    private ShelfEntrance _entrance = ShelfEntrance.Plain;
+    private EventHandler? _slideFrame;
     private bool _closing;
     private bool _closed;
     private bool _dragInside;
@@ -79,10 +105,12 @@ public partial class ShelfWindow : Window
         Drop += OnDrop;
         PreviewKeyDown += OnPreviewKeyDown;
         Activated += (_, _) => ViewModel.RefreshAvailability();
+        if (host.History is { } history) history.Changed += OnHistoryChanged;
 
         Surface.Opacity = 0;
         ApplySettings(host.Settings);
         UpdateViews();
+        UpdateRestoreButton();
     }
 
     public ShelfViewModel ViewModel { get; }
@@ -96,13 +124,15 @@ public partial class ShelfWindow : Window
     public void ApplySettings(AppSettings settings)
     {
         _size = settings.QuickShelfSize;
-        ViewModel.Actions = settings.QuickActions?.Select(QuickActions.Get).ToArray() ?? [];
+        _dragOutMode = settings.DragOutMode;
+        ViewModel.Actions = QuickActions.Visible(settings);
         BuildActions();
+        UpdateTransferMode();
         UpdateWindowSize();
     }
 
     /// <summary>以屏幕像素坐标为中心显示置物架。</summary>
-    public void ShowAt(POINT center, bool activate)
+    public void ShowAt(POINT center, bool activate, ShelfEntrance entrance = default)
     {
         ShowActivated = activate;
         WindowPlacement.CenterOn(this, center, Width, Height);
@@ -114,7 +144,11 @@ public partial class ShelfWindow : Window
             Activate();
             Focus();
         }
-        if (!wasVisible) AnimateIn();
+        if (!wasVisible)
+        {
+            _entrance = entrance;
+            AnimateIn(center);
+        }
     }
 
     public void CloseAnimated()
@@ -122,25 +156,42 @@ public partial class ShelfWindow : Window
         if (_closing || _closed) return;
         _closing = true;
         IsHitTestVisible = false;
-        var duration = TimeSpan.FromMilliseconds(120);
-        var fade = new DoubleAnimation(0, duration) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
+        if (!ShelfMotion.Enabled)
+        {
+            Close();
+            return;
+        }
+
+        var duration = ShelfMotion.CloseDuration;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
         fade.Completed += (_, _) => Close();
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, duration));
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, duration));
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
         Surface.BeginAnimation(OpacityProperty, fade);
+
+        // 窗口本身也朝来时的方向退回一小段，避免内容消失后只剩空的背景。
+        if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
+        {
+            var (dx, dy) = ShelfMotion.CloseOffset(_entrance, DpiScale());
+            SlideWindow(rect.Left, rect.Top, rect.Left + dx, rect.Top + dy, duration, ease);
+        }
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        StopSlide();
         _toastTimer.Stop();
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
+        if (_host.History is { } history) history.Changed -= OnHistoryChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        var items = ViewModel.Items.ToArray();
         ViewModel.ReleaseResources();
         base.OnClosed(e);
-        _host.OnShelfClosed(this);
+        _host.OnShelfClosed(this, items);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -163,17 +214,113 @@ public partial class ShelfWindow : Window
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         ViewModel.RefreshText();
+        UpdateTransferMode();
         // 按钮提示和拖入时的操作名称是代码生成的，需要重新创建；正在拖入时等下一次再更新。
         if (!_dragInside) BuildActions();
     }
 
-    private void AnimateIn()
+    private void OnHistoryChanged(object? sender, EventArgs e) => UpdateRestoreButton();
+
+    private void UpdateRestoreButton() =>
+        RestoreButton.Visibility = _host.History?.Latest is not null ? Visibility.Visible : Visibility.Collapsed;
+
+    private void UpdateTransferMode()
     {
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)));
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.92, 1, TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.92, 1, TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
+        var copy = _dragOutMode == TransferMode.Copy;
+        TransferModeGlyph.Text = copy ? "\uE8C8" : "\uE7C2";
+        TransferModeText.Text = copy ? Strings.TransferCopy : Strings.TransferMove;
+        TransferModeButton.ToolTip = Strings.DragOutModeTooltip(_dragOutMode);
+        System.Windows.Automation.AutomationProperties.SetName(TransferModeButton, Strings.DragOutModeTooltip(_dragOutMode));
     }
+
+    private void OnTransferModeClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.HasInteracted = true;
+        var next = _dragOutMode == TransferMode.Move ? TransferMode.Copy : TransferMode.Move;
+        _host.SetDragOutMode(next);
+        ViewModel.Notify(Strings.DragOutModeChanged(next));
+    }
+
+    private void OnRestoreClick(object sender, RoutedEventArgs e)
+    {
+        if (_host.History?.Latest is { } latest) _host.Restore(latest, this);
+    }
+
+    // ───────────── 动画 ─────────────
+
+    /// <summary>
+    /// 弹出动画：窗口从来源方向滑入（亚克力背景随窗口一起移动），内容同时淡入并放大到原尺寸。
+    /// 晃动呼出时内容从光标处弹出，带一点回弹；从屏幕边缘呼出时从该边缘滑入。
+    /// </summary>
+    private void AnimateIn(POINT cursor)
+    {
+        StopSlide();
+        if (!ShelfMotion.Enabled)
+        {
+            Surface.BeginAnimation(OpacityProperty, null);
+            Surface.Opacity = 1;
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        var motion = ShelfMotion.For(_entrance);
+        if (NativeMethods.GetWindowRect(handle, out var rect))
+        {
+            // 内容从光标所在的位置展开。
+            Surface.RenderTransformOrigin = _entrance.Kind == ShelfEntranceKind.Shake && rect.Width > 0 && rect.Height > 0
+                ? new WpfPoint(Math.Clamp((cursor.X - rect.Left) / (double)rect.Width, 0.15, 0.85),
+                    Math.Clamp((cursor.Y - rect.Top) / (double)rect.Height, 0.15, 0.85))
+                : new WpfPoint(0.5, 0.4);
+            var (dx, dy) = ShelfMotion.OpenOffset(_entrance, DpiScale());
+            SlideWindow(rect.Left + dx, rect.Top + dy, rect.Left, rect.Top, motion.Duration, new QuinticEase { EasingMode = EasingMode.EaseOut },
+                () => WindowPlacement.KeepInWorkArea(this));
+        }
+
+        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+    }
+
+    /// <summary>逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。</summary>
+    private void SlideWindow(int fromX, int fromY, int toX, int toY, TimeSpan duration, IEasingFunction ease, Action? completed = null)
+    {
+        StopSlide();
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || (fromX == toX && fromY == toY))
+        {
+            completed?.Invoke();
+            return;
+        }
+
+        MoveWindow(handle, fromX, fromY);
+        var clock = Stopwatch.StartNew();
+        _slideFrame = (_, _) =>
+        {
+            var progress = Math.Min(1, clock.Elapsed.TotalMilliseconds / duration.TotalMilliseconds);
+            var eased = ease.Ease(progress);
+            MoveWindow(handle, (int)Math.Round(fromX + (toX - fromX) * eased), (int)Math.Round(fromY + (toY - fromY) * eased));
+            if (progress < 1) return;
+            StopSlide();
+            completed?.Invoke();
+        };
+        CompositionTarget.Rendering += _slideFrame;
+    }
+
+    private void StopSlide()
+    {
+        if (_slideFrame is null) return;
+        CompositionTarget.Rendering -= _slideFrame;
+        _slideFrame = null;
+    }
+
+    private bool IsSliding => _slideFrame is not null;
+
+    private static void MoveWindow(IntPtr handle, int x, int y) =>
+        NativeMethods.SetWindowPos(handle, IntPtr.Zero, x, y, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+
+    private double DpiScale() => VisualTreeHelper.GetDpi(this).DpiScaleX;
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -206,7 +353,8 @@ public partial class ShelfWindow : Window
             ? Math.Min(Math.Max(ViewModel.Count, 2), 6) * RowHeight + 6
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
-        var tileRows = Math.Ceiling(ViewModel.Actions.Count / (ViewModel.Actions.Count == 1 ? 1.0 : 2.0));
+        // 两个和四个操作的拖放区域占用相同高度：四个排成两行，两个各占满两行的高度。
+        var tileRows = ViewModel.HasActions ? 2 : 0;
         body = Math.Max(body, 66 + tileRows * 50 + 8 - actions);
 
         ActionBarHost.Visibility = ViewModel.HasActions ? Visibility.Visible : Visibility.Collapsed;
@@ -214,7 +362,11 @@ public partial class ShelfWindow : Window
         Width = width;
         Height = HeaderHeight + body + actions;
         if (IsVisible)
-            Dispatcher.BeginInvoke(() => WindowPlacement.KeepInWorkArea(this), DispatcherPriority.Background);
+            Dispatcher.BeginInvoke(() =>
+            {
+                // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
+                if (!IsSliding) WindowPlacement.KeepInWorkArea(this);
+            }, DispatcherPriority.Background);
     }
 
     private void BuildActions()
@@ -222,7 +374,12 @@ public partial class ShelfWindow : Window
         ActionBar.Children.Clear();
         ActionTiles.Children.Clear();
         _tiles.Clear();
-        ActionTiles.Columns = ViewModel.Actions.Count == 1 ? 1 : 2;
+        // 只有两个操作时按钮显示文字，拖放区域的两块也更大。
+        var large = ViewModel.Actions.Count <= 2;
+        ActionTiles.Columns = Math.Max(1, Math.Min(2, ViewModel.Actions.Count));
+        ActionTiles.Rows = large ? 1 : 0;
+        var textFont = (System.Windows.Media.FontFamily)FindResource("TextFont");
+        var iconFont = (System.Windows.Media.FontFamily)FindResource("IconFont");
         foreach (var info in ViewModel.Actions)
         {
             var button = new System.Windows.Controls.Button
@@ -231,10 +388,25 @@ public partial class ShelfWindow : Window
                 Width = double.NaN,
                 Height = 36,
                 Margin = new Thickness(2, 0, 2, 0),
-                Content = info.Glyph,
                 Tag = info,
-                ToolTip = Strings.QuickActionTooltip(info.Label, info.Description)
+                ToolTip = Strings.QuickActionTooltip(info.Title, info.Description)
             };
+            button.Content = large
+                ? (object)new DockPanel
+                {
+                    HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                    Margin = new Thickness(2, 0, 2, 0),
+                    Children =
+                    {
+                        new TextBlock { Text = info.Glyph, FontSize = 15, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 6, 0) },
+                        new TextBlock
+                        {
+                            Text = info.Label, FontFamily = textFont, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+                            TextTrimming = TextTrimming.CharacterEllipsis
+                        }
+                    }
+                }
+                : info.Glyph;
             System.Windows.Automation.AutomationProperties.SetName(button, info.Label);
             button.Click += OnActionClick;
             ActionBar.Children.Add(button);
@@ -242,24 +414,32 @@ public partial class ShelfWindow : Window
             var glyph = new TextBlock
             {
                 Text = info.Glyph,
-                FontFamily = (System.Windows.Media.FontFamily)FindResource("IconFont"),
-                FontSize = 15,
+                FontFamily = iconFont,
+                FontSize = large ? 22 : 15,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 1, 7, 0)
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                Margin = large ? new Thickness(0, 0, 0, 8) : new Thickness(0, 1, 7, 0)
             };
-            var label = new TextBlock { Text = info.Label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var label = new TextBlock
+            {
+                Text = info.Label,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            var content = new DockPanel { HorizontalAlignment = System.Windows.HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            DockPanel.SetDock(glyph, large ? Dock.Top : Dock.Left);
+            content.Children.Add(glyph);
+            content.Children.Add(label);
             var tile = new Border
             {
-                Height = 44,
+                Height = large ? 94 : 44,
                 Margin = new Thickness(3),
-                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(6, 0, 6, 0),
+                CornerRadius = new CornerRadius(large ? 10 : 8),
                 BorderThickness = new Thickness(1),
-                Child = new StackPanel
-                {
-                    Orientation = System.Windows.Controls.Orientation.Horizontal,
-                    HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                    Children = { glyph, label }
-                }
+                Child = content
             };
             _tiles.Add((tile, glyph, label, info));
             ActionTiles.Children.Add(tile);
@@ -392,7 +572,7 @@ public partial class ShelfWindow : Window
                     foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.DeleteCacheAsync(cache);
                     return;
                 }
-                var result = await ViewModel.RunActionAsync(action.Type, files, new WindowInteropHelper(this).Handle, PickFolder);
+                var result = await ViewModel.RunActionAsync(action, files, new WindowInteropHelper(this).Handle, PickFolder);
                 if (result.Succeeded) await CloseIfStillEmptyAsync();
             }
             else
@@ -481,7 +661,7 @@ public partial class ShelfWindow : Window
         DragOutResult result;
         try
         {
-            result = ShelfDragService.DoDragDrop(this, items, ViewModel.Id);
+            result = ShelfDragService.DoDragDrop(this, items, ViewModel.Id, _dragOutMode);
         }
         finally
         {
@@ -490,6 +670,8 @@ public partial class ShelfWindow : Window
 
         ViewModel.HasInteracted = true;
         if (result == DragOutResult.Cancelled) return;
+        // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
+        if (items.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
         ViewModel.ApplyDragOut(items, result, _host.Settings.RemoveAfterDragOut);
         if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty && !ViewModel.IsPinned) CloseAnimated();
     }
@@ -634,7 +816,7 @@ public partial class ShelfWindow : Window
     private async void OnActionClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not QuickActionInfo info || ViewModel.IsBusy) return;
-        await ViewModel.RunActionAsync(info.Type, GetTargets(), new WindowInteropHelper(this).Handle, PickFolder);
+        await ViewModel.RunActionAsync(info, GetTargets(), new WindowInteropHelper(this).Handle, PickFolder);
     }
 
     private string? PickFolder()
@@ -652,6 +834,7 @@ public partial class ShelfWindow : Window
         if (e.ButtonState != MouseButtonState.Pressed) return;
         try
         {
+            StopSlide();
             ViewModel.HasInteracted = true;
             DragMove();
         }
@@ -673,6 +856,8 @@ public partial class ShelfWindow : Window
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(new Separator());
+        if (_host.History is { Entries.Count: > 0 } history)
+            menu.Items.Add(HistoryMenu.Create(history.Entries, entry => _host.Restore(entry, ViewModel.IsEmpty ? this : null), history.Clear));
         menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());

@@ -66,6 +66,24 @@ internal struct MSG
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct MOUSEINPUT
+{
+    public int X;
+    public int Y;
+    public uint MouseData;
+    public uint Flags;
+    public uint Time;
+    public IntPtr ExtraInfo;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct INPUT
+{
+    public uint Type;
+    public MOUSEINPUT Mouse;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct MARGINS
 {
     public int Left;
@@ -181,7 +199,9 @@ internal static class NativeMethods
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_FRAMECHANGED = 0x0020;
 
+    public const uint MONITOR_DEFAULTTONULL = 0;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
+    public const int WM_TIMER = 0x0113;
     public const int MDT_EFFECTIVE_DPI = 0;
 
     public const int SM_CXSMICON = 49;
@@ -254,6 +274,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromPoint(POINT point, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern UIntPtr SetTimer(IntPtr window, UIntPtr id, uint elapse, IntPtr timerProc);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool KillTimer(IntPtr window, UIntPtr id);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -426,6 +453,26 @@ internal static class NativeMethods
 
     [DllImport("shell32.dll")]
     public static extern int SHGetKnownFolderPath(ref Guid folderId, uint flags, IntPtr token, out IntPtr path);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+    /// <summary>
+    /// 发送一次零距离的鼠标移动。光标静止时，正在拖放的程序要等到下一次移动才会发现光标下出现了新窗口；
+    /// 从屏幕边缘呼出置物架时光标往往停着不动，用它让拖放立即交给新窗口。
+    /// </summary>
+    public static void NudgeMouse()
+    {
+        try
+        {
+            var input = new INPUT { Type = 0, Mouse = new MOUSEINPUT { Flags = 0x0001 } };
+            SendInput(1, [input], Marshal.SizeOf<INPUT>());
+        }
+        catch
+        {
+            // 无法发送时等待用户移动鼠标即可。
+        }
+    }
 
     public static bool IsButtonPhysicallyDown() =>
         GetAsyncKeyState(VK_LBUTTON) < 0 || GetAsyncKeyState(VK_RBUTTON) < 0;

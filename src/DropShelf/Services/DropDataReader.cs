@@ -39,7 +39,15 @@ public sealed record DropReadResult(
 public static class DropDataReader
 {
     public const string ShelfIdFormat = "DropShelf.ShelfId";
+    private const string DibV5Format = "Format17";
     private static readonly string[] UrlFormats = ["UniformResourceLocatorW", "UniformResourceLocator", "text/x-moz-url"];
+    private static readonly string[] QqRichEditFormats = ["QQ_Unicode_RichEdit_Format", "QQ_RichEdit_Format"];
+
+    /// <summary>以压缩数据提供的图片格式及保存时使用的扩展名，按优先顺序排列。</summary>
+    private static readonly (string Format, string Extension)[] EncodedImageFormats =
+    [
+        ("PNG", ".png"), ("image/png", ".png"), ("JFIF", ".jpg"), ("image/jpeg", ".jpg"), ("GIF", ".gif"), ("image/gif", ".gif")
+    ];
 
     public static string? GetSourceShelfId(WpfDataObject data)
     {
@@ -58,6 +66,7 @@ public static class DropDataReader
         try
         {
             if (data.GetDataPresent(WpfDataFormats.FileDrop, false)) return DropContentKind.Files;
+            if (ReadSingleFileName(data) is not null) return DropContentKind.Files;
             var hasUrl = UrlFormats.Any(format => data.GetDataPresent(format, false));
             if (VirtualFileDropService.CanImport(data))
             {
@@ -66,10 +75,10 @@ public static class DropDataReader
                     return DropContentKind.Link;
                 return DropContentKind.VirtualFiles;
             }
+            // 聊天软件拖出图片时常同时提供图片地址，有图片数据时优先当作图片。
+            if (HasImageData(data)) return DropContentKind.Image;
+            if (ReadLocalImagePaths(data).Count > 0) return DropContentKind.Files;
             if (hasUrl) return DropContentKind.Link;
-            if (data.GetDataPresent("PNG", false) || data.GetDataPresent(WpfDataFormats.Bitmap, false) ||
-                data.GetDataPresent(WpfDataFormats.Dib, false))
-                return DropContentKind.Image;
             if (data.GetDataPresent(WpfDataFormats.UnicodeText, false) || data.GetDataPresent(WpfDataFormats.Text, false))
                 return DropContentKind.Text;
         }
@@ -96,7 +105,7 @@ public static class DropDataReader
         switch (kind)
         {
             case DropContentKind.Files:
-                return ReadFileDrop(data);
+                return await ReadFileDropAsync(data);
 
             case DropContentKind.VirtualFiles:
                 var imported = await VirtualFileDropService.ImportAsync(data);
@@ -135,47 +144,152 @@ public static class DropDataReader
         Uri.TryCreate(text, UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
-    private static DropReadResult ReadFileDrop(WpfDataObject data)
+    /// <summary>
+    /// 读取文件路径。来源程序放在临时文件夹中的文件（聊天软件拖出的图片和附件）会在拖放结束后被删除，
+    /// 必须在 Drop 回调返回前打开它们，再在后台复制到 DropShelf 自己的缓存中。
+    /// </summary>
+    private static async Task<DropReadResult> ReadFileDropAsync(WpfDataObject data)
     {
-        if (data.GetData(WpfDataFormats.FileDrop, false) is not string[] paths || paths.Length == 0)
-            return DropReadResult.Failed(Strings.NoFilesRead);
+        var paths = data.GetData(WpfDataFormats.FileDrop, false) is string[] { Length: > 0 } dropped
+            ? dropped
+            : ReadSingleFileName(data) is { } single ? [single] : ReadLocalImagePaths(data).ToArray();
+        paths = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        if (paths.Length == 0) return DropReadResult.Failed(Strings.NoFilesRead);
+
         var entries = paths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => new DroppedEntry(Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File, path))
             .ToArray();
-        return new DropReadResult(entries, [], 0, null);
+        var snapshots = OpenVolatileFiles(entries);
+        if (snapshots.Count == 0) return new DropReadResult(entries, [], 0, null);
+
+        var cacheDirectory = VirtualFileDropService.CreateCacheDirectory();
+        await Task.Run(() =>
+        {
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (index, stream) in snapshots)
+            {
+                var source = entries[index].Value;
+                var destination = Path.Combine(cacheDirectory, VirtualFileDropService.CreateUniqueSafeName(Path.GetFileName(source), usedNames));
+                try
+                {
+                    using (stream)
+                    using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
+                        stream.CopyTo(output);
+                    try { File.SetLastWriteTimeUtc(destination, File.GetLastWriteTimeUtc(source)); }
+                    catch { }
+                    entries[index] = new DroppedEntry(ShelfItemKind.File, destination, IsTemporary: true);
+                }
+                catch (Exception exception)
+                {
+                    // 复制失败时保留原路径，文件只要还在就仍然可用。
+                    LogService.Error($"保存来源程序的临时文件失败：{source}", exception);
+                    try { if (File.Exists(destination)) File.Delete(destination); } catch { }
+                }
+            }
+        });
+        return new DropReadResult(entries, [cacheDirectory], 0, null);
     }
+
+    private static List<(int Index, FileStream Stream)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries)
+    {
+        var opened = new List<(int, FileStream)>();
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var path = entries[index].Value;
+            if (entries[index].Kind != ShelfItemKind.File || !ChatAppCompatibility.IsVolatilePath(path)) continue;
+            try
+            {
+                if (new FileInfo(path).Length > ChatAppCompatibility.MaximumSnapshotBytes) continue;
+                opened.Add((index, new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920,
+                    FileOptions.SequentialScan)));
+            }
+            catch
+            {
+                // 打不开的文件按原路径处理。
+            }
+        }
+        return opened;
+    }
+
+    /// <summary>只提供单个文件名（FileNameW / FileName）的来源程序。</summary>
+    private static string? ReadSingleFileName(WpfDataObject data)
+    {
+        try
+        {
+            var path = data.GetDataPresent("FileNameW", false) ? ReadString(data.GetData("FileNameW", false), unicode: true)
+                : data.GetDataPresent("FileName", false) ? ReadString(data.GetData("FileName", false), unicode: false)
+                : null;
+            return !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path)) ? path : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>旧版 QQ 的富文本或只含图片的网页片段中，仍然存在的本地图片。</summary>
+    private static IReadOnlyList<string> ReadLocalImagePaths(WpfDataObject data)
+    {
+        try
+        {
+            foreach (var format in QqRichEditFormats)
+            {
+                if (!data.GetDataPresent(format, false)) continue;
+                var xml = data.GetData(format, false) is string text ? text : ChatAppCompatibility.DecodeRichEdit(ReadBytes(data.GetData(format, false)));
+                var images = ChatAppCompatibility.ParseQqRichEdit(xml).Where(File.Exists).ToArray();
+                if (images.Length > 0) return images;
+            }
+            if (data.GetDataPresent(WpfDataFormats.Html, false) && data.GetData(WpfDataFormats.Html, false) is string html)
+                return ChatAppCompatibility.ParseHtmlLocalImages(html).Where(File.Exists).ToArray();
+        }
+        catch
+        {
+            // 富文本格式不规范时按其他内容处理。
+        }
+        return [];
+    }
+
+    private static bool HasImageData(WpfDataObject data) =>
+        EncodedImageFormats.Any(format => data.GetDataPresent(format.Format, false)) ||
+        data.GetDataPresent(WpfDataFormats.Bitmap, false) ||
+        data.GetDataPresent(WpfDataFormats.Dib, false) ||
+        data.GetDataPresent(DibV5Format, false);
 
     private static async Task<DropReadResult> ReadImageAsync(WpfDataObject data)
     {
-        byte[]? pngBytes = null;
+        byte[]? encoded = null;
+        var extension = ".png";
         BitmapSource? bitmap = null;
         try
         {
-            if (data.GetDataPresent("PNG", false))
-                pngBytes = ReadBytes(data.GetData("PNG", false));
-            if (pngBytes is null && data.GetData(WpfDataFormats.Bitmap, true) is BitmapSource source)
+            foreach (var (format, formatExtension) in EncodedImageFormats)
             {
-                bitmap = source;
-                if (bitmap.CanFreeze) bitmap.Freeze();
+                if (!data.GetDataPresent(format, false)) continue;
+                encoded = ReadBytes(data.GetData(format, false));
+                if (encoded is not { Length: > 0 }) continue;
+                extension = formatExtension;
+                break;
             }
+            if (encoded is null && data.GetData(WpfDataFormats.Bitmap, true) is BitmapSource source) bitmap = source;
+            bitmap ??= DecodeDib(data, DibV5Format) ?? DecodeDib(data, WpfDataFormats.Dib);
+            if (bitmap is { CanFreeze: true }) bitmap.Freeze();
         }
         catch (Exception exception)
         {
             LogService.Error("读取拖入的图片失败", exception);
         }
 
-        if (pngBytes is null && bitmap is null) return DropReadResult.Failed(Strings.NoImageRead);
+        if (encoded is null && bitmap is null) return DropReadResult.Failed(Strings.NoImageRead);
 
         var cacheDirectory = VirtualFileDropService.CreateCacheDirectory();
-        var path = Path.Combine(cacheDirectory, $"{Strings.DroppedImageName} {DateTime.Now:yyyy-MM-dd HH.mm.ss}.png");
+        var path = Path.Combine(cacheDirectory, $"{Strings.DroppedImageName} {DateTime.Now:yyyy-MM-dd HH.mm.ss}{extension}");
         try
         {
             await Task.Run(() =>
             {
-                if (pngBytes is not null)
+                if (encoded is not null)
                 {
-                    File.WriteAllBytes(path, pngBytes);
+                    File.WriteAllBytes(path, encoded);
                     return;
                 }
                 var encoder = new PngBitmapEncoder();
@@ -190,6 +304,38 @@ public static class DropDataReader
             LogService.Error("保存拖入的图片失败", exception);
             await VirtualFileDropService.DeleteCacheAsync(cacheDirectory);
             return DropReadResult.Failed(Strings.ImageSaveFailed);
+        }
+    }
+
+    /// <summary>
+    /// 把 DIB 数据（位图信息头 + 像素）补上 BMP 文件头后解码。部分程序只提供 CF_DIBV5，WPF 不会自动转换。
+    /// </summary>
+    private static BitmapSource? DecodeDib(WpfDataObject data, string format)
+    {
+        try
+        {
+            if (!data.GetDataPresent(format, false) || ReadBytes(data.GetData(format, false)) is not { Length: > 40 } dib) return null;
+            var headerSize = BitConverter.ToInt32(dib, 0);
+            var bitCount = BitConverter.ToInt16(dib, 14);
+            var compression = BitConverter.ToInt32(dib, 16);
+            var colorsUsed = BitConverter.ToInt32(dib, 32);
+            var paletteEntries = colorsUsed > 0 ? colorsUsed : bitCount <= 8 ? 1 << bitCount : 0;
+            // BI_BITFIELDS 且只有基本信息头时，三个颜色掩码紧跟在信息头后面。
+            var masks = headerSize == 40 && compression == 3 ? 12 : 0;
+            var offset = 14 + headerSize + masks + paletteEntries * 4;
+
+            var file = new byte[14 + dib.Length];
+            file[0] = (byte)'B';
+            file[1] = (byte)'M';
+            BitConverter.GetBytes(file.Length).CopyTo(file, 2);
+            BitConverter.GetBytes(offset).CopyTo(file, 10);
+            dib.CopyTo(file, 14);
+            var decoder = new BmpBitmapDecoder(new MemoryStream(file), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            return decoder.Frames[0];
+        }
+        catch
+        {
+            return null;
         }
     }
 
