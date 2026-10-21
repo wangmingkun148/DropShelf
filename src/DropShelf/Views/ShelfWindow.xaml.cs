@@ -78,6 +78,7 @@ public partial class ShelfWindow : Window
     private DropContentKind _dragKind;
     private QuickActionInfo? _hoveredAction;
     private bool _tilesExpanded;
+    private bool _layoutPending;
     private string? _lastDescription;
     private long _lastDragOverTick;
     private WpfPoint _pressPoint;
@@ -322,8 +323,17 @@ public partial class ShelfWindow : Window
         {
             case nameof(ShelfViewModel.Count):
             case nameof(ShelfViewModel.IsExpanded):
-                UpdateViews();
-                UpdateWindowSize();
+                // 数量变化时项目集合还在通知列表的途中；此时改窗口大小会立即重新布局，
+                // 列表与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
+                if (_layoutPending) break;
+                _layoutPending = true;
+                Dispatcher.BeginInvoke(() =>
+                {
+                    _layoutPending = false;
+                    if (IsClosing) return;
+                    UpdateViews();
+                    UpdateWindowSize();
+                });
                 break;
             case nameof(ShelfViewModel.Actions):
                 BuildActions();

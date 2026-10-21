@@ -1347,6 +1347,16 @@ internal static class Program
         Pump(100);
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
+        // 展开时继续放入项目：窗口变高要等列表收到新增项目之后，否则布局会抛出异常。
+        var twoRowsHeight = window.Height;
+        var extra = Path.Combine(folder, "b.txt");
+        File.WriteAllText(extra, "y");
+        window.ViewModel.AddFiles([extra]);
+        Pump(100);
+        Assert(((System.Windows.Controls.ListBox)window.FindName("ItemsList")!).Items.Count == 3 && window.Height > twoRowsHeight, "展开时放入项目后列表或高度没有更新");
+        window.ViewModel.Remove([window.ViewModel.Items[^1]]);
+        Pump(100);
+
         // 压缩生成的压缩包放进旁边新开的置物架，不混进原来的项目。
         controller.Settings.QuickActionLayout = QuickActionLayout.Four;
         window.ApplySettings(controller.Settings);

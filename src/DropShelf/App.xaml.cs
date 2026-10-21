@@ -124,7 +124,7 @@ public partial class App : System.Windows.Application
     {
         e.Handled = true;
         var now = Environment.TickCount64;
-        var error = e.Exception.ToString();
+        var error = $"{e.Exception.GetType().FullName}: {e.Exception.Message}";
         var repeated = error == _lastError && now - _lastErrorTick < ErrorQuietMilliseconds;
         _lastError = error;
         _lastErrorTick = now;
