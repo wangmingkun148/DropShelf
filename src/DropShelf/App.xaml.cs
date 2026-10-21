@@ -30,12 +30,10 @@ public partial class App : System.Windows.Application
         if (!_ownsSingleInstanceMutex)
         {
             // 已在运行：“发送到”或拖到图标上的文件交给现有实例，否则唤醒主窗口。
-            var forwarded = false;
-            if (AppController.IsShelfRequest(e.Args))
-            {
-                NativeMethods.AllowSetForegroundWindow(-1);
-                forwarded = MessageWindow.SendArguments(AppController.MessageWindowTitle, e.Args);
-            }
+            // 先允许现有实例切到前台，否则它的窗口可能打开在其他窗口后面，看起来像没有反应。
+            NativeMethods.AllowSetForegroundWindow(-1);
+            var forwarded = AppController.IsShelfRequest(e.Args) &&
+                            MessageWindow.SendArguments(AppController.MessageWindowTitle, e.Args);
             if (!forwarded) SignalExistingInstance();
             Shutdown();
             return;

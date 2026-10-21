@@ -4,7 +4,7 @@ DropShelf 是一个 Windows 临时文件置物架。拖住文件并晃动鼠标�
 
 ## 使用方法
 
-1. 运行 `artifacts\installer\DropShelf-Setup-2.0.3.exe` 安装；也可以直接运行便携版 `artifacts\win-x64\DropShelf.exe`。
+1. 运行 `artifacts\installer\DropShelf-Setup-2.0.4.exe` 安装；也可以直接运行便携版 `artifacts\win-x64\DropShelf.exe`。
 2. 关闭主窗口后，程序继续在任务栏通知区域运行。
 3. 在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速来回晃动鼠标，置物架会出现在光标处；也可以拖到屏幕左、右或上边缘停一下，置物架会从边缘滑入。
 4. 把文件放进置物架。之后拖动缩略图堆叠，可一次带走全部文件；在右上角“⋯”菜单中展开列表，可以单独或多选拖出。
