@@ -48,6 +48,8 @@ public static class ImageCompressor
                 return new ImageCompressionResult(source, null, ImageCompressionStatus.AlreadySmall);
 
             var bytes = EncodeWithinLimit(Load(source), maximumBytes);
+            // 极窄或极小的图片缩到最小尺寸仍然过大时，不保存一个名不副实的文件。
+            if (bytes.Length > maximumBytes) return new ImageCompressionResult(source, null, ImageCompressionStatus.Failed);
             var directory = string.IsNullOrWhiteSpace(outputDirectory)
                 ? Path.GetDirectoryName(source) ?? throw new IOException("无法确定输出文件保存位置")
                 : outputDirectory;
@@ -108,7 +110,9 @@ public static class ImageCompressor
 
             // 文件大小与像素数大致成正比，按面积比例缩小并多留一点余量。
             var ratio = Math.Clamp(Math.Sqrt((double)maximumBytes / smallest.Length) * 0.92, 0.2, 0.92);
-            if (current.PixelWidth * ratio < MinimumEdge || current.PixelHeight * ratio < MinimumEdge) return smallest;
+            // 两边都已经很小时停止；细长的图片允许短边继续缩小。
+            if (current.PixelWidth * ratio < MinimumEdge && current.PixelHeight * ratio < MinimumEdge) return smallest;
+            if (current.PixelWidth * ratio < 1 || current.PixelHeight * ratio < 1) return smallest;
             current = Resize(current, ratio);
         }
         return Encode(current, MinimumQuality);

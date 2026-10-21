@@ -268,8 +268,15 @@ public sealed class SettingsViewModel : ObservableObject
     public void EditCustomAction(CustomQuickAction action) =>
         Editor = new CustomActionEditorViewModel(action.Clone(), isNew: false, null, SaveCustomAction, () => Editor = null);
 
+    /// <summary>删除自定义操作；它所在的位置原地换成一个未使用的内置操作，其他按钮不移动。</summary>
     public void DeleteCustomAction(CustomQuickAction action) => Update(settings =>
     {
+        var slots = QuickActions.NormalizeSlots(settings.QuickActionSlots, settings.CustomActions);
+        var index = slots.IndexOf(action.Id);
+        if (index >= 0)
+            slots[index] = QuickActions.Defaults.Select(type => type.ToString()).Concat(QuickActions.All.Select(info => info.Id))
+                .First(id => !slots.Contains(id));
+        settings.QuickActionSlots = slots;
         settings.CustomActions = (settings.CustomActions ?? []).Where(custom => custom.Id != action.Id).ToList();
     });
 

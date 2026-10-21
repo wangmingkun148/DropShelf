@@ -39,7 +39,8 @@ public sealed record DropReadResult(
 public static class DropDataReader
 {
     public const string ShelfIdFormat = "DropShelf.ShelfId";
-    private const string DibV5Format = "Format17";
+    // 按编号取得 CF_DIBV5 的名称；直接用名称 "Format17" 查询会注册出一个同名的自定义格式。
+    private static readonly string DibV5Format = WpfDataFormats.GetDataFormat(17).Name;
     private static readonly string[] UrlFormats = ["UniformResourceLocatorW", "UniformResourceLocator", "text/x-moz-url"];
     private static readonly string[] QqRichEditFormats = ["QQ_Unicode_RichEdit_Format", "QQ_RichEdit_Format"];
 
@@ -173,10 +174,19 @@ public static class DropDataReader
                 try
                 {
                     using (stream)
-                    using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
-                        stream.CopyTo(output);
-                    try { File.SetLastWriteTimeUtc(destination, File.GetLastWriteTimeUtc(source)); }
-                    catch { }
+                    {
+                        // 来源文件此时可能已被删除，修改时间从仍然打开的句柄读取。
+                        DateTime? modified = null;
+                        try { modified = File.GetLastWriteTimeUtc(stream.SafeFileHandle); }
+                        catch { }
+                        using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
+                            stream.CopyTo(output);
+                        if (modified is { Year: > 1601 } time)
+                        {
+                            try { File.SetLastWriteTimeUtc(destination, time); }
+                            catch { }
+                        }
+                    }
                     entries[index] = new DroppedEntry(ShelfItemKind.File, destination, IsTemporary: true);
                 }
                 catch (Exception exception)
@@ -216,8 +226,10 @@ public static class DropDataReader
     {
         try
         {
-            var path = data.GetDataPresent("FileNameW", false) ? ReadString(data.GetData("FileNameW", false), unicode: true)
-                : data.GetDataPresent("FileName", false) ? ReadString(data.GetData("FileName", false), unicode: false)
+            // 来自其他程序时 WPF 把这两种格式转换为只有一项的字符串数组。
+            static string? First(object? value, bool unicode) => value is string[] { Length: > 0 } array ? array[0] : ReadString(value, unicode);
+            var path = data.GetDataPresent("FileNameW", false) ? First(data.GetData("FileNameW", false), unicode: true)
+                : data.GetDataPresent("FileName", false) ? First(data.GetData("FileName", false), unicode: false)
                 : null;
             return !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path)) ? path : null;
         }

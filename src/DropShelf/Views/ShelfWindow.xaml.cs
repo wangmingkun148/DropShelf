@@ -135,8 +135,10 @@ public partial class ShelfWindow : Window
     public void ShowAt(POINT center, bool activate, ShelfEntrance entrance = default)
     {
         ShowActivated = activate;
-        WindowPlacement.CenterOn(this, center, Width, Height);
         var wasVisible = IsVisible;
+        // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
+        if (wasVisible) StopSlide();
+        WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (activate)

@@ -945,6 +945,10 @@ internal static class Program
             $"<QQRichEditFormat><Info version=\"1001\"></Info><EditElement type=\"1\" filepath=\"{image}\" shortcut=\"\"></EditElement></QQRichEditFormat>")));
         qq.SetData(System.Windows.DataFormats.UnicodeText, "[图片]");
         Assert(DropDataReader.Classify(qq) == DropContentKind.Files, "旧版 QQ 拖出的图片没有识别");
+        var fileName = new WpfDataObject();
+        fileName.SetData("FileNameW", new[] { image });
+        Assert(DropDataReader.Classify(fileName) == DropContentKind.Files &&
+               (await DropDataReader.ReadAsync(fileName)).Entries.Single().Value == image, "只提供 FileNameW 的来源没有识别");
         Assert((await DropDataReader.ReadAsync(qq)).Entries.Single().Value == image, "旧版 QQ 拖出的图片路径不正确");
 
         var html = new WpfDataObject();
@@ -1159,6 +1163,13 @@ internal static class Program
         File.WriteAllText(broken, new string('x', 200_000));
         Assert(ImageCompressor.Compress(broken, limit).Status == ImageCompressionStatus.Failed, "损坏的图片没有报告失败");
         Assert(ImageCompressor.FormatLimit(2 * 1024 * 1024) == "2MB" && Strings.ImageSizeText(2048) == "2 MB", "大小文字不正确");
+
+        var banner = Path.Combine(folder, "banner.png");
+        File.WriteAllBytes(banner, CreateNoisyPng(3000, 40));
+        var bannerResult = ImageCompressor.Compress(banner, 10 * 1024);
+        Assert(bannerResult.Status == ImageCompressionStatus.Failed ||
+               (bannerResult.Status == ImageCompressionStatus.Compressed && new FileInfo(bannerResult.Output!).Length <= 10 * 1024),
+            "细长图片压缩后超过了限制却报告成功");
     }
 
     private static async Task TestCompressImageReplacesItems()
