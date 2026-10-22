@@ -10,7 +10,7 @@ $portableOutput = Join-Path $projectRoot "artifacts\win-x64"
 $installerScript = Join-Path $PSScriptRoot "DropShelf.iss"
 $uninstallLauncherScript = Join-Path $PSScriptRoot "UninstallLauncher.iss"
 
-& $DotnetPath restore $appProject -r win-x64 -p:NuGetAudit=false
+& $DotnetPath restore $appProject -r win-x64 -p:PublishReadyToRun=true -p:NuGetAudit=false
 if ($LASTEXITCODE -ne 0) { throw "无法准备发布文件。" }
 
 # 自包含单文件：目标电脑无需安装 .NET。
