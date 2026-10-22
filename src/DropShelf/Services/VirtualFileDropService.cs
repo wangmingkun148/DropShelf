@@ -69,9 +69,13 @@ public static class VirtualFileDropService
         catch (Exception exception)
         {
             LogService.Error("接收虚拟附件失败", exception);
-            if (preparedFiles is not null) ReleasePreparedContents(preparedFiles);
             await DeleteCacheAsync(cacheDirectory);
             return new VirtualFileImportResult([], null, descriptors.Count, Strings.AttachmentReceiveFailed);
+        }
+        finally
+        {
+            // 介质来自界面线程的套间，回到这里再释放。
+            if (preparedFiles is not null) ReleasePreparedContents(preparedFiles);
         }
     }
 
@@ -96,9 +100,58 @@ public static class VirtualFileDropService
         }
     }
 
+    /// <summary>临时附件可以从一个置物架拖到另一个，每个缓存目录记录有几个置物架在使用。</summary>
+    private static readonly Dictionary<string, int> CacheHolders = new(StringComparer.OrdinalIgnoreCase);
+
+    public static void RetainCache(string cacheDirectory)
+    {
+        lock (CacheHolders) CacheHolders[CacheKey(cacheDirectory)] = CacheHolders.GetValueOrDefault(CacheKey(cacheDirectory)) + 1;
+    }
+
+    /// <summary>置物架不再使用这个缓存；最后一个使用者释放时才删除。</summary>
+    public static Task ReleaseCacheAsync(string cacheDirectory)
+    {
+        lock (CacheHolders)
+        {
+            var key = CacheKey(cacheDirectory);
+            var holders = CacheHolders.GetValueOrDefault(key) - 1;
+            if (holders > 0)
+            {
+                CacheHolders[key] = holders;
+                return Task.CompletedTask;
+            }
+            CacheHolders.Remove(key);
+        }
+        return DeleteCacheAsync(cacheDirectory);
+    }
+
+    /// <summary>文件所在的 DropShelf 缓存目录；不在缓存中时返回 null。</summary>
+    public static string? GetCacheDirectory(string path)
+    {
+        try
+        {
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(CacheRoot)) + Path.DirectorySeparatorChar;
+            var full = Path.GetFullPath(path);
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
+            var name = full[root.Length..].Split(Path.DirectorySeparatorChar)[0];
+            return name.Length == 0 ? null : root + name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string CacheKey(string cacheDirectory) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheDirectory));
+
+    /// <summary>删除缓存目录；仍有置物架在使用时保留。</summary>
     public static Task DeleteCacheAsync(string? cacheDirectory)
     {
         if (!IsOwnedCacheDirectory(cacheDirectory)) return Task.CompletedTask;
+        lock (CacheHolders)
+        {
+            if (CacheHolders.ContainsKey(CacheKey(cacheDirectory!))) return Task.CompletedTask;
+        }
         return Task.Run(() =>
         {
             try
@@ -163,7 +216,17 @@ public static class VirtualFileDropService
             try
             {
                 data.GetData(ref format, out var medium);
-                prepared.Add(new PreparedVirtualFile(descriptor, destination, medium));
+                var file = new PreparedVirtualFile(descriptor, destination, medium);
+                try
+                {
+                    file.MarshalStream();
+                }
+                catch
+                {
+                    file.Release();
+                    throw;
+                }
+                prepared.Add(file);
             }
             catch (Exception exception)
             {
@@ -185,7 +248,7 @@ public static class VirtualFileDropService
         {
             try
             {
-                CopyPreparedContent(prepared.Medium, prepared.Destination);
+                CopyPreparedContent(prepared, prepared.Destination);
                 var descriptor = prepared.Descriptor;
                 if (descriptor.LastWriteTimeUtc is { } lastWriteTime)
                     File.SetLastWriteTimeUtc(prepared.Destination, lastWriteTime);
@@ -197,10 +260,6 @@ public static class VirtualFileDropService
                 LogService.Error($"无法写入虚拟附件 {Path.GetFileName(prepared.Destination)}", exception);
                 try { if (File.Exists(prepared.Destination)) File.Delete(prepared.Destination); } catch { }
             }
-            finally
-            {
-                prepared.Release();
-            }
         }
 
         return new VirtualFileImportResult(
@@ -210,13 +269,14 @@ public static class VirtualFileDropService
             paths.Count == 0 ? Strings.AttachmentReceiveFailed : null);
     }
 
-    private static void CopyPreparedContent(STGMEDIUM medium, string destination)
+    private static void CopyPreparedContent(PreparedVirtualFile prepared, string destination)
     {
+        var medium = prepared.Medium;
         using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan);
         switch (medium.tymed)
         {
             case TYMED.TYMED_ISTREAM:
-                CopyComStream(medium.unionmember, output);
+                CopyComStream(prepared.TakeStream(), output);
                 break;
             case TYMED.TYMED_HGLOBAL:
                 CopyGlobalMemory(medium.unionmember, output);
@@ -237,10 +297,9 @@ public static class VirtualFileDropService
         foreach (var prepared in preparedFiles) prepared.Release();
     }
 
-    private static void CopyComStream(IntPtr streamPointer, Stream output)
+    private static void CopyComStream(object? streamObject, Stream output)
     {
-        if (streamPointer == IntPtr.Zero) throw new IOException("附件内容流为空");
-        var streamObject = Marshal.GetObjectForIUnknown(streamPointer);
+        if (streamObject is null) throw new IOException("附件内容流为空");
         try
         {
             if (streamObject is not IStream input) throw new IOException("附件内容流不可读");
@@ -426,13 +485,40 @@ public static class VirtualFileDropService
         STGMEDIUM medium)
     {
         private int _released;
+        private IntPtr _marshaledStream;
         public VirtualFileDescriptor Descriptor { get; } = descriptor;
         public string Destination { get; } = destination;
         public STGMEDIUM Medium = medium;
 
+        /// <summary>附件流属于界面线程的套间，必须先封送，后台线程才能按 COM 规则使用（来源程序可能只允许在原套间中访问）。</summary>
+        public void MarshalStream()
+        {
+            if (Medium.tymed != TYMED.TYMED_ISTREAM || Medium.unionmember == IntPtr.Zero) return;
+            var streamId = typeof(IStream).GUID;
+            Marshal.ThrowExceptionForHR(NativeMethods.CoMarshalInterThreadInterfaceInStream(ref streamId, Medium.unionmember, out _marshaledStream));
+        }
+
+        /// <summary>在当前线程取得可用的附件流，只能取一次；用完后由调用方释放。</summary>
+        public object? TakeStream()
+        {
+            var marshaled = Interlocked.Exchange(ref _marshaledStream, IntPtr.Zero);
+            if (marshaled == IntPtr.Zero) return null;
+            var streamId = typeof(IStream).GUID;
+            Marshal.ThrowExceptionForHR(NativeMethods.CoGetInterfaceAndReleaseStream(marshaled, ref streamId, out var stream));
+            return stream;
+        }
+
         public void Release()
         {
             if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            try
+            {
+                // 后台线程没有取走封送的流时，在这里取回并释放，否则会留下一个引用。
+                if (TakeStream() is { } stream && Marshal.IsComObject(stream)) Marshal.ReleaseComObject(stream);
+            }
+            catch
+            {
+            }
             NativeMethods.ReleaseStgMedium(ref Medium);
         }
     }

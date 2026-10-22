@@ -207,7 +207,8 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void RegisterCache(string? cacheDirectory)
     {
-        if (!string.IsNullOrWhiteSpace(cacheDirectory)) _cacheDirectories.Add(cacheDirectory);
+        if (!string.IsNullOrWhiteSpace(cacheDirectory) && _cacheDirectories.Add(cacheDirectory))
+            VirtualFileDropService.RetainCache(cacheDirectory);
     }
 
     public void RefreshAvailability()
@@ -383,13 +384,16 @@ public sealed class ShelfViewModel : ObservableObject
 
     public bool CopyPaths(IReadOnlyList<ShelfItem> items)
     {
-        var paths = items.Where(item => item.IsFileSystem).Select(item => item.Value).ToArray();
+        var files = items.Where(item => item.IsFileSystem).ToArray();
+        var paths = files.Select(item => item.Value).ToArray();
         if (paths.Length == 0)
         {
             Notify(Strings.NoPathsToCopy, false);
             return false;
         }
         var copied = ClipboardService.TrySetText(string.Join(Environment.NewLine, paths));
+        // 临时附件的路径可能在关闭置物架之后才被使用。
+        if (copied && files.Any(item => item.IsTemporaryAttachment)) KeepTemporaryFilesForAWhile();
         Notify(copied ? (paths.Length > 1 ? Strings.CopiedPaths(paths.Length) : Strings.CopiedPath) : Strings.ClipboardBusy, copied);
         return copied;
     }
@@ -401,6 +405,7 @@ public sealed class ShelfViewModel : ObservableObject
             switch (item.Kind)
             {
                 case ShelfItemKind.Text:
+                case ShelfItemKind.Link when !DropDataReader.IsSingleUrl(item.Value):
                     if (ClipboardService.TrySetText(item.Value)) Notify(Strings.CopiedText);
                     break;
                 case ShelfItemKind.Link:
@@ -412,6 +417,8 @@ public sealed class ShelfViewModel : ObservableObject
                         Notify(Strings.ItemMissing, false);
                         return;
                     }
+                    // 打开的程序可能在置物架关闭后才读取文件。
+                    if (item.IsTemporaryAttachment) KeepTemporaryFilesForAWhile();
                     Process.Start(new ProcessStartInfo(item.Value) { UseShellExecute = true });
                     break;
             }
@@ -454,7 +461,7 @@ public sealed class ShelfViewModel : ObservableObject
     private static async Task DeleteCacheLaterAsync(string cache, TimeSpan delay)
     {
         if (delay > TimeSpan.Zero) await Task.Delay(delay).ConfigureAwait(false);
-        await VirtualFileDropService.DeleteCacheAsync(cache).ConfigureAwait(false);
+        await VirtualFileDropService.ReleaseCacheAsync(cache).ConfigureAwait(false);
     }
 
     private async Task RemoveWhenGoneAsync(IReadOnlyList<ShelfItem> items)

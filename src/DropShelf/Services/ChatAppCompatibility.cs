@@ -50,7 +50,7 @@ public static partial class ChatAppCompatibility
         if (hasText) return [];
         return QqImageElement().Matches(xml)
             .Select(match => WebUtility.HtmlDecode(match.Groups[1].Value))
-            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Where(IsLocalPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -74,6 +74,7 @@ public static partial class ChatAppCompatibility
             var source = WebUtility.HtmlDecode(match.Groups[2].Value);
             if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) || !uri.IsFile) continue;
             var path = uri.LocalPath;
+            if (!IsLocalPath(path)) continue;
             if (!paths.Contains(path, StringComparer.OrdinalIgnoreCase)) paths.Add(path);
         }
         return paths;
@@ -86,6 +87,24 @@ public static partial class ChatAppCompatibility
         var utf8 = Encoding.UTF8.GetString(bytes).TrimEnd('\0');
         if (utf8.Contains("<QQRichEditFormat", StringComparison.OrdinalIgnoreCase)) return utf8;
         return Encoding.Unicode.GetString(bytes).TrimEnd('\0');
+    }
+
+    /// <summary>
+    /// 富文本中间接引用的图片只接受本机磁盘上的路径。检查是否存在时会访问对应位置，
+    /// 网络共享或映射的网络驱动器会发起网络连接，可能卡住界面，甚至向对方发送登录凭据。
+    /// </summary>
+    internal static bool IsLocalPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal) ||
+            path.StartsWith("//", StringComparison.Ordinal)) return false;
+        try
+        {
+            return new DriveInfo(Path.GetPathRoot(path)!).DriveType is not (DriveType.Network or DriveType.NoRootDirectory);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsUnder(string path, string folder)

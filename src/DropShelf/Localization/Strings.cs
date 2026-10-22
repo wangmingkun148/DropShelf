@@ -522,6 +522,7 @@ public static class Strings
     public static string FolderNotFound => T("文件夹已删除或移动，或暂时无法访问。", "The folder was moved or deleted, or can't be accessed right now.");
     public static string PathTooLong => T("路径过长，Windows 无法处理。", "The path is too long for Windows to handle.");
     public static string FolderIntoItself => T("不能把文件夹复制或移动到它自己的内部。", "A folder can't be copied or moved into itself.");
+    public static string FolderContainsLinks => T("文件夹中包含联接点或符号链接，无法完整复制，原文件夹未改动。", "The folder contains junctions or symbolic links and can't be copied completely. The original folder was left unchanged.");
     public static string ItemBusy => T("项目正被占用、目标空间不足或设备暂时不可用。",
         "The item is in use, the destination is out of space, or the device is unavailable.");
     public static string OperationIncomplete => T("操作没有完成。", "The operation didn't finish.");

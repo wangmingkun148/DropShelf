@@ -157,11 +157,17 @@ public static class DropDataReader
         paths = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
         if (paths.Length == 0) return DropReadResult.Failed(Strings.NoFilesRead);
 
-        var entries = paths
-            .Select(path => new DroppedEntry(Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File, path))
-            .ToArray();
+        // 从另一个置物架拖来的临时附件仍是临时附件，并一起持有它所在的缓存，原置物架关闭时不会被删掉。
+        var shared = new List<string>();
+        var entries = paths.Select(path =>
+        {
+            var kind = Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File;
+            if (VirtualFileDropService.GetCacheDirectory(path) is not { } cache) return new DroppedEntry(kind, path);
+            if (!shared.Contains(cache, StringComparer.OrdinalIgnoreCase)) shared.Add(cache);
+            return new DroppedEntry(kind, path, IsTemporary: true);
+        }).ToArray();
         var snapshots = OpenVolatileFiles(entries);
-        if (snapshots.Count == 0) return new DropReadResult(entries, [], 0, null);
+        if (snapshots.Count == 0) return new DropReadResult(entries, shared, 0, null);
 
         var cacheDirectory = VirtualFileDropService.CreateCacheDirectory();
         await Task.Run(() =>
@@ -197,7 +203,7 @@ public static class DropDataReader
                 }
             }
         });
-        return new DropReadResult(entries, [cacheDirectory], 0, null);
+        return new DropReadResult(entries, [.. shared, cacheDirectory], 0, null);
     }
 
     private static List<(int Index, FileStream Stream)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries)
@@ -380,7 +386,9 @@ public static class DropDataReader
         }
 
         url = url?.Trim();
-        return string.IsNullOrWhiteSpace(url) ? null : new DroppedEntry(ShelfItemKind.Link, url, title);
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        // 只有网页地址按链接保存；其他协议（本地程序、自定义协议等）双击时会交给系统执行，按文本保存。
+        return IsSingleUrl(url) ? new DroppedEntry(ShelfItemKind.Link, url, title) : new DroppedEntry(ShelfItemKind.Text, url);
     }
 
     private static string? ReadText(WpfDataObject data)

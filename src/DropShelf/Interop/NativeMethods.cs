@@ -438,6 +438,13 @@ internal static class NativeMethods
     [DllImport("ole32.dll")]
     public static extern void ReleaseStgMedium(ref STGMEDIUM medium);
 
+    [DllImport("ole32.dll")]
+    public static extern int CoMarshalInterThreadInterfaceInStream(ref Guid interfaceId, IntPtr unknown, out IntPtr stream);
+
+    [DllImport("ole32.dll")]
+    public static extern int CoGetInterfaceAndReleaseStream(IntPtr stream, ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.IUnknown)] out object result);
+
     [DllImport("gdi32.dll", SetLastError = true)]
     public static extern IntPtr CreateDIBSection(IntPtr dc, ref BITMAPINFOHEADER header, uint usage, out IntPtr bits,
         IntPtr section, uint offset);

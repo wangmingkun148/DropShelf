@@ -445,6 +445,7 @@ public static class QuickActionService
         var destinationBase = Path.GetFullPath(destination);
         var destinationRoot = destinationBase + Path.DirectorySeparatorChar;
         using var archive = ZipFile.OpenRead(source);
+        EnsureFreeSpace(destination, archive.Entries.Aggregate(0L, (total, entry) => checked(total + entry.Length)));
         foreach (var entry in archive.Entries)
         {
             var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar)
@@ -463,7 +464,37 @@ public static class QuickActionService
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             using var input = entry.Open();
             using var output = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            input.CopyTo(output);
+            CopyAtMost(input, output, entry.Length);
+        }
+    }
+
+    /// <summary>压缩包声明的解压后总大小放不下时直接失败，不会先把磁盘写满。</summary>
+    private static void EnsureFreeSpace(string directory, long required)
+    {
+        long available;
+        try
+        {
+            available = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(directory))!).AvailableFreeSpace;
+        }
+        catch
+        {
+            // 网络位置等无法查询剩余空间时照常解压，仍受每个条目声明大小的限制。
+            return;
+        }
+        if (required > available) throw new IOException("磁盘空间不足，无法解压");
+    }
+
+    /// <summary>实际解出的内容超过条目声明的大小时视为损坏或恶意的压缩包，防止声明很小、解出很大的压缩包写满磁盘。</summary>
+    private static void CopyAtMost(Stream input, Stream output, long limit)
+    {
+        var buffer = new byte[81920];
+        long written = 0;
+        int read;
+        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            written += read;
+            if (written > limit) throw new InvalidDataException("压缩包条目的实际大小超过声明的大小");
+            output.Write(buffer, 0, read);
         }
     }
 

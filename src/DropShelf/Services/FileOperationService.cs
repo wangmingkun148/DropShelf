@@ -9,6 +9,7 @@ public sealed record FileOperationResult(string Source, string? Destination, boo
 public sealed class FileOperationService
 {
     private const string FolderIntoItselfMessage = "不能把文件夹复制或移动到它自己的内部。";
+    private const string FolderContainsLinksMessage = "文件夹中包含目录链接，无法完整复制。";
 
     public void Open(string path)
     {
@@ -112,16 +113,13 @@ public sealed class FileOperationService
         }
     }
 
-    private static async Task CopyFileAsync(string source, string destination, CancellationToken cancellationToken)
-    {
-        const int bufferSize = 1024 * 128;
-        await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, true);
-        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize, true);
-        await input.CopyToAsync(output, cancellationToken);
-    }
+    /// <summary>由系统复制，连同下载来源标记（Zone.Identifier 等备用数据流）、文件属性和修改时间一起保留。</summary>
+    private static Task CopyFileAsync(string source, string destination, CancellationToken cancellationToken) =>
+        Task.Run(() => File.Copy(source, destination, overwrite: false), cancellationToken);
 
     private static async Task CopyDirectoryAsync(string source, string destination, CancellationToken cancellationToken)
     {
+        EnsureNoDirectoryLinks(source);
         Directory.CreateDirectory(destination);
         var pending = new Stack<(string Source, string Destination)>();
         pending.Push((source, destination));
@@ -137,14 +135,22 @@ public sealed class FileOperationService
             foreach (var directory in Directory.EnumerateDirectories(current.Source))
             {
                 var info = new DirectoryInfo(directory);
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
-                    continue;
-
                 var childDestination = Path.Combine(current.Destination, info.Name);
                 Directory.CreateDirectory(childDestination);
                 pending.Push((directory, childDestination));
             }
         }
+    }
+
+    /// <summary>
+    /// 联接点和目录符号链接无法原样复制，跳过又会让移动后删掉源文件夹时丢失它们；
+    /// 在开始复制之前就报错，源文件夹保持不变。
+    /// </summary>
+    private static void EnsureNoDirectoryLinks(string source)
+    {
+        var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false };
+        if (new DirectoryInfo(source).EnumerateDirectories("*", options).Any(directory => (directory.Attributes & FileAttributes.ReparsePoint) != 0))
+            throw new IOException(FolderContainsLinksMessage);
     }
 
     private static string GetAvailablePath(string destination, string name, bool isDirectory)
@@ -199,6 +205,7 @@ public sealed class FileOperationService
         DirectoryNotFoundException => Strings.FolderNotFound,
         PathTooLongException => Strings.PathTooLong,
         IOException when exception.Message == FolderIntoItselfMessage => Strings.FolderIntoItself,
+        IOException when exception.Message == FolderContainsLinksMessage => Strings.FolderContainsLinks,
         IOException => Strings.ItemBusy,
         _ => Strings.OperationIncomplete
     };

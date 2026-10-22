@@ -95,14 +95,19 @@ internal static class Program
         Run("识别来自置物架自身的拖动", TestSourceShelfId);
         Run("拖出数据包含不同文件夹中的全部文件", TestShellDataObject);
         Run("未落盘附件可接收为实际文件", TestVirtualAttachmentImport);
+        Run("临时附件拖到另一个置物架后共同持有缓存", TestAttachmentSharedBetweenShelves);
         Run("聊天软件的临时文件会立即保存一份", TestVolatileFileSnapshot);
         Run("聊天软件提供的图片格式与富文本图片", TestChatAppImageFormats);
+        Run("富文本中的网络路径不会被访问", TestRichTextRejectsNetworkPaths);
+        Run("非网页链接按文本保存，不交给系统打开", TestNonWebLinksBecomeText);
 
         // 文件与快速操作
         Run("同名复制不覆盖", TestCopyDoesNotOverwrite);
         Run("源文件消失时返回失败", TestMissingSourceIsReported);
         Run("文件被占用时返回失败", TestLockedFileIsReported);
         Run("阻止复制到文件夹自身或其内部", TestNestedDestinationIsRejected);
+        Run("复制保留下载来源标记和修改时间", TestCopyKeepsFileMetadata);
+        Run("含联接点的文件夹明确失败且不改动", TestFolderLinksAreRejected);
         Run("快速压缩与安全解压", TestArchiveActions);
         Run("复制路径写入剪贴板", TestCopyPathAction);
         Run("移动到所选文件夹并可取消", TestMoveToAction);
@@ -920,6 +925,28 @@ internal static class Program
         Assert(!Directory.Exists(result.CacheDirectories[0]), "关闭置物架后临时附件没有清理");
     }
 
+    private static async Task TestAttachmentSharedBetweenShelves()
+    {
+        var cache = VirtualFileDropService.CreateCacheDirectory();
+        var file = Path.Combine(cache, "附件.txt");
+        File.WriteAllText(file, "shared");
+        var first = new ShelfViewModel();
+        first.Add(new DropReadResult([new DroppedEntry(ShelfItemKind.File, file, IsTemporary: true)], [cache], 0, null));
+
+        var data = new WpfDataObject();
+        data.SetData(System.Windows.DataFormats.FileDrop, new[] { file });
+        var second = new ShelfViewModel();
+        second.Add(await DropDataReader.ReadAsync(data));
+        Assert(second.Items.Single().IsTemporaryAttachment && second.Items[0].Value == file, "从其他置物架拖来的临时附件没有标记为临时附件");
+
+        first.ReleaseResources();
+        await Task.Delay(300);
+        Assert(File.Exists(file), "原置物架关闭后，另一个置物架中的临时附件被删除");
+        second.ReleaseResources();
+        await Task.Delay(300);
+        Assert(!Directory.Exists(cache), "所有置物架关闭后临时附件没有清理");
+    }
+
     private static async Task TestVolatileFileSnapshot()
     {
         var temporary = Path.Combine(Path.GetTempPath(), "DropShelf.Tests.Chat", Guid.NewGuid().ToString("N"));
@@ -940,6 +967,31 @@ internal static class Program
         Assert(File.Exists(read.Entries[0].Value) && Path.GetFileName(read.Entries[0].Value) == "聊天图片.png", "来源程序删除临时文件后内容丢失");
         Assert(!read.Entries[1].IsTemporary && read.Entries[1].Value == stable, "普通文件不应复制");
         foreach (var cache in read.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+    }
+
+    private static void TestRichTextRejectsNetworkPaths()
+    {
+        var image = Path.Combine(CreateStableFolder("rich-text-local"), "local.png");
+        File.WriteAllBytes(image, CreatePng());
+        Assert(ChatAppCompatibility.ParseHtmlLocalImages($"<img src=\"{new Uri(image).AbsoluteUri}\">").SequenceEqual([image]), "本机图片路径没有识别");
+        Assert(ChatAppCompatibility.ParseHtmlLocalImages("<img src=\"file://server/share/a.png\">").Count == 0, "网页片段中的网络共享路径没有被拒绝");
+        Assert(ChatAppCompatibility.ParseQqRichEdit(
+            "<QQRichEditFormat><EditElement type=\"1\" filepath=\"\\\\server\\share\\a.png\"></EditElement></QQRichEditFormat>").Count == 0,
+            "QQ 富文本中的网络共享路径没有被拒绝");
+    }
+
+    private static async Task TestNonWebLinksBecomeText()
+    {
+        var data = new WpfDataObject();
+        data.SetData("UniformResourceLocatorW", new MemoryStream(Encoding.Unicode.GetBytes("file:///C:/Windows/System32/calc.exe\0")));
+        var read = await DropDataReader.ReadAsync(data);
+        Assert(read.Entries.Single().Kind == ShelfItemKind.Text, "非网页链接没有按文本保存");
+
+        // 旧版本保存的链接项目打开时也要检查协议：只复制文字，不启动程序。
+        var viewModel = new ShelfViewModel();
+        viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Link, "calc.exe")]);
+        viewModel.Open(viewModel.Items[0]);
+        Assert(System.Windows.Clipboard.GetText() == "calc.exe", "非网页链接被交给系统打开");
     }
 
     private static async Task TestChatAppImageFormats()
@@ -976,6 +1028,38 @@ internal static class Program
     }
 
     // ───────────── 文件与快速操作 ─────────────
+
+    private static async Task TestCopyKeepsFileMetadata()
+    {
+        var source = Path.Combine(CreateFolder("metadata-source"), "download.txt");
+        File.WriteAllText(source, "downloaded");
+        File.WriteAllText(source + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+        var modified = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(source, modified);
+
+        var results = await new FileOperationService().CopyAsync([source], CreateFolder("metadata-destination"));
+        var copy = results.Single().Destination!;
+        Assert(results[0].Succeeded && File.ReadAllText(copy + ":Zone.Identifier").Contains("ZoneId=3"), "复制后丢失了下载来源标记");
+        Assert(File.GetLastWriteTimeUtc(copy) == modified, "复制后修改时间被改成了当前时间");
+    }
+
+    private static async Task TestFolderLinksAreRejected()
+    {
+        var source = CreateFolder("link-source");
+        var linked = CreateFolder("link-target");
+        File.WriteAllText(Path.Combine(linked, "inside.txt"), "linked");
+        var junction = Path.Combine(source, "junction");
+        using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{junction}\" \"{linked}\"")
+               { CreateNoWindow = true, UseShellExecute = false })!)
+            mklink.WaitForExit();
+        Assert(Directory.Exists(junction), "无法创建测试用的联接点");
+
+        var destination = CreateFolder("link-destination");
+        var results = await new FileOperationService().CopyAsync([source], destination);
+        Assert(results.Count == 1 && !results[0].Succeeded && results[0].ErrorMessage == Strings.FolderContainsLinks, "含联接点的文件夹没有明确报告失败");
+        Assert(!Directory.EnumerateFileSystemEntries(destination).Any(), "失败时留下了不完整的副本");
+        Assert(Directory.Exists(junction) && File.Exists(Path.Combine(linked, "inside.txt")), "源文件夹被改动");
+    }
 
     private static async Task TestCopyDoesNotOverwrite()
     {
