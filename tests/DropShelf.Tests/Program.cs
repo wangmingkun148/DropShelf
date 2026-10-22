@@ -789,6 +789,10 @@ internal static class Program
 
         var reloaded = new ShelfHistoryService(historyPath);
         Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity && reloaded.Latest!.Items[0].Path.EndsWith("single-11.txt"), "重新启动后记录丢失");
+        var moved = reloaded.Entries[0];
+        reloaded.Move(moved, 3);
+        Assert(reloaded.Entries[3] == moved && new ShelfHistoryService(historyPath).Entries[3].Items[0].Path == moved.Items[0].Path, "调整记录顺序没有生效或没有保存");
+        reloaded.Move(moved, 0);
         reloaded.Remove(reloaded.Latest!);
         Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity - 1, "恢复后记录没有移除");
         reloaded.Clear();

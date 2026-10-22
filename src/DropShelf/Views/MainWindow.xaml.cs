@@ -495,6 +495,8 @@ public partial class MainWindow : Window
 
     private HistoryEntryViewModel? _pressedEntry;
     private FrameworkElement? _draggedContainer;
+    private Controls.FanPanel? _historyPanel;
+    private int _historyIndex;
     private System.Windows.Point _historyPressPoint;
     private Vector _grabOffset;
     private System.Windows.Point _dragStartCursor;
@@ -557,7 +559,9 @@ public partial class MainWindow : Window
         _dragStartCursor = CursorPoint();
         _grabOffset = _dragStartCursor - start.Center;
         _tornOff = false;
-        (VisualTreeHelper.GetParent(container) as Controls.FanPanel)?.ClearHot();
+        _historyPanel = VisualTreeHelper.GetParent(container) as Controls.FanPanel;
+        _historyIndex = HistoryList.ItemContainerGenerator.IndexFromContainer(container);
+        _historyPanel?.ClearHot();
         (container.ContentTemplate?.FindName("RestoreHint", container) as UIElement)?.BeginAnimation(OpacityProperty, null);
         card.UpdateLayout();
         if (Snapshot(card)?.Image.Source is not { } image)
@@ -566,12 +570,13 @@ public partial class MainWindow : Window
             return;
         }
         container.Opacity = 0;
+        _historyPanel?.SetGap(container, _historyIndex);
         _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () => HistoryDragPose(start, container));
     }
 
     /// <summary>
     /// 拖动分三段：先被牌堆吸住、只跟一小段；拉过一定距离后脱离并略微放大，顿一下跟上光标；
-    /// 拖回牌堆上方时被原位吸过去一截并缩回原来的大小，提示松手会放回。
+    /// 脱离后其余的牌并拢；拖回牌堆上方时按卡牌位置让出空位，卡牌被空位吸过去一截并缩回原来的大小，提示松手会放到这里。
     /// </summary>
     private CardPose HistoryDragPose(CardPose start, FrameworkElement container)
     {
@@ -581,30 +586,42 @@ public partial class MainWindow : Window
             return start with { Center = start.Center + pulled * HoldFollow };
         _tornOff = true;
         var free = cursor - _grabOffset;
-        if (!IsOverHistory(cursor) || PoseOf(container) is not { } slot) return new CardPose(free, DetachedScale, 0);
+        var over = IsOverHistory(cursor);
+        _historyPanel?.SetGap(container, over ? _historyPanel.SlotAt(_historyPanel.PointFromScreen(free).X) : -1);
+        if (!over || PoseOf(container) is not { } slot) return new CardPose(free, DetachedScale, 0);
         return new CardPose(slot.Center + (free - slot.Center) * ReturnFollow, slot.Scale, slot.Angle * (1 - ReturnFollow));
     }
 
-    /// <summary>在牌堆上松手（或取消）时卡牌飞回原位；其他位置松手时在光标处打开置物架，卡牌缩小淡出。</summary>
+    /// <summary>在牌堆上松手时卡牌飞进让出的空位并移到这个位置，取消时飞回原位；其他位置松手时在光标处打开置物架，卡牌缩小淡出。</summary>
     private void EndHistoryDrag(bool cancel)
     {
         if (!_draggingHistory) return;
         _draggingHistory = false;
         var entry = _pressedEntry!;
         var container = _draggedContainer!;
+        var panel = _historyPanel;
         _pressedEntry = null;
         _draggedContainer = null;
+        _historyPanel = null;
         if (Mouse.Captured == HistoryList) HistoryList.ReleaseMouseCapture();
         if (_ghost is not { IsBusy: true } ghost)
         {
             container.Opacity = 1;
+            panel?.SetGap(null, -1);
             return;
         }
 
         var cursor = CursorPoint();
         if (cancel || !_tornOff || IsOverHistory(cursor))
         {
-            ghost.Settle(() => PoseOf(container), () => container.Opacity = 1);
+            var index = !cancel && _tornOff && panel?.Gap is >= 0 and var gap ? gap : _historyIndex;
+            panel?.SetGap(container, index);
+            ghost.Settle(() => PoseOf(container), () =>
+            {
+                container.Opacity = 1;
+                panel?.SetGap(null, -1);
+                _controller.History.Move(entry.Entry, index);
+            });
             return;
         }
         ghost.Vanish(cursor);

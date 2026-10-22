@@ -37,6 +37,9 @@ public sealed class FanPanel : Panel
     private int _pressed = -1;
     private double _center;
     private double _spacing;
+    private double _width;
+    private UIElement? _dragged;
+    private int _gap = -1;
     private Size _card;
 
     public FanPanel()
@@ -57,6 +60,7 @@ public sealed class FanPanel : Panel
         _card = InternalChildren[0].DesiredSize;
         _spacing = count > 1 ? Math.Clamp((finalSize.Width - _card.Width) / (count - 1), 0, MaxSpacing) : 0;
         _center = finalSize.Width / 2;
+        _width = finalSize.Width;
         for (var index = 0; index < count; index++)
         {
             var child = InternalChildren[index];
@@ -68,6 +72,8 @@ public sealed class FanPanel : Panel
         {
             _childrenChanged = false;
             _hot = _lastHot = -1;
+            _dragged = null;
+            _gap = -1;
             ApplyState(animate: false);
         }
         return finalSize;
@@ -80,6 +86,10 @@ public sealed class FanPanel : Panel
     }
 
     private double CenterOf(int index) => _center + (index - (InternalChildren.Count - 1) / 2.0) * _spacing;
+
+    /// <summary>牌堆排成 slots 张牌时第 slot 张的中心。</summary>
+    private double SlotCenter(int slot, int slots) =>
+        _center + (slot - (slots - 1) / 2.0) * (slots > 1 ? Math.Clamp((_width - _card.Width) / (slots - 1), 0, MaxSpacing) : 0);
 
     private static double RestY(int index, int count)
     {
@@ -169,6 +179,31 @@ public sealed class FanPanel : Panel
     /// <summary>选出的牌被拖走时，所有牌回到原位。</summary>
     public void ClearHot() => SetHot(-1);
 
+    /// <summary>拖着的牌要放回的位置；-1 表示牌已离开牌堆，其余的牌并拢。</summary>
+    public int Gap => _gap;
+
+    /// <summary>
+    /// 拖动 dragged 时其余的牌在 gap 处让出空位，gap 为 -1 时并拢；dragged 为 null 时结束拖动。
+    /// 拖着的牌（已隐藏）摆在空位上，放回时飞向它即可。
+    /// </summary>
+    public void SetGap(UIElement? dragged, int gap)
+    {
+        if (dragged is null) gap = -1;
+        if (dragged == _dragged && gap == _gap) return;
+        _dragged = dragged;
+        _gap = gap;
+        _hot = -1;
+        ApplyState(animate: true);
+    }
+
+    /// <summary>面板上横坐标 x 处对应的空位。</summary>
+    public int SlotAt(double x)
+    {
+        var count = InternalChildren.Count;
+        if (count <= 1 || _spacing <= 0) return 0;
+        return Math.Clamp((int)Math.Round((x - _center) / _spacing + (count - 1) / 2.0), 0, count - 1);
+    }
+
     private void SetHot(int index)
     {
         if (index == _hot) return;
@@ -180,24 +215,35 @@ public sealed class FanPanel : Panel
     private void ApplyState(bool animate)
     {
         var count = InternalChildren.Count;
-        var mid = (count - 1) / 2.0;
+        var dragged = _dragged is null ? -1 : InternalChildren.IndexOf(_dragged);
+        var slots = dragged >= 0 && _gap < 0 ? count - 1 : count;
+        var mid = (slots - 1) / 2.0;
         for (var index = 0; index < count; index++)
         {
             var child = InternalChildren[index];
             var (scale, rotate, move) = Transforms(child);
-            var rest = (index - mid) * Tilt;
+            // 拖动时其余的牌依次补上拖走的位置，再在空位处让开。
+            var slot = index;
+            if (index == dragged && _gap >= 0) slot = _gap;
+            else if (dragged >= 0 && index != dragged)
+            {
+                if (index > dragged) slot--;
+                if (_gap >= 0 && slot >= _gap) slot++;
+            }
+            var rest = (slot - mid) * Tilt;
             var isHot = index == _hot;
-            var offset = _hot < 0 || isHot ? 0 : Math.Sign(index - _hot) * Math.Max(0, 3 - Math.Abs(index - _hot)) / 3.0 * Push;
+            var offset = SlotCenter(slot, slots) - CenterOf(index) +
+                         (_hot < 0 || isHot ? 0 : Math.Sign(index - _hot) * Math.Max(0, 3 - Math.Abs(index - _hot)) / 3.0 * Push);
 
             var ease = isHot ? LiftEase : MoveEase;
             Set(scale, ScaleTransform.ScaleXProperty, isHot ? HotScale : 1, ease, animate);
             Set(scale, ScaleTransform.ScaleYProperty, isHot ? HotScale : 1, ease, animate);
             Set(rotate, RotateTransform.AngleProperty, isHot ? 0 : rest, MoveEase, animate);
             Set(move, TranslateTransform.XProperty, offset, MoveEase, animate);
-            Set(move, TranslateTransform.YProperty, isHot ? -Lift - RestY(index, count) : 0, ease, animate);
+            Set(move, TranslateTransform.YProperty, isHot ? -Lift - RestY(index, count) : RestY(slot, slots) - RestY(index, count), ease, animate);
 
             // 中间的牌在上面；刚放回去的牌在落下过程中仍压在邻居上面。
-            SetZIndex(child, isHot ? 1000 : index == _lastHot ? 999 : count - (int)Math.Ceiling(Math.Abs(index - mid)));
+            SetZIndex(child, isHot ? 1000 : index == _lastHot ? 999 : slots - (int)Math.Ceiling(Math.Abs(slot - mid)));
             SetIsHot(child, isHot);
             child.IsHitTestVisible = isHot;
         }

@@ -441,9 +441,12 @@ public sealed class SettingsViewModel : ObservableObject
         _editor?.RefreshText();
     }
 
-    private void RefreshHistory()
+    /// <summary>reuse 时沿用已有的卡片，调整顺序或删除一张后其余卡片的缩略图不必重新读取。</summary>
+    private void RefreshHistory(bool reuse = false)
     {
-        _historyEntries = _controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)).ToArray();
+        var existing = reuse ? _historyEntries.ToDictionary(entry => entry.Entry) : [];
+        _historyEntries = _controller.History.Entries
+            .Select(entry => existing.GetValueOrDefault(entry) ?? new HistoryEntryViewModel(entry, _controller)).ToArray();
         OnPropertyChanged(nameof(HistoryEntries));
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistoryDescription));
@@ -475,7 +478,7 @@ public sealed class SettingsViewModel : ObservableObject
 
     private void OnSettingsChanged(object? sender, EventArgs e) => RefreshAll();
 
-    private void OnHistoryChanged(object? sender, EventArgs e) => RefreshHistory();
+    private void OnHistoryChanged(object? sender, EventArgs e) => RefreshHistory(reuse: true);
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
