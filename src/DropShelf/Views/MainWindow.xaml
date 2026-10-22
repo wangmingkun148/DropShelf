@@ -911,8 +911,12 @@
                     </Border>
 
                     <StackPanel Margin="30,30,30,0">
-                        <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <Image x:Name="SidePanelIcon" Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
+                               RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0.5,0.5">
+                            <Image.RenderTransform>
+                                <ScaleTransform x:Name="SidePanelIconScale" />
+                            </Image.RenderTransform>
+                        </Image>
                         <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,20,0,0"
                                    TextWrapping="Wrap" />
                         <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
@@ -952,14 +956,48 @@
                                 </ItemsControl>
                         </StackPanel>
                     </StackPanel>
+
+                    <!-- 打开设置页后图标收起，概览标题缩成返回链接，页面名称从上方滚出 -->
+                    <StackPanel Margin="30,24,30,0" VerticalAlignment="Top">
+                        <Button x:Name="PanelBackButton" Click="OnBackClick" Opacity="0" IsHitTestVisible="False" HorizontalAlignment="Left"
+                                Cursor="Hand" Foreground="{DynamicResource TextSecondaryBrush}" ToolTip="{l:Loc BackTooltip}">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="Transparent" Padding="0,2">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Back}" FontFamily="{StaticResource IconFont}" FontSize="10"
+                                           VerticalAlignment="Center" Margin="0,1,6,0" />
+                                <TextBlock x:Name="PanelCrumbText" Text="{l:Loc Overview}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Border ClipToBounds="True" Margin="0,2,0,0" IsHitTestVisible="False">
+                            <TextBlock x:Name="PanelPageName" Style="{StaticResource TitleTextStyle}" Opacity="0" TextTrimming="CharacterEllipsis">
+                                <TextBlock.RenderTransform>
+                                    <TranslateTransform x:Name="PanelPageNameShift" />
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
                 </Grid>
 
-                <!-- 概览页的标题：状态栏出现时从页面左上角飞到状态栏图标右侧 -->
+                <!-- 概览页的标题：状态栏出现时从页面左上角飞到状态栏图标右侧，打开设置页时缩进返回链接 -->
                 <Grid Grid.RowSpan="2" Height="52" Margin="98,30,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False">
                     <TextBlock x:Name="PanelPageTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" VerticalAlignment="Center"
                                Visibility="Collapsed">
                         <TextBlock.RenderTransform>
-                            <TranslateTransform x:Name="PanelTitleShift" />
+                            <TransformGroup>
+                                <ScaleTransform x:Name="PanelTitleScale" />
+                                <TranslateTransform x:Name="PanelTitleShift" />
+                            </TransformGroup>
                         </TextBlock.RenderTransform>
                     </TextBlock>
                 </Grid>

@@ -59,20 +59,250 @@ public partial class MainWindow : Window
 
     private void OnPageCardClick(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string page }) ShowPage(page);
+        if (sender is Controls.PageTile { Tag: string page } tile) OpenPage(page, tile);
     }
 
-    private void OnBackClick(object sender, RoutedEventArgs e) => ShowPage("Overview");
+    private void OnBackClick(object sender, RoutedEventArgs e) => BackToOverview();
+
+    // ───────────── 卡片展开成页面 ─────────────
+
+    private static readonly Duration GrowDuration = TimeSpan.FromMilliseconds(340);
+    private static readonly Duration ShrinkDuration = TimeSpan.FromMilliseconds(380);
+    private static readonly IEasingFunction GrowEase = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 5 };
+    private static readonly IEasingFunction ShrinkEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 };
+    private static readonly IEasingFunction LeaveEase = new CubicEase { EasingMode = EasingMode.EaseIn };
+    private string _page = "Overview";
+    private bool _morphing;
+
+    /// <summary>
+    /// 点开的卡片放大成整个页面：卡片背景从卡片的位置和大小长到页面区域，卡片上的图标和文字跟着左上角走并淡出；
+    /// 概览页同时下沉淡出，长到接近页面大小时换成新页面，卡片背景淡出露出页面内容。
+    /// 卡片背景是一个空的圆角矩形，内容用截图，每帧只改变几个矩形的位置和大小，不会重新排版页面。
+    /// </summary>
+    private void OpenPage(string page, Controls.PageTile tile)
+    {
+        if (_morphing || _page != "Overview") return;
+        _morphing = true;
+        var from = BoundsOf(tile);
+        var to = PageArea();
+        var card = AddMorphCard(from);
+        var content = Snapshot(tile)?.Image;
+        Morph(card, from, to, GrowDuration, GrowEase, resize: true);
+        if (content is not null)
+        {
+            DragLayer.Children.Add(content);
+            Morph(content, from, to, GrowDuration, GrowEase, resize: false);
+            content.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(140)));
+        }
+        SetPanelHeader(page, animate: true);
+        FadeOutPage(OverviewPage, () =>
+        {
+            ShowPage(page);
+            var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = MotionEase };
+            reveal.Completed += (_, _) =>
+            {
+                DragLayer.Children.Remove(card);
+                if (content is not null) DragLayer.Children.Remove(content);
+                _morphing = false;
+            };
+            card.BeginAnimation(OpacityProperty, reveal);
+        });
+    }
+
+    /// <summary>
+    /// 返回时反过来：卡片背景先盖住页面，换回概览页后缩回原来那张卡片，落位时略微回弹，卡片内容在落位前淡入。
+    /// </summary>
+    private void BackToOverview()
+    {
+        if (_morphing || _page == "Overview") return;
+        if (PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, _page)) is not { } tile)
+        {
+            ShowPage("Overview");
+            SetPanelHeader("Overview", animate: true);
+            return;
+        }
+        _morphing = true;
+        var from = PageArea();
+        var card = AddMorphCard(from);
+        card.Opacity = 0;
+        SetPanelHeader("Overview", animate: true);
+        var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(130));
+        cover.Completed += (_, _) =>
+        {
+            ShowPage("Overview");
+            ContentLayer.UpdateLayout();
+            var to = BoundsOf(tile);
+            var content = Snapshot(tile)?.Image;
+            tile.Opacity = 0;
+            var shrink = Morph(card, from, to, ShrinkDuration, ShrinkEase, resize: true);
+            if (content is not null)
+            {
+                content.Opacity = 0;
+                DragLayer.Children.Add(content);
+                Morph(content, from, to, ShrinkDuration, ShrinkEase, resize: false);
+                content.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)) { BeginTime = TimeSpan.FromMilliseconds(170) });
+            }
+            shrink.Completed += (_, _) =>
+            {
+                tile.Opacity = 1;
+                DragLayer.Children.Remove(card);
+                if (content is not null) DragLayer.Children.Remove(content);
+                _morphing = false;
+            };
+        };
+        card.BeginAnimation(OpacityProperty, cover);
+    }
+
+    private Rect BoundsOf(FrameworkElement element) => new(element.TranslatePoint(default, DragLayer), new Size(element.ActualWidth, element.ActualHeight));
+
+    /// <summary>页面在窗口中可见的区域：页面内容的宽度，从内容顶部（滚动后为可视区域顶部）到可视区域底部的页边距。</summary>
+    private Rect PageArea()
+    {
+        var view = BoundsOf(PageScroll);
+        var content = BoundsOf(PageContent);
+        var top = Math.Max(content.Top, view.Top);
+        return new Rect(content.Left, top, content.Width, Math.Max(0, view.Bottom - PageMargin - top));
+    }
+
+    /// <summary>与设置卡片外观相同的空卡片（没有内容），放大缩小时只需重画一个圆角矩形。</summary>
+    private Border AddMorphCard(Rect bounds)
+    {
+        var card = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), IsHitTestVisible = false };
+        card.SetResourceReference(Border.BackgroundProperty, "CardBrush");
+        card.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        Canvas.SetLeft(card, bounds.Left);
+        Canvas.SetTop(card, bounds.Top);
+        card.Width = bounds.Width;
+        card.Height = bounds.Height;
+        DragLayer.Children.Add(card);
+        return card;
+    }
+
+    /// <summary>从一个矩形移到另一个矩形；resize 为 false 时只移动左上角（卡片内容保持原大小，文字不会被拉伸）。返回位置动画，可等它结束。</summary>
+    private static AnimationTimeline Morph(FrameworkElement element, Rect from, Rect to, Duration duration, IEasingFunction ease, bool resize)
+    {
+        DoubleAnimation Step(double start, double end) => new(start, end, duration) { EasingFunction = ease };
+        var left = Step(from.Left, to.Left);
+        element.BeginAnimation(Canvas.TopProperty, Step(from.Top, to.Top));
+        if (resize)
+        {
+            element.BeginAnimation(WidthProperty, Step(from.Width, to.Width));
+            element.BeginAnimation(HeightProperty, Step(from.Height, to.Height));
+        }
+        element.BeginAnimation(Canvas.LeftProperty, left);
+        return left;
+    }
+
+    /// <summary>页面略微下沉并淡出，动画期间缓存为位图。</summary>
+    private static void FadeOutPage(FrameworkElement page, Action done)
+    {
+        if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
+        page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
+        var duration = TimeSpan.FromMilliseconds(200);
+        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
+        var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
+        fade.Completed += (_, _) => done();
+        page.BeginAnimation(OpacityProperty, fade);
+    }
+
+    // ───────────── 状态栏顶部的页面标题 ─────────────
+
+    private static readonly TimeSpan HeaderDuration = TimeSpan.FromMilliseconds(340);
+    private static readonly IEasingFunction RollEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.35 };
+    private static readonly IEasingFunction PopEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 };
+
+    /// <summary>
+    /// 状态栏显示时，设置页的标题放在状态栏顶部：打开设置页时图标缩小消失，“概览”缩小飞进上方的返回链接，
+    /// 页面名称从上往下滚出；返回时页面名称继续向下滚走，“概览”从返回链接放大飞回，图标弹回。
+    /// </summary>
+    private void SetPanelHeader(string page, bool animate)
+    {
+        var onOverview = page == "Overview";
+        if (!onOverview) PanelPageName.Text = PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, page))?.Header;
+        PanelBackButton.IsHitTestVisible = !onOverview;
+        foreach (var (target, property) in new (Animatable, DependencyProperty)[]
+                 {
+                     (SidePanelIconScale, ScaleTransform.ScaleXProperty), (SidePanelIconScale, ScaleTransform.ScaleYProperty),
+                     (PanelTitleScale, ScaleTransform.ScaleXProperty), (PanelTitleScale, ScaleTransform.ScaleYProperty),
+                     (PanelTitleShift, TranslateTransform.XProperty), (PanelTitleShift, TranslateTransform.YProperty),
+                     (PanelPageNameShift, TranslateTransform.YProperty)
+                 })
+            target.BeginAnimation(property, null);
+        foreach (var element in new UIElement[] { SidePanelIcon, PanelPageTitle, PanelBackButton, PanelPageName })
+            element.BeginAnimation(OpacityProperty, null);
+
+        // 先设好最终状态，动画结束或被清除后停在这里。
+        SidePanelIcon.Opacity = onOverview ? 1 : 0;
+        PanelBackButton.Opacity = PanelPageName.Opacity = onOverview ? 0 : 1;
+        PanelPageTitle.Visibility = _sidePanelShown && onOverview ? Visibility.Visible : Visibility.Collapsed;
+        if (!animate || !_sidePanelShown) return;
+
+        // “概览”与返回链接里的“概览”之间的位移和缩放，按文字左上角对齐。
+        PanelPageTitle.Visibility = Visibility.Visible;
+        PanelPageTitle.UpdateLayout();
+        var offset = PositionOf(PanelCrumbText) - PositionOf(PanelPageTitle);
+        var ratio = PanelCrumbText.FontSize / PanelPageTitle.FontSize;
+        var (shiftFrom, shiftTo, scaleFrom, scaleTo) = onOverview ? (offset, default(Vector), ratio, 1.0) : (default(Vector), offset, 1.0, ratio);
+        PanelTitleShift.BeginAnimation(TranslateTransform.XProperty, Header(shiftFrom.X, shiftTo.X, MotionEase));
+        PanelTitleShift.BeginAnimation(TranslateTransform.YProperty, Header(shiftFrom.Y, shiftTo.Y, MotionEase));
+        PanelTitleScale.BeginAnimation(ScaleTransform.ScaleXProperty, Header(scaleFrom, scaleTo, MotionEase));
+        PanelTitleScale.BeginAnimation(ScaleTransform.ScaleYProperty, Header(scaleFrom, scaleTo, MotionEase));
+
+        if (onOverview)
+        {
+            PanelPageNameShift.BeginAnimation(TranslateTransform.YProperty, Header(0, 40, LeaveEase, 200));
+            PanelPageName.BeginAnimation(OpacityProperty, Header(1, 0, LeaveEase, 200));
+            PanelBackButton.BeginAnimation(OpacityProperty, Header(1, 0, LeaveEase, 120));
+            PanelPageTitle.BeginAnimation(OpacityProperty, Header(0, 1, MotionEase, 140));
+            SidePanelIcon.BeginAnimation(OpacityProperty, Header(0, 1, MotionEase, 200, delay: 120));
+            SidePanelIconScale.BeginAnimation(ScaleTransform.ScaleXProperty, Header(0.5, 1, PopEase, 380, delay: 120));
+            SidePanelIconScale.BeginAnimation(ScaleTransform.ScaleYProperty, Header(0.5, 1, PopEase, 380, delay: 120));
+            return;
+        }
+
+        SidePanelIcon.BeginAnimation(OpacityProperty, Header(1, 0, LeaveEase, 180));
+        SidePanelIconScale.BeginAnimation(ScaleTransform.ScaleXProperty, Header(1, 0.5, LeaveEase, 180));
+        SidePanelIconScale.BeginAnimation(ScaleTransform.ScaleYProperty, Header(1, 0.5, LeaveEase, 180));
+        PanelBackButton.BeginAnimation(OpacityProperty, Header(0, 1, MotionEase, 160, delay: 220));
+        PanelPageNameShift.BeginAnimation(TranslateTransform.YProperty, Header(-40, 0, RollEase, 380, delay: 120));
+        PanelPageName.BeginAnimation(OpacityProperty, Header(0, 1, MotionEase, 200, delay: 120));
+        // 飞到返回链接处淡出，之后收起并复位，下次返回时从返回链接处飞出。
+        var hide = Header(1, 0, MotionEase, 120, delay: 220);
+        hide.Completed += (_, _) =>
+        {
+            if (_page == "Overview") return;
+            PanelPageTitle.Visibility = Visibility.Collapsed;
+            PanelPageTitle.BeginAnimation(OpacityProperty, null);
+            foreach (var property in new[] { TranslateTransform.XProperty, TranslateTransform.YProperty }) PanelTitleShift.BeginAnimation(property, null);
+            foreach (var property in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty }) PanelTitleScale.BeginAnimation(property, null);
+        };
+        PanelPageTitle.BeginAnimation(OpacityProperty, hide);
+    }
+
+    /// <summary>延迟期间停在起点；用 BeginTime 延迟的动画开始前会显示属性原来的值（即最终状态），出现闪烁。</summary>
+    private static AnimationTimeline Header(double from, double to, IEasingFunction ease, double milliseconds = 0, double delay = 0)
+    {
+        var duration = milliseconds > 0 ? milliseconds : HeaderDuration.TotalMilliseconds;
+        return new DoubleAnimationUsingKeyFrames
+        {
+            KeyFrames =
+            {
+                new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero)),
+                new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(delay))),
+                new EasingDoubleKeyFrame(to, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(delay + duration)), ease)
+            }
+        };
+    }
 
     /// <summary>概览页列出各项设置，点进去显示对应页面，左上角返回。</summary>
     private void ShowPage(string page)
     {
+        _page = page;
         OverviewPage.Visibility = page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         GeneralPage.Visibility = page == "General" ? Visibility.Visible : Visibility.Collapsed;
         ShelfPage.Visibility = page == "Shelf" ? Visibility.Visible : Visibility.Collapsed;
         ActionsPage.Visibility = page == "Actions" ? Visibility.Visible : Visibility.Collapsed;
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        PanelPageTitle.Visibility = _sidePanelShown && page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         PageScroll.ScrollToTop();
         FadeInPage(page switch
         {
@@ -145,7 +375,7 @@ public partial class MainWindow : Window
         if (show == _sidePanelShown) return;
         _sidePanelShown = show;
 
-        var onOverview = OverviewPage.Visibility == Visibility.Visible;
+        var onOverview = _page == "Overview";
         var flyingTitle = show ? PanelPageTitle : OverviewTitle;
         var titleShift = show ? PanelTitleShift : OverviewTitleShift;
         var pageBefore = PositionOf(PageContent);
@@ -158,6 +388,9 @@ public partial class MainWindow : Window
 
         PageContent.Margin = new Thickness(show ? PageMargin + SidePanelWidth : PageMargin, 26, PageMargin, PageMargin);
         OverviewHeader.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        // 设置页的标题和返回按钮移到状态栏顶部。
+        foreach (var page in new[] { GeneralPage, ShelfPage, ActionsPage, AppearancePage })
+            page.Children[0].Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         PanelPageTitle.Visibility = show && onOverview ? Visibility.Visible : Visibility.Collapsed;
         SidePanel.Visibility = Visibility.Visible;
         SidePanel.IsHitTestVisible = show;
@@ -224,7 +457,11 @@ public partial class MainWindow : Window
             dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
-            context.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+        {
+            // 只截元素自身的范围：被裁掉的溢出部分不能算进画面，否则截图会被压扁。
+            var bounds = new Rect(0, 0, element.ActualWidth, element.ActualHeight);
+            context.DrawRectangle(new VisualBrush(element) { Viewbox = bounds, ViewboxUnits = BrushMappingMode.Absolute }, null, bounds);
+        }
         bitmap.Render(visual);
         bitmap.Freeze();
         var image = new System.Windows.Controls.Image { Source = bitmap, Width = element.ActualWidth, Height = element.ActualHeight, RenderTransform = new TranslateTransform() };
