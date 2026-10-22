@@ -88,7 +88,7 @@ public partial class MainWindow : Window
     private static void FadeInPage(FrameworkElement page)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
-        var duration = TimeSpan.FromMilliseconds(220);
+        var duration = TimeSpan.FromMilliseconds(300);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
         page.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase });
     }

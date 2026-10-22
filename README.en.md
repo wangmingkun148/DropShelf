@@ -134,7 +134,7 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 ## Releasing a new version
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
-2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.6`, matching the version) and publish.
+2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.7`, matching the version) and publish.
 3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later.
 
 ## License

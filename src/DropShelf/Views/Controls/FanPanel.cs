@@ -149,13 +149,22 @@ public sealed class FanPanel : Panel
     {
         var count = InternalChildren.Count;
         if (count == 0) return -1;
+        if (_hot >= 0 && _hot < count && HotContains(point)) return _hot;
         var mid = (count - 1) / 2.0;
         var half = _card.Width / 2;
-        if (point.X < CenterOf(0) - half || point.X > CenterOf(count - 1) + half) return _hot >= 0 && HotContains(point) ? _hot : -1;
+        if (point.X < CenterOf(0) - half || point.X > CenterOf(count - 1) + half) return -1;
         return _spacing > 0 ? Math.Clamp((int)Math.Round((point.X - _center) / _spacing + mid), 0, count - 1) : 0;
     }
 
-    private bool HotContains(Point point) => Math.Abs(point.X - CenterOf(_hot)) <= _card.Width * HotScale / 2;
+    /// <summary>
+    /// 光标在选出的牌抽出后的位置上时保持选中，否则移到牌靠边处会离相邻的牌更近、牌被换掉，点不到右上角的按钮。
+    /// 按动画终点计算，牌升起的过程中不会因位置还在变化而来回切换。
+    /// </summary>
+    private bool HotContains(Point point)
+    {
+        var bottom = _card.Height - Lift;
+        return Math.Abs(point.X - CenterOf(_hot)) <= _card.Width * HotScale / 2 && point.Y >= bottom - _card.Height * HotScale && point.Y <= bottom;
+    }
 
     private void SetHot(int index)
     {
