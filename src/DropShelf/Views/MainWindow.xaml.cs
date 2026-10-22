@@ -616,14 +616,21 @@ public partial class MainWindow : Window
         var cursor = CursorPoint();
         if (cancel || !_tornOff || HistoryReturnWeight(cursor) > 0)
         {
-            var index = !cancel && _tornOff && panel?.Gap is >= 0 and var gap ? gap : _historyIndex;
+            var original = _historyIndex;
+            var index = !cancel && _tornOff && panel?.Gap is >= 0 and var gap ? gap : original;
             panel?.SetGap(container, index);
+            // 放回的牌立即参与选中，光标下的牌（通常就是它）直接抽出，卡牌落进抽出的位置。
+            panel?.UpdateHot();
             ghost.ClipBottom = WindowBottom;
             ghost.Settle(() => PoseOf(container), () =>
             {
                 container.Opacity = 1;
-                panel?.SetGap(null, -1);
-                // 卡牌落定、画面静止后再重排列表，重新生成卡片的停顿不会出现在动画中。
+                if (index == original)
+                {
+                    panel?.SetGap(null, -1);
+                    return;
+                }
+                // 牌堆保持放回后的排法，等卡牌落定、画面静止后再重排列表，重新生成卡片的停顿不会出现在动画中。
                 Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => _controller.History.Move(entry.Entry, index));
             });
             return;

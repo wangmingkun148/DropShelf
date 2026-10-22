@@ -74,6 +74,8 @@ public sealed class FanPanel : Panel
             _hot = _lastHot = -1;
             _dragged = null;
             _gap = -1;
+            // 放回的牌调整顺序后整组重新生成，光标下的牌直接保持选中，不会先落下再抽出。
+            if (IsMouseOver && Mouse.Captured is null) _hot = IndexAt(Mouse.GetPosition(this));
             ApplyState(animate: false);
         }
         return finalSize;
@@ -87,9 +89,35 @@ public sealed class FanPanel : Panel
 
     private double CenterOf(int index) => _center + (index - (InternalChildren.Count - 1) / 2.0) * _spacing;
 
+    /// <summary>牌堆排成 slots 张牌时相邻两张的间距。</summary>
+    private double SlotSpacing(int slots) => slots > 1 ? Math.Clamp((_width - _card.Width) / (slots - 1), 0, MaxSpacing) : 0;
+
     /// <summary>牌堆排成 slots 张牌时第 slot 张的中心。</summary>
-    private double SlotCenter(int slot, int slots) =>
-        _center + (slot - (slots - 1) / 2.0) * (slots > 1 ? Math.Clamp((_width - _card.Width) / (slots - 1), 0, MaxSpacing) : 0);
+    private double SlotCenter(int slot, int slots) => _center + (slot - (slots - 1) / 2.0) * SlotSpacing(slots);
+
+    private int DraggedIndex => _dragged is null ? -1 : InternalChildren.IndexOf(_dragged);
+
+    /// <summary>现在排出的位置数：拖着的牌离开牌堆时少一个。</summary>
+    private int Slots => _dragged is not null && _gap < 0 ? InternalChildren.Count - 1 : InternalChildren.Count;
+
+    /// <summary>第 index 张牌现在排在第几个位置：拖动时其余的牌依次补上拖走的位置，再在空位处让开，拖着的牌排在空位上。</summary>
+    private int SlotOf(int index)
+    {
+        var dragged = DraggedIndex;
+        if (dragged < 0) return index;
+        if (index == dragged) return _gap >= 0 ? _gap : index;
+        var slot = index > dragged ? index - 1 : index;
+        return _gap >= 0 && slot >= _gap ? slot + 1 : slot;
+    }
+
+    /// <summary>排在第 slot 个位置的牌；拖着的牌离开牌堆时不算。</summary>
+    private int IndexOfSlot(int slot)
+    {
+        var dragged = DraggedIndex;
+        for (var index = 0; index < InternalChildren.Count; index++)
+            if (SlotOf(index) == slot && (index != dragged || _gap >= 0)) return index;
+        return -1;
+    }
 
     private static double RestY(int index, int count)
     {
@@ -149,7 +177,7 @@ public sealed class FanPanel : Panel
         {
             var half = _card.Width * HotScale / 2;
             var top = -Lift - _card.Height * (HotScale - 1);
-            if (point.Y >= top && point.Y <= ActualHeight && Math.Abs(point.X - CenterOf(_hot)) <= half)
+            if (point.Y >= top && point.Y <= ActualHeight && Math.Abs(point.X - SlotCenter(SlotOf(_hot), Slots)) <= half)
                 return new PointHitTestResult(this, point);
         }
         return base.HitTestCore(hitTestParameters);
@@ -157,13 +185,13 @@ public sealed class FanPanel : Panel
 
     private int IndexAt(Point point)
     {
-        var count = InternalChildren.Count;
-        if (count == 0) return -1;
-        if (_hot >= 0 && _hot < count && HotContains(point)) return _hot;
-        var mid = (count - 1) / 2.0;
+        var slots = Slots;
+        if (slots <= 0) return -1;
+        if (_hot >= 0 && _hot < InternalChildren.Count && HotContains(point)) return _hot;
         var half = _card.Width / 2;
-        if (point.X < CenterOf(0) - half || point.X > CenterOf(count - 1) + half) return -1;
-        return _spacing > 0 ? Math.Clamp((int)Math.Round((point.X - _center) / _spacing + mid), 0, count - 1) : 0;
+        if (point.X < SlotCenter(0, slots) - half || point.X > SlotCenter(slots - 1, slots) + half) return -1;
+        var spacing = SlotSpacing(slots);
+        return IndexOfSlot(spacing > 0 ? Math.Clamp((int)Math.Round((point.X - _center) / spacing + (slots - 1) / 2.0), 0, slots - 1) : 0);
     }
 
     /// <summary>
@@ -173,11 +201,17 @@ public sealed class FanPanel : Panel
     private bool HotContains(Point point)
     {
         var bottom = _card.Height - Lift;
-        return Math.Abs(point.X - CenterOf(_hot)) <= _card.Width * HotScale / 2 && point.Y >= bottom - _card.Height * HotScale && point.Y <= bottom;
+        return Math.Abs(point.X - SlotCenter(SlotOf(_hot), Slots)) <= _card.Width * HotScale / 2 && point.Y >= bottom - _card.Height * HotScale && point.Y <= bottom;
     }
 
     /// <summary>选出的牌被拖走时，所有牌回到原位。</summary>
     public void ClearHot() => SetHot(-1);
+
+    /// <summary>选出光标下的牌，不必等鼠标再移动（如拖动结束、释放捕获后）。</summary>
+    public void UpdateHot()
+    {
+        if (IsMouseOver) SetHot(IndexAt(Mouse.GetPosition(this)));
+    }
 
     /// <summary>拖着的牌要放回的位置；-1 表示牌已离开牌堆，其余的牌并拢。</summary>
     public int Gap => _gap;
@@ -192,7 +226,6 @@ public sealed class FanPanel : Panel
         if (dragged == _dragged && gap == _gap) return;
         _dragged = dragged;
         _gap = gap;
-        _hot = -1;
         ApplyState(animate: true);
     }
 
@@ -215,25 +248,19 @@ public sealed class FanPanel : Panel
     private void ApplyState(bool animate)
     {
         var count = InternalChildren.Count;
-        var dragged = _dragged is null ? -1 : InternalChildren.IndexOf(_dragged);
-        var slots = dragged >= 0 && _gap < 0 ? count - 1 : count;
+        var dragged = DraggedIndex;
+        var slots = Slots;
         var mid = (slots - 1) / 2.0;
+        var hotSlot = _hot >= 0 && _hot < count ? SlotOf(_hot) : -1;
         for (var index = 0; index < count; index++)
         {
             var child = InternalChildren[index];
             var (scale, rotate, move) = Transforms(child);
-            // 拖动时其余的牌依次补上拖走的位置，再在空位处让开。
-            var slot = index;
-            if (index == dragged && _gap >= 0) slot = _gap;
-            else if (dragged >= 0 && index != dragged)
-            {
-                if (index > dragged) slot--;
-                if (_gap >= 0 && slot >= _gap) slot++;
-            }
+            var slot = SlotOf(index);
             var rest = (slot - mid) * Tilt;
             var isHot = index == _hot;
             var offset = SlotCenter(slot, slots) - CenterOf(index) +
-                         (_hot < 0 || isHot ? 0 : Math.Sign(index - _hot) * Math.Max(0, 3 - Math.Abs(index - _hot)) / 3.0 * Push);
+                         (hotSlot < 0 || isHot ? 0 : Math.Sign(slot - hotSlot) * Math.Max(0, 3 - Math.Abs(slot - hotSlot)) / 3.0 * Push);
 
             var ease = isHot ? LiftEase : MoveEase;
             // 拖着的牌是隐藏的，直接放到空位上，拖回来的卡牌被吸向空位的最终位置，而不是一路滑过去的中间位置。
