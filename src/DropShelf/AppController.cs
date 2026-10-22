@@ -22,6 +22,7 @@ public sealed class AppController : IDisposable
     private GestureService? _gestures;
     private ProbeWindow? _probe;
     private MainWindow? _mainWindow;
+    private bool _showingMainWindow;
     private OnboardingWindow? _onboarding;
     private bool _hasShownTrayHint;
     private bool _exiting;
@@ -155,20 +156,26 @@ public sealed class AppController : IDisposable
 
     public void ShowMainWindow()
     {
-        if (_exiting) return;
+        // Show() 创建窗口时会处理消息，连续点击托盘图标可能在此期间再次进入；第二次 Show() 会抛出异常。
+        if (_exiting || _showingMainWindow) return;
         if (!_dispatcher.CheckAccess())
         {
             _dispatcher.BeginInvoke(ShowMainWindow);
             return;
         }
-        if (_mainWindow is null)
+        _showingMainWindow = true;
+        try
         {
-            _mainWindow = new MainWindow(this);
-            _mainWindow.Closed += OnMainWindowClosed;
+            if (_mainWindow is null)
+            {
+                _mainWindow = new MainWindow(this);
+                _mainWindow.Closed += OnMainWindowClosed;
+            }
+            if (!_mainWindow.IsVisible) _mainWindow.Show();
+            if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
+            _mainWindow.Activate();
         }
-        if (!_mainWindow.IsVisible) _mainWindow.Show();
-        if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
-        _mainWindow.Activate();
+        finally { _showingMainWindow = false; }
     }
 
     private void OnMainWindowClosed(object? sender, EventArgs e)
