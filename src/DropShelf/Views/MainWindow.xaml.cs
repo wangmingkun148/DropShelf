@@ -27,7 +27,7 @@ public partial class MainWindow : Window
 
         SourceInitialized += OnSourceInitialized;
         StateChanged += (_, _) => UpdateMaximizedPadding();
-        LayoutUpdated += (_, _) => UpdateCardHeight();
+        LayoutUpdated += (_, _) => UpdateCardHeight(PageScroll.ViewportHeight);
         ThemeService.ThemeChanged += OnThemeChanged;
     }
 
@@ -232,6 +232,7 @@ public partial class MainWindow : Window
     private const double FanHeadroom = 72;
     private double _cardHeightTarget = MinCardHeight;
     private double _viewportHeight;
+    private double _measuredHeight;
 
     public double SettingsCardHeight
     {
@@ -243,10 +244,10 @@ public partial class MainWindow : Window
     /// 页面其余内容的高度不变，剩下的空间分给两行卡片；牌堆由布局固定在窗口底边，不受影响。
     /// 每次排版后检查一次：拖动窗口大小时直接跟随，只有页面内容变化（如收起入门提示）时才平滑过渡。
     /// </summary>
-    private void UpdateCardHeight()
+    private void UpdateCardHeight(double viewport)
     {
-        var viewport = PageScroll.ViewportHeight;
-        if (OverviewPage.Visibility != Visibility.Visible || viewport <= 0) return;
+        // 概览页刚从隐藏切回来、还没测量时 DesiredSize 是 0，等排版后再算。
+        if (OverviewPage.Visibility != Visibility.Visible || OverviewPage.DesiredSize.Height <= 0 || viewport <= 0) return;
         var resized = Math.Abs(viewport - _viewportHeight) >= 1;
         _viewportHeight = viewport;
         // 用测量高度减去卡片区域本身，结果与卡片当前高度无关，动画和像素取整都不会反过来改变目标。
@@ -265,6 +266,18 @@ public partial class MainWindow : Window
         }
         BeginAnimation(SettingsCardHeightProperty, null);
         SettingsCardHeight = cards;
+    }
+
+    /// <summary>
+    /// 窗口高度变化时，在排版之前就按新的可视高度算好卡片高度。否则会先按旧高度排一遍：
+    /// 窗口变矮时内容一度超出窗口、出现滚动条，排完才缩回去，拖动窗口边缘时看起来在抖。
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        if (_viewportHeight > 0 && _measuredHeight > 0 && availableSize.Height != _measuredHeight && !double.IsInfinity(availableSize.Height))
+            UpdateCardHeight(_viewportHeight + availableSize.Height - _measuredHeight);
+        _measuredHeight = availableSize.Height;
+        return base.MeasureOverride(availableSize);
     }
 
     // ───────────── 拖动更换快速操作 ─────────────

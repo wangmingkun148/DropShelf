@@ -139,7 +139,7 @@
             <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
         </Style>
 
-        <!-- 概览页的设置卡片：高度随窗口变化，矮时一行，拉高后交叉淡入成大卡片并渐显背景图案 -->
+        <!-- 概览页的设置卡片：高度随窗口变化，矮时一行，够高时交叉淡入成大卡片，背景图案随高度渐显 -->
         <Style TargetType="controls:PageTile">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
             <Setter Property="Margin" Value="0,0,6,6" />
@@ -157,7 +157,7 @@
                                                Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                                Margin="0,0,-16,-24" />
                                 </Grid>
-                                <Grid Margin="18,0,16,0" Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='150,126'}">
+                                <Grid x:Name="Compact" Margin="18,0,16,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -173,7 +173,7 @@
                                     <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
                                                Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
                                 </Grid>
-                                <Grid Margin="22,22,18,20" Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='126,150'}">
+                                <Grid x:Name="Tall" Margin="22,22,18,20" Opacity="0">
                                     <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource AccentFaintBrush}"
                                             HorizontalAlignment="Left" VerticalAlignment="Top">
                                         <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22"
@@ -202,6 +202,24 @@
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsTall" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Compact" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetName="Tall" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Compact" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                                            <DoubleAnimation Storyboard.TargetName="Tall" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardHoverBrush}" />
                             </Trigger>

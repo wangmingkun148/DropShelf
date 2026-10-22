@@ -1421,9 +1421,12 @@ internal static class Program
         window.Height = 1100;
         Pump(700);
         Assert(window.SettingsCardHeight > shortCards + 40, "窗口变高后设置卡片应拉长");
+        var firstTile = (DropShelf.Views.Controls.PageTile)((System.Windows.Controls.Panel)window.FindName("PageCards")!).Children[0];
+        Assert(firstTile.ActualHeight < 144 || firstTile.IsTall, "卡片够高时应切换成大卡片样式");
         window.Height = 640;
         Pump(700);
         Assert(Math.Abs(window.SettingsCardHeight - shortCards) < 1, "窗口变矮后设置卡片应恢复");
+        Assert(!firstTile.IsTall || firstTile.ActualHeight >= 132, "窗口变矮后卡片应回到单行样式");
 
         controller.History.Clear();
         var pageCards = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("PageCards")!;

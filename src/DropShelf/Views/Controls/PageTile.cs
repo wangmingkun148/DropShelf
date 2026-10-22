@@ -7,7 +7,8 @@ namespace DropShelf.Views.Controls;
 
 /// <summary>
 /// 概览页上进入设置页的卡片。窗口较矮时是一行图标和文字；高度足够时卡片拉高，
-/// 换成图标在左上、设置项标签在下的样式，背景图案随高度渐显（模板中按卡片高度交叉淡入）。
+/// 换成图标在左上、设置项标签在下的样式，背景图案随高度渐显。
+/// 两种样式按 <see cref="IsTall"/> 切换并交叉淡入，不随高度连续变化，否则高度停在中间时两套内容会叠在一起。
 /// </summary>
 public sealed class PageTile : Button
 {
@@ -25,6 +26,15 @@ public sealed class PageTile : Button
         DependencyProperty.RegisterReadOnly(nameof(Items), typeof(string[]), typeof(PageTile), new PropertyMetadata(Array.Empty<string>()));
 
     public static readonly DependencyProperty ItemsProperty = ItemsPropertyKey.DependencyProperty;
+
+    private static readonly DependencyPropertyKey IsTallPropertyKey =
+        DependencyProperty.RegisterReadOnly(nameof(IsTall), typeof(bool), typeof(PageTile), new PropertyMetadata(false));
+
+    public static readonly DependencyProperty IsTallProperty = IsTallPropertyKey.DependencyProperty;
+
+    private const double TallHeight = 138;
+    // 回差：高度停在分界附近时不会来回切换。
+    private const double Hysteresis = 6;
 
     public string? Icon
     {
@@ -47,6 +57,16 @@ public sealed class PageTile : Button
 
     /// <summary>摘要拆成的各项，大卡片上显示为标签。</summary>
     public string[] Items => (string[])GetValue(ItemsProperty);
+
+    /// <summary>卡片够高时显示大卡片样式。</summary>
+    public bool IsTall => (bool)GetValue(IsTallProperty);
+
+    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+    {
+        base.OnRenderSizeChanged(sizeInfo);
+        var height = sizeInfo.NewSize.Height;
+        if (IsTall ? height < TallHeight - Hysteresis : height >= TallHeight + Hysteresis) SetValue(IsTallPropertyKey, !IsTall);
+    }
 
     private void UpdateItems() => SetValue(ItemsPropertyKey,
         Summary?.Split([" · ", "、", ", "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? []);
