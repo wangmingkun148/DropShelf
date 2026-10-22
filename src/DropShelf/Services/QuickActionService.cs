@@ -110,7 +110,7 @@ public static class QuickActionService
                 {
                     var outputDirectory = request.HasTemporaryFiles ? GetPersistentOutputDirectory() : null;
                     var maximumBytes = custom.ImageSizeKb * 1024L;
-                    var results = await Task.Run(() => ImageCompressor.CompressAll(paths, maximumBytes, outputDirectory));
+                    var results = await ImagingThread.RunAsync(() => ImageCompressor.CompressAll(paths, maximumBytes, outputDirectory));
                     return SummarizeImageCompression(results, custom.ImageSizeKb);
                 }
                 catch (Exception exception)

@@ -297,7 +297,7 @@ public static class DropDataReader
         var path = Path.Combine(cacheDirectory, $"{Strings.DroppedImageName} {DateTime.Now:yyyy-MM-dd HH.mm.ss}{extension}");
         try
         {
-            await Task.Run(() =>
+            await ImagingThread.RunAsync(() =>
             {
                 if (encoded is not null)
                 {

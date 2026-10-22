@@ -115,6 +115,7 @@ internal static class Program
 
         // 系统集成
         Run("文件使用 Windows 系统缩略图和类型名称", TestShellThumbnail);
+        Run("后台图片处理集中在同一个常驻线程", TestImagingThread);
         Run("开机启动命令正确处理空格路径", TestStartupCommand);
         Run("主题解析与强调色对比度", TestThemeAndAccent);
         Run("托盘图标可从图标资源创建", TestTrayIconLoader);
@@ -1228,6 +1229,18 @@ internal static class Program
         Assert(thumbnail is System.Windows.Media.Imaging.BitmapSource { PixelWidth: > 0 } && thumbnail.IsFrozen, "没有获取到可跨线程使用的缩略图");
         Assert(!string.IsNullOrWhiteSpace(ShellFileInfo.GetTypeName(path)), "没有获取到文件类型名称");
         Assert(ShellFileInfo.GetTypeName("noextension") == "文件", "无扩展名文件类型不正确");
+    }
+
+    private static async Task TestImagingThread()
+    {
+        var first = await ImagingThread.RunAsync(() => (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()));
+        var second = await ImagingThread.RunAsync(() => Environment.CurrentManagedThreadId);
+        Assert(first.Item1 == second && first.Item2 == ApartmentState.STA, "图片处理没有在同一个单线程套间线程上运行");
+        Assert(Environment.CurrentManagedThreadId != second, "图片处理占用了界面线程");
+        var failed = false;
+        try { await ImagingThread.RunAsync(() => throw new InvalidOperationException()); }
+        catch (InvalidOperationException) { failed = true; }
+        Assert(failed, "图片处理中的异常没有传回调用方");
     }
 
     private static void TestStartupCommand()

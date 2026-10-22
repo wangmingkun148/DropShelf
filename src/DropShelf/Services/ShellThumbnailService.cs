@@ -8,24 +8,16 @@ namespace DropShelf.Services;
 
 public static class ShellThumbnailService
 {
-    private static readonly SemaphoreSlim LoadingSlots = new(3, 3);
-
     public static async Task<ImageSource?> LoadAsync(string path, int size = 128)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-
-        await LoadingSlots.WaitAsync().ConfigureAwait(false);
         try
         {
-            return await Task.Run(() => LoadFromWindows(path, size)).ConfigureAwait(false);
+            return await ImagingThread.RunAsync(() => LoadFromWindows(path, size)).ConfigureAwait(false);
         }
         catch
         {
             return null;
-        }
-        finally
-        {
-            LoadingSlots.Release();
         }
     }
 

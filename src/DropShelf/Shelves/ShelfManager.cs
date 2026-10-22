@@ -155,6 +155,8 @@ public sealed class ShelfManager : IShelfHost
         if (items.Count > 0) History?.Record(items);
         if (ReferenceEquals(window, _spare)) _spare = null;
         _open.Remove(window);
+        // 拖入的数据、缩略图和动画位图大多占用原生内存，托管堆很小时很少触发回收；全部关闭后空闲时回收一次。
+        if (_open.Count == 0 && !_shuttingDown) _dispatcher.BeginInvoke(() => GC.Collect(), DispatcherPriority.ApplicationIdle);
     }
 
     public void ShowSettings() => _showSettings();
