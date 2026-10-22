@@ -171,7 +171,20 @@ public sealed class AppController : IDisposable
                 _mainWindow = new MainWindow(this);
                 _mainWindow.Closed += OnMainWindowClosed;
             }
-            if (!_mainWindow.IsVisible) _mainWindow.Show();
+            if (!_mainWindow.IsVisible)
+            {
+                try { _mainWindow.Show(); }
+                catch
+                {
+                    // Show() 中途出错后窗口停在半初始化状态，再次 Show() 只会报“VisualTarget 的根 Visual 不能具有父级”，
+                    // 主窗口从此打不开；丢弃这个窗口，下次重新创建。
+                    var broken = _mainWindow;
+                    _mainWindow = null;
+                    broken.Closed -= OnMainWindowClosed;
+                    try { broken.Close(); } catch (InvalidOperationException) { }
+                    throw;
+                }
+            }
             if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
             _mainWindow.Activate();
         }
