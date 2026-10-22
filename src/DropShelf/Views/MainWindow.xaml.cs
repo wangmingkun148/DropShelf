@@ -413,11 +413,149 @@ public partial class MainWindow : Window
             ? FindAncestor<FrameworkElement>(hit, element => element.DataContext is ActionSlotViewModel)?.DataContext as ActionSlotViewModel
             : null;
 
+    // ───────────── 拖出最近关闭的置物架 ─────────────
+
+    /// <summary>卡牌拖到牌堆上方这么高的范围内松手算放回。</summary>
+    private const double HistoryReturnReach = 120;
+    private const double DetachedScale = 1.06;
+
+    private HistoryEntryViewModel? _pressedEntry;
+    private FrameworkElement? _draggedContainer;
+    private System.Windows.Point _historyPressPoint;
+    private Vector _grabOffset;
+    private bool _draggingHistory;
+    private CardGhostWindow? _ghost;
+
+    private void OnHistoryMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _pressedEntry = null;
+        var source = e.OriginalSource as DependencyObject;
+        if (_ghost?.IsBusy == true ||
+            FindAncestor<FrameworkElement>(source, element => element.DataContext is HistoryEntryViewModel) is not { DataContext: HistoryEntryViewModel entry } ||
+            FindAncestor<ButtonBase>(source)?.Command != entry.RestoreCommand) return;
+        _pressedEntry = entry;
+        _historyPressPoint = e.GetPosition(this);
+        _ghost ??= new CardGhostWindow();
+    }
+
+    private void OnHistoryMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_draggingHistory || _pressedEntry is not { } entry || e.LeftButton != MouseButtonState.Pressed) return;
+        var position = e.GetPosition(this);
+        if (Math.Abs(position.X - _historyPressPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _historyPressPoint.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        BeginHistoryDrag(entry);
+    }
+
+    private void OnHistoryMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_draggingHistory)
+        {
+            _pressedEntry = null;
+            return;
+        }
+        e.Handled = true;
+        EndHistoryDrag(cancel: false);
+    }
+
+    /// <summary>子元素失去捕获也会冒泡到这里，只处理拖动时列表本身失去捕获（如切换窗口）。</summary>
+    private void OnHistoryLostCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, HistoryList)) EndHistoryDrag(cancel: true);
+    }
+
+    /// <summary>
+    /// 卡牌从当前的位置、大小和角度脱离牌堆，换成跟随光标的截图窗口，原位留出空位。
+    /// 截图前先收起选中状态（强调色边框、“点击恢复”提示），拖着的是一张干净的卡牌。
+    /// </summary>
+    private void BeginHistoryDrag(HistoryEntryViewModel entry)
+    {
+        _pressedEntry = null;
+        if (_ghost is null || HistoryList.ItemContainerGenerator.ContainerFromItem(entry) is not ContentPresenter container ||
+            VisualTreeHelper.GetChildrenCount(container) == 0 || VisualTreeHelper.GetChild(container, 0) is not FrameworkElement card ||
+            PoseOf(container) is not { } start || !Mouse.Capture(HistoryList, CaptureMode.Element)) return;
+
+        _draggingHistory = true;
+        _pressedEntry = entry;
+        _draggedContainer = container;
+        _grabOffset = CursorPoint() - start.Center;
+        (VisualTreeHelper.GetParent(container) as Controls.FanPanel)?.ClearHot();
+        (container.ContentTemplate?.FindName("RestoreHint", container) as UIElement)?.BeginAnimation(OpacityProperty, null);
+        card.UpdateLayout();
+        if (Snapshot(card)?.Image.Source is not { } image)
+        {
+            EndHistoryDrag(cancel: true);
+            return;
+        }
+        container.Opacity = 0;
+        _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () =>
+        {
+            var cursor = CursorPoint();
+            return new CardPose(cursor - _grabOffset, IsOverHistory(cursor) ? 1 : DetachedScale, 0);
+        });
+    }
+
+    /// <summary>在牌堆上松手（或取消）时卡牌飞回原位；其他位置松手时在光标处打开置物架，卡牌缩小淡出。</summary>
+    private void EndHistoryDrag(bool cancel)
+    {
+        if (!_draggingHistory) return;
+        _draggingHistory = false;
+        var entry = _pressedEntry!;
+        var container = _draggedContainer!;
+        _pressedEntry = null;
+        _draggedContainer = null;
+        if (Mouse.Captured == HistoryList) HistoryList.ReleaseMouseCapture();
+        if (_ghost is not { IsBusy: true } ghost)
+        {
+            container.Opacity = 1;
+            return;
+        }
+
+        var cursor = CursorPoint();
+        if (cancel || IsOverHistory(cursor))
+        {
+            ghost.Settle(() => PoseOf(container), () => container.Opacity = 1);
+            return;
+        }
+        ghost.Vanish(cursor);
+        _controller.RestoreAt(entry.Entry, new POINT((int)cursor.X, (int)cursor.Y));
+    }
+
+    private bool IsOverHistory(System.Windows.Point screen)
+    {
+        var window = PointFromScreen(screen);
+        var list = HistoryList.PointFromScreen(screen);
+        return window.X >= 0 && window.Y >= 0 && window.X <= ActualWidth && window.Y <= ActualHeight &&
+               list.X >= 0 && list.X <= HistoryList.ActualWidth && list.Y >= -HistoryReturnReach && list.Y <= HistoryList.ActualHeight;
+    }
+
+    /// <summary>元素在屏幕上的中心、缩放和角度，包含牌堆给它的变换和动画。</summary>
+    private static CardPose? PoseOf(FrameworkElement element)
+    {
+        if (!element.IsVisible || element.ActualWidth < 1 || PresentationSource.FromVisual(element) is null) return null;
+        var origin = element.PointToScreen(default);
+        var edge = element.PointToScreen(new System.Windows.Point(element.ActualWidth, 0)) - origin;
+        var center = element.PointToScreen(new System.Windows.Point(element.ActualWidth / 2, element.ActualHeight / 2));
+        return new CardPose(center, edge.Length / (element.ActualWidth * VisualTreeHelper.GetDpi(element).DpiScaleX),
+            Math.Atan2(edge.Y, edge.X) * 180 / Math.PI);
+    }
+
+    private static System.Windows.Point CursorPoint()
+    {
+        var cursor = WindowPlacement.GetCursor();
+        return new System.Windows.Point(cursor.X, cursor.Y);
+    }
+
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         if (_draggingCard && e.Key == Key.Escape)
         {
             EndCardDrag();
+            e.Handled = true;
+        }
+        if (_draggingHistory && e.Key == Key.Escape)
+        {
+            EndHistoryDrag(cancel: true);
             e.Handled = true;
         }
         base.OnPreviewKeyDown(e);
@@ -453,6 +591,7 @@ public partial class MainWindow : Window
     {
         ThemeService.ThemeChanged -= OnThemeChanged;
         ViewModel.Detach();
+        _ghost?.Close();
         base.OnClosed(e);
     }
 

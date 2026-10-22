@@ -166,6 +166,9 @@ public sealed class FanPanel : Panel
         return Math.Abs(point.X - CenterOf(_hot)) <= _card.Width * HotScale / 2 && point.Y >= bottom - _card.Height * HotScale && point.Y <= bottom;
     }
 
+    /// <summary>选出的牌被拖走时，所有牌回到原位。</summary>
+    public void ClearHot() => SetHot(-1);
+
     private void SetHot(int index)
     {
         if (index == _hot) return;

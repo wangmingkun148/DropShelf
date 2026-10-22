@@ -50,7 +50,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - While dragging in, move to the bottom button bar to reveal quick actions and drop directly on one.
 - "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.
 - Chat app support: temporary images and files deleted right after the drop are saved; PNG, JPG, GIF and DIB image data and older QQ versions are supported; temporary attachments dragged or copied to chat apps are kept for 10 more minutes.
-- Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu.
+- Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu. You can also drag a card out of the Overview page to reopen the shelf where you let go, or drop it back on the stack to put it back.
 - Several shelves can be open at once, in Small, Medium or Large.
 - Shortcuts: `Esc` collapses or closes, `Delete` removes the selection, `Ctrl+A` selects all, `Ctrl+C` copies, `Ctrl+V` pastes, `Enter` opens.
 

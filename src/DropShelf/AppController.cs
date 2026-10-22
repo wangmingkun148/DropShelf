@@ -215,6 +215,10 @@ public sealed class AppController : IDisposable
     /// <summary>从设置窗口恢复最近关闭的置物架，在主窗口旁边打开。</summary>
     public void RestoreNearMainWindow(ShelfHistoryEntry entry) => Shelves.Restore(entry, OpenShelfNearMainWindow());
 
+    /// <summary>把最近关闭的置物架拖出设置窗口后，在松手的位置打开。</summary>
+    public void RestoreAt(ShelfHistoryEntry entry, POINT center) =>
+        Shelves.Restore(entry, Shelves.OpenAt(center, openedByGesture: false, activate: true));
+
     public void Exit()
     {
         if (!_dispatcher.CheckAccess())

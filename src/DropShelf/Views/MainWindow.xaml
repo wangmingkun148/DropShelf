@@ -370,7 +370,7 @@
                                    TextTrimming="CharacterEllipsis" MaxHeight="36" LineHeight="18" />
                         <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    Foreground="{DynamicResource TextSecondaryBrush}" />
-                        <Border Style="{StaticResource HotOnlyStyle}" Margin="0,10,0,0" Padding="10,2,10,3" CornerRadius="10" HorizontalAlignment="Center"
+                        <Border x:Name="RestoreHint" Style="{StaticResource HotOnlyStyle}" Margin="0,10,0,0" Padding="10,2,10,3" CornerRadius="10" HorizontalAlignment="Center"
                                 Background="{DynamicResource AccentBrush}">
                             <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}" />
                         </Border>
@@ -627,7 +627,9 @@
                             <StackPanel x:Name="HistorySection" Grid.Row="2" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
                                 <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
-                                              Focusable="False" Height="165" Margin="0,4,0,-36">
+                                              Focusable="False" Height="165" Margin="0,4,0,-36"
+                                              PreviewMouseLeftButtonDown="OnHistoryMouseDown" PreviewMouseMove="OnHistoryMouseMove"
+                                              PreviewMouseLeftButtonUp="OnHistoryMouseUp" LostMouseCapture="OnHistoryLostCapture">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <controls:FanPanel />

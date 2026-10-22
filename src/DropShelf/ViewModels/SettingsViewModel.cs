@@ -86,6 +86,7 @@ public sealed class HistoryEntryViewModel
 {
     public HistoryEntryViewModel(ShelfHistoryEntry entry, AppController controller)
     {
+        Entry = entry;
         Title = Strings.HistoryEntryTitle(entry);
         Detail = $"{Strings.ItemCount(entry.Items.Count)} · {Strings.HistoryEntryTime(entry.ClosedAt)}";
         // 最后放入的项目在最上面。
@@ -97,6 +98,7 @@ public sealed class HistoryEntryViewModel
         RemoveCommand = new RelayCommand(_ => controller.History.Remove(entry));
     }
 
+    public ShelfHistoryEntry Entry { get; }
     public string Title { get; }
     public string Detail { get; }
     public HistoryThumbnailViewModel? Stack0 { get; }
