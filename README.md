@@ -27,6 +27,8 @@ DropShelf 是一个 Windows 临时文件置物架。拖着文件晃一晃鼠标�
 - `DropShelf-Setup-版本号.exe`：安装包。
 - `DropShelf-版本号-portable.zip`：便携版，解压后运行 `DropShelf.exe`。
 
+DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows 已保护你的电脑”。这是 SmartScreen 对新发布、下载量还少的程序的常规提示，并不代表检测到病毒。点“更多信息”，再点“仍要运行”即可。浏览器下载时提示“不常下载”也一样，选择“保留”。
+
 ## 使用方法
 
 1. 安装后运行。关闭主窗口后，程序在任务栏通知区域继续运行。
@@ -134,7 +136,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 ## 发布新版本
 
 1. 修改 `DropShelf.csproj`、`app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
-2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.8`，须与版本号一致）并发布。
+2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.9`，须与版本号一致）并发布。
 3. GitHub Actions 会自动编译安装包和便携版，几分钟后附加到这个 Release 上。
 
 ## 许可证

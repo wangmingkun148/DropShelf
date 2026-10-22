@@ -27,6 +27,8 @@ Get the latest version from [Releases](https://github.com/wangmingkun148/dropshe
 - `DropShelf-Setup-<version>.exe`: installer (in Simplified Chinese).
 - `DropShelf-<version>-portable.zip`: portable version. Unzip it and run `DropShelf.exe`.
 
+DropShelf is not code-signed, so Windows may show "Windows protected your PC" the first time you run it. SmartScreen shows this for new programs that haven't been downloaded much yet; it doesn't mean a virus was found. Click "More info", then "Run anyway". If your browser says the file isn't commonly downloaded, choose "Keep".
+
 ## Getting started
 
 1. Install and run it. After you close the main window, DropShelf keeps running in the notification area.
@@ -134,7 +136,7 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 ## Releasing a new version
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
-2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.8`, matching the version) and publish.
+2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish.
 3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later.
 
 ## License
