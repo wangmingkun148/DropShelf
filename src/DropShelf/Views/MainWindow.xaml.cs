@@ -27,6 +27,7 @@ public partial class MainWindow : Window
 
         SourceInitialized += OnSourceInitialized;
         StateChanged += (_, _) => UpdateMaximizedPadding();
+        LayoutUpdated += (_, _) => UpdateCardHeight();
         ThemeService.ThemeChanged += OnThemeChanged;
     }
 
@@ -230,7 +231,6 @@ public partial class MainWindow : Window
     // 牌抽出后会超出牌堆标题约这么高；窗口够高时在卡片和牌堆之间留出这段空间，不够高时才允许牌盖住卡片。
     private const double FanHeadroom = 72;
     private double _cardHeightTarget = MinCardHeight;
-    private double _fanGapTarget;
 
     public double SettingsCardHeight
     {
@@ -239,29 +239,21 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 页面其余内容的高度不变，剩下的空间先分给两行卡片，多出的放在牌堆上方，让牌堆始终贴着窗口底边。
-    /// 高度变化时平滑过渡。
+    /// 页面其余内容的高度不变，剩下的空间分给两行卡片；牌堆由布局固定在窗口底边，不受影响。
+    /// 每次排版后检查一次，只在目标高度变化时开始平滑过渡。
     /// </summary>
-    private void OnPageLayoutChanged(object sender, SizeChangedEventArgs e)
+    private void UpdateCardHeight()
     {
         if (OverviewPage.Visibility != Visibility.Visible || PageScroll.ViewportHeight <= 0) return;
-        var hasFan = HistorySection.Visibility == Visibility.Visible;
-        var rest = OverviewPage.ActualHeight - 2 * SettingsCardHeight - (hasFan ? HistorySection.Margin.Top : 0);
+        // 概览页被拉伸到可视区域高度，ActualHeight 不能反映内容本身，用测量出的高度。
+        var rest = OverviewPage.DesiredSize.Height - 2 * SettingsCardHeight;
         var spare = PageScroll.ViewportHeight - PageContent.Margin.Top - PageContent.Margin.Bottom - rest;
-        var cards = Math.Floor(Math.Clamp((spare - (hasFan ? FanHeadroom : 0)) / 2, MinCardHeight, MaxCardHeight));
-        var gap = hasFan ? Math.Floor(Math.Max(0, spare - 2 * cards)) : 0;
-        if (Math.Abs(cards - _cardHeightTarget) < 1 && Math.Abs(gap - _fanGapTarget) < 1) return;
+        var headroom = HistorySection.Visibility == Visibility.Visible ? FanHeadroom : 0;
+        var cards = Math.Floor(Math.Clamp((spare - headroom) / 2, MinCardHeight, MaxCardHeight));
+        if (Math.Abs(cards - _cardHeightTarget) < 1) return;
         _cardHeightTarget = cards;
-        _fanGapTarget = gap;
-        if (!IsLoaded)
-        {
-            SettingsCardHeight = cards;
-            HistorySection.Margin = new Thickness(0, gap, 0, 0);
-            return;
-        }
-        BeginAnimation(SettingsCardHeightProperty, Motion(SettingsCardHeight, cards));
-        HistorySection.BeginAnimation(MarginProperty,
-            new ThicknessAnimation(HistorySection.Margin, new Thickness(0, gap, 0, 0), MotionDuration) { EasingFunction = MotionEase });
+        BeginAnimation(SettingsCardHeightProperty, IsLoaded ? Motion(SettingsCardHeight, cards) : null);
+        if (!IsLoaded) SettingsCardHeight = cards;
     }
 
     // ───────────── 拖动更换快速操作 ─────────────

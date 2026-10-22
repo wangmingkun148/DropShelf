@@ -537,13 +537,19 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <ScrollViewer x:Name="PageScroll" Grid.RowSpan="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Focusable="False" SizeChanged="OnPageLayoutChanged">
+                              Focusable="False">
                     <Grid x:Name="PageContent" MaxWidth="860" Margin="36,26,36,36">
                         <Grid.RenderTransform>
                             <TranslateTransform x:Name="PageContentShift" />
                         </Grid.RenderTransform>
                         <!-- 概览 -->
-                        <StackPanel x:Name="OverviewPage" Visibility="Visible" SizeChanged="OnPageLayoutChanged">
+                        <!-- 撑满可视区域：内容不够高时中间一行留空，牌堆总是贴着窗口底边 -->
+                        <Grid x:Name="OverviewPage" Visibility="Visible">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <!-- 窗口宽到显示左侧状态栏时，标题移到状态栏图标右侧，这一行收起 -->
                             <Grid x:Name="OverviewHeader">
                                 <TextBlock x:Name="OverviewTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" HorizontalAlignment="Left">
@@ -561,7 +567,7 @@
                                 </Button>
                             </Grid>
 
-                            <StackPanel x:Name="OverviewBody">
+                            <StackPanel x:Name="OverviewBody" Grid.Row="1" VerticalAlignment="Top">
                                 <StackPanel.RenderTransform>
                                     <TranslateTransform x:Name="OverviewBodyShift" />
                                 </StackPanel.RenderTransform>
@@ -612,21 +618,21 @@
                                     <controls:PageTile Tag="Appearance" Click="OnPageCardClick" Icon="{StaticResource Glyph.Color}" Header="{l:Loc Appearance}"
                                                        Summary="{Binding AppearanceSummary}" />
                                 </UniformGrid>
-
-                                <!-- 最近关闭的置物架排成一手牌，贴着窗口底边，下半截被裁掉；没有记录时整块隐藏 -->
-                                <StackPanel x:Name="HistorySection" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
-                                    <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
-                                    <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
-                                                  Focusable="False" Height="165" Margin="0,4,0,-36">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <controls:FanPanel />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                    </ItemsControl>
-                                </StackPanel>
                             </StackPanel>
-                        </StackPanel>
+
+                            <!-- 最近关闭的置物架排成一手牌，贴着窗口底边，下半截被裁掉；没有记录时整块隐藏 -->
+                            <StackPanel x:Name="HistorySection" Grid.Row="2" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
+                                              Focusable="False" Height="165" Margin="0,4,0,-36">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <controls:FanPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Grid>
 
                         <!-- 常规 -->
                         <StackPanel x:Name="GeneralPage" Style="{StaticResource PageStyle}">
@@ -874,13 +880,14 @@
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="SidePanelShift" />
                     </Grid.RenderTransform>
+                    <!-- 椭圆渐隐：上半部分几乎是竖直的边，往下沿弧线收窄到左下角 -->
                     <Border Background="{DynamicResource CardBrush}">
                         <Border.OpacityMask>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <RadialGradientBrush Center="0,0.2" GradientOrigin="0,0.2" RadiusX="1" RadiusY="0.8">
                                 <GradientStop Color="Black" Offset="0" />
                                 <GradientStop Color="#B0000000" Offset="0.6" />
                                 <GradientStop Color="Transparent" Offset="1" />
-                            </LinearGradientBrush>
+                            </RadialGradientBrush>
                         </Border.OpacityMask>
                     </Border>
                     <!-- 左上角的强调色光晕 -->

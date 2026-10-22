@@ -1472,6 +1472,19 @@ internal static class Program
         Assert(cards.All(card => card.RenderTransform is System.Windows.Media.TransformGroup) &&
                System.Windows.Controls.Panel.GetZIndex(cards[2]) > System.Windows.Controls.Panel.GetZIndex(cards[0]) &&
                cards.All(card => !DropShelf.Views.Controls.FanPanel.GetIsHot(card)), "牌堆应以中间的牌在最上面排开，默认不选出任何一张");
+        var shelfPage = (System.Windows.Controls.Panel)window.FindName("ShelfPage")!;
+        var backButton = (System.Windows.Controls.Button)((System.Windows.Controls.Panel)shelfPage.Children[0]).Children[0];
+        backButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        var pageScroll = (System.Windows.Controls.ScrollViewer)window.FindName("PageScroll")!;
+        foreach (var height in new[] { 640.0, 1100.0 })
+        {
+            window.Height = height;
+            Pump(700);
+            var fanBottom = historyList.TranslatePoint(new Point(0, historyList.ActualHeight), pageScroll).Y;
+            Assert(Math.Abs(fanBottom - pageScroll.ViewportHeight) < 1, $"窗口高 {height} 时牌堆应贴着窗口底边");
+        }
+        Assert(window.SettingsCardHeight > shortCards + 40, "有牌堆时窗口变高后设置卡片也应拉长");
+        window.Height = 640;
         controller.History.Clear();
 
         viewModel.BeginNewCustomAction();
