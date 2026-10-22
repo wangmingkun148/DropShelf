@@ -172,7 +172,8 @@ public static class Strings
     public static string LayoutFour => T("4 个", "4");
     public static string CurrentActions => T("当前操作", "Current actions");
     public static string MoreActions => T("更多操作", "More actions");
-    public static string DragToSwapHint => T("拖动卡片调换位置，或从下方“更多操作”拖上来替换", "Drag to rearrange, or drag one up from More actions to replace an action");
+    public static string DragToSwapHint => T("拖动卡片调换位置，或从下方“更多操作”拖上来替换；自定义操作拖到窗口底部可删除",
+        "Drag to rearrange, or drag one up from More actions to replace an action. Drag a custom action to the bottom of the window to delete it");
     public static string SlotLeft => T("左", "Left");
     public static string SlotRight => T("右", "Right");
     public static string SlotFarLeft => T("左一", "Far left");
@@ -185,6 +186,8 @@ public static class Strings
     public static string EditCustomAction => T("编辑自定义操作", "Edit custom action");
     public static string EditTooltip => T("编辑", "Edit");
     public static string DeleteTooltip => T("删除", "Delete");
+    public static string ReleaseToDelete => T("松开以删除", "Release to delete");
+    public static string ConfirmDeleteAction(string title) => T($"确定删除快速操作“{title}”吗？", $"Delete the quick action “{title}”?");
 
     public static string Theme => T("主题", "Theme");
     public static string ThemeLight => T("浅色", "Light");

@@ -1055,6 +1055,27 @@
             </Border>
         </Grid>
 
+        <!-- 拖动自定义操作时窗口底部发出红光，拖进去后提示松开删除 -->
+        <Grid x:Name="DeleteZone" Grid.RowSpan="2" Height="120" VerticalAlignment="Bottom" IsHitTestVisible="False" Opacity="0">
+            <Rectangle x:Name="DeleteGlow" Fill="{DynamicResource CriticalBrush}" Opacity="0.3">
+                <Rectangle.OpacityMask>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="Black" Offset="0" />
+                        <GradientStop Color="#60000000" Offset="0.4" />
+                        <GradientStop Color="Transparent" Offset="1" />
+                    </LinearGradientBrush>
+                </Rectangle.OpacityMask>
+            </Rectangle>
+            <Border x:Name="DeleteHint" CornerRadius="14" Padding="12,5,14,6" Margin="0,0,0,28" HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom" Background="{DynamicResource CriticalBrush}" Opacity="0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{StaticResource Glyph.Delete}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="0,1,8,0"
+                               VerticalAlignment="Center" Foreground="White" />
+                    <TextBlock Text="{l:Loc ReleaseToDelete}" FontSize="13" VerticalAlignment="Center" Foreground="White" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- 拖动快速操作时跟随光标的卡片 -->
         <Canvas x:Name="DragLayer" Grid.RowSpan="2" IsHitTestVisible="False">
             <Border x:Name="DragGhost" Visibility="Collapsed" CornerRadius="8" Padding="12,8,16,9" Background="{DynamicResource FlyoutBrush}"

@@ -310,6 +310,7 @@ public partial class MainWindow : Window
     private System.Windows.Point _pressPoint;
     private bool _draggingCard;
     private ActionSlotViewModel? _dropTarget;
+    private bool _overDeleteZone;
 
     private void OnActionCardMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -332,7 +333,8 @@ public partial class MainWindow : Window
 
         Canvas.SetLeft(DragGhost, position.X + 12);
         Canvas.SetTop(DragGhost, position.Y + 8);
-        SetDropTarget(HitTestSlot(e.GetPosition(ActionSlotsList)), card);
+        SetOverDeleteZone(card.IsCustom && position.Y >= DragLayer.ActualHeight - DeleteZone.ActualHeight);
+        SetDropTarget(_overDeleteZone ? null : HitTestSlot(e.GetPosition(ActionSlotsList)), card);
     }
 
     private void OnActionCardMouseUp(object sender, MouseButtonEventArgs e)
@@ -340,8 +342,18 @@ public partial class MainWindow : Window
         var card = _pressedCard;
         var target = _dropTarget;
         var dragged = _draggingCard;
+        var delete = _overDeleteZone;
         EndCardDrag();
-        if (dragged && card is not null && target is not null) ViewModel.AssignSlot(target.Index, card.Action.Id);
+        if (!dragged || card is null) return;
+        if (delete) ConfirmDeleteCustomAction(card);
+        else if (target is not null) ViewModel.AssignSlot(target.Index, card.Action.Id);
+    }
+
+    private void ConfirmDeleteCustomAction(ActionCardViewModel card)
+    {
+        if (System.Windows.MessageBox.Show(this, Strings.ConfirmDeleteAction(card.Title), "DropShelf", MessageBoxButton.YesNo,
+                MessageBoxImage.Question) == MessageBoxResult.Yes)
+            ViewModel.DeleteCustomAction(card.Action.Custom!);
     }
 
     /// <summary>子元素失去捕获也会冒泡到这里，只处理拖动时页面本身失去捕获（如切换窗口）。</summary>
@@ -357,6 +369,7 @@ public partial class MainWindow : Window
         DragGhostGlyph.Text = card.Glyph;
         DragGhostText.Text = card.Title;
         DragGhost.Visibility = Visibility.Visible;
+        if (card.IsCustom) Fade(DeleteZone, 1);
         Mouse.Capture(ActionsPage, CaptureMode.SubTree);
     }
 
@@ -364,12 +377,26 @@ public partial class MainWindow : Window
     {
         if (_pressedCard is { } card) card.IsDragSource = false;
         SetDropTarget(null, null);
+        SetOverDeleteZone(false);
+        Fade(DeleteZone, 0);
         _pressedCard = null;
         DragGhost.Visibility = Visibility.Collapsed;
         if (!_draggingCard) return;
         _draggingCard = false;
         if (Mouse.Captured == ActionsPage) ActionsPage.ReleaseMouseCapture();
     }
+
+    /// <summary>拖进底部红光区域时红光变亮，并提示松开删除。</summary>
+    private void SetOverDeleteZone(bool value)
+    {
+        if (value == _overDeleteZone) return;
+        _overDeleteZone = value;
+        Fade(DeleteGlow, value ? 0.7 : 0.3);
+        Fade(DeleteHint, value ? 1 : 0);
+    }
+
+    private static void Fade(UIElement element, double to) =>
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(150)));
 
     /// <summary>悬停的位置显示“交换”（从另一个位置拖来）或“替换”（从更多操作拖来）。</summary>
     private void SetDropTarget(ActionSlotViewModel? target, ActionCardViewModel? card)
