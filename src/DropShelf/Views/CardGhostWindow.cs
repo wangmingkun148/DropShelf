@@ -16,7 +16,7 @@ public readonly record struct CardPose(Point Center, double Scale, double Angle)
 /// </summary>
 public sealed class CardGhostWindow : Window
 {
-    private const double FollowRate = 18;
+    private const double FollowRate = 60;
     private const double TurnRate = 9;
     private const double ScaleRate = 14;
     private const double SwayPerSpeed = 0.007;

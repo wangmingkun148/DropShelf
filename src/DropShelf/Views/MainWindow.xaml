@@ -392,6 +392,9 @@
             </Button>
         </DataTemplate>
 
+        <!-- 删除光效和提示用的大红，与强调色中的红色（偏粉）区分开 -->
+        <SolidColorBrush x:Key="DeleteBrush" Color="#E5000F" />
+
         <!-- 对话框中字段上方的标题 -->
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13" />
@@ -1057,19 +1060,49 @@
             </Border>
         </Grid>
 
+        <!-- 确认删除自定义操作（与编辑对话框相同的 Windows 11 对话框样式） -->
+        <Grid x:Name="ConfirmOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}" Visibility="Collapsed">
+            <Border Width="400" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" Background="{DynamicResource FlyoutBrush}"
+                    BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8" RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="ConfirmDialogScale" />
+                </Border.RenderTransform>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="270" Opacity="0.22" Color="Black" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Margin="24,22,24,24">
+                        <TextBlock Text="{l:Loc ConfirmDeleteTitle}" Style="{StaticResource SubtitleTextStyle}" />
+                        <TextBlock x:Name="ConfirmMessage" FontSize="14" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="20" />
+                    </StackPanel>
+                    <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                            BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                        <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
+                            <Button Style="{StaticResource AccentButtonStyle}" Content="{l:Loc DeleteTooltip}" Click="OnConfirmDeleteClick" Margin="0,0,4,0" />
+                            <Button x:Name="ConfirmCancelButton" Content="{l:Loc Cancel}" Click="OnConfirmCancelClick" Margin="4,0,0,0" />
+                        </UniformGrid>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
         <!-- 拖动自定义操作时窗口底部发出红光，拖进去后提示松开删除 -->
         <Grid x:Name="DeleteZone" Grid.RowSpan="2" Height="120" VerticalAlignment="Bottom" IsHitTestVisible="False" Opacity="0">
-            <Rectangle x:Name="DeleteGlow" Fill="{DynamicResource CriticalBrush}" Opacity="0.3">
+            <Rectangle x:Name="DeleteGlow" Fill="{StaticResource DeleteBrush}" Opacity="0.35">
                 <Rectangle.OpacityMask>
                     <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
                         <GradientStop Color="Black" Offset="0" />
-                        <GradientStop Color="#60000000" Offset="0.4" />
+                        <GradientStop Color="#80000000" Offset="0.4" />
                         <GradientStop Color="Transparent" Offset="1" />
                     </LinearGradientBrush>
                 </Rectangle.OpacityMask>
             </Rectangle>
             <Border x:Name="DeleteHint" CornerRadius="14" Padding="12,5,14,6" Margin="0,0,0,28" HorizontalAlignment="Center"
-                    VerticalAlignment="Bottom" Background="{DynamicResource CriticalBrush}" Opacity="0">
+                    VerticalAlignment="Bottom" Background="{StaticResource DeleteBrush}" Opacity="0">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="{StaticResource Glyph.Delete}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="0,1,8,0"
                                VerticalAlignment="Center" Foreground="White" />

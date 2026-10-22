@@ -187,7 +187,9 @@ public static class Strings
     public static string EditTooltip => T("编辑", "Edit");
     public static string DeleteTooltip => T("删除", "Delete");
     public static string ReleaseToDelete => T("松开以删除", "Release to delete");
-    public static string ConfirmDeleteAction(string title) => T($"确定删除快速操作“{title}”吗？", $"Delete the quick action “{title}”?");
+    public static string ConfirmDeleteTitle => T("删除快速操作", "Delete quick action");
+    public static string ConfirmDeleteAction(string title) => T($"“{title}”将从快速操作中移除，此操作无法撤销。",
+        $"“{title}” will be removed from your quick actions. This can't be undone.");
 
     public static string Theme => T("主题", "Theme");
     public static string ThemeLight => T("浅色", "Light");

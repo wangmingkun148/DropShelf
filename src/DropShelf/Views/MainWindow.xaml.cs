@@ -349,11 +349,39 @@ public partial class MainWindow : Window
         else if (target is not null) ViewModel.AssignSlot(target.Index, card.Action.Id);
     }
 
+    /// <summary>要删除的自定义操作，确认对话框打开期间有值。</summary>
+    private ActionCardViewModel? _pendingDelete;
+
+    /// <summary>与编辑对话框相同样式的确认框：遮罩淡入，对话框从略小处放大到原尺寸。</summary>
     private void ConfirmDeleteCustomAction(ActionCardViewModel card)
     {
-        if (System.Windows.MessageBox.Show(this, Strings.ConfirmDeleteAction(card.Title), "DropShelf", MessageBoxButton.YesNo,
-                MessageBoxImage.Question) == MessageBoxResult.Yes)
-            ViewModel.DeleteCustomAction(card.Action.Custom!);
+        _pendingDelete = card;
+        ConfirmMessage.Text = Strings.ConfirmDeleteAction(card.Title);
+        ConfirmOverlay.Visibility = Visibility.Visible;
+        ConfirmOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)));
+        ConfirmDialogScale.BeginAnimation(ScaleTransform.ScaleXProperty, Motion(0.96, 1));
+        ConfirmDialogScale.BeginAnimation(ScaleTransform.ScaleYProperty, Motion(0.96, 1));
+        ConfirmCancelButton.Focus();
+    }
+
+    private void OnConfirmDeleteClick(object sender, RoutedEventArgs e)
+    {
+        if (_pendingDelete?.Action.Custom is { } custom) ViewModel.DeleteCustomAction(custom);
+        CloseConfirm();
+    }
+
+    private void OnConfirmCancelClick(object sender, RoutedEventArgs e) => CloseConfirm();
+
+    private void CloseConfirm()
+    {
+        if (_pendingDelete is null) return;
+        _pendingDelete = null;
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(120));
+        fade.Completed += (_, _) =>
+        {
+            if (_pendingDelete is null) ConfirmOverlay.Visibility = Visibility.Collapsed;
+        };
+        ConfirmOverlay.BeginAnimation(OpacityProperty, fade);
     }
 
     /// <summary>子元素失去捕获也会冒泡到这里，只处理拖动时页面本身失去捕获（如切换窗口）。</summary>
@@ -391,7 +419,7 @@ public partial class MainWindow : Window
     {
         if (value == _overDeleteZone) return;
         _overDeleteZone = value;
-        Fade(DeleteGlow, value ? 0.7 : 0.3);
+        Fade(DeleteGlow, value ? 0.8 : 0.35);
         Fade(DeleteHint, value ? 1 : 0);
     }
 
@@ -419,10 +447,19 @@ public partial class MainWindow : Window
     private const double HistoryReturnReach = 120;
     private const double DetachedScale = 1.06;
 
+    /// <summary>拖动不到这个距离时卡牌被牌堆吸住，只跟随一小部分；超过后脱离。</summary>
+    private const double TearDistance = 48;
+    private const double HoldFollow = 0.3;
+
+    /// <summary>拖回牌堆上方时卡牌被原位吸引，只走到光标处的这一比例。</summary>
+    private const double ReturnFollow = 0.6;
+
     private HistoryEntryViewModel? _pressedEntry;
     private FrameworkElement? _draggedContainer;
     private System.Windows.Point _historyPressPoint;
     private Vector _grabOffset;
+    private System.Windows.Point _dragStartCursor;
+    private bool _tornOff;
     private bool _draggingHistory;
     private CardGhostWindow? _ghost;
 
@@ -478,7 +515,9 @@ public partial class MainWindow : Window
         _draggingHistory = true;
         _pressedEntry = entry;
         _draggedContainer = container;
-        _grabOffset = CursorPoint() - start.Center;
+        _dragStartCursor = CursorPoint();
+        _grabOffset = _dragStartCursor - start.Center;
+        _tornOff = false;
         (VisualTreeHelper.GetParent(container) as Controls.FanPanel)?.ClearHot();
         (container.ContentTemplate?.FindName("RestoreHint", container) as UIElement)?.BeginAnimation(OpacityProperty, null);
         card.UpdateLayout();
@@ -488,11 +527,23 @@ public partial class MainWindow : Window
             return;
         }
         container.Opacity = 0;
-        _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () =>
-        {
-            var cursor = CursorPoint();
-            return new CardPose(cursor - _grabOffset, IsOverHistory(cursor) ? 1 : DetachedScale, 0);
-        });
+        _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () => HistoryDragPose(start, container));
+    }
+
+    /// <summary>
+    /// 拖动分三段：先被牌堆吸住、只跟一小段；拉过一定距离后脱离并略微放大，顿一下跟上光标；
+    /// 拖回牌堆上方时被原位吸过去一截并缩回原来的大小，提示松手会放回。
+    /// </summary>
+    private CardPose HistoryDragPose(CardPose start, FrameworkElement container)
+    {
+        var cursor = CursorPoint();
+        var pulled = cursor - _dragStartCursor;
+        if (!_tornOff && pulled.Length / VisualTreeHelper.GetDpi(this).DpiScaleX < TearDistance)
+            return start with { Center = start.Center + pulled * HoldFollow };
+        _tornOff = true;
+        var free = cursor - _grabOffset;
+        if (!IsOverHistory(cursor) || PoseOf(container) is not { } slot) return new CardPose(free, DetachedScale, 0);
+        return new CardPose(slot.Center + (free - slot.Center) * ReturnFollow, slot.Scale, slot.Angle * (1 - ReturnFollow));
     }
 
     /// <summary>在牌堆上松手（或取消）时卡牌飞回原位；其他位置松手时在光标处打开置物架，卡牌缩小淡出。</summary>
@@ -512,7 +563,7 @@ public partial class MainWindow : Window
         }
 
         var cursor = CursorPoint();
-        if (cancel || IsOverHistory(cursor))
+        if (cancel || !_tornOff || IsOverHistory(cursor))
         {
             ghost.Settle(() => PoseOf(container), () => container.Opacity = 1);
             return;
@@ -551,6 +602,11 @@ public partial class MainWindow : Window
         if (_draggingCard && e.Key == Key.Escape)
         {
             EndCardDrag();
+            e.Handled = true;
+        }
+        if (_pendingDelete is not null && e.Key == Key.Escape)
+        {
+            CloseConfirm();
             e.Handled = true;
         }
         if (_draggingHistory && e.Key == Key.Escape)
