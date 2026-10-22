@@ -124,12 +124,8 @@ public sealed record AccentOption(string Value, SolidColorBrush? Brush)
 
 public sealed class SettingsViewModel : ObservableObject
 {
-    /// <summary>概览页一行显示的最近关闭的置物架数量，其余的展开后显示。</summary>
-    private const int HistoryPreviewCount = 4;
-
     private readonly AppController _controller;
     private bool _startupFailed;
-    private bool _showAllHistory;
     private CustomActionEditorViewModel? _editor;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
@@ -147,11 +143,6 @@ public sealed class SettingsViewModel : ObservableObject
         DismissGettingStartedCommand = new RelayCommand(_ => Update(settings => settings.ShowGettingStarted = false));
         ExitCommand = new RelayCommand(_ => controller.Exit());
         UninstallCommand = new RelayCommand(_ => Uninstall(), _ => CanUninstall);
-        ToggleHistoryCommand = new RelayCommand(_ =>
-        {
-            _showAllHistory = !_showAllHistory;
-            RefreshHistoryView();
-        });
         OpenLogFolderCommand = new RelayCommand(_ => OpenFolder(LogService.LogDirectory));
         OpenProgramFolderCommand = new RelayCommand(_ => OpenFolder(ProgramDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
@@ -168,7 +159,6 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand DismissGettingStartedCommand { get; }
     public ICommand ExitCommand { get; }
     public ICommand UninstallCommand { get; }
-    public ICommand ToggleHistoryCommand { get; }
     public ICommand OpenLogFolderCommand { get; }
     public ICommand OpenProgramFolderCommand { get; }
     public ICommand OpenSettingsFolderCommand { get; }
@@ -217,11 +207,8 @@ public sealed class SettingsViewModel : ObservableObject
     public string ActionsSummary => Strings.ActionsSummary(QuickActions.Visible(Settings).Select(info => info.Label));
     public string AppearanceSummary => Strings.AppearanceSummary(Settings.Theme, Settings.AccentColor is not null);
 
-    /// <summary>概览页显示的最近关闭的置物架：默认一行，展开后显示全部。</summary>
-    public IReadOnlyList<HistoryEntryViewModel> VisibleHistory => _showAllHistory ? _historyEntries : _historyEntries.Take(HistoryPreviewCount).ToArray();
-
-    public bool HasMoreHistory => _historyEntries.Count > HistoryPreviewCount;
-    public string ToggleHistoryText => _showAllHistory ? Strings.ShowLessHistory : Strings.ShowAllHistory;
+    /// <summary>概览页底部牌堆中的最近关闭的置物架，最新的在最左边。</summary>
+    public IReadOnlyList<HistoryEntryViewModel> HistoryEntries => _historyEntries;
 
     public bool HasHistory => _controller.History.Entries.Count > 0;
 
@@ -455,17 +442,10 @@ public sealed class SettingsViewModel : ObservableObject
     private void RefreshHistory()
     {
         _historyEntries = _controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)).ToArray();
-        RefreshHistoryView();
+        OnPropertyChanged(nameof(HistoryEntries));
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistoryDescription));
         CommandManager.InvalidateRequerySuggested();
-    }
-
-    private void RefreshHistoryView()
-    {
-        OnPropertyChanged(nameof(VisibleHistory));
-        OnPropertyChanged(nameof(HasMoreHistory));
-        OnPropertyChanged(nameof(ToggleHistoryText));
     }
 
     /// <summary>启动卸载程序后退出，卸载时文件不会被占用。</summary>

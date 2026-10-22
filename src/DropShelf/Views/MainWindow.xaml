@@ -92,19 +92,129 @@
             <Setter Property="ToolTip" Value="{l:Loc BackTooltip}" />
         </Style>
 
-        <!-- 可点击的卡片：概览页的设置入口和最近关闭的置物架 -->
-        <Style x:Key="CardButtonStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-            <Setter Property="Padding" Value="18,14,16,14" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <controls:RampConverter x:Key="Ramp" />
+
+        <!-- 左侧状态栏中的行和按钮：没有边框，背景向右渐隐 -->
+        <LinearGradientBrush x:Key="SoftEdgeMask" StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="Black" Offset="0" />
+            <GradientStop Color="Black" Offset="0.5" />
+            <GradientStop Color="Transparent" Offset="1" />
+        </LinearGradientBrush>
+        <Style x:Key="SoftRowStyle" TargetType="ContentControl">
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Grid MinHeight="38">
+                            <Border CornerRadius="6" Background="{DynamicResource SubtleSelectedBrush}" OpacityMask="{StaticResource SoftEdgeMask}" />
+                            <ContentPresenter Margin="12,0" VerticalAlignment="Center" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SoftAccentButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
+                        <Grid MinHeight="38" Background="Transparent">
+                            <Border x:Name="Bd" CornerRadius="6" Background="{DynamicResource AccentBrush}">
+                                <Border.OpacityMask>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="Black" Offset="0" />
+                                        <GradientStop Color="Black" Offset="0.62" />
+                                        <GradientStop Color="#00000000" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.OpacityMask>
+                            </Border>
+                            <ContentPresenter Margin="14,0" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="WayGlyphStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+
+        <!-- 概览页的设置卡片：高度随窗口变化，矮时一行，拉高后交叉淡入成大卡片并渐显背景图案 -->
+        <Style TargetType="controls:PageTile">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Height" Value="{Binding SettingsCardHeight, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="controls:PageTile">
                         <Border x:Name="Bd" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}"
-                                BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                BorderThickness="1" CornerRadius="8">
+                            <Grid ClipToBounds="True">
+                                <Grid Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='140,230'}">
+                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="150" Opacity="0.07"
+                                               Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                               Margin="0,0,-16,-24" />
+                                </Grid>
+                                <Grid Margin="18,0,16,0" Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='150,126'}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{TemplateBinding Header}" Style="{StaticResource BodyStrongTextStyle}" />
+                                        <TextBlock Text="{TemplateBinding Summary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0"
+                                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                               Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </Grid>
+                                <Grid Margin="22,22,18,20" Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='126,150'}">
+                                    <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource AccentFaintBrush}"
+                                            HorizontalAlignment="Left" VerticalAlignment="Top">
+                                        <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                    </Border>
+                                    <TextBlock Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    <StackPanel VerticalAlignment="Bottom">
+                                        <TextBlock Text="{TemplateBinding Header}" FontSize="16" FontWeight="SemiBold" />
+                                        <ItemsControl ItemsSource="{TemplateBinding Items}" Focusable="False" Margin="0,10,0,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Margin="0,0,6,0" Padding="9,3,9,4" CornerRadius="11" Background="{DynamicResource SubtleSelectedBrush}">
+                                                        <TextBlock Text="{Binding}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -117,38 +227,6 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
-        </Style>
-
-        <!-- 左侧状态栏中的一种呼出方式 -->
-        <Style x:Key="WayRowStyle" TargetType="Border">
-            <Setter Property="MinHeight" Value="38" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-            <Setter Property="Padding" Value="12,0" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
-        </Style>
-        <Style x:Key="WayGlyphStyle" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
-            <Setter Property="FontSize" Value="15" />
-            <Setter Property="Width" Value="26" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
-        </Style>
-        <Style x:Key="DecoCardStyle" TargetType="Border">
-            <Setter Property="Width" Value="70" />
-            <Setter Property="Height" Value="90" />
-            <Setter Property="CornerRadius" Value="9" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Background" Value="{DynamicResource FlyoutBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource FlyoutBorderBrush}" />
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        </Style>
-        <Style x:Key="DecoGlyphStyle" TargetType="TextBlock" BasedOn="{StaticResource GlyphTextStyle}">
-            <Setter Property="FontSize" Value="26" />
-            <Setter Property="Margin" Value="0,0,0,10" />
-            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
         </Style>
 
         <!-- 窗口右下角的版本号等文字链接 -->
@@ -207,12 +285,60 @@
             </Grid>
         </DataTemplate>
 
+        <!-- 牌堆中的一张牌：被选出时显示强调色边框、“点击恢复”和删除按钮 -->
+        <Style x:Key="FanCardStyle" TargetType="Button">
+            <Setter Property="Width" Value="150" />
+            <Setter Property="Height" Value="200" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
+                                BorderThickness="1" CornerRadius="12">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HotOnlyStyle" TargetType="FrameworkElement">
+            <Setter Property="Opacity" Value="0" />
+            <Style.Triggers>
+                <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <DataTemplate x:Key="HistoryCardTemplate">
-            <Button Style="{StaticResource CardButtonStyle}" Padding="10,12,10,12" Margin="0,0,6,6" Command="{Binding RestoreCommand}"
-                    ToolTip="{l:Loc RestoreShelf}">
+            <Button Style="{StaticResource FanCardStyle}" Command="{Binding RestoreCommand}" ToolTip="{l:Loc RestoreShelf}">
                 <Grid>
-                    <StackPanel>
-                        <Viewbox Height="64" Stretch="Uniform">
+                    <StackPanel Margin="12,16,12,0">
+                        <Viewbox Height="60" Stretch="Uniform">
                             <Canvas Width="120" Height="84">
                                 <Border Style="{StaticResource MiniStackCardStyle}" Canvas.Left="30" Canvas.Top="14" DataContext="{Binding Stack2}">
                                     <Border.RenderTransform>
@@ -237,20 +363,24 @@
                                 </Border>
                             </Canvas>
                         </Viewbox>
-                        <TextBlock Text="{Binding Title}" FontSize="13" Margin="0,8,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,2,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
+                        <TextBlock Text="{Binding Title}" FontSize="13" Margin="0,10,0,0" TextAlignment="Center" TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis" MaxHeight="36" LineHeight="18" />
+                        <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <Border Style="{StaticResource HotOnlyStyle}" Margin="0,10,0,0" Padding="10,2,10,3" CornerRadius="10" HorizontalAlignment="Center"
+                                Background="{DynamicResource AccentBrush}">
+                            <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}" />
+                        </Border>
                     </StackPanel>
-                    <!-- 悬停在卡片上时显示，删除这条记录 -->
-                    <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,-6,-4,0"
+                    <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,4,4,0"
                             HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip="{l:Loc RemoveHistoryTooltip}" Command="{Binding RemoveCommand}">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
                                 <Setter Property="Visibility" Value="Hidden" />
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+                                    <Trigger Property="controls:FanPanel.IsHot" Value="True">
                                         <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
+                                    </Trigger>
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
@@ -406,16 +536,21 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Focusable="False">
-                    <Grid x:Name="PageContent" MaxWidth="860" Margin="36,26,36,20">
+                <ScrollViewer x:Name="PageScroll" Grid.RowSpan="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Focusable="False" SizeChanged="OnPageLayoutChanged">
+                    <Grid x:Name="PageContent" MaxWidth="860" Margin="36,26,36,36">
                         <Grid.RenderTransform>
                             <TranslateTransform x:Name="PageContentShift" />
                         </Grid.RenderTransform>
                         <!-- 概览 -->
-                        <StackPanel x:Name="OverviewPage" Visibility="Visible">
-                            <Grid>
-                                <TextBlock Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" />
+                        <StackPanel x:Name="OverviewPage" Visibility="Visible" SizeChanged="OnPageLayoutChanged">
+                            <!-- 窗口宽到显示左侧状态栏时，标题移到状态栏图标右侧，这一行收起 -->
+                            <Grid x:Name="OverviewHeader">
+                                <TextBlock x:Name="OverviewTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" HorizontalAlignment="Left">
+                                    <TextBlock.RenderTransform>
+                                        <TranslateTransform x:Name="OverviewTitleShift" />
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
                                 <Button x:Name="OverviewOpenButton" Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" HorizontalAlignment="Right"
                                         VerticalAlignment="Center" Padding="16,6,16,7">
                                     <StackPanel Orientation="Horizontal">
@@ -426,130 +561,70 @@
                                 </Button>
                             </Grid>
 
-                            <StackPanel x:Name="GettingStartedSection" Visibility="{Binding ShowGettingStarted, Converter={StaticResource BoolToVisibility}}">
-                                <Grid>
-                                    <TextBlock Text="{l:Loc GettingStarted}" Style="{StaticResource SectionHeaderTextStyle}" />
-                                    <Button x:Name="DismissGettingStartedButton" Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Close}"
-                                            FontSize="10" Width="28" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,4"
-                                            ToolTip="{l:Loc DismissTooltip}" Command="{Binding DismissGettingStartedCommand}" />
-                                </Grid>
-                                <UniformGrid Columns="3">
-                                    <Border Style="{StaticResource TipCardStyle}" Margin="0,0,6,0">
-                                        <StackPanel>
-                                            <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                       Foreground="{DynamicResource AccentTextBrush}" />
-                                            <TextBlock Text="{l:Loc TipShakeTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
-                                            <TextBlock Text="{l:Loc TipShakeBody}" Style="{StaticResource CaptionTextStyle}" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border Style="{StaticResource TipCardStyle}" Margin="3,0,3,0">
-                                        <StackPanel>
-                                            <TextBlock Text="{StaticResource Glyph.Library}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                       Foreground="{DynamicResource AccentTextBrush}" />
-                                            <TextBlock Text="{l:Loc TipStackTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
-                                            <TextBlock Text="{l:Loc TipStackBody}" Style="{StaticResource CaptionTextStyle}" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border Style="{StaticResource TipCardStyle}" Margin="6,0,0,0">
-                                        <StackPanel>
-                                            <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                       Foreground="{DynamicResource AccentTextBrush}" />
-                                            <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
-                                            <TextBlock Text="{l:Loc TipActionsBody}" Style="{StaticResource CaptionTextStyle}" />
-                                        </StackPanel>
-                                    </Border>
+                            <StackPanel x:Name="OverviewBody">
+                                <StackPanel.RenderTransform>
+                                    <TranslateTransform x:Name="OverviewBodyShift" />
+                                </StackPanel.RenderTransform>
+                                <StackPanel x:Name="GettingStartedSection" Visibility="{Binding ShowGettingStarted, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid>
+                                        <TextBlock Text="{l:Loc GettingStarted}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                        <Button x:Name="DismissGettingStartedButton" Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Close}"
+                                                FontSize="10" Width="28" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,4"
+                                                ToolTip="{l:Loc DismissTooltip}" Command="{Binding DismissGettingStartedCommand}" />
+                                    </Grid>
+                                    <UniformGrid Columns="3">
+                                        <Border Style="{StaticResource TipCardStyle}" Margin="0,0,6,0">
+                                            <StackPanel>
+                                                <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                           Foreground="{DynamicResource AccentTextBrush}" />
+                                                <TextBlock Text="{l:Loc TipShakeTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                <TextBlock Text="{l:Loc TipShakeBody}" Style="{StaticResource CaptionTextStyle}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource TipCardStyle}" Margin="3,0,3,0">
+                                            <StackPanel>
+                                                <TextBlock Text="{StaticResource Glyph.Library}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                           Foreground="{DynamicResource AccentTextBrush}" />
+                                                <TextBlock Text="{l:Loc TipStackTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                <TextBlock Text="{l:Loc TipStackBody}" Style="{StaticResource CaptionTextStyle}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource TipCardStyle}" Margin="6,0,0,0">
+                                            <StackPanel>
+                                                <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                           Foreground="{DynamicResource AccentTextBrush}" />
+                                                <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                <TextBlock Text="{l:Loc TipActionsBody}" Style="{StaticResource CaptionTextStyle}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </UniformGrid>
+                                </StackPanel>
+
+
+                                <TextBlock Text="{l:Loc SettingsSection}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                <UniformGrid x:Name="PageCards" Columns="2" Margin="0,0,-6,0">
+                                    <controls:PageTile Tag="General" Click="OnPageCardClick" Icon="{StaticResource Glyph.Settings}" Header="{l:Loc General}"
+                                                       Summary="{Binding GeneralSummary}" />
+                                    <controls:PageTile Tag="Shelf" Click="OnPageCardClick" Icon="{StaticResource Glyph.Mouse}" Header="{l:Loc GesturesAndShelf}"
+                                                       Summary="{Binding ShelfSummary}" />
+                                    <controls:PageTile Tag="Actions" Click="OnPageCardClick" Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc QuickActionsTitle}"
+                                                       Summary="{Binding ActionsSummary}" />
+                                    <controls:PageTile Tag="Appearance" Click="OnPageCardClick" Icon="{StaticResource Glyph.Color}" Header="{l:Loc Appearance}"
+                                                       Summary="{Binding AppearanceSummary}" />
                                 </UniformGrid>
-                            </StackPanel>
 
-
-                            <TextBlock Text="{l:Loc SettingsSection}" Style="{StaticResource SectionHeaderTextStyle}" />
-                            <UniformGrid x:Name="PageCards" Columns="2" Margin="0,0,-6,0">
-                                <Button Style="{StaticResource CardButtonStyle}" Tag="General" Click="OnPageCardClick" Margin="0,0,6,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{StaticResource Glyph.Settings}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
-                                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{l:Loc General}" Style="{StaticResource BodyStrongTextStyle}" />
-                                            <TextBlock Text="{Binding GeneralSummary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
-                                                   Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    </Grid>
-                                </Button>
-                                <Button Style="{StaticResource CardButtonStyle}" Tag="Shelf" Click="OnPageCardClick" Margin="0,0,6,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
-                                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{l:Loc GesturesAndShelf}" Style="{StaticResource BodyStrongTextStyle}" />
-                                            <TextBlock Text="{Binding ShelfSummary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
-                                                   Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    </Grid>
-                                </Button>
-                                <Button Style="{StaticResource CardButtonStyle}" Tag="Actions" Click="OnPageCardClick" Margin="0,0,6,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
-                                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" />
-                                            <TextBlock Text="{Binding ActionsSummary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
-                                                   Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    </Grid>
-                                </Button>
-                                <Button Style="{StaticResource CardButtonStyle}" Tag="Appearance" Click="OnPageCardClick" Margin="0,0,6,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{StaticResource Glyph.Color}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
-                                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{l:Loc Appearance}" Style="{StaticResource BodyStrongTextStyle}" />
-                                            <TextBlock Text="{Binding AppearanceSummary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="11"
-                                                   Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    </Grid>
-                                </Button>
-                            </UniformGrid>
-
-                            <!-- 最近关闭的置物架：不常用，没有记录时整块隐藏 -->
-                            <StackPanel x:Name="HistorySection" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
-                                <Grid>
+                                <!-- 最近关闭的置物架排成一手牌，贴着窗口底边，下半截被裁掉；没有记录时整块隐藏 -->
+                                <StackPanel x:Name="HistorySection" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
                                     <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
-                                    <Button Style="{StaticResource TextLinkStyle}" Content="{Binding ToggleHistoryText}" Command="{Binding ToggleHistoryCommand}"
-                                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,4"
-                                            Visibility="{Binding HasMoreHistory, Converter={StaticResource BoolToVisibility}}" />
-                                </Grid>
-                                <ItemsControl x:Name="HistoryList" ItemsSource="{Binding VisibleHistory}" ItemTemplate="{StaticResource HistoryCardTemplate}"
-                                              Focusable="False" Margin="0,0,-6,0">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <UniformGrid Columns="4" />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                </ItemsControl>
+                                    <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
+                                                  Focusable="False" Height="165" Margin="0,4,0,-36">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <controls:FanPanel />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </StackPanel>
                             </StackPanel>
                         </StackPanel>
 
@@ -794,99 +869,89 @@
                 <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"
                         HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick" />
 
-                <!-- 窗口足够宽时在左侧显示状态栏：程序状态、呼出方式和打开置物架按钮 -->
-                <Border x:Name="SidePanel" Grid.RowSpan="2" Width="272" Margin="20,26,0,20" HorizontalAlignment="Left"
-                        Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1"
-                        CornerRadius="10" Visibility="Collapsed">
-                    <Border.RenderTransform>
+                <!-- 窗口足够宽时在左侧显示状态栏：没有边框，背景向右渐隐，与内容区融为一体 -->
+                <Grid x:Name="SidePanel" Grid.RowSpan="2" Width="300" HorizontalAlignment="Left" Visibility="Collapsed">
+                    <Grid.RenderTransform>
                         <TranslateTransform x:Name="SidePanelShift" />
-                    </Border.RenderTransform>
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <!-- 右上角的强调色光晕 -->
-                        <Border Grid.RowSpan="2" CornerRadius="9" Background="{DynamicResource AccentBrush}" Opacity="0.22">
-                            <Border.OpacityMask>
-                                <RadialGradientBrush Center="1,0" GradientOrigin="1,0" RadiusX="1.3" RadiusY="0.75">
-                                    <GradientStop Color="Black" Offset="0" />
-                                    <GradientStop Color="Transparent" Offset="1" />
-                                </RadialGradientBrush>
-                            </Border.OpacityMask>
-                        </Border>
+                    </Grid.RenderTransform>
+                    <Border Background="{DynamicResource CardBrush}">
+                        <Border.OpacityMask>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="Black" Offset="0" />
+                                <GradientStop Color="#B0000000" Offset="0.6" />
+                                <GradientStop Color="Transparent" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.OpacityMask>
+                    </Border>
+                    <!-- 左上角的强调色光晕 -->
+                    <Border Background="{DynamicResource AccentBrush}" Opacity="0.2">
+                        <Border.OpacityMask>
+                            <RadialGradientBrush Center="0,0" GradientOrigin="0,0" RadiusX="1" RadiusY="0.5">
+                                <GradientStop Color="Black" Offset="0" />
+                                <GradientStop Color="Transparent" Offset="1" />
+                            </RadialGradientBrush>
+                        </Border.OpacityMask>
+                    </Border>
 
-                        <StackPanel Margin="24,28,24,0">
-                            <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
-                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                            <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,18,0,0"
-                                       TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
-                            <Button Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" Margin="0,20,0,0" Padding="16,7,16,8">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
-                                               Margin="0,1,8,0" VerticalAlignment="Center" />
-                                    <TextBlock Text="{l:Loc OpenShelf}" />
-                                </StackPanel>
-                            </Button>
+                    <StackPanel Margin="30,30,30,0">
+                        <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,20,0,0"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
+                        <Button Style="{StaticResource SoftAccentButtonStyle}" Command="{Binding OpenShelfCommand}" Margin="0,20,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13" Width="26"
+                                           Margin="0,1,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{l:Loc OpenShelf}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
 
-                            <TextBlock Text="{l:Loc PanelWays}" FontSize="12" Margin="2,26,0,8" Foreground="{DynamicResource TextTertiaryBrush}" />
-                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
-                                    <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
-                                    <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{StaticResource Glyph.Keyboard}" Style="{StaticResource WayGlyphStyle}" />
-                                    <ItemsControl ItemsSource="{Binding HotkeyKeys}" Focusable="False" VerticalAlignment="Center">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal" />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="4" BorderThickness="1,1,1,2"
-                                                        Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource ControlBorderBrush}">
-                                                    <TextBlock Text="{Binding}" FontSize="11" />
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
+                        <TextBlock Text="{l:Loc PanelWays}" FontSize="12" Margin="2,26,0,8" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
+                                <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ContentControl>
+                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
+                                <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ContentControl>
+                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Keyboard}" Style="{StaticResource WayGlyphStyle}" />
+                                <ItemsControl ItemsSource="{Binding HotkeyKeys}" Focusable="False" VerticalAlignment="Center">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="4" BorderThickness="1,1,1,2"
+                                                    Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource ControlBorderBrush}">
+                                                <TextBlock Text="{Binding}" FontSize="11" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ContentControl>
+                    </StackPanel>
+                </Grid>
 
-                        <!-- 底部叠放的三张文件卡，窗口较矮时被裁掉 -->
-                        <Grid Grid.Row="1" ClipToBounds="True" Margin="0,16,0,1">
-                            <Canvas Width="200" Height="96" VerticalAlignment="Bottom">
-                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="14" Canvas.Top="30">
-                                    <Border.RenderTransform>
-                                        <RotateTransform Angle="-12" />
-                                    </Border.RenderTransform>
-                                    <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource DecoGlyphStyle}" />
-                                </Border>
-                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="116" Canvas.Top="28">
-                                    <Border.RenderTransform>
-                                        <RotateTransform Angle="11" />
-                                    </Border.RenderTransform>
-                                    <TextBlock Text="{StaticResource Glyph.Folder}" Style="{StaticResource DecoGlyphStyle}" />
-                                </Border>
-                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="65" Canvas.Top="12">
-                                    <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource DecoGlyphStyle}" />
-                                </Border>
-                            </Canvas>
-                        </Grid>
-                    </Grid>
-                </Border>
+                <!-- 概览页的标题：状态栏出现时从页面左上角飞到状态栏图标右侧 -->
+                <Grid Grid.RowSpan="2" Height="52" Margin="98,30,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False">
+                    <TextBlock x:Name="PanelPageTitle" Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" VerticalAlignment="Center"
+                               Visibility="Collapsed">
+                        <TextBlock.RenderTransform>
+                            <TranslateTransform x:Name="PanelTitleShift" />
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
+                </Grid>
             </Grid>
         </Border>
 

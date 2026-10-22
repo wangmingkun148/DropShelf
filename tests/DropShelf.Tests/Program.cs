@@ -1405,15 +1405,25 @@ internal static class Program
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
         var sidePanel = (FrameworkElement)window.FindName("SidePanel")!;
-        var overviewOpen = (FrameworkElement)window.FindName("OverviewOpenButton")!;
-        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewOpen.Visibility == Visibility.Visible, "窗口较窄时不应显示左侧状态栏");
+        var overviewHeader = (FrameworkElement)window.FindName("OverviewHeader")!;
+        var panelTitle = (FrameworkElement)window.FindName("PanelPageTitle")!;
+        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewHeader.Visibility == Visibility.Visible, "窗口较窄时不应显示左侧状态栏");
         window.Width = 1500;
-        Pump(600);
-        Assert(sidePanel.Visibility == Visibility.Visible && sidePanel.Opacity == 1 && overviewOpen.Visibility == Visibility.Hidden,
-            "窗口足够宽时应显示左侧状态栏，并隐藏概览页上重复的按钮");
+        Pump(700);
+        Assert(sidePanel.Visibility == Visibility.Visible && sidePanel.Opacity == 1 && overviewHeader.Visibility == Visibility.Collapsed &&
+               panelTitle.Visibility == Visibility.Visible, "窗口足够宽时应显示左侧状态栏，概览标题移到状态栏");
         window.Width = 900;
-        Pump(600);
-        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewOpen.Visibility == Visibility.Visible, "窗口变窄后应收起左侧状态栏");
+        Pump(700);
+        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewHeader.Visibility == Visibility.Visible &&
+               panelTitle.Visibility == Visibility.Collapsed, "窗口变窄后应收起左侧状态栏，标题回到页面");
+
+        var shortCards = window.SettingsCardHeight;
+        window.Height = 1100;
+        Pump(700);
+        Assert(window.SettingsCardHeight > shortCards + 40, "窗口变高后设置卡片应拉长");
+        window.Height = 640;
+        Pump(700);
+        Assert(Math.Abs(window.SettingsCardHeight - shortCards) < 1, "窗口变矮后设置卡片应恢复");
 
         controller.History.Clear();
         var pageCards = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("PageCards")!;
@@ -1455,10 +1465,13 @@ internal static class Program
         }
         Pump(50);
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Visible &&
-               viewModel.VisibleHistory.Count == 4 && viewModel.HasMoreHistory, "最近关闭默认应只显示一行");
-        viewModel.ToggleHistoryCommand.Execute(null);
-        Assert(viewModel.VisibleHistory.Count == 5 && viewModel.ToggleHistoryText == "收起", "最近关闭没有展开全部");
-        Assert(viewModel.VisibleHistory[0].Stack0 is { Glyph.Length: 1 } && viewModel.VisibleHistory[0].Stack1 is null, "历史卡片的缩略图堆叠不正确");
+               viewModel.HistoryEntries.Count == 5, "最近关闭应全部显示在牌堆中");
+        Assert(viewModel.HistoryEntries[0].Stack0 is { Glyph.Length: 1 } && viewModel.HistoryEntries[0].Stack1 is null, "历史卡片的缩略图堆叠不正确");
+        var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
+        var cards = Enumerable.Range(0, 5).Select(index => (UIElement)historyList.ItemContainerGenerator.ContainerFromIndex(index)).ToArray();
+        Assert(cards.All(card => card.RenderTransform is System.Windows.Media.TransformGroup) &&
+               System.Windows.Controls.Panel.GetZIndex(cards[2]) > System.Windows.Controls.Panel.GetZIndex(cards[0]) &&
+               cards.All(card => !DropShelf.Views.Controls.FanPanel.GetIsHot(card)), "牌堆应以中间的牌在最上面排开，默认不选出任何一张");
         controller.History.Clear();
 
         viewModel.BeginNewCustomAction();

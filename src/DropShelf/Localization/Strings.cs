@@ -44,8 +44,7 @@ public static class Strings
     public static string BackTooltip => T("返回", "Back");
     public static string AboutTooltip => T("关于 DropShelf", "About DropShelf");
     public static string SettingsSection => T("设置", "Settings");
-    public static string ShowAllHistory => T("显示全部", "Show all");
-    public static string ShowLessHistory => T("收起", "Show less");
+    public static string ClickToRestore => T("点击恢复", "Click to restore");
     public static string ProgramLocation => T("程序位置", "Program location");
     public static string Uninstall => T("卸载", "Uninstall");
     public static string UninstallHeader => T("卸载 DropShelf", "Uninstall DropShelf");

@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Services;
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
         ShelfPage.Visibility = page == "Shelf" ? Visibility.Visible : Visibility.Collapsed;
         ActionsPage.Visibility = page == "Actions" ? Visibility.Visible : Visibility.Collapsed;
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        PanelPageTitle.Visibility = _sidePanelShown && page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         PageScroll.ScrollToTop();
     }
 
@@ -80,71 +82,186 @@ public partial class MainWindow : Window
     // 内容区宽到放得下状态栏和完整页面时显示；两个阈值之间不切换，拖动窗口边缘时不会反复出现、消失。
     private const double SidePanelShowWidth = 1240;
     private const double SidePanelHideWidth = 1200;
-    private const double SidePanelSpace = 292;
-    private static readonly Duration SidePanelDuration = TimeSpan.FromMilliseconds(320);
-    private static readonly IEasingFunction SidePanelEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+    private const double SidePanelWidth = 300;
+    private const double PageMargin = 36;
+    private static readonly Duration MotionDuration = TimeSpan.FromMilliseconds(340);
+    private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+    private bool _sidePanelWanted;
     private bool _sidePanelShown;
+    private bool _sidePanelPending;
 
     private void OnContentLayerSizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = e.NewSize.Width;
-        if (_sidePanelShown ? width < SidePanelHideWidth : width >= SidePanelShowWidth) SetSidePanel(!_sidePanelShown, IsLoaded);
+        if (_sidePanelWanted ? width >= SidePanelHideWidth : width < SidePanelShowWidth) return;
+        _sidePanelWanted = !_sidePanelWanted;
+        if (!IsLoaded)
+        {
+            SetSidePanel(animate: false);
+            return;
+        }
+        if (_sidePanelPending) return;
+        // 排版过程中不能再排版：等这一帧排完再切换，切换后测量各元素的新位置。
+        _sidePanelPending = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _sidePanelPending = false;
+            SetSidePanel(animate: true);
+        });
     }
 
     /// <summary>
-    /// 页面只重新排版一次，之后的动画全部是位移和透明度：页面从原位置滑到新位置，状态栏从左侧滑入或滑出。
-    /// 动画期间状态栏缓存为位图，每帧只需合成，不必重新绘制。
+    /// 先记下各元素当前看到的位置，再一次性改成新布局并排版，然后让它们从原位置滑到新位置：
+    /// 页面横向让出状态栏，概览标题飞到状态栏图标右侧（或飞回），下面的内容补上标题让出的空间。
+    /// 动画只改变位移和透明度，每帧不需要重新排版；状态栏动画期间缓存为位图。
     /// </summary>
-    private void SetSidePanel(bool show, bool animate)
+    private void SetSidePanel(bool animate)
     {
+        var show = _sidePanelWanted;
+        if (show == _sidePanelShown) return;
         _sidePanelShown = show;
-        var oldLeft = PageContent.Margin.Left;
-        var newLeft = show ? PageMargin + SidePanelSpace : PageMargin;
-        PageContent.Margin = new Thickness(newLeft, 26, PageMargin, 20);
-        var wasCollapsed = SidePanel.Visibility == Visibility.Collapsed;
+
+        var onOverview = OverviewPage.Visibility == Visibility.Visible;
+        var flyingTitle = show ? PanelPageTitle : OverviewTitle;
+        var titleShift = show ? PanelTitleShift : OverviewTitleShift;
+        var pageBefore = PositionOf(PageContent);
+        var bodyBefore = PositionOf(OverviewBody);
+        var titleBefore = PositionOf(show ? OverviewTitle : PanelPageTitle);
+        var buttonSnapshot = animate && show && onOverview ? Snapshot(OverviewOpenButton) : null;
+        var panelWasHidden = SidePanel.Visibility != Visibility.Visible;
+        var panelOpacity = panelWasHidden ? 0 : SidePanel.Opacity;
+        var panelOffset = panelWasHidden ? -24 : SidePanelShift.X;
+
+        PageContent.Margin = new Thickness(show ? PageMargin + SidePanelWidth : PageMargin, 26, PageMargin, PageMargin);
+        OverviewHeader.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        PanelPageTitle.Visibility = show && onOverview ? Visibility.Visible : Visibility.Collapsed;
         SidePanel.Visibility = Visibility.Visible;
         SidePanel.IsHitTestVisible = show;
-        OverviewOpenButton.Visibility = Visibility.Visible;
-        OverviewOpenButton.IsHitTestVisible = !show;
+        foreach (var (target, property) in new (Animatable, DependencyProperty)[]
+                 {
+                     (PageContentShift, TranslateTransform.XProperty), (OverviewBodyShift, TranslateTransform.YProperty),
+                     (OverviewTitleShift, TranslateTransform.XProperty), (OverviewTitleShift, TranslateTransform.YProperty),
+                     (PanelTitleShift, TranslateTransform.XProperty), (PanelTitleShift, TranslateTransform.YProperty),
+                     (SidePanelShift, TranslateTransform.XProperty)
+                 })
+        {
+            target.BeginAnimation(property, null);
+            target.SetValue(property, 0.0);
+        }
+        SidePanel.BeginAnimation(OpacityProperty, null);
+        OverviewOpenButton.BeginAnimation(OpacityProperty, null);
 
         if (!animate)
         {
-            PageContentShift.BeginAnimation(TranslateTransform.XProperty, null);
-            SidePanelShift.BeginAnimation(TranslateTransform.XProperty, null);
-            SidePanel.BeginAnimation(OpacityProperty, null);
-            OverviewOpenButton.BeginAnimation(OpacityProperty, null);
             OnSidePanelSettled();
             return;
         }
 
-        // 页面在新位置排版后，先反向平移回原来看到的位置，再滑过去。
-        var viewport = PageScroll.ViewportWidth > 0 ? PageScroll.ViewportWidth : PageScroll.ActualWidth;
-        var moved = PageLeft(viewport, newLeft) - PageLeft(viewport, oldLeft);
-        PageContentShift.BeginAnimation(TranslateTransform.XProperty, Animate(PageContentShift.X - moved, 0));
-        SidePanelShift.BeginAnimation(TranslateTransform.XProperty, Animate(wasCollapsed ? -24 : null, show ? 0 : -24));
-        OverviewOpenButton.BeginAnimation(OpacityProperty, Animate(null, show ? 0 : 1));
+        ContentLayer.UpdateLayout();
+        var pageOffset = pageBefore.X - PositionOf(PageContent).X;
+        PageContentShift.BeginAnimation(TranslateTransform.XProperty, Motion(pageOffset, 0));
+        if (onOverview)
+        {
+            OverviewBodyShift.BeginAnimation(TranslateTransform.YProperty, Motion(bodyBefore.Y - PositionOf(OverviewBody).Y, 0));
+            // 页面内的标题还会随页面一起平移，要扣除这部分。
+            var titleAfter = PositionOf(flyingTitle);
+            titleShift.BeginAnimation(TranslateTransform.XProperty, Motion(titleBefore.X - titleAfter.X - (show ? 0 : pageOffset), 0));
+            titleShift.BeginAnimation(TranslateTransform.YProperty, Motion(titleBefore.Y - titleAfter.Y, 0));
+            if (!show) OverviewOpenButton.BeginAnimation(OpacityProperty, Motion(0, 1));
+        }
+        if (buttonSnapshot is { } snapshot) FadeOutSnapshot(snapshot, -pageOffset);
+
+        SidePanelShift.BeginAnimation(TranslateTransform.XProperty, Motion(panelOffset, show ? 0 : -24));
         SidePanel.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
-        var fade = Animate(wasCollapsed ? 0 : null, show ? 1 : 0);
+        var fade = Motion(panelOpacity, show ? 1 : 0);
         fade.Completed += (_, _) => OnSidePanelSettled();
         SidePanel.BeginAnimation(OpacityProperty, fade);
     }
 
-    private const double PageMargin = 36;
-    private const double PageMaxWidth = 860;
+    private System.Windows.Point PositionOf(UIElement element) => element.TranslatePoint(default, ContentLayer);
 
-    /// <summary>页面最宽 860，内容区更宽时在左右边距之间居中。</summary>
-    private static double PageLeft(double viewport, double left) => left + Math.Max(0, (viewport - left - PageMargin - PageMaxWidth) / 2);
+    private static DoubleAnimation Motion(double from, double to) =>
+        new(from, to, MotionDuration) { EasingFunction = MotionEase };
 
-    private static DoubleAnimation Animate(double? from, double to) =>
-        new() { From = from, To = to, Duration = SidePanelDuration, EasingFunction = SidePanelEase };
-
-    /// <summary>动画结束后去掉位图缓存，文字恢复清晰的 ClearType；隐藏的元素不再参与排版。</summary>
+    /// <summary>动画结束后去掉位图缓存，文字恢复清晰的 ClearType；收起的状态栏不再参与排版。</summary>
     private void OnSidePanelSettled()
     {
-        if (SidePanel.Opacity != (_sidePanelShown ? 1 : 0) && SidePanel.HasAnimatedProperties) return;
+        if (SidePanel.HasAnimatedProperties && SidePanel.Opacity != (_sidePanelShown ? 1 : 0)) return;
         SidePanel.CacheMode = null;
-        if (_sidePanelShown) OverviewOpenButton.Visibility = Visibility.Hidden;
-        else SidePanel.Visibility = Visibility.Collapsed;
+        if (!_sidePanelShown) SidePanel.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>概览页右上角的按钮随标题行一起收起；先截一张图留在原处，跟着页面平移并淡出。</summary>
+    private (System.Windows.Controls.Image Image, System.Windows.Point Position)? Snapshot(FrameworkElement element)
+    {
+        if (!element.IsVisible || element.ActualWidth < 1) return null;
+        var dpi = VisualTreeHelper.GetDpi(element);
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(element.ActualHeight * dpi.DpiScaleY),
+            dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+            context.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+        bitmap.Render(visual);
+        bitmap.Freeze();
+        var image = new System.Windows.Controls.Image { Source = bitmap, Width = element.ActualWidth, Height = element.ActualHeight, RenderTransform = new TranslateTransform() };
+        return (image, element.TranslatePoint(default, DragLayer));
+    }
+
+    private void FadeOutSnapshot((System.Windows.Controls.Image Image, System.Windows.Point Position) snapshot, double distance)
+    {
+        var (image, position) = snapshot;
+        Canvas.SetLeft(image, position.X);
+        Canvas.SetTop(image, position.Y);
+        DragLayer.Children.Add(image);
+        image.RenderTransform.BeginAnimation(TranslateTransform.XProperty, Motion(0, distance));
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180));
+        fade.Completed += (_, _) => DragLayer.Children.Remove(image);
+        image.BeginAnimation(OpacityProperty, fade);
+    }
+
+    // ───────────── 设置卡片高度 ─────────────
+
+    /// <summary>概览页四张设置卡片的高度：窗口较高时拉长卡片填满页面，避免纵向留白。</summary>
+    public static readonly DependencyProperty SettingsCardHeightProperty =
+        DependencyProperty.Register(nameof(SettingsCardHeight), typeof(double), typeof(MainWindow), new PropertyMetadata(MinCardHeight));
+
+    private const double MinCardHeight = 70;
+    private const double MaxCardHeight = 230;
+    // 牌抽出后会超出牌堆标题约这么高；窗口够高时在卡片和牌堆之间留出这段空间，不够高时才允许牌盖住卡片。
+    private const double FanHeadroom = 72;
+    private double _cardHeightTarget = MinCardHeight;
+    private double _fanGapTarget;
+
+    public double SettingsCardHeight
+    {
+        get => (double)GetValue(SettingsCardHeightProperty);
+        set => SetValue(SettingsCardHeightProperty, value);
+    }
+
+    /// <summary>
+    /// 页面其余内容的高度不变，剩下的空间先分给两行卡片，多出的放在牌堆上方，让牌堆始终贴着窗口底边。
+    /// 高度变化时平滑过渡。
+    /// </summary>
+    private void OnPageLayoutChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (OverviewPage.Visibility != Visibility.Visible || PageScroll.ViewportHeight <= 0) return;
+        var hasFan = HistorySection.Visibility == Visibility.Visible;
+        var rest = OverviewPage.ActualHeight - 2 * SettingsCardHeight - (hasFan ? HistorySection.Margin.Top : 0);
+        var spare = PageScroll.ViewportHeight - PageContent.Margin.Top - PageContent.Margin.Bottom - rest;
+        var cards = Math.Floor(Math.Clamp((spare - (hasFan ? FanHeadroom : 0)) / 2, MinCardHeight, MaxCardHeight));
+        var gap = hasFan ? Math.Floor(Math.Max(0, spare - 2 * cards)) : 0;
+        if (Math.Abs(cards - _cardHeightTarget) < 1 && Math.Abs(gap - _fanGapTarget) < 1) return;
+        _cardHeightTarget = cards;
+        _fanGapTarget = gap;
+        if (!IsLoaded)
+        {
+            SettingsCardHeight = cards;
+            HistorySection.Margin = new Thickness(0, gap, 0, 0);
+            return;
+        }
+        BeginAnimation(SettingsCardHeightProperty, Motion(SettingsCardHeight, cards));
+        HistorySection.BeginAnimation(MarginProperty,
+            new ThicknessAnimation(HistorySection.Margin, new Thickness(0, gap, 0, 0), MotionDuration) { EasingFunction = MotionEase });
     }
 
     // ───────────── 拖动更换快速操作 ─────────────
