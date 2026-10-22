@@ -958,25 +958,30 @@
                     </StackPanel>
 
                     <!-- 打开设置页后图标收起，概览标题缩成返回链接，页面名称从上方滚出 -->
-                    <StackPanel Margin="30,24,30,0" VerticalAlignment="Top">
+                    <StackPanel Margin="30,20,30,0" VerticalAlignment="Top">
+                        <!-- 胶囊形的返回按钮，文字与下面的页面名称左对齐 -->
                         <Button x:Name="PanelBackButton" Click="OnBackClick" Opacity="0" IsHitTestVisible="False" HorizontalAlignment="Left"
-                                Cursor="Hand" Foreground="{DynamicResource TextSecondaryBrush}" ToolTip="{l:Loc BackTooltip}">
+                                Margin="-10,0,0,0" Cursor="Hand" Foreground="{DynamicResource TextSecondaryBrush}" ToolTip="{l:Loc BackTooltip}">
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
-                                    <Border Background="Transparent" Padding="0,2">
+                                    <Border x:Name="Pill" Background="Transparent" CornerRadius="6" Padding="10,5,14,6">
                                         <ContentPresenter />
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
                                             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource SubtlePressedBrush}" />
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Button.Template>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{StaticResource Glyph.Back}" FontFamily="{StaticResource IconFont}" FontSize="10"
-                                           VerticalAlignment="Center" Margin="0,1,6,0" />
-                                <TextBlock x:Name="PanelCrumbText" Text="{l:Loc Overview}" FontSize="13" VerticalAlignment="Center" />
+                                <TextBlock Text="{StaticResource Glyph.Back}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                           VerticalAlignment="Center" Margin="0,1,8,0" />
+                                <TextBlock x:Name="PanelCrumbText" Text="{l:Loc Overview}" FontSize="15" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                         <Border ClipToBounds="True" Margin="0,2,0,0" IsHitTestVisible="False">
