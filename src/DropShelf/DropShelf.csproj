@@ -8,9 +8,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>DropShelf</AssemblyName>
     <RootNamespace>DropShelf</RootNamespace>
-    <Version>2.1.5</Version>
-    <AssemblyVersion>2.1.5.0</AssemblyVersion>
-    <FileVersion>2.1.5.0</FileVersion>
+    <Version>2.1.6</Version>
+    <AssemblyVersion>2.1.6.0</AssemblyVersion>
+    <FileVersion>2.1.6.0</FileVersion>
     <Product>DropShelf for Windows</Product>
     <Company>DropShelf</Company>
     <Authors>DropShelf Project</Authors>

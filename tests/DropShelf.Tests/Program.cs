@@ -1470,14 +1470,27 @@ internal static class Program
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Visible &&
                viewModel.HistoryEntries.Count == 5, "最近关闭应全部显示在牌堆中");
         Assert(viewModel.HistoryEntries[0].Stack0 is { Glyph.Length: 1 } && viewModel.HistoryEntries[0].Stack1 is null, "历史卡片的缩略图堆叠不正确");
-        var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
-        var cards = Enumerable.Range(0, 5).Select(index => (UIElement)historyList.ItemContainerGenerator.ContainerFromIndex(index)).ToArray();
-        Assert(cards.All(card => card.RenderTransform is System.Windows.Media.TransformGroup) &&
-               System.Windows.Controls.Panel.GetZIndex(cards[2]) > System.Windows.Controls.Panel.GetZIndex(cards[0]) &&
-               cards.All(card => !DropShelf.Views.Controls.FanPanel.GetIsHot(card)), "牌堆应以中间的牌在最上面排开，默认不选出任何一张");
+        // 牌堆在概览页上，回到概览页排版后才会排开。
         var shelfPage = (System.Windows.Controls.Panel)window.FindName("ShelfPage")!;
         var backButton = (System.Windows.Controls.Button)((System.Windows.Controls.Panel)shelfPage.Children[0]).Children[0];
         backButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Pump(400);
+        Assert(((FrameworkElement)window.FindName("OverviewPage")!).Opacity == 1, "切换页面的淡入动画结束后页面应完全显示");
+        var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
+        void AssertFanArranged(string when)
+        {
+            var cards = Enumerable.Range(0, 5).Select(index => (UIElement)historyList.ItemContainerGenerator.ContainerFromIndex(index)).ToArray();
+            Assert(cards.All(card => card.RenderTransform is System.Windows.Media.TransformGroup) &&
+                   System.Windows.Controls.Panel.GetZIndex(cards[2]) > System.Windows.Controls.Panel.GetZIndex(cards[0]) &&
+                   cards.All(card => !DropShelf.Views.Controls.FanPanel.GetIsHot(card)), $"{when}牌堆应以中间的牌在最上面排开，默认不选出任何一张");
+        }
+        AssertFanArranged("");
+        // 切换语言会重新生成同样数量的牌，也要重新排开。
+        viewModel.Language = AppLanguage.English;
+        Pump(50);
+        viewModel.Language = AppLanguage.Chinese;
+        Pump(50);
+        AssertFanArranged("切换语言后");
         var pageScroll = (System.Windows.Controls.ScrollViewer)window.FindName("PageScroll")!;
         foreach (var height in new[] { 640.0, 1100.0 })
         {

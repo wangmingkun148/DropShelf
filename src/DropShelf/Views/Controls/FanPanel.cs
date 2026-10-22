@@ -33,7 +33,7 @@ public sealed class FanPanel : Panel
 
     private int _hot = -1;
     private int _lastHot = -1;
-    private int _arrangedCount = -1;
+    private bool _childrenChanged = true;
     private int _pressed = -1;
     private double _center;
     private double _spacing;
@@ -63,14 +63,20 @@ public sealed class FanPanel : Panel
             child.Arrange(new Rect(CenterOf(index) - _card.Width / 2, RestY(index, count), _card.Width, _card.Height));
         }
 
-        // 数量变化时重新摆好，不播放动画；其余重新排版（如窗口变化）不打断正在播放的动画。
-        if (count != _arrangedCount)
+        // 牌换过时（含数量不变、整组重新生成，如切换语言）重新摆好，不播放动画；其余重新排版（如窗口变化）不打断正在播放的动画。
+        if (_childrenChanged)
         {
-            _arrangedCount = count;
+            _childrenChanged = false;
             _hot = _lastHot = -1;
             ApplyState(animate: false);
         }
         return finalSize;
+    }
+
+    protected override void OnVisualChildrenChanged(DependencyObject visualAdded, DependencyObject visualRemoved)
+    {
+        base.OnVisualChildrenChanged(visualAdded, visualRemoved);
+        _childrenChanged = true;
     }
 
     private double CenterOf(int index) => _center + (index - (InternalChildren.Count - 1) / 2.0) * _spacing;

@@ -74,6 +74,23 @@ public partial class MainWindow : Window
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         PanelPageTitle.Visibility = _sidePanelShown && page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
         PageScroll.ScrollToTop();
+        FadeInPage(page switch
+        {
+            "General" => GeneralPage,
+            "Shelf" => ShelfPage,
+            "Actions" => ActionsPage,
+            "Appearance" => AppearancePage,
+            _ => OverviewPage
+        });
+    }
+
+    /// <summary>新页面从稍低处上移并淡入；只改变位移和透明度，不影响排版。</summary>
+    private static void FadeInPage(FrameworkElement page)
+    {
+        if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
+        var duration = TimeSpan.FromMilliseconds(220);
+        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
+        page.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase });
     }
 
     private void OnVersionClick(object sender, RoutedEventArgs e) => new AboutWindow(ViewModel) { Owner = this }.ShowDialog();
