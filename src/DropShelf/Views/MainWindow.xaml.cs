@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Services;
@@ -73,6 +74,78 @@ public partial class MainWindow : Window
     }
 
     private void OnVersionClick(object sender, RoutedEventArgs e) => new AboutWindow(ViewModel) { Owner = this }.ShowDialog();
+
+    // ───────────── 左侧状态栏 ─────────────
+
+    // 内容区宽到放得下状态栏和完整页面时显示；两个阈值之间不切换，拖动窗口边缘时不会反复出现、消失。
+    private const double SidePanelShowWidth = 1240;
+    private const double SidePanelHideWidth = 1200;
+    private const double SidePanelSpace = 292;
+    private static readonly Duration SidePanelDuration = TimeSpan.FromMilliseconds(320);
+    private static readonly IEasingFunction SidePanelEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+    private bool _sidePanelShown;
+
+    private void OnContentLayerSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = e.NewSize.Width;
+        if (_sidePanelShown ? width < SidePanelHideWidth : width >= SidePanelShowWidth) SetSidePanel(!_sidePanelShown, IsLoaded);
+    }
+
+    /// <summary>
+    /// 页面只重新排版一次，之后的动画全部是位移和透明度：页面从原位置滑到新位置，状态栏从左侧滑入或滑出。
+    /// 动画期间状态栏缓存为位图，每帧只需合成，不必重新绘制。
+    /// </summary>
+    private void SetSidePanel(bool show, bool animate)
+    {
+        _sidePanelShown = show;
+        var oldLeft = PageContent.Margin.Left;
+        var newLeft = show ? PageMargin + SidePanelSpace : PageMargin;
+        PageContent.Margin = new Thickness(newLeft, 26, PageMargin, 20);
+        var wasCollapsed = SidePanel.Visibility == Visibility.Collapsed;
+        SidePanel.Visibility = Visibility.Visible;
+        SidePanel.IsHitTestVisible = show;
+        OverviewOpenButton.Visibility = Visibility.Visible;
+        OverviewOpenButton.IsHitTestVisible = !show;
+
+        if (!animate)
+        {
+            PageContentShift.BeginAnimation(TranslateTransform.XProperty, null);
+            SidePanelShift.BeginAnimation(TranslateTransform.XProperty, null);
+            SidePanel.BeginAnimation(OpacityProperty, null);
+            OverviewOpenButton.BeginAnimation(OpacityProperty, null);
+            OnSidePanelSettled();
+            return;
+        }
+
+        // 页面在新位置排版后，先反向平移回原来看到的位置，再滑过去。
+        var viewport = PageScroll.ViewportWidth > 0 ? PageScroll.ViewportWidth : PageScroll.ActualWidth;
+        var moved = PageLeft(viewport, newLeft) - PageLeft(viewport, oldLeft);
+        PageContentShift.BeginAnimation(TranslateTransform.XProperty, Animate(PageContentShift.X - moved, 0));
+        SidePanelShift.BeginAnimation(TranslateTransform.XProperty, Animate(wasCollapsed ? -24 : null, show ? 0 : -24));
+        OverviewOpenButton.BeginAnimation(OpacityProperty, Animate(null, show ? 0 : 1));
+        SidePanel.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
+        var fade = Animate(wasCollapsed ? 0 : null, show ? 1 : 0);
+        fade.Completed += (_, _) => OnSidePanelSettled();
+        SidePanel.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private const double PageMargin = 36;
+    private const double PageMaxWidth = 860;
+
+    /// <summary>页面最宽 860，内容区更宽时在左右边距之间居中。</summary>
+    private static double PageLeft(double viewport, double left) => left + Math.Max(0, (viewport - left - PageMargin - PageMaxWidth) / 2);
+
+    private static DoubleAnimation Animate(double? from, double to) =>
+        new() { From = from, To = to, Duration = SidePanelDuration, EasingFunction = SidePanelEase };
+
+    /// <summary>动画结束后去掉位图缓存，文字恢复清晰的 ClearType；隐藏的元素不再参与排版。</summary>
+    private void OnSidePanelSettled()
+    {
+        if (SidePanel.Opacity != (_sidePanelShown ? 1 : 0) && SidePanel.HasAnimatedProperties) return;
+        SidePanel.CacheMode = null;
+        if (_sidePanelShown) OverviewOpenButton.Visibility = Visibility.Hidden;
+        else SidePanel.Visibility = Visibility.Collapsed;
+    }
 
     // ───────────── 拖动更换快速操作 ─────────────
 

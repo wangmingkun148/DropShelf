@@ -199,6 +199,18 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool ShowGettingStarted => Settings.ShowGettingStarted;
 
+    // 宽窗口左侧的状态栏：手势识别出错时显示原因，正常时列出当前可用的呼出方式。
+    public string PanelTitle => IsHealthy ? Strings.PanelReady : Strings.StatusGestureFailed;
+    public string PanelBody => IsHealthy ? Strings.PanelTagline : Strings.StatusGestureFailedDetail;
+    public bool ShowShakeWay => IsHealthy && UsesShake;
+    public bool ShowEdgeWay => IsHealthy && UsesEdge;
+
+    public IReadOnlyList<string> HotkeyKeys => !Settings.HotkeyGesture.IsEmpty && _controller.IsHotkeyRegistered
+        ? Settings.HotkeyGesture.ToString().Split('+')
+        : [];
+
+    public bool ShowHotkeyWay => HotkeyKeys.Count > 0;
+
     // 概览页四张设置卡片上显示的当前设置。
     public string GeneralSummary => Strings.GeneralSummary(Settings.Language, Settings.StartWithWindows, Settings.HotkeyGesture);
     public string ShelfSummary => Strings.ShelfSummary(Settings.AutoOpenTrigger, Settings.DragOutMode);
@@ -496,7 +508,8 @@ public sealed class SettingsViewModel : ObservableObject
                      nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity),
                      nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
-                     nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(ShowGettingStarted), nameof(ActionLayout),
+                     nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
+                     nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),
                      nameof(StartupDescription), nameof(Version), nameof(HistoryDescription), nameof(GeneralSummary),
                      nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription)
                  })

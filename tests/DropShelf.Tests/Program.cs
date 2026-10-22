@@ -1404,6 +1404,17 @@ internal static class Program
                      "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
 
+        var sidePanel = (FrameworkElement)window.FindName("SidePanel")!;
+        var overviewOpen = (FrameworkElement)window.FindName("OverviewOpenButton")!;
+        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewOpen.Visibility == Visibility.Visible, "窗口较窄时不应显示左侧状态栏");
+        window.Width = 1500;
+        Pump(600);
+        Assert(sidePanel.Visibility == Visibility.Visible && sidePanel.Opacity == 1 && overviewOpen.Visibility == Visibility.Hidden,
+            "窗口足够宽时应显示左侧状态栏，并隐藏概览页上重复的按钮");
+        window.Width = 900;
+        Pump(600);
+        Assert(sidePanel.Visibility == Visibility.Collapsed && overviewOpen.Visibility == Visibility.Visible, "窗口变窄后应收起左侧状态栏");
+
         controller.History.Clear();
         var pageCards = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("PageCards")!;
         Assert(pageCards.Children.Count == 4, "概览页应有四张设置卡片");

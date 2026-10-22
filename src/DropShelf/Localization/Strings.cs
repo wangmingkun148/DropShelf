@@ -81,6 +81,14 @@ public static class Strings
     public static string StatusGestureFailed => T("手势识别未能启动", "Gesture detection couldn't start");
     public static string StatusGestureFailedDetail => T("请重新启动 DropShelf；置物架和快捷键仍可使用", "Restart DropShelf. Shelves and the shortcut still work");
 
+    // 宽窗口左侧的状态栏
+    public static string PanelReady => T("置物架已就绪", "Your shelf is ready");
+    public static string PanelTagline => T("拖动文件时随时呼出，临时放一放，再拖到任何地方。",
+        "Call it up while dragging files, park them for a moment, then drop them anywhere.");
+    public static string PanelWays => T("呼出方式", "Ways to open");
+    public static string WayShake => T("拖住文件晃一晃", "Drag a file and shake");
+    public static string WayEdge => T("拖到屏幕边缘停一下", "Pause at the screen edge");
+
     public static string StatusRunningDetail(AutoOpenTrigger trigger, string? hotkey) => trigger switch
     {
         AutoOpenTrigger.Shake => T($"拖住文件并快速晃动鼠标{(hotkey is null ? null : $"，或按 {hotkey} 打开置物架")}",

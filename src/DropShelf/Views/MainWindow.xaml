@@ -119,6 +119,38 @@
             </Setter>
         </Style>
 
+        <!-- 左侧状态栏中的一种呼出方式 -->
+        <Style x:Key="WayRowStyle" TargetType="Border">
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
+        </Style>
+        <Style x:Key="WayGlyphStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+        <Style x:Key="DecoCardStyle" TargetType="Border">
+            <Setter Property="Width" Value="70" />
+            <Setter Property="Height" Value="90" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource FlyoutBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FlyoutBorderBrush}" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        </Style>
+        <Style x:Key="DecoGlyphStyle" TargetType="TextBlock" BasedOn="{StaticResource GlyphTextStyle}">
+            <Setter Property="FontSize" Value="26" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+        </Style>
+
         <!-- 窗口右下角的版本号等文字链接 -->
         <Style x:Key="TextLinkStyle" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -368,7 +400,7 @@
 
         <!-- 页面内容：概览页列出各项设置，点进去后可返回 -->
         <Border x:Name="ContentLayer" Grid.Row="1" Background="{DynamicResource LayerBrush}"
-                BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0">
+                BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" SizeChanged="OnContentLayerSizeChanged">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
@@ -376,12 +408,15 @@
                 </Grid.RowDefinitions>
                 <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Focusable="False">
-                    <Grid MaxWidth="860" Margin="36,26,36,20">
+                    <Grid x:Name="PageContent" MaxWidth="860" Margin="36,26,36,20">
+                        <Grid.RenderTransform>
+                            <TranslateTransform x:Name="PageContentShift" />
+                        </Grid.RenderTransform>
                         <!-- 概览 -->
                         <StackPanel x:Name="OverviewPage" Visibility="Visible">
                             <Grid>
                                 <TextBlock Text="{l:Loc Overview}" Style="{StaticResource TitleTextStyle}" />
-                                <Button Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" HorizontalAlignment="Right"
+                                <Button x:Name="OverviewOpenButton" Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" HorizontalAlignment="Right"
                                         VerticalAlignment="Center" Padding="16,6,16,7">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
@@ -758,6 +793,100 @@
                 </ScrollViewer>
                 <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"
                         HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick" />
+
+                <!-- 窗口足够宽时在左侧显示状态栏：程序状态、呼出方式和打开置物架按钮 -->
+                <Border x:Name="SidePanel" Grid.RowSpan="2" Width="272" Margin="20,26,0,20" HorizontalAlignment="Left"
+                        Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1"
+                        CornerRadius="10" Visibility="Collapsed">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="SidePanelShift" />
+                    </Border.RenderTransform>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <!-- 右上角的强调色光晕 -->
+                        <Border Grid.RowSpan="2" CornerRadius="9" Background="{DynamicResource AccentBrush}" Opacity="0.22">
+                            <Border.OpacityMask>
+                                <RadialGradientBrush Center="1,0" GradientOrigin="1,0" RadiusX="1.3" RadiusY="0.75">
+                                    <GradientStop Color="Black" Offset="0" />
+                                    <GradientStop Color="Transparent" Offset="1" />
+                                </RadialGradientBrush>
+                            </Border.OpacityMask>
+                        </Border>
+
+                        <StackPanel Margin="24,28,24,0">
+                            <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,18,0,0"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
+                            <Button Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" Margin="0,20,0,0" Padding="16,7,16,8">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                               Margin="0,1,8,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="{l:Loc OpenShelf}" />
+                                </StackPanel>
+                            </Button>
+
+                            <TextBlock Text="{l:Loc PanelWays}" FontSize="12" Margin="2,26,0,8" Foreground="{DynamicResource TextTertiaryBrush}" />
+                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
+                                    <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
+                                    <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{StaticResource Glyph.Keyboard}" Style="{StaticResource WayGlyphStyle}" />
+                                    <ItemsControl ItemsSource="{Binding HotkeyKeys}" Focusable="False" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="4" BorderThickness="1,1,1,2"
+                                                        Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource ControlBorderBrush}">
+                                                    <TextBlock Text="{Binding}" FontSize="11" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- 底部叠放的三张文件卡，窗口较矮时被裁掉 -->
+                        <Grid Grid.Row="1" ClipToBounds="True" Margin="0,16,0,1">
+                            <Canvas Width="200" Height="96" VerticalAlignment="Bottom">
+                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="14" Canvas.Top="30">
+                                    <Border.RenderTransform>
+                                        <RotateTransform Angle="-12" />
+                                    </Border.RenderTransform>
+                                    <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource DecoGlyphStyle}" />
+                                </Border>
+                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="116" Canvas.Top="28">
+                                    <Border.RenderTransform>
+                                        <RotateTransform Angle="11" />
+                                    </Border.RenderTransform>
+                                    <TextBlock Text="{StaticResource Glyph.Folder}" Style="{StaticResource DecoGlyphStyle}" />
+                                </Border>
+                                <Border Style="{StaticResource DecoCardStyle}" Canvas.Left="65" Canvas.Top="12">
+                                    <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource DecoGlyphStyle}" />
+                                </Border>
+                            </Canvas>
+                        </Grid>
+                    </Grid>
+                </Border>
             </Grid>
         </Border>
 
