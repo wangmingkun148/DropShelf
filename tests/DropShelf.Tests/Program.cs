@@ -1475,7 +1475,7 @@ internal static class Program
         var backButton = (System.Windows.Controls.Button)((System.Windows.Controls.Panel)shelfPage.Children[0]).Children[0];
         backButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(400);
-        Assert(((FrameworkElement)window.FindName("OverviewPage")!).Opacity == 1, "切换页面的淡入动画结束后页面应完全显示");
+        Assert(((FrameworkElement)window.FindName("OverviewPage")!) is { Opacity: 1, CacheMode: null }, "切换页面的淡入动画结束后页面应完全显示并去掉位图缓存");
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {

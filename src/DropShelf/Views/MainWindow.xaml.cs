@@ -84,13 +84,19 @@ public partial class MainWindow : Window
         });
     }
 
-    /// <summary>新页面从稍低处上移并淡入；只改变位移和透明度，不影响排版。</summary>
+    /// <summary>
+    /// 新页面从稍低处上移并淡入；只改变位移和透明度，不影响排版。
+    /// 动画期间页面缓存为位图，每帧只叠一张图，不用重画整页内容；结束后去掉缓存，文字恢复清晰的 ClearType。
+    /// </summary>
     private static void FadeInPage(FrameworkElement page)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
+        page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
         var duration = TimeSpan.FromMilliseconds(300);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
-        page.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase });
+        var fade = new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase };
+        fade.Completed += (_, _) => page.CacheMode = null;
+        page.BeginAnimation(OpacityProperty, fade);
     }
 
     private void OnVersionClick(object sender, RoutedEventArgs e) => new AboutWindow(ViewModel) { Owner = this }.ShowDialog();
