@@ -236,11 +236,13 @@ public sealed class FanPanel : Panel
                          (_hot < 0 || isHot ? 0 : Math.Sign(index - _hot) * Math.Max(0, 3 - Math.Abs(index - _hot)) / 3.0 * Push);
 
             var ease = isHot ? LiftEase : MoveEase;
-            Set(scale, ScaleTransform.ScaleXProperty, isHot ? HotScale : 1, ease, animate);
-            Set(scale, ScaleTransform.ScaleYProperty, isHot ? HotScale : 1, ease, animate);
-            Set(rotate, RotateTransform.AngleProperty, isHot ? 0 : rest, MoveEase, animate);
-            Set(move, TranslateTransform.XProperty, offset, MoveEase, animate);
-            Set(move, TranslateTransform.YProperty, isHot ? -Lift - RestY(index, count) : RestY(slot, slots) - RestY(index, count), ease, animate);
+            // 拖着的牌是隐藏的，直接放到空位上，拖回来的卡牌被吸向空位的最终位置，而不是一路滑过去的中间位置。
+            var smooth = animate && index != dragged;
+            Set(scale, ScaleTransform.ScaleXProperty, isHot ? HotScale : 1, ease, smooth);
+            Set(scale, ScaleTransform.ScaleYProperty, isHot ? HotScale : 1, ease, smooth);
+            Set(rotate, RotateTransform.AngleProperty, isHot ? 0 : rest, MoveEase, smooth);
+            Set(move, TranslateTransform.XProperty, offset, MoveEase, smooth);
+            Set(move, TranslateTransform.YProperty, isHot ? -Lift - RestY(index, count) : RestY(slot, slots) - RestY(index, count), ease, smooth);
 
             // 中间的牌在上面；刚放回去的牌在落下过程中仍压在邻居上面。
             SetZIndex(child, isHot ? 1000 : index == _lastHot ? 999 : slots - (int)Math.Ceiling(Math.Abs(slot - mid)));

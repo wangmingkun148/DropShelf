@@ -25,6 +25,8 @@ public sealed class CardGhostWindow : Window
     private const double SettleTimeout = 0.8;
 
     private readonly System.Windows.Controls.Image _image = new() { Stretch = Stretch.Fill };
+    private readonly System.Windows.Controls.Grid _root = new();
+    private readonly RectangleGeometry _clip = new();
     private readonly ScaleTransform _scale = new();
     private readonly RotateTransform _rotate = new();
     private readonly Stopwatch _clock = new();
@@ -56,7 +58,8 @@ public sealed class CardGhostWindow : Window
         _image.RenderTransformOrigin = new Point(0.5, 0.5);
         _image.RenderTransform = new TransformGroup { Children = { _scale, _rotate } };
         _image.Effect = new DropShadowEffect { BlurRadius = 24, ShadowDepth = 6, Direction = 270, Opacity = 0.25, Color = Colors.Black };
-        Content = _image;
+        _root.Children.Add(_image);
+        Content = _root;
         SourceInitialized += (_, _) =>
         {
             WindowEffects.SetToolWindow(this, noActivate: true);
@@ -70,6 +73,9 @@ public sealed class CardGhostWindow : Window
 
     /// <summary>正在拖动或播放收尾动画。</summary>
     public bool IsBusy => _running;
+
+    /// <summary>卡牌在这条横线（屏幕像素）以下的部分不显示，与牌堆被窗口底边裁掉的样子一致；null 表示不裁。</summary>
+    public Func<double?> ClipBottom { get; set; } = () => null;
 
     /// <summary>从卡牌当前的样子开始跟随目标。</summary>
     public void Begin(ImageSource image, Size size, CardPose start, Func<CardPose?> target)
@@ -156,8 +162,14 @@ public sealed class CardGhostWindow : Window
         _scale.ScaleX = _scale.ScaleY = _pose.Scale;
         _rotate.Angle = _pose.Angle + _sway;
         var dpi = VisualTreeHelper.GetDpi(this);
-        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, (int)Math.Round(_pose.Center.X - Width * dpi.DpiScaleX / 2),
-            (int)Math.Round(_pose.Center.Y - Height * dpi.DpiScaleY / 2), 0, 0,
+        var top = (int)Math.Round(_pose.Center.Y - Height * dpi.DpiScaleY / 2);
+        if (ClipBottom() is { } bottom)
+        {
+            _clip.Rect = new Rect(0, 0, Width, Math.Max(0, (bottom - top) / dpi.DpiScaleY));
+            _root.Clip = _clip;
+        }
+        else _root.Clip = null;
+        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, (int)Math.Round(_pose.Center.X - Width * dpi.DpiScaleX / 2), top, 0, 0,
             NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
     }
 

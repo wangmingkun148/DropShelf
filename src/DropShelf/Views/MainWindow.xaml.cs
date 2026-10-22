@@ -482,16 +482,16 @@ public partial class MainWindow : Window
 
     // ───────────── 拖出最近关闭的置物架 ─────────────
 
-    /// <summary>卡牌拖到牌堆上方这么高的范围内松手算放回。</summary>
-    private const double HistoryReturnReach = 120;
+    /// <summary>卡牌拖到牌堆上方这么高的范围内松手算放回；越靠近牌堆，空位对卡牌的吸引越强。</summary>
+    private const double HistoryReturnReach = 60;
     private const double DetachedScale = 1.06;
 
     /// <summary>拖动不到这个距离时卡牌被牌堆吸住，只跟随一小部分；超过后脱离。</summary>
     private const double TearDistance = 48;
     private const double HoldFollow = 0.3;
 
-    /// <summary>拖回牌堆上方时卡牌被原位吸引，只走到光标处的这一比例。</summary>
-    private const double ReturnFollow = 0.6;
+    /// <summary>拖回牌堆上时卡牌最多被空位拉过去这一比例。</summary>
+    private const double ReturnPull = 0.25;
 
     private HistoryEntryViewModel? _pressedEntry;
     private FrameworkElement? _draggedContainer;
@@ -571,12 +571,13 @@ public partial class MainWindow : Window
         }
         container.Opacity = 0;
         _historyPanel?.SetGap(container, _historyIndex);
+        _ghost.ClipBottom = () => !_tornOff || HistoryReturnWeight(CursorPoint()) > 0 ? WindowBottom() : null;
         _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () => HistoryDragPose(start, container));
     }
 
     /// <summary>
     /// 拖动分三段：先被牌堆吸住、只跟一小段；拉过一定距离后脱离并略微放大，顿一下跟上光标；
-    /// 脱离后其余的牌并拢；拖回牌堆上方时按卡牌位置让出空位，卡牌被空位吸过去一截并缩回原来的大小，提示松手会放到这里。
+    /// 脱离后其余的牌并拢；拖回牌堆上方时按卡牌位置让出空位，越靠近牌堆，卡牌被空位吸得越紧、越接近原来的大小，提示松手会放到这里。
     /// </summary>
     private CardPose HistoryDragPose(CardPose start, FrameworkElement container)
     {
@@ -586,10 +587,11 @@ public partial class MainWindow : Window
             return start with { Center = start.Center + pulled * HoldFollow };
         _tornOff = true;
         var free = cursor - _grabOffset;
-        var over = IsOverHistory(cursor);
-        _historyPanel?.SetGap(container, over ? _historyPanel.SlotAt(_historyPanel.PointFromScreen(free).X) : -1);
-        if (!over || PoseOf(container) is not { } slot) return new CardPose(free, DetachedScale, 0);
-        return new CardPose(slot.Center + (free - slot.Center) * ReturnFollow, slot.Scale, slot.Angle * (1 - ReturnFollow));
+        var weight = HistoryReturnWeight(cursor);
+        _historyPanel?.SetGap(container, weight > 0 ? _historyPanel.SlotAt(_historyPanel.PointFromScreen(free).X) : -1);
+        if (weight <= 0 || PoseOf(container) is not { } slot) return new CardPose(free, DetachedScale, 0);
+        var pull = ReturnPull * weight;
+        return new CardPose(free + (slot.Center - free) * pull, DetachedScale + (slot.Scale - DetachedScale) * weight, slot.Angle * pull);
     }
 
     /// <summary>在牌堆上松手时卡牌飞进让出的空位并移到这个位置，取消时飞回原位；其他位置松手时在光标处打开置物架，卡牌缩小淡出。</summary>
@@ -612,29 +614,39 @@ public partial class MainWindow : Window
         }
 
         var cursor = CursorPoint();
-        if (cancel || !_tornOff || IsOverHistory(cursor))
+        if (cancel || !_tornOff || HistoryReturnWeight(cursor) > 0)
         {
             var index = !cancel && _tornOff && panel?.Gap is >= 0 and var gap ? gap : _historyIndex;
             panel?.SetGap(container, index);
+            ghost.ClipBottom = WindowBottom;
             ghost.Settle(() => PoseOf(container), () =>
             {
                 container.Opacity = 1;
                 panel?.SetGap(null, -1);
-                _controller.History.Move(entry.Entry, index);
+                // 卡牌落定、画面静止后再重排列表，重新生成卡片的停顿不会出现在动画中。
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => _controller.History.Move(entry.Entry, index));
             });
             return;
         }
+        ghost.ClipBottom = () => null;
         ghost.Vanish(cursor);
         _controller.RestoreAt(entry.Entry, new POINT((int)cursor.X, (int)cursor.Y));
     }
 
-    private bool IsOverHistory(System.Windows.Point screen)
+    /// <summary>光标离牌堆多近：0 表示不在放回范围内，从范围上沿到牌堆上沿平滑增加到 1。</summary>
+    private double HistoryReturnWeight(System.Windows.Point screen)
     {
         var window = PointFromScreen(screen);
         var list = HistoryList.PointFromScreen(screen);
-        return window.X >= 0 && window.Y >= 0 && window.X <= ActualWidth && window.Y <= ActualHeight &&
-               list.X >= 0 && list.X <= HistoryList.ActualWidth && list.Y >= -HistoryReturnReach && list.Y <= HistoryList.ActualHeight;
+        if (window.X < 0 || window.Y < 0 || window.X > ActualWidth || window.Y > ActualHeight ||
+            list.X < 0 || list.X > HistoryList.ActualWidth || list.Y < -HistoryReturnReach || list.Y > HistoryList.ActualHeight) return 0;
+        var t = Math.Clamp((list.Y + HistoryReturnReach) / HistoryReturnReach, 0.01, 1);
+        return t * t * (3 - 2 * t);
     }
+
+    /// <summary>窗口内容底边的屏幕坐标，牌堆的下半截在这里被裁掉。</summary>
+    private double? WindowBottom() =>
+        PresentationSource.FromVisual(RootGrid) is null ? null : RootGrid.PointToScreen(new System.Windows.Point(0, RootGrid.ActualHeight)).Y;
 
     /// <summary>元素在屏幕上的中心、缩放和角度，包含牌堆给它的变换和动画。</summary>
     private static CardPose? PoseOf(FrameworkElement element)
