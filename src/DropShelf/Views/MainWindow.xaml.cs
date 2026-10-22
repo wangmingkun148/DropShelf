@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -35,6 +36,22 @@ public partial class MainWindow : Window
     {
         if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
             Background = System.Windows.Media.Brushes.Transparent;
+        HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(OnWindowMessage);
+    }
+
+    private const int WmEnterSizeMove = 0x0231;
+    private const int WmExitSizeMove = 0x0232;
+
+    /// <summary>
+    /// 正在拖动窗口边框。此时布局变化直接到位、不播放动画：来回拖过分界线时，
+    /// 每次都从半路重新开始的动画会叠在一起，整页看起来在剧烈抖动。
+    /// </summary>
+    private bool _resizing;
+
+    private IntPtr OnWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message is WmEnterSizeMove or WmExitSizeMove) _resizing = message == WmEnterSizeMove;
+        return IntPtr.Zero;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
@@ -107,7 +124,7 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             _sidePanelPending = false;
-            SetSidePanel(animate: true);
+            SetSidePanel(animate: !_resizing);
         });
     }
 
@@ -259,7 +276,7 @@ public partial class MainWindow : Window
         if (Math.Abs(cards - _cardHeightTarget) < 1) return;
         _cardHeightTarget = cards;
         // 动画落后于窗口边缘时页面会时高时矮、滚动条反复出现，看起来整页都在抖。
-        if (IsLoaded && !resized)
+        if (IsLoaded && !resized && !_resizing)
         {
             BeginAnimation(SettingsCardHeightProperty, Motion(SettingsCardHeight, cards));
             return;

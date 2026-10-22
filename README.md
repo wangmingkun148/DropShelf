@@ -134,7 +134,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 ## 发布新版本
 
 1. 修改 `DropShelf.csproj`、`app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
-2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.3`，须与版本号一致）并发布。
+2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.4`，须与版本号一致）并发布。
 3. GitHub Actions 会自动编译安装包和便携版，几分钟后附加到这个 Release 上。
 
 ## 许可证
