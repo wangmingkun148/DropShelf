@@ -94,26 +94,7 @@
 
         <controls:RampConverter x:Key="Ramp" />
 
-        <!-- 左侧状态栏中的行和按钮：没有边框，背景向右渐隐 -->
-        <LinearGradientBrush x:Key="SoftEdgeMask" StartPoint="0,0" EndPoint="1,0">
-            <GradientStop Color="Black" Offset="0" />
-            <GradientStop Color="Black" Offset="0.5" />
-            <GradientStop Color="Transparent" Offset="1" />
-        </LinearGradientBrush>
-        <Style x:Key="SoftRowStyle" TargetType="ContentControl">
-            <Setter Property="Margin" Value="0,0,0,6" />
-            <Setter Property="Focusable" Value="False" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ContentControl">
-                        <Grid MinHeight="38">
-                            <Border CornerRadius="6" Background="{DynamicResource SubtleSelectedBrush}" OpacityMask="{StaticResource SoftEdgeMask}" />
-                            <ContentPresenter Margin="12,0" VerticalAlignment="Center" />
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- 左侧状态栏中的按钮，以及只作提示、不可点击的呼出方式（不加背景，免得像按钮） -->
         <Style x:Key="SoftAccentButtonStyle" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
             <Setter Property="FontSize" Value="14" />
@@ -145,6 +126,10 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+        <Style x:Key="WayRowStyle" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="Margin" Value="2,0,0,12" />
         </Style>
         <Style x:Key="WayGlyphStyle" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
@@ -915,20 +900,15 @@
                         </Button>
 
                         <TextBlock Text="{l:Loc PanelWays}" FontSize="12" Margin="2,26,0,8" Foreground="{DynamicResource TextTertiaryBrush}" />
-                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
-                                <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ContentControl>
-                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
-                                <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ContentControl>
-                        <ContentControl Style="{StaticResource SoftRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
-                            <StackPanel Orientation="Horizontal">
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowShakeWay, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{StaticResource Glyph.Move}" Style="{StaticResource WayGlyphStyle}" />
+                            <TextBlock Text="{l:Loc WayShake}" FontSize="13" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowEdgeWay, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{StaticResource Glyph.Expand}" Style="{StaticResource WayGlyphStyle}" />
+                            <TextBlock Text="{l:Loc WayEdge}" FontSize="13" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Style="{StaticResource WayRowStyle}" Visibility="{Binding ShowHotkeyWay, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock Text="{StaticResource Glyph.Keyboard}" Style="{StaticResource WayGlyphStyle}" />
                                 <ItemsControl ItemsSource="{Binding HotkeyKeys}" Focusable="False" VerticalAlignment="Center">
                                     <ItemsControl.ItemsPanel>
@@ -945,8 +925,7 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                            </StackPanel>
-                        </ContentControl>
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
 

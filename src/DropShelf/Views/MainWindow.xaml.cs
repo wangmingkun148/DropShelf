@@ -231,6 +231,7 @@ public partial class MainWindow : Window
     // 牌抽出后会超出牌堆标题约这么高；窗口够高时在卡片和牌堆之间留出这段空间，不够高时才允许牌盖住卡片。
     private const double FanHeadroom = 72;
     private double _cardHeightTarget = MinCardHeight;
+    private double _viewportHeight;
 
     public double SettingsCardHeight
     {
@@ -240,20 +241,30 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 页面其余内容的高度不变，剩下的空间分给两行卡片；牌堆由布局固定在窗口底边，不受影响。
-    /// 每次排版后检查一次，只在目标高度变化时开始平滑过渡。
+    /// 每次排版后检查一次：拖动窗口大小时直接跟随，只有页面内容变化（如收起入门提示）时才平滑过渡。
     /// </summary>
     private void UpdateCardHeight()
     {
-        if (OverviewPage.Visibility != Visibility.Visible || PageScroll.ViewportHeight <= 0) return;
-        // 概览页被拉伸到可视区域高度，ActualHeight 不能反映内容本身，用测量出的高度。
-        var rest = OverviewPage.DesiredSize.Height - 2 * SettingsCardHeight;
-        var spare = PageScroll.ViewportHeight - PageContent.Margin.Top - PageContent.Margin.Bottom - rest;
+        var viewport = PageScroll.ViewportHeight;
+        if (OverviewPage.Visibility != Visibility.Visible || viewport <= 0) return;
+        var resized = Math.Abs(viewport - _viewportHeight) >= 1;
+        _viewportHeight = viewport;
+        // 用测量高度减去卡片区域本身，结果与卡片当前高度无关，动画和像素取整都不会反过来改变目标。
+        var rest = OverviewPage.DesiredSize.Height - PageCards.DesiredSize.Height;
+        var spare = viewport - PageContent.Margin.Top - PageContent.Margin.Bottom - rest;
         var headroom = HistorySection.Visibility == Visibility.Visible ? FanHeadroom : 0;
-        var cards = Math.Floor(Math.Clamp((spare - headroom) / 2, MinCardHeight, MaxCardHeight));
+        var gap = ((FrameworkElement)PageCards.Children[0]).Margin.Bottom;
+        var cards = Math.Floor(Math.Clamp((spare - headroom) / 2 - gap, MinCardHeight, MaxCardHeight));
         if (Math.Abs(cards - _cardHeightTarget) < 1) return;
         _cardHeightTarget = cards;
-        BeginAnimation(SettingsCardHeightProperty, IsLoaded ? Motion(SettingsCardHeight, cards) : null);
-        if (!IsLoaded) SettingsCardHeight = cards;
+        // 动画落后于窗口边缘时页面会时高时矮、滚动条反复出现，看起来整页都在抖。
+        if (IsLoaded && !resized)
+        {
+            BeginAnimation(SettingsCardHeightProperty, Motion(SettingsCardHeight, cards));
+            return;
+        }
+        BeginAnimation(SettingsCardHeightProperty, null);
+        SettingsCardHeight = cards;
     }
 
     // ───────────── 拖动更换快速操作 ─────────────
