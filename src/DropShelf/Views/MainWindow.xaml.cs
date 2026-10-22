@@ -4,7 +4,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -36,22 +35,6 @@ public partial class MainWindow : Window
     {
         if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
             Background = System.Windows.Media.Brushes.Transparent;
-        HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(OnWindowMessage);
-    }
-
-    private const int WmEnterSizeMove = 0x0231;
-    private const int WmExitSizeMove = 0x0232;
-
-    /// <summary>
-    /// 正在拖动窗口边框。此时布局变化直接到位、不播放动画：来回拖过分界线时，
-    /// 每次都从半路重新开始的动画会叠在一起，整页看起来在剧烈抖动。
-    /// </summary>
-    private bool _resizing;
-
-    private IntPtr OnWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (message is WmEnterSizeMove or WmExitSizeMove) _resizing = message == WmEnterSizeMove;
-        return IntPtr.Zero;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
@@ -98,8 +81,8 @@ public partial class MainWindow : Window
     // ───────────── 左侧状态栏 ─────────────
 
     // 内容区宽到放得下状态栏和完整页面时显示；两个阈值之间不切换，拖动窗口边缘时不会反复出现、消失。
-    private const double SidePanelShowWidth = 1240;
-    private const double SidePanelHideWidth = 1200;
+    private const double SidePanelShowWidth = 1260;
+    private const double SidePanelHideWidth = 1160;
     private const double SidePanelWidth = 300;
     private const double PageMargin = 36;
     private static readonly Duration MotionDuration = TimeSpan.FromMilliseconds(340);
@@ -124,7 +107,7 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             _sidePanelPending = false;
-            SetSidePanel(animate: !_resizing);
+            SetSidePanel(animate: true);
         });
     }
 
@@ -276,7 +259,7 @@ public partial class MainWindow : Window
         if (Math.Abs(cards - _cardHeightTarget) < 1) return;
         _cardHeightTarget = cards;
         // 动画落后于窗口边缘时页面会时高时矮、滚动条反复出现，看起来整页都在抖。
-        if (IsLoaded && !resized && !_resizing)
+        if (IsLoaded && !resized)
         {
             BeginAnimation(SettingsCardHeightProperty, Motion(SettingsCardHeight, cards));
             return;

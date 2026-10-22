@@ -1,5 +1,5 @@
 ﻿#define AppName "DropShelf"
-#define AppVersion "2.1.4"
+#define AppVersion "2.1.5"
 #define AppPublisher "DropShelf"
 #define AppExeName "DropShelf.exe"
 
@@ -9,7 +9,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=2.1.4.0
+VersionInfoVersion=2.1.5.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=DropShelf 安装程序
 VersionInfoProductName={#AppName}
