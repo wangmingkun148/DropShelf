@@ -394,6 +394,8 @@
 
         <!-- 删除光效和提示用的大红，与强调色中的红色（偏粉）区分开 -->
         <SolidColorBrush x:Key="DeleteBrush" Color="#E5000F" />
+        <!-- 拖动内置操作时底部亮起的中性灰：表示这里删不了 -->
+        <SolidColorBrush x:Key="LockedBrush" Color="#808080" />
 
         <!-- 对话框中字段上方的标题 -->
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
@@ -1090,7 +1092,7 @@
             </Border>
         </Grid>
 
-        <!-- 拖动自定义操作时窗口底部发出红光，拖进去后提示松开删除 -->
+        <!-- 拖动快速操作时窗口底部发光：自定义操作为红色，拖进去后提示松开删除；内置操作为灰色，提示不能删除 -->
         <Grid x:Name="DeleteZone" Grid.RowSpan="2" Height="120" VerticalAlignment="Bottom" IsHitTestVisible="False" Opacity="0">
             <Rectangle x:Name="DeleteGlow" Fill="{StaticResource DeleteBrush}" Opacity="0.35">
                 <Rectangle.OpacityMask>
@@ -1104,9 +1106,9 @@
             <Border x:Name="DeleteHint" CornerRadius="14" Padding="12,5,14,6" Margin="0,0,0,28" HorizontalAlignment="Center"
                     VerticalAlignment="Bottom" Background="{StaticResource DeleteBrush}" Opacity="0">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{StaticResource Glyph.Delete}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="0,1,8,0"
+                    <TextBlock x:Name="DeleteHintGlyph" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="0,1,8,0"
                                VerticalAlignment="Center" Foreground="White" />
-                    <TextBlock Text="{l:Loc ReleaseToDelete}" FontSize="13" VerticalAlignment="Center" Foreground="White" />
+                    <TextBlock x:Name="DeleteHintText" FontSize="13" VerticalAlignment="Center" Foreground="White" />
                 </StackPanel>
             </Border>
         </Grid>

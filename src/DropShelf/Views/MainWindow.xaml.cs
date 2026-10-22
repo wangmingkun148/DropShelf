@@ -331,9 +331,14 @@ public partial class MainWindow : Window
             BeginCardDrag(card);
         }
 
+        // 内置操作拖进底部区域时像碰到弹性边界：越往下越拖不动，最多陷进去一小段。
+        var zoneTop = DragLayer.ActualHeight - DeleteZone.ActualHeight;
+        var y = card.IsCustom || position.Y <= zoneTop
+            ? position.Y
+            : zoneTop + LockedSink * (1 - Math.Exp(-(position.Y - zoneTop) / LockedSink));
         Canvas.SetLeft(DragGhost, position.X + 12);
-        Canvas.SetTop(DragGhost, position.Y + 8);
-        SetOverDeleteZone(card.IsCustom && position.Y >= DragLayer.ActualHeight - DeleteZone.ActualHeight);
+        Canvas.SetTop(DragGhost, y + 8);
+        SetOverDeleteZone(position.Y >= zoneTop);
         SetDropTarget(_overDeleteZone ? null : HitTestSlot(e.GetPosition(ActionSlotsList)), card);
     }
 
@@ -342,11 +347,37 @@ public partial class MainWindow : Window
         var card = _pressedCard;
         var target = _dropTarget;
         var dragged = _draggingCard;
-        var delete = _overDeleteZone;
+        var overZone = _overDeleteZone;
         EndCardDrag();
         if (!dragged || card is null) return;
-        if (delete) ConfirmDeleteCustomAction(card);
+        if (overZone && card.IsCustom) ConfirmDeleteCustomAction(card);
+        else if (overZone) BounceBackGhost();
         else if (target is not null) ViewModel.AssignSlot(target.Index, card.Action.Id);
+    }
+
+    /// <summary>内置操作在底部松手：跟随的卡片弹回区域上方并淡出。</summary>
+    private void BounceBackGhost()
+    {
+        DragGhost.Visibility = Visibility.Visible;
+        var top = DragLayer.ActualHeight - DeleteZone.ActualHeight - DragGhost.ActualHeight;
+        DragGhost.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(Math.Min(Canvas.GetTop(DragGhost), top), TimeSpan.FromMilliseconds(320))
+        {
+            EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }
+        });
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)) { BeginTime = TimeSpan.FromMilliseconds(160) };
+        fade.Completed += (_, _) =>
+        {
+            if (_draggingCard) return;
+            DragGhost.Visibility = Visibility.Collapsed;
+            ClearGhostAnimations();
+        };
+        DragGhost.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void ClearGhostAnimations()
+    {
+        DragGhost.BeginAnimation(Canvas.TopProperty, null);
+        DragGhost.BeginAnimation(OpacityProperty, null);
     }
 
     /// <summary>要删除的自定义操作，确认对话框打开期间有值。</summary>
@@ -396,8 +427,13 @@ public partial class MainWindow : Window
         card.IsDragSource = true;
         DragGhostGlyph.Text = card.Glyph;
         DragGhostText.Text = card.Title;
+        ClearGhostAnimations();
         DragGhost.Visibility = Visibility.Visible;
-        if (card.IsCustom) Fade(DeleteZone, 1);
+        var zoneBrush = (System.Windows.Media.Brush)FindResource(card.IsCustom ? "DeleteBrush" : "LockedBrush");
+        DeleteGlow.Fill = DeleteHint.Background = zoneBrush;
+        DeleteHintGlyph.Text = (string)FindResource(card.IsCustom ? "Glyph.Delete" : "Glyph.Lock");
+        DeleteHintText.Text = card.IsCustom ? Strings.ReleaseToDelete : Strings.BuiltInCannotDelete;
+        Fade(DeleteZone, 1);
         Mouse.Capture(ActionsPage, CaptureMode.SubTree);
     }
 
@@ -414,7 +450,10 @@ public partial class MainWindow : Window
         if (Mouse.Captured == ActionsPage) ActionsPage.ReleaseMouseCapture();
     }
 
-    /// <summary>拖进底部红光区域时红光变亮，并提示松开删除。</summary>
+    /// <summary>内置操作拖进底部区域时最多陷进去的深度。</summary>
+    private const double LockedSink = 28;
+
+    /// <summary>拖进底部区域时光效变亮，并提示松开删除或不能删除。</summary>
     private void SetOverDeleteZone(bool value)
     {
         if (value == _overDeleteZone) return;
