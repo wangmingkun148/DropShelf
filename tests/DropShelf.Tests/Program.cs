@@ -1536,18 +1536,17 @@ internal static class Program
         Assert(service.Load().CustomActions!.All(action => action.Id != created.Id) && !service.Load().QuickActionSlots!.Contains(created.Id),
             "删除的自定义操作仍在置物架上");
 
-        var generalCard = (Grid)((System.Windows.Controls.Button)pageCards.Children[0]).Content;
-        var generalLabel = (System.Windows.Controls.TextBlock)((StackPanel)generalCard.Children[1]).Children[0];
-        Assert(generalLabel.Text == "常规", "设置卡片文字不正确");
+        var generalTile = (DropShelf.Views.Controls.PageTile)pageCards.Children[0];
+        Assert(generalTile.Header == "常规", "设置卡片文字不正确");
         try
         {
             ((System.Windows.Controls.ListBox)window.FindName("LanguageSelector")!).SelectedValue = AppLanguage.English;
             Pump(50);
             Assert(service.Load().Language == AppLanguage.English && !LanguageService.IsChinese, "语言设置没有保存或生效");
-            Assert(generalLabel.Text == "General" && viewModel.GeneralSummary.StartsWith("English"), "切换语言后主窗口文字没有更新");
+            Assert(generalTile.Header == "General" && viewModel.GeneralSummary.StartsWith("English"), "切换语言后主窗口文字没有更新");
             viewModel.Language = AppLanguage.Chinese;
             Pump(50);
-            Assert(generalLabel.Text == "常规" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
+            Assert(generalTile.Header == "常规" && LanguageService.IsChinese, "切换回中文后主窗口文字没有更新");
         }
         finally
         {
@@ -1662,6 +1661,8 @@ internal static class Program
         {
             _failed++;
             Console.WriteLine($"失败  {name}：{exception.Message}");
+            // 断言失败的消息已说明原因；其他异常附上调用栈，才能找到出错的位置。
+            if (exception is not InvalidOperationException) Console.WriteLine(exception.StackTrace);
         }
     }
 
