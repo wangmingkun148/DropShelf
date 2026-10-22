@@ -131,10 +131,11 @@ public partial class MainWindow : Window
         {
             ShowPage("Overview");
             ContentLayer.UpdateLayout();
+            // 概览页正从稍低处上移，扣掉这段位移才是卡片最终的位置。
             var to = BoundsOf(tile);
+            to.Y -= (OverviewPage.RenderTransform as TranslateTransform)?.Y ?? 0;
             var content = Snapshot(tile)?.Image;
             tile.Opacity = 0;
-            var shrink = Morph(card, from, to, ShrinkDuration, ShrinkEase, resize: true);
             if (content is not null)
             {
                 content.Opacity = 0;
@@ -142,13 +143,13 @@ public partial class MainWindow : Window
                 Morph(content, from, to, ShrinkDuration, ShrinkEase, resize: false);
                 content.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)) { BeginTime = TimeSpan.FromMilliseconds(170) });
             }
-            shrink.Completed += (_, _) =>
+            Morph(card, from, to, ShrinkDuration, ShrinkEase, resize: true, () =>
             {
                 tile.Opacity = 1;
                 DragLayer.Children.Remove(card);
                 if (content is not null) DragLayer.Children.Remove(content);
                 _morphing = false;
-            };
+            });
         };
         card.BeginAnimation(OpacityProperty, cover);
     }
@@ -178,11 +179,15 @@ public partial class MainWindow : Window
         return card;
     }
 
-    /// <summary>从一个矩形移到另一个矩形；resize 为 false 时只移动左上角（卡片内容保持原大小，文字不会被拉伸）。返回位置动画，可等它结束。</summary>
-    private static AnimationTimeline Morph(FrameworkElement element, Rect from, Rect to, Duration duration, IEasingFunction ease, bool resize)
+    /// <summary>
+    /// 从一个矩形移到另一个矩形；resize 为 false 时只移动左上角（卡片内容保持原大小，文字不会被拉伸）。
+    /// done 在动画结束时调用；Completed 必须在 BeginAnimation 之前挂上，之后挂上的不会触发。
+    /// </summary>
+    private static void Morph(FrameworkElement element, Rect from, Rect to, Duration duration, IEasingFunction ease, bool resize, Action? done = null)
     {
         DoubleAnimation Step(double start, double end) => new(start, end, duration) { EasingFunction = ease };
         var left = Step(from.Left, to.Left);
+        if (done is not null) left.Completed += (_, _) => done();
         element.BeginAnimation(Canvas.TopProperty, Step(from.Top, to.Top));
         if (resize)
         {
@@ -190,7 +195,6 @@ public partial class MainWindow : Window
             element.BeginAnimation(HeightProperty, Step(from.Height, to.Height));
         }
         element.BeginAnimation(Canvas.LeftProperty, left);
-        return left;
     }
 
     /// <summary>页面略微下沉并淡出，动画期间缓存为位图。</summary>
