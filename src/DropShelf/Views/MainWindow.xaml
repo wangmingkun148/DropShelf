@@ -911,12 +911,18 @@
                     </Border>
 
                     <StackPanel Margin="30,30,30,0">
-                        <Image x:Name="SidePanelIcon" Source="/DropShelf;component/Assets/DropShelf-256.png" Width="52" Height="52" HorizontalAlignment="Left"
-                               RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0.5,0.5">
-                            <Image.RenderTransform>
+                        <!-- 线框版应用图标，跟随文字颜色，不与强调色冲突。 -->
+                        <Viewbox x:Name="SidePanelIcon" Width="52" Height="52" HorizontalAlignment="Left" RenderTransformOrigin="0.5,0.5">
+                            <Viewbox.RenderTransform>
                                 <ScaleTransform x:Name="SidePanelIconScale" />
-                            </Image.RenderTransform>
-                        </Image>
+                            </Viewbox.RenderTransform>
+                            <Canvas Width="256" Height="256">
+                                <Rectangle Canvas.Left="22" Canvas.Top="22" Width="212" Height="212" RadiusX="44" RadiusY="44"
+                                           Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="12" />
+                                <Path Data="M128,64 V156 M90,120 L128,158 L166,120 M68,170 V190 H188 V170" Stroke="{DynamicResource TextPrimaryBrush}"
+                                      StrokeThickness="12" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                            </Canvas>
+                        </Viewbox>
                         <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,20,0,0"
                                    TextWrapping="Wrap" />
                         <TextBlock Text="{Binding PanelBody}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" LineHeight="19" />
