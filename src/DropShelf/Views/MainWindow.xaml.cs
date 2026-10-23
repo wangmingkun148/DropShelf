@@ -49,7 +49,10 @@ public partial class MainWindow : Window
         {
             tile.MouseEnter += OnPageTileHover;
             tile.GotKeyboardFocus += OnPageTileHover;
+            tile.PreviewMouseLeftButtonDown += OnFlipPress;
         }
+        // 按住卡片或设置页的空白处横向拖动可以翻牌。
+        foreach (var view in _pages.Values) view.Host.PreviewMouseLeftButtonDown += OnFlipPress;
 
         _flipHole = new GeometryGroup { FillRule = FillRule.EvenOdd, Children = { _flipBounds, new GeometryGroup { Transform = _flipMatrix, Children = { _flipCard } } } };
         _flipFill = new System.Windows.Shapes.Path { Data = _flipCard };
@@ -112,6 +115,8 @@ public partial class MainWindow : Window
     private const double OpenFrontMs = 170, OpenBackMs = 300, BackPageMs = 230, BackFrontMs = 320;
     /// <summary>卡片侧立换面的时刻在整次翻牌中的位置。</summary>
     private const double OpenEdge = OpenFrontMs / (OpenFrontMs + OpenBackMs), BackEdge = BackPageMs / (BackPageMs + BackFrontMs);
+    // 打开时概览页在换面后下沉淡出，返回时一开始就从稍低处上移淡入（毫秒）。
+    private const double OverviewLeaveMs = 200, OverviewRevealMs = 300;
 
     // 整次翻牌用一条转动曲线和一条移动曲线从头连到尾，两段动画只是各取一截，侧立换面时速度连续：
     // 不会先停住再突然加速，也不拖很长的尾巴。转过的角度 = 180° × 转动曲线，横向缩放为 |cos 角度|，纵向放大和阴影按 sin 角度变化。
@@ -129,13 +134,24 @@ public partial class MainWindow : Window
     private static readonly double OpenEdgeTravel = OpenTravel.Ease(OpenEdge), BackEdgeTravel = BackTravel.Ease(BackEdge);
     private static readonly IEasingFunction GlideEase = new SineEase { EasingMode = EasingMode.EaseInOut };
     private static readonly IEasingFunction LeaveEase = new CubicEase { EasingMode = EasingMode.EaseIn };
+
+    // 拖动翻牌：拖过与卡片同宽的距离正好翻过半圈，像按着卡片的边把它推过中轴，拖到一半时侧立；距离限制在这个范围内。
+    private const double DragTurnMin = 240, DragTurnMax = 480;
+    /// <summary>横向移动超过这段距离才开始翻牌；先竖着移动的不算，卡片照常是按钮。</summary>
+    private const double DragStart = 8;
+    /// <summary>松手时取此前这段时间（毫秒）的平均速度，往前推算 FlingMs：推算的位置过了侧立就翻过去，否则退回。</summary>
+    private const double VelocityWindowMs = 80, FlingMs = 150;
+    /// <summary>在卡片上只拖动了这么一点（占半圈的比例）就松手，按点击处理。</summary>
+    private const double TapTurn = 0.04;
+
     private string _page = "Overview";
     private bool _morphing;
     /// <summary>每次翻牌的编号；翻牌被打断后，旧动画的回调看到编号变了就不再动页面。</summary>
     private int _flipSession;
     /// <summary>被打断时把页面直接摆到这次翻牌的终点。</summary>
     private Action? _finishFlip;
-    private PageFlip? _flip;
+    private Flip? _flip;
+    private bool _flipFrames;
     private string? _prepareCandidate;
     private readonly Dictionary<string, PageView> _pages;
 
@@ -148,6 +164,8 @@ public partial class MainWindow : Window
     private readonly GeometryGroup _flipHole;
     private readonly Canvas _flipDecor;
     private readonly System.Windows.Shapes.Path _flipFill, _flipShade, _flipBorder;
+    /// <summary>正面转动时卡片本身的变换。</summary>
+    private readonly MatrixTransform _tileMatrix = new();
 
     private sealed record PageView(Grid Host, ScrollViewer Scroll, FrameworkElement Content);
 
@@ -178,22 +196,52 @@ public partial class MainWindow : Window
     /// <summary>起止都静止、在 edge 处正好过半的曲线：y1 = 0、y2 = 1 时参数 0.5 处 y = 0.5，x = 0.125 + 0.375 × (x1 + x2)。</summary>
     private static BezierEase HalfwayAt(double edge, double x1) => new(x1, 0, (edge - 0.125) / 0.375 - x1, 1);
 
-    /// <summary>后半段翻牌：背面从 From 变到 To；Page 是页面静止时的可见区域，背面上的页面按它等比缩放。</summary>
-    private sealed class PageFlip
+    /// <summary>
+    /// 一次翻牌。打开：卡片转到侧面换成页面，页面再转回正面展开到整页；返回反过来。
+    /// 整次翻牌按进度摆放（0 为起点，1 为终点，即平常翻牌的时间比例），转过的角度、位置、大小和概览页的淡入淡出都由进度决定，
+    /// 所以能停在任意位置、往回走。点击时进度匀速增加；拖动时跟着鼠标，松手后从当前位置接着走到终点或退回起点。
+    /// </summary>
+    private sealed class Flip
     {
+        public required bool Opening { get; init; }
+        public required string Page { get; init; }
         public required PageView View { get; init; }
-        public Rect From { get; init; }
-        public Rect To { get; init; }
-        public Rect Page { get; init; }
-        public bool Closing { get; init; }
-        public bool Plain { get; init; }
-        public double Milliseconds { get; init; }
-        /// <summary>按时间比例给出从 From 走向 To 的比例，和背面转过的角度（弧度，侧立为 π/2，背面正对屏幕为 π）。</summary>
-        public required Func<double, double> Travel { get; init; }
-        public required Func<double, double> Angle { get; init; }
-        public required Action Done { get; init; }
-        public TimeSpan? Start { get; set; }
+        public required Controls.PageTile Tile { get; init; }
+        /// <summary>卡片的原位、页面静止时的可见区域和侧立换面时的位置。</summary>
+        public required Rect Home { get; init; }
+        public required Rect Area { get; init; }
+        public required Rect Edge { get; init; }
+        public required bool Plain { get; init; }
+        /// <summary>拖动开始的翻牌，侧栏标题跟着朝向屏幕的一面切换；点击的翻牌一开始就切到目标页。</summary>
+        public required bool Dragged { get; init; }
+        public required string Header { get; set; }
+        public int Session { get; init; }
+        public double Total => Opening ? OpenFrontMs + OpenBackMs : BackPageMs + BackFrontMs;
+        public double Progress { get; set; }
+        public double? Posed { get; set; }
+        /// <summary>当前朝向屏幕的是页面还是卡片。</summary>
+        public bool? PageShown { get; set; }
+        public bool Dragging { get; set; }
+        /// <summary>拖动中转到过的最大比例。</summary>
+        public double Peak { get; set; }
+        // 不拖动时进度在 RunMs 毫秒内从 RunFrom 走到 RunTo，起止的斜率见 Glide。
+        public double RunFrom { get; set; }
+        public double RunTo { get; set; }
+        public double RunMs { get; set; }
+        public double StartSlope { get; set; }
+        public double EndSlope { get; set; }
+        /// <summary>开始播放的时刻；第一帧按从这里经过的时间摆放，松手后不会先停一帧。</summary>
+        public long RunBegun { get; set; }
+        public TimeSpan? RunStart { get; set; }
         public TimeSpan Last { get; set; }
+    }
+
+    /// <summary>进度为 s 时转过的比例（半圈为 1），随进度单调增加，侧立时正好为 0.5。</summary>
+    private static double TurnAt(Flip flip, double s) => (flip.Opening ? OpenTurn : BackTurn).Ease(s);
+
+    private void OpenPage(string page, Controls.PageTile tile)
+    {
+        if (StartOpen(page, tile, drag: false) is { } flip) Run(flip, 1);
     }
 
     /// <summary>
@@ -201,86 +249,57 @@ public partial class MainWindow : Window
     /// 正面一直是卡片本身，转到侧面（宽度为 0）时才换成背面，看不出切换。概览页在这之后下沉淡出，卡片范围内挖空，旧内容不会透过来。
     /// 背面期间页面缓存为可视区大小的位图，每帧只改变它外面的变换和裁剪，不排版也不重画页面。
     /// </summary>
-    private void OpenPage(string page, Controls.PageTile tile)
+    private Flip? StartOpen(string page, Controls.PageTile tile, bool drag)
     {
-        if (_morphing || _sidePanelFade is not null || _page != "Overview" || !_pages.TryGetValue(page, out var view)) return;
-        StartTrace($"open {page}");
+        if (_morphing || _sidePanelFade is not null || _page != "Overview" || !_pages.TryGetValue(page, out var view)) return null;
+        StartTrace($"{(drag ? "drag " : "")}open {page}");
         var clicked = Stopwatch.GetTimestamp();
         // 页面通常在鼠标移到卡片上时已经排好版；用键盘直接打开时在这里补上。
         PreparePage(view);
         PageStage.UpdateLayout();
         var home = BoundsOf(tile);
         var to = PageArea(view);
-        var edge = Lerp(home, to, OpenEdgeTravel);
         var plain = UsePlainFlip(to);
-        SetPanelHeader(page, animate: true);
+        var dragged = drag && !plain;
+        if (!dragged) SetPanelHeader(page, animate: true);
         TraceMark(plain ? "prepare plain" : "prepare", clicked);
         // 排版可能触发窗口尺寸变化而打断翻牌，排完再开始计数。
-        _morphing = true;
-        var session = ++_flipSession;
-        _finishFlip = () =>
+        return BeginSession(new Flip
         {
-            ClearFlip(view);
-            ResetTile(tile);
-            tile.Opacity = 1;
-            ShowPage(page);
-            SettleOverview();
-        };
-        FlipTile(tile, home, edge, OpenFrontMs, u => OpenTravel.Ease(OpenEdge * u) / OpenEdgeTravel, u => Math.PI * OpenTurn.Ease(OpenEdge * u), () =>
-        {
-            if (session != _flipSession) return;
-            tile.Opacity = 0;
-            ResetTile(tile);
-            FadeOutPage(OverviewPage, () =>
-            {
-                if (session != _flipSession) return;
-                OverviewHost.Visibility = Visibility.Collapsed;
-                OverviewHost.Clip = null;
-            });
-            BeginFlip(new PageFlip
-            {
-                View = view, From = edge, To = to, Page = to, Plain = plain, Milliseconds = OpenBackMs,
-                Travel = t => (OpenTravel.Ease(OpenEdge + (1 - OpenEdge) * t) - OpenEdgeTravel) / (1 - OpenEdgeTravel),
-                Angle = t => Math.PI * OpenTurn.Ease(OpenEdge + (1 - OpenEdge) * t),
-                Done = () =>
-                {
-                    var landed = Stopwatch.GetTimestamp();
-                    tile.Opacity = 1;
-                    ShowPage(page);
-                    if (plain) RevealPlainPage(view, session);
-                    else
-                    {
-                        ClearFlip(view);
-                        FadeInScrollBar(view.Scroll);
-                        EndMorph();
-                    }
-                    TraceMark("land", landed);
-                }
-            });
+            Opening = true, Page = page, View = view, Tile = tile, Home = home, Area = to, Edge = Lerp(home, to, OpenEdgeTravel),
+            Plain = plain, Dragged = dragged, Header = dragged ? "Overview" : page, Session = ++_flipSession
         });
+    }
+
+    private void BackToOverview()
+    {
+        if (StartBack(drag: false) is { } flip) Run(flip, 1);
     }
 
     /// <summary>
     /// 返回时反过来：页面带着内容缩小并转到侧面，换成卡片本身转回正面落进原位，落位时略微回弹。
-    /// 概览页一开始就在后面上移淡入，卡片范围内挖空。
+    /// 概览页一开始就在后面上移淡入，卡片范围内挖空。背面空白时先让空白卡片盖住页面，再换回概览页直接播完，不跟手。
     /// </summary>
-    private void BackToOverview()
+    private Flip? StartBack(bool drag)
     {
-        if (_morphing || _sidePanelFade is not null || _page == "Overview") return;
-        SetPanelHeader("Overview", animate: true);
+        if (_morphing || _sidePanelFade is not null || _page == "Overview") return null;
         var page = _page;
         if (!_pages.TryGetValue(page, out var view) ||
             PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, page)) is not { } tile)
         {
+            SetPanelHeader("Overview", animate: true);
             ShowPage("Overview");
             RevealOverview();
-            return;
+            return null;
         }
-        StartTrace($"back {page}");
-        _morphing = true;
-        var session = ++_flipSession;
+        StartTrace($"{(drag ? "drag " : "")}back {page}");
         var from = PageArea(view);
         var plain = UsePlainFlip(from);
+        if (!drag || plain) SetPanelHeader("Overview", animate: true);
+        if (!plain) return BeginBack(view, tile, from, plain, drag);
+
+        _morphing = true;
+        var session = ++_flipSession;
         // 被打断时概览页可能还停在上次淡出后的透明状态，要明确摆回静止状态。
         _finishFlip = () =>
         {
@@ -288,64 +307,128 @@ public partial class MainWindow : Window
             ShowPage("Overview");
             OverviewScroll.ScrollToTop();
             SettleOverview();
-            ResetTile(tile);
-            tile.Opacity = 1;
         };
-
-        void Flip()
-        {
-            var revealed = Stopwatch.GetTimestamp();
-            RevealOverview();
-            TraceMark("overview", revealed);
-            if (session != _flipSession) return;
-            // 概览页正从稍低处上移，扣掉这段位移才是卡片最终的位置。
-            var home = BoundsOf(tile);
-            home.Y -= (OverviewPage.RenderTransform as TranslateTransform)?.Y ?? 0;
-            var edge = Lerp(from, home, BackEdgeTravel);
-            tile.Opacity = 0;
-            BeginFlip(new PageFlip
-            {
-                View = view, From = from, To = edge, Page = from, Closing = true, Plain = plain, Milliseconds = BackPageMs,
-                Travel = t => BackTravel.Ease(BackEdge * t) / BackEdgeTravel,
-                Angle = t => Math.PI * (1 - BackTurn.Ease(BackEdge * t)),
-                Done = () =>
-                {
-                    var swapped = Stopwatch.GetTimestamp();
-                    ClearFlip(view);
-                    ShowPage("Overview");
-                    _finishFlip = () =>
-                    {
-                        ResetTile(tile);
-                        SettleOverview();
-                    };
-                    // 先摆到侧面再显示，不会先在原位闪一下。
-                    double Time(double u) => BackEdge + (1 - BackEdge) * u;
-                    FlipTile(tile, home, edge, BackFrontMs, u => 1 - (BackTravel.Ease(Time(u)) - BackEdgeTravel) / (1 - BackEdgeTravel),
-                        u => Math.PI * (1 - BackTurn.Ease(Time(u))), () =>
-                    {
-                        if (session != _flipSession) return;
-                        ResetTile(tile);
-                        EndMorph();
-                    });
-                    tile.Opacity = 1;
-                    TraceMark("edge", swapped);
-                }
-            });
-        }
-
-        if (!plain)
-        {
-            Flip();
-            return;
-        }
-        // 背面空白时和以前一样：先让空白卡片盖住页面，再换回概览页开始翻转。
-        AttachFlip(new PageFlip { View = view, From = from, To = from, Page = from, Closing = true, Plain = true, Milliseconds = BackPageMs, Travel = _ => 0, Angle = _ => Math.PI, Done = () => { } });
+        AttachFlip(view, plain);
+        PoseBack(from, from, Math.PI, 1);
         var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120));
         cover.Completed += (_, _) =>
         {
-            if (session == _flipSession) Flip();
+            if (session == _flipSession && BeginBack(view, tile, from, plain, drag: false) is { } flip) Run(flip, 1);
         };
         _flipDecor.BeginAnimation(OpacityProperty, cover);
+        return null;
+    }
+
+    /// <summary>概览页回到顶部、排好版，按起点摆好再开始；卡片的原位要在概览页静止时量。</summary>
+    private Flip? BeginBack(PageView view, Controls.PageTile tile, Rect from, bool plain, bool drag)
+    {
+        var session = _flipSession;
+        var revealed = Stopwatch.GetTimestamp();
+        SettleOverview();
+        OverviewHost.Visibility = Visibility.Visible;
+        OverviewScroll.ScrollToTop();
+        PageStage.UpdateLayout();
+        TraceMark("overview", revealed);
+        if (plain && session != _flipSession) return null;
+        var home = BoundsOf(tile);
+        return BeginSession(new Flip
+        {
+            Opening = false, Page = _page, View = view, Tile = tile, Home = home, Area = from, Edge = Lerp(from, home, BackEdgeTravel),
+            Plain = plain, Dragged = drag, Header = drag ? _page : "Overview", Session = ++_flipSession
+        });
+    }
+
+    /// <summary>挂上背面，按起点摆好；之后由 Run 播放，或由 DragFlip 跟着鼠标走。</summary>
+    private Flip BeginSession(Flip flip)
+    {
+        _morphing = true;
+        _flip = flip;
+        flip.Dragging = flip.Dragged;
+        _finishFlip = () =>
+        {
+            // 拖动中被打断时退回起点，其余的直接摆到要去的终点。
+            var forward = !flip.Dragging && flip.RunTo >= 1;
+            if (flip.Dragging)
+            {
+                flip.Dragging = false;
+                _flipPress = null;
+                if (IsMouseCaptured) ReleaseMouseCapture();
+            }
+            Land(flip, forward, jump: true);
+        };
+        AttachFlip(flip.View, flip.Plain);
+        if (flip.Plain) flip.View.Scroll.Opacity = 0;
+        Pose(flip);
+        return flip;
+    }
+
+    /// <summary>
+    /// 从当前进度走到 target（1 为终点，0 为起点）。rate 是起步的速度（每毫秒的进度），默认为匀速播放的速度。
+    /// 点击时匀速走完全程。松手时从手上的速度接着走：比匀速快就按平均速度缩短剩下的时间，最快约为平常的三倍；比匀速慢就从这个速度加速。
+    /// 到达时回到匀速：翻牌的各条曲线在起点和终点本来就停稳，进度匀速到达时画面也是平稳停下的。
+    /// </summary>
+    private void Run(Flip flip, double target, double? rate = null)
+    {
+        flip.Dragging = false;
+        var natural = 1 / flip.Total;
+        var distance = Math.Abs(target - flip.Progress);
+        var speed = Math.Max(0, (rate ?? natural) * Math.Sign(target - flip.Progress));
+        var milliseconds = distance / natural;
+        if (speed > natural) milliseconds = Math.Max(2 * distance / (speed + natural), milliseconds / 3);
+        flip.RunFrom = flip.Progress;
+        flip.RunTo = target;
+        flip.RunMs = milliseconds;
+        flip.StartSlope = distance > 0 ? Math.Min(3, speed * milliseconds / distance) : 1;
+        flip.EndSlope = distance > 0 ? natural * milliseconds / distance : 1;
+        flip.RunBegun = Stopwatch.GetTimestamp();
+        flip.RunStart = null;
+        HookFlipFrames();
+    }
+
+    /// <summary>从 0 到 1 的三次曲线，起止斜率为 m0、m1（匀速为 1）；斜率都在 0 到 3 之间时单调，不会越过终点。</summary>
+    private static double Glide(double u, double m0, double m1) => (((m0 + m1 - 2) * u + 3 - 2 * m0 - m1) * u + m0) * u;
+
+    /// <summary>开始拖动翻牌：tile 不为空时从概览页翻开这张卡片，为空时把当前设置页翻回概览页。背面空白时不跟手，直接播完，返回 false。</summary>
+    internal bool BeginFlipDrag(Controls.PageTile? tile)
+    {
+        var flip = tile is { Tag: string page } ? StartOpen(page, tile, drag: true) : StartBack(drag: true);
+        if (flip is null) return false;
+        if (flip.Dragging) return true;
+        Run(flip, 1);
+        return false;
+    }
+
+    /// <summary>拖动中摆到转过 turn（半圈为 1）的位置，下一帧画出来。</summary>
+    internal void DragFlip(double turn)
+    {
+        if (_flip is not { Dragging: true } flip) return;
+        turn = Math.Clamp(turn, 0, 1);
+        flip.Peak = Math.Max(flip.Peak, turn);
+        // 转动曲线单调，二分求出对应的进度；位置、大小和概览页都按这个进度摆放，和点击时走的是同一条路线。
+        double low = 0, high = 1;
+        for (var i = 0; i < 30; i++)
+        {
+            var middle = (low + high) / 2;
+            if (TurnAt(flip, middle) < turn) low = middle;
+            else high = middle;
+        }
+        flip.Progress = (low + high) / 2;
+        HookFlipFrames();
+    }
+
+    /// <summary>
+    /// 松手：按手上的速度（每毫秒转过的比例）往前推算一小段，过了侧立就翻过去，否则退回；在卡片上几乎没拖动就松手时按点击处理。
+    /// 之后从手上的速度接着走，见 Run。cancel 时一律退回。
+    /// </summary>
+    internal void ReleaseFlip(double velocity, bool cancel = false)
+    {
+        if (_flip is not { Dragging: true } flip) return;
+        var tap = !cancel && flip.Opening && flip.Peak < TapTurn;
+        var forward = tap || !cancel && TurnAt(flip, flip.Progress) + velocity * FlingMs >= 0.5;
+        // 每毫秒转过的比例换算成每毫秒的进度：除以转动曲线在当前位置的斜率。
+        var (low, high) = (Math.Max(0, flip.Progress - 1e-3), Math.Min(1, flip.Progress + 1e-3));
+        var slope = (TurnAt(flip, high) - TurnAt(flip, low)) / (high - low);
+        Run(flip, forward ? 1 : 0, tap ? null : slope > 0 ? velocity / slope : 0);
     }
 
     /// <summary>概览页回到顶部、排好版，从稍低处上移淡入。</summary>
@@ -354,7 +437,7 @@ public partial class MainWindow : Window
         OverviewHost.Visibility = Visibility.Visible;
         OverviewScroll.ScrollToTop();
         PageStage.UpdateLayout();
-        FadeInPage(OverviewPage, 300);
+        FadeInPage(OverviewPage, OverviewRevealMs);
     }
 
     /// <summary>鼠标移到卡片上或卡片获得焦点时，空闲时先把对应页面排好版；快速划过几张卡片时只准备最后一张。</summary>
@@ -395,71 +478,144 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 把页面挂到背面上：页面的滚动区缓存为位图，宿主套上背面的变换和裁剪，边框和阴影盖在页面上面，概览页挖出卡片的形状。
-    /// 变换和裁剪都在缓存外面，每帧改变它们不会让缓存重建。
+    /// 把页面挂到背面上：页面的滚动区缓存为位图，宿主套上背面的变换和裁剪，边框和阴影盖在页面上面。
+    /// 变换和裁剪都在缓存外面，每帧改变它们不会让缓存重建。页面要等换面时才显示，见 ShowSide。
     /// </summary>
-    private void AttachFlip(PageFlip flip)
+    private void AttachFlip(PageView view, bool plain)
     {
         var started = Stopwatch.GetTimestamp();
-        var view = flip.View;
         if (_flipDecor.Parent is Panel parent) parent.Children.Remove(_flipDecor);
         view.Host.Children.Add(_flipDecor);
         _flipDecor.BeginAnimation(OpacityProperty, null);
-        _flipFill.Visibility = flip.Plain ? Visibility.Visible : Visibility.Collapsed;
+        _flipFill.Visibility = plain ? Visibility.Visible : Visibility.Collapsed;
         view.Host.RenderTransform = _flipMatrix;
         view.Host.IsHitTestVisible = false;
         // 滚动条在卡片范围外，翻转时本来就被裁掉；藏起来，缓存也不用包含它。
         if (ScrollBarOf(view.Scroll) is { } bar) bar.Visibility = Visibility.Hidden;
-        if (!flip.Plain)
+        if (!plain)
         {
             // 缓存本身已按显示缩放比例生成，RenderAtScale 保持 1；再乘一次缩放比例，200% 时会占用四倍内存。
             view.Scroll.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
             view.Host.Clip = _flipCard;
             _flipBounds.Rect = new Rect(-1, -1, OverviewHost.ActualWidth + 2, OverviewHost.ActualHeight + 2);
-            OverviewHost.Clip = _flipHole;
         }
-        view.Host.Visibility = Visibility.Visible;
-        PoseFlip(flip, 0);
         TraceMark("attach", started);
     }
 
-    private void BeginFlip(PageFlip flip)
+    private void HookFlipFrames()
     {
-        AttachFlip(flip);
-        if (flip.Plain) flip.View.Scroll.Opacity = 0;
-        _flip = flip;
+        if (_flipFrames) return;
+        _flipFrames = true;
         CompositionTarget.Rendering += OnFlipFrame;
     }
 
-    /// <summary>按实际经过的时间推进，同一帧重复触发时跳过；背面、页面、边框、阴影和概览页上的洞在同一次回调里更新。</summary>
-    private void OnFlipFrame(object? sender, EventArgs e)
+    private void StopFlipFrames()
     {
-        if (_flip is not { } flip) return;
-        var time = ((RenderingEventArgs)e).RenderingTime;
-        if (flip.Start is not null && time == flip.Last) return;
-        flip.Start ??= time;
-        flip.Last = time;
-        var elapsed = (time - flip.Start.Value).TotalMilliseconds;
-        PoseFlip(flip, elapsed);
-        if (elapsed < flip.Milliseconds) return;
-        StopFlipFrames();
-        flip.Done();
+        _flip = null;
+        if (!_flipFrames) return;
+        _flipFrames = false;
+        CompositionTarget.Rendering -= OnFlipFrame;
     }
 
     /// <summary>
-    /// 背面当前的矩形 R 由 From 走向 To，绕中心横向缩放 kx、纵向缩放 ky；页面按 s = R 宽 / 页面宽 等比缩放后裁成 R 的高度。
-    /// 打开时 kx 从 0 到 1，返回时从 1 到 0。打开的终点 s = kx = ky = 1，矩阵正好是单位矩阵。
+    /// 播放时按实际经过的时间推进，同一帧重复触发时跳过；拖动时摆到鼠标给出的进度。
+    /// 拖动中鼠标不动时不再每帧唤醒界面线程，下次移动时再接上。
     /// </summary>
-    private void PoseFlip(PageFlip flip, double elapsed)
+    private void OnFlipFrame(object? sender, EventArgs e)
     {
-        var t = Math.Clamp(elapsed / flip.Milliseconds, 0, 1);
-        var angle = flip.Angle(t);
+        if (_flip is not { } flip)
+        {
+            StopFlipFrames();
+            return;
+        }
+        var time = ((RenderingEventArgs)e).RenderingTime;
+        if (flip.Dragging)
+        {
+            _flipFrames = false;
+            CompositionTarget.Rendering -= OnFlipFrame;
+            if (flip.Posed != flip.Progress) Pose(flip);
+            return;
+        }
+        if (flip.RunStart is not null && time == flip.Last) return;
+        flip.RunStart ??= time - Stopwatch.GetElapsedTime(flip.RunBegun);
+        flip.Last = time;
+        var u = flip.RunMs > 0 ? Math.Min(1, (time - flip.RunStart.Value).TotalMilliseconds / flip.RunMs) : 1;
+        flip.Progress = flip.RunFrom + (flip.RunTo - flip.RunFrom) * Glide(u, flip.StartSlope, flip.EndSlope);
+        Pose(flip);
+        if (u >= 1) Land(flip, forward: flip.RunTo >= 1, jump: false);
+    }
+
+    /// <summary>按当前进度摆放：侧立前后分别摆卡片本身或背面上的页面，概览页按进度淡入淡出。</summary>
+    private void Pose(Flip flip)
+    {
+        var s = flip.Progress;
+        flip.Posed = s;
+        var pageSide = flip.Opening ? s >= OpenEdge : s < BackEdge;
+        if (flip.PageShown != pageSide) ShowSide(flip, pageSide);
+        if (flip.Opening)
+        {
+            var travel = OpenTravel.Ease(s);
+            var angle = Math.PI * OpenTurn.Ease(s);
+            if (pageSide)
+                PoseBack(Lerp(flip.Edge, flip.Area, (travel - OpenEdgeTravel) / (1 - OpenEdgeTravel)), flip.Area, angle,
+                    flip.Plain ? 1 : Smooth((1 - s) * flip.Total / OutlineFade));
+            else PoseTile(flip, travel / OpenEdgeTravel, angle);
+            var leave = LeaveEase.Ease(Math.Clamp((s - OpenEdge) * flip.Total / OverviewLeaveMs, 0, 1));
+            PoseOverview(1 - leave, 10 * leave, pageSide);
+        }
+        else
+        {
+            var travel = BackTravel.Ease(s);
+            var angle = Math.PI * (1 - BackTurn.Ease(s));
+            if (pageSide) PoseBack(Lerp(flip.Area, flip.Edge, travel / BackEdgeTravel), flip.Area, angle, flip.Plain ? 1 : Smooth(s * flip.Total / OutlineFade));
+            else PoseTile(flip, 1 - (travel - BackEdgeTravel) / (1 - BackEdgeTravel), angle);
+            var reveal = MotionEase.Ease(Math.Clamp(s * flip.Total / OverviewRevealMs, 0, 1));
+            PoseOverview(reveal, 14 * (1 - reveal), pageSide);
+        }
+    }
+
+    /// <summary>
+    /// 侧立时换面：朝向屏幕的是页面时，页面显示在背面上，概览页挖出卡片的形状，卡片本身藏起；
+    /// 反过来页面藏起，卡片转动时压在相邻的卡片上面。拖动时侧栏标题跟着切换，往回拖过侧立时再切回来。
+    /// </summary>
+    private void ShowSide(Flip flip, bool pageSide)
+    {
+        var swapped = Stopwatch.GetTimestamp();
+        flip.PageShown = pageSide;
+        flip.View.Host.Visibility = pageSide ? Visibility.Visible : Visibility.Hidden;
+        OverviewHost.Clip = pageSide && !flip.Plain ? _flipHole : null;
+        var tile = flip.Tile;
+        tile.Opacity = pageSide ? 0 : 1;
+        tile.RenderTransform = pageSide ? Transform.Identity : _tileMatrix;
+        Panel.SetZIndex(tile, pageSide ? 0 : 1);
+        var header = pageSide ? flip.Page : "Overview";
+        if (flip.Dragged && flip.Header != header)
+        {
+            flip.Header = header;
+            SetPanelHeader(header, animate: true);
+        }
+        TraceMark(pageSide ? "page" : "tile", swapped);
+    }
+
+    /// <summary>卡片本身：从原位走向侧立处的比例为 travel，转过 angle（弧度，0 为正对屏幕，π/2 为侧立）。只改变卡片的变换，不影响排版。</summary>
+    private void PoseTile(Flip flip, double travel, double angle)
+    {
+        var home = flip.Home;
+        var card = Lerp(home, flip.Edge, travel);
+        var sx = card.Width * Math.Abs(Math.Cos(angle)) / home.Width;
+        var sy = card.Height * (1 + (FlipLift - 1) * Math.Sin(angle)) / home.Height;
+        _tileMatrix.Matrix = new Matrix(sx, 0, 0, sy, card.X + card.Width / 2 - home.X - sx * home.Width / 2,
+            card.Y + card.Height / 2 - home.Y - sy * home.Height / 2);
+    }
+
+    /// <summary>
+    /// 背面当前的矩形为 card，转过 angle（弧度，侧立为 π/2，背面正对屏幕为 π），绕中心横向缩放 kx、纵向缩放 ky；
+    /// 页面按 s = card 宽 / 页面宽 等比缩放后裁成 card 的高度。page 是页面静止时的可见区域；展开到 page 且正对屏幕时矩阵正好是单位矩阵。
+    /// </summary>
+    private void PoseBack(Rect card, Rect page, double angle, double outline)
+    {
         var kx = Math.Abs(Math.Cos(angle));
         var ky = 1 + (FlipLift - 1) * Math.Sin(angle);
-        var shade = FlipShade * Math.Sin(angle);
-        var outline = flip.Plain ? 1 : Smooth(flip.Closing ? elapsed / OutlineFade : (flip.Milliseconds - elapsed) / OutlineFade);
-        var card = Lerp(flip.From, flip.To, flip.Travel(t));
-        var page = flip.Page;
         var s = card.Width / page.Width;
         var cx = card.X + card.Width / 2;
         var cy = card.Y + card.Height / 2;
@@ -473,7 +629,20 @@ public partial class MainWindow : Window
         _flipEdge.RadiusX = _flipEdge.RadiusY = Math.Max(0, radius - line / 2);
         _flipBorder.StrokeThickness = line;
         _flipBorder.Opacity = outline;
-        _flipShade.Opacity = shade;
+        _flipShade.Opacity = FlipShade * Math.Sin(angle);
+    }
+
+    /// <summary>
+    /// 概览页的透明度和下移距离。页面在背面上、概览页半透明时缓存为位图，每帧只叠一张图；
+    /// 卡片本身在概览页里转动时不缓存，否则每帧都要重建缓存。
+    /// </summary>
+    private void PoseOverview(double opacity, double shift, bool pageSide)
+    {
+        if (OverviewPage.RenderTransform is not TranslateTransform translate) OverviewPage.RenderTransform = translate = new TranslateTransform();
+        OverviewPage.Opacity = opacity;
+        translate.Y = shift;
+        if (pageSide && opacity is > 0 and < 1) CacheWhileFading(OverviewPage);
+        else OverviewPage.CacheMode = null;
     }
 
     private static double Smooth(double x)
@@ -482,11 +651,40 @@ public partial class MainWindow : Window
         return x * x * (3 - 2 * x);
     }
 
-    private void StopFlipFrames()
+    /// <summary>
+    /// 翻牌走到头：页面或概览页回到静止状态。forward 表示走到了终点，否则是退回了起点；
+    /// jump 表示被打断，直接摆好，不再播放收尾的动画。
+    /// </summary>
+    private void Land(Flip flip, bool forward, bool jump)
     {
-        if (_flip is not { } flip) return;
-        _flip = null;
-        CompositionTarget.Rendering -= OnFlipFrame;
+        var landed = Stopwatch.GetTimestamp();
+        StopFlipFrames();
+        var view = flip.View;
+        var pageShown = flip.Opening == forward;
+        var page = pageShown ? flip.Page : "Overview";
+        ResetTile(flip.Tile);
+        flip.Tile.Opacity = 1;
+        SettleOverview();
+        ShowPage(page);
+        if (flip.Header != page)
+        {
+            flip.Header = page;
+            SetPanelHeader(page, animate: !jump);
+        }
+        if (pageShown && flip.Plain && !jump) RevealPlainPage(view, flip.Session);
+        else
+        {
+            ClearFlip(view);
+            if (pageShown && !jump) FadeInScrollBar(view.Scroll);
+            EndMorph();
+        }
+        TraceMark("land", landed);
+    }
+
+    private static void ResetTile(FrameworkElement tile)
+    {
+        tile.RenderTransform = Transform.Identity;
+        Panel.SetZIndex(tile, 0);
     }
 
     /// <summary>页面回到静止状态：去掉变换、裁剪和缓存，拿走边框和阴影，概览页不再挖空。</summary>
@@ -541,6 +739,99 @@ public partial class MainWindow : Window
         var finish = _finishFlip;
         EndMorph();
         finish?.Invoke();
+    }
+
+    // ───────────── 拖动翻牌 ─────────────
+
+    /// <summary>按下鼠标的位置；按在概览页的卡片上时 _pressedTile 是那张卡片，按在设置页的空白处时为空。</summary>
+    private System.Windows.Point? _flipPress;
+    private Controls.PageTile? _pressedTile;
+    private double _dragOrigin, _dragSign, _dragSpan;
+    /// <summary>最近各次移动的时刻和转过的比例，松手时用来算速度。</summary>
+    private readonly Queue<(long Time, double Turn)> _dragSamples = new();
+
+    private void OnFlipPress(object sender, MouseButtonEventArgs e)
+    {
+        _flipPress = null;
+        if (_morphing || sender is Grid host && !IsBlank(e.OriginalSource as DependencyObject, host)) return;
+        _pressedTile = sender as Controls.PageTile;
+        _flipPress = e.GetPosition(this);
+    }
+
+    /// <summary>按在设置页的空白处、文字或设置卡片的底色上，而不是按钮、选项、开关、快捷键框、滚动条或可拖动的操作卡片上。</summary>
+    private static bool IsBlank(DependencyObject? source, DependencyObject host)
+    {
+        for (; source is not null && source != host; source = source is Visual ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source))
+            if (source is Control and not (Controls.SettingsCard or ScrollViewer) ||
+                source is FrameworkElement { DataContext: ActionCardViewModel or ActionSlotViewModel }) return false;
+        return true;
+    }
+
+    protected override void OnPreviewMouseMove(System.Windows.Input.MouseEventArgs e)
+    {
+        base.OnPreviewMouseMove(e);
+        if (_flipPress is not { } press) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _flipPress = null;
+            return;
+        }
+        var position = e.GetPosition(this);
+        if (_flip is not { Dragging: true })
+        {
+            var delta = position - press;
+            if (Math.Abs(delta.X) < DragStart && Math.Abs(delta.Y) < DragStart) return;
+            _flipPress = null;
+            if (Math.Abs(delta.Y) >= Math.Abs(delta.X)) return;
+            var dragging = BeginFlipDrag(_pressedTile);
+            // 翻牌开始后窗口拿走鼠标捕获：卡片按钮不再处于按下状态，松手时不会再触发点击。
+            if (_morphing) CaptureMouse();
+            if (!dragging || _flip is not { } flip)
+            {
+                if (IsMouseCaptured) ReleaseMouseCapture();
+                return;
+            }
+            _flipPress = press;
+            _dragOrigin = position.X;
+            _dragSign = Math.Sign(delta.X);
+            _dragSpan = Math.Clamp(flip.Tile.ActualWidth, DragTurnMin, DragTurnMax);
+            _dragSamples.Clear();
+        }
+        var turn = Math.Clamp((position.X - _dragOrigin) * _dragSign / _dragSpan, 0, 1);
+        var now = Stopwatch.GetTimestamp();
+        _dragSamples.Enqueue((now, turn));
+        while (_dragSamples.Count > 2 && Stopwatch.GetElapsedTime(_dragSamples.Peek().Time, now).TotalMilliseconds > VelocityWindowMs) _dragSamples.Dequeue();
+        DragFlip(turn);
+    }
+
+    protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e)
+    {
+        _flipPress = null;
+        if (_flip is { Dragging: true })
+        {
+            e.Handled = true;
+            ReleaseFlip(DragVelocity());
+            ReleaseMouseCapture();
+        }
+        base.OnPreviewMouseLeftButtonUp(e);
+    }
+
+    /// <summary>拖动中窗口失去鼠标捕获（如切换了窗口）时退回起点；卡片按钮让出捕获也会冒泡到这里，不算。</summary>
+    protected override void OnLostMouseCapture(System.Windows.Input.MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (!ReferenceEquals(e.OriginalSource, this) || _flip is not { Dragging: true }) return;
+        _flipPress = null;
+        ReleaseFlip(0, cancel: true);
+    }
+
+    /// <summary>从最早一次记录到松手这一刻的平均速度（每毫秒转过的比例）：停住一会儿再松手时速度接近 0。</summary>
+    private double DragVelocity()
+    {
+        if (_dragSamples.Count == 0) return 0;
+        var (time, turn) = _dragSamples.Peek();
+        var elapsed = Stopwatch.GetElapsedTime(time).TotalMilliseconds;
+        return elapsed > 1 ? (_dragSamples.Last().Turn - turn) / elapsed : 0;
     }
 
     /// <summary>诊断日志打开时（DROPSHELF_TRACE=1），从点击到翻牌结束记下每帧间隔，并标出几个同步步骤各用了多久。</summary>
@@ -605,57 +896,6 @@ public partial class MainWindow : Window
         var content = BoundsOf(view.Content);
         var top = Math.Max(content.Top, 0);
         return new Rect(content.Left, top, content.Width, Math.Max(1, PageStage.ActualHeight - top));
-    }
-
-    /// <summary>
-    /// 卡片本身转四分之一圈：travel 给出从原位 home 走向 away 的比例，angle 给出转过的角度（弧度，0 为正对屏幕，π/2 为侧立）。
-    /// 每个属性的缓动直接给出它的值，和背面的动画取自同一组曲线。只改变卡片的变换，不影响排版；转动期间压在相邻的卡片上面。
-    /// </summary>
-    private static void FlipTile(FrameworkElement tile, Rect home, Rect away, double milliseconds, Func<double, double> travel, Func<double, double> angle, Action done)
-    {
-        var size = new ScaleTransform();
-        var flip = new ScaleTransform();
-        var move = new TranslateTransform();
-        tile.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
-        tile.RenderTransform = new TransformGroup { Children = { size, flip, move } };
-        Panel.SetZIndex(tile, 1);
-        var path = new CurveEase(travel);
-        Tween(size, ScaleTransform.ScaleXProperty, 1, away.Width / home.Width, milliseconds, path);
-        Tween(size, ScaleTransform.ScaleYProperty, 1, away.Height / home.Height, milliseconds, path);
-        Tween(move, TranslateTransform.XProperty, 0, away.X + away.Width / 2 - home.X - home.Width / 2, milliseconds, path);
-        Tween(move, TranslateTransform.YProperty, 0, away.Y + away.Height / 2 - home.Y - home.Height / 2, milliseconds, path);
-        Tween(flip, ScaleTransform.ScaleYProperty, 1, FlipLift, milliseconds, new CurveEase(u => Math.Sin(angle(u))));
-        Tween(flip, ScaleTransform.ScaleXProperty, 1, 0, milliseconds, new CurveEase(u => 1 - Math.Cos(angle(u))), done);
-    }
-
-    private static void ResetTile(FrameworkElement tile)
-    {
-        tile.RenderTransform = Transform.Identity;
-        Panel.SetZIndex(tile, 0);
-    }
-
-    /// <summary>done 在动画结束时调用；Completed 必须在 BeginAnimation 之前挂上，之后挂上的不会触发。</summary>
-    private static void Tween(IAnimatable target, DependencyProperty property, double from, double to, double milliseconds, IEasingFunction ease, Action? done = null)
-    {
-        var animation = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = ease };
-        if (done is not null) animation.Completed += (_, _) => done();
-        target.BeginAnimation(property, animation);
-    }
-
-    /// <summary>页面略微下沉并淡出，动画期间缓存为位图，淡出后去掉缓存。</summary>
-    private static void FadeOutPage(FrameworkElement page, Action done)
-    {
-        if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
-        CacheWhileFading(page);
-        var duration = TimeSpan.FromMilliseconds(200);
-        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
-        var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
-        fade.Completed += (_, _) =>
-        {
-            page.CacheMode = null;
-            done();
-        };
-        page.BeginAnimation(OpacityProperty, fade);
     }
 
     // ───────────── 状态栏顶部的页面标题 ─────────────
@@ -1393,7 +1633,7 @@ public partial class MainWindow : Window
         return new System.Windows.Point(cursor.X, cursor.Y);
     }
 
-    // 翻牌期间页面跟着卡片变形，点击、滚轮和按键都先不处理；Alt+F4 等系统按键照常。
+    // 翻牌期间页面跟着卡片变形，点击、滚轮和按键都先不处理；Alt+F4 等系统按键照常，拖动翻牌时按 Esc 退回起点。
     protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
     {
         if (_morphing) e.Handled = true;
@@ -1414,6 +1654,12 @@ public partial class MainWindow : Window
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
+        if (_flip is { Dragging: true } && e.Key == Key.Escape)
+        {
+            _flipPress = null;
+            ReleaseFlip(0, cancel: true);
+            ReleaseMouseCapture();
+        }
         if (_morphing && e.Key != Key.System) e.Handled = true;
         if (_draggingCard && e.Key == Key.Escape)
         {

@@ -1706,6 +1706,51 @@ internal static class Program
             Pump(900);
             Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed, $"设置页里按{name}应回到概览");
         }
+        // 拖动翻牌：转过一半前只转动卡片，过了侧立换成页面，往回拖又换回卡片；松手时没过侧立就退回，过了或甩得够快就翻过去。
+        // 软件渲染时背面空白，拖动直接播完一次翻牌。
+        var generalTile = (DropShelf.Views.Controls.PageTile)pageCards.Children[0];
+        var overviewPage = (FrameworkElement)window.FindName("OverviewPage")!;
+        var generalScroll = (System.Windows.Controls.ScrollViewer)window.FindName("GeneralScroll")!;
+        if (window.BeginFlipDrag(generalTile))
+        {
+            window.DragFlip(0.3);
+            Pump(50);
+            Assert(generalTile.Opacity == 1 && !generalTile.RenderTransform.Value.IsIdentity && generalHost.Visibility == Visibility.Hidden,
+                "拖到侧立前应只转动卡片");
+            window.DragFlip(0.7);
+            Pump(50);
+            Assert(generalTile.Opacity == 0 && generalHost.Visibility == Visibility.Visible && overviewHost.Clip is not null, "拖过侧立后应换成页面");
+            window.DragFlip(0.2);
+            Pump(50);
+            Assert(generalTile.Opacity == 1 && generalHost.Visibility == Visibility.Hidden && overviewHost.Clip is null, "往回拖过侧立后应换回卡片");
+            window.ReleaseFlip(0);
+            Pump(700);
+            Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewPage is { Opacity: 1, CacheMode: null } &&
+                   generalTile is { Opacity: 1 } && generalTile.RenderTransform.Value.IsIdentity, "没拖过侧立就松手应退回概览页");
+            Assert(window.BeginFlipDrag(generalTile), "退回后应能再次拖动");
+            window.DragFlip(0.6);
+            window.ReleaseFlip(0);
+            Pump(700);
+            Assert(generalHost is { Visibility: Visibility.Visible, Clip: null, IsHitTestVisible: true } && generalHost.RenderTransform.Value.IsIdentity &&
+                   generalScroll is { CacheMode: null, Opacity: 1 } && overviewHost.Visibility == Visibility.Collapsed, "拖过侧立后松手应翻开页面");
+            Assert(window.BeginFlipDrag(null), "设置页应能拖回概览页");
+            window.DragFlip(0.3);
+            window.ReleaseFlip(0);
+            Pump(700);
+            Assert(generalHost is { Visibility: Visibility.Visible, Clip: null } && overviewHost.Visibility == Visibility.Collapsed, "返回时没拖过侧立就松手应留在设置页");
+            Assert(window.BeginFlipDrag(null), "退回后应能再次拖回概览页");
+            window.DragFlip(0.2);
+            window.ReleaseFlip(0.01);
+            Pump(700);
+        }
+        else
+        {
+            Pump(900);
+            generalBack.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Pump(900);
+        }
+        Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewPage is { Opacity: 1, CacheMode: null } &&
+               pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "甩动应翻回概览页，卡片落回原位");
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {
@@ -1766,7 +1811,6 @@ internal static class Program
         Assert(service.Load().CustomActions!.All(action => action.Id != created.Id) && !service.Load().QuickActionSlots!.Contains(created.Id),
             "删除的自定义操作仍在置物架上");
 
-        var generalTile = (DropShelf.Views.Controls.PageTile)pageCards.Children[0];
         Assert(generalTile.Header == "常规", "设置卡片文字不正确");
         try
         {
