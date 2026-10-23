@@ -58,6 +58,10 @@ public sealed class FanPanel : Panel
     {
         var count = InternalChildren.Count;
         if (count == 0) return finalSize;
+        // 调整顺序或删掉一张时牌沿用原来的：记下换位前的位置，换位后从看到的位置接着滑过去，正在播放的动画不会跳到终点。
+        var before = _childrenChanged && InternalChildren.Cast<UIElement>().All(child => child is FrameworkElement element && LayoutInformation.GetLayoutSlot(element).Width > 0)
+            ? InternalChildren.Cast<FrameworkElement>().Select(element => LayoutInformation.GetLayoutSlot(element).TopLeft).ToArray()
+            : null;
         _card = InternalChildren[0].DesiredSize;
         _spacing = count > 1 ? Math.Clamp((finalSize.Width - _card.Width) / (count - 1), 0, MaxSpacing) : 0;
         _center = finalSize.Width / 2;
@@ -77,7 +81,10 @@ public sealed class FanPanel : Panel
             _gap = -1;
             // 放回的牌调整顺序后整组重新生成，光标下的牌直接保持选中，不会先落下再抽出。
             if (IsMouseOver && Mouse.Captured is null) _hot = IndexAt(Mouse.GetPosition(this));
-            ApplyState(animate: false);
+            if (before is not null)
+                for (var index = 0; index < count; index++)
+                    Shift(InternalChildren[index], LayoutInformation.GetLayoutSlot((FrameworkElement)InternalChildren[index]).TopLeft - before[index]);
+            ApplyState(animate: before is not null);
         }
         return finalSize;
     }
@@ -289,6 +296,21 @@ public sealed class FanPanel : Panel
         child.RenderTransformOrigin = new Point(0.5, 1);
         child.RenderTransform = new TransformGroup { Children = { scale, rotate, move } };
         return (scale, rotate, move);
+    }
+
+    /// <summary>牌的排版位置挪了 delta：位移减去这段，画面停在原处，再从这里滑向新的终点。</summary>
+    private static void Shift(UIElement child, Vector delta)
+    {
+        var (_, _, move) = Transforms(child);
+        Hold(move, TranslateTransform.XProperty, move.X - delta.X);
+        Hold(move, TranslateTransform.YProperty, move.Y - delta.Y);
+    }
+
+    private static void Hold(Animatable target, DependencyProperty property, double value)
+    {
+        target.BeginAnimation(property, null);
+        target.SetValue(property, value);
+        Goals.GetOrCreateValue(target).Remove(property);
     }
 
     /// <summary>每个变换各属性最后一次要去的值。</summary>

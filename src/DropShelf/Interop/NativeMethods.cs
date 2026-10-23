@@ -252,6 +252,11 @@ internal static class NativeMethods
     public const uint DWMWA_COLOR_NONE = 0xFFFFFFFE;
     public const int DWMWCP_DONOTROUND = 1;
     public const int WM_NCHITTEST = 0x0084;
+    public const int WM_NCCALCSIZE = 0x0083;
+    public const int WM_ENTERSIZEMOVE = 0x0231;
+    public const int WM_EXITSIZEMOVE = 0x0232;
+    public const int WVR_VALIDRECTS = 0x0400;
+    public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int HTTRANSPARENT = -1;
 
     public const uint NIM_ADD = 0;

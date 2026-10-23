@@ -96,13 +96,15 @@ internal static class WindowEffects
         }
     }
 
-    /// <summary>Windows 11 上不画圆角和边框，透明窗口里只看得到内容。</summary>
+    /// <summary>显示和隐藏时不播放系统的淡入淡出；Windows 11 上不画圆角和边框，透明窗口里只看得到内容。</summary>
     public static void SetFrameless(Window window)
     {
-        if (!IsWindows11) return;
         try
         {
             var handle = Handle(window);
+            var disabled = 1;
+            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_TRANSITIONS_FORCEDISABLED, ref disabled, sizeof(int));
+            if (!IsWindows11) return;
             var corner = NativeMethods.DWMWCP_DONOTROUND;
             NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
             var border = NativeMethods.DWMWA_COLOR_NONE;
