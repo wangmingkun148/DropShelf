@@ -1816,7 +1816,7 @@ public partial class MainWindow : Window
         }
         container.Opacity = 0;
         _historyPanel?.SetGap(container, _historyIndex);
-        _ghost.ClipBottom = () => !_tornOff || HistoryReturnWeight(CursorPoint()) > 0 ? WindowBottom() : null;
+        _ghost.Layer = () => !_tornOff || HistoryReturnWeight(CursorPoint()) > 0 ? DragLayer : null;
         _ghost.Begin(image, new Size(card.ActualWidth, card.ActualHeight), start, () => HistoryDragPose(start, container));
     }
 
@@ -1868,7 +1868,7 @@ public partial class MainWindow : Window
             panel?.SetGap(container, index);
             // 放回的牌立即参与选中，光标下的牌（通常就是它）直接抽出，卡牌落进抽出的位置。
             panel?.UpdateHot();
-            ghost.ClipBottom = WindowBottom;
+            ghost.Layer = () => DragLayer;
             ghost.Settle(() => PoseOf(container), () =>
             {
                 container.Opacity = 1;
@@ -1882,7 +1882,7 @@ public partial class MainWindow : Window
             });
             return;
         }
-        ghost.ClipBottom = () => null;
+        ghost.Layer = () => null;
         ghost.Vanish(cursor);
         _controller.RestoreAt(entry.Entry, new POINT((int)cursor.X, (int)cursor.Y));
     }
@@ -1897,10 +1897,6 @@ public partial class MainWindow : Window
         var t = Math.Clamp((list.Y + HistoryReturnReach) / HistoryReturnReach, 0.01, 1);
         return t * t * (3 - 2 * t);
     }
-
-    /// <summary>窗口内容底边的屏幕坐标，牌堆的下半截在这里被裁掉。</summary>
-    private double? WindowBottom() =>
-        PresentationSource.FromVisual(RootGrid) is null ? null : RootGrid.PointToScreen(new System.Windows.Point(0, RootGrid.ActualHeight)).Y;
 
     /// <summary>元素在屏幕上的中心、缩放和角度，包含牌堆给它的变换和动画。</summary>
     private static CardPose? PoseOf(FrameworkElement element)

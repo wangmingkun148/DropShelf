@@ -13,6 +13,7 @@ public readonly record struct CardPose(Point Center, double Scale, double Angle)
 /// <summary>
 /// 从概览页拖出的卡牌：用一个不接收鼠标的透明小窗口显示卡牌截图，因此可以拖出主窗口。
 /// 透明靠 DWM 把玻璃区扩展到整个窗口，不用分层窗口：分层窗口每帧要把画面从显卡读回内存再提交，拖动时会掉帧。
+/// 在牌堆附近时卡牌改画在主窗口里，和牌堆的动画同一帧画出，也不必每帧移动另一个窗口。
 /// 位置、大小和角度每帧按指数衰减向目标靠拢，跟手但略有滞后；横向移动越快卡牌越向移动方向倾斜，停下后慢慢回正，带出阻尼感。
 /// 只在拖动和收尾动画期间挂接每帧回调，平时不占用资源。
 /// </summary>
@@ -29,7 +30,6 @@ public sealed class CardGhostWindow : Window
     private readonly System.Windows.Controls.Image _image = new() { Stretch = Stretch.Fill };
     private readonly System.Windows.Controls.Grid _card = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly System.Windows.Controls.Grid _root = new();
-    private readonly RectangleGeometry _clip = new();
     private readonly ScaleTransform _scale = new();
     private readonly RotateTransform _rotate = new();
     private readonly Stopwatch _clock = new();
@@ -87,8 +87,8 @@ public sealed class CardGhostWindow : Window
     /// <summary>正在拖动或播放收尾动画。</summary>
     public bool IsBusy => _running;
 
-    /// <summary>卡牌在这条横线（屏幕像素）以下的部分不显示，与牌堆被窗口底边裁掉的样子一致；null 表示不裁。</summary>
-    public Func<double?> ClipBottom { get; set; } = () => null;
+    /// <summary>卡牌要画在主窗口的这一层时返回它（超出窗口底边的部分随牌堆一起被裁掉），null 表示画在独立的窗口里。</summary>
+    public Func<System.Windows.Controls.Panel?> Layer { get; set; } = () => null;
 
     /// <summary>从卡牌当前的样子开始跟随目标。</summary>
     public void Begin(ImageSource image, Size size, CardPose start, Func<CardPose?> target)
@@ -176,16 +176,27 @@ public sealed class CardGhostWindow : Window
     {
         _scale.ScaleX = _scale.ScaleY = _pose.Scale;
         _rotate.Angle = _pose.Angle + _sway;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var top = (int)Math.Round(_pose.Center.Y - Height * dpi.DpiScaleY / 2);
-        if (ClipBottom() is { } bottom)
+        var layer = Layer();
+        MoveTo(layer ?? _root);
+        if (layer is not null)
         {
-            _clip.Rect = new Rect(0, 0, Width, Math.Max(0, (bottom - top) / dpi.DpiScaleY));
-            _root.Clip = _clip;
+            var point = layer.PointFromScreen(_pose.Center);
+            System.Windows.Controls.Canvas.SetLeft(_card, point.X - _image.Width / 2);
+            System.Windows.Controls.Canvas.SetTop(_card, point.Y - _image.Height / 2);
+            return;
         }
-        else _root.Clip = null;
-        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, (int)Math.Round(_pose.Center.X - Width * dpi.DpiScaleX / 2), top, 0, 0,
+        var dpi = VisualTreeHelper.GetDpi(this);
+        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, (int)Math.Round(_pose.Center.X - Width * dpi.DpiScaleX / 2),
+            (int)Math.Round(_pose.Center.Y - Height * dpi.DpiScaleY / 2), 0, 0,
             NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    /// <summary>把卡牌挪到要画它的地方；挪进主窗口后独立窗口留空，不再移动。</summary>
+    private void MoveTo(System.Windows.Controls.Panel host)
+    {
+        if (ReferenceEquals(_card.Parent, host)) return;
+        (_card.Parent as System.Windows.Controls.Panel)?.Children.Remove(_card);
+        host.Children.Add(_card);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -203,6 +214,7 @@ public sealed class CardGhostWindow : Window
         _arrived = null;
         _clock.Stop();
         Hide();
+        MoveTo(_root);
         _image.Source = null;
         _card.CacheMode = null;
     }
