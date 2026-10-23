@@ -139,9 +139,10 @@
             </DoubleAnimationUsingKeyFrames>
         </Storyboard>
 
+        <!-- 拖到底部 → 按钮栏向上展开成一排操作并点亮“压缩” → 放下后收起，压缩包留在置物架上并提示 -->
         <Storyboard x:Key="Step4Story" RepeatBehavior="Forever" Duration="0:0:3.8">
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Move" Storyboard.TargetProperty="X">
-                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-190" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-150" />
                 <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
                     <EasingDoubleKeyFrame.EasingFunction>
                         <CubicEase EasingMode="EaseInOut" />
@@ -149,7 +150,7 @@
                 </EasingDoubleKeyFrame>
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Move" Storyboard.TargetProperty="Y">
-                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-80" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="-110" />
                 <EasingDoubleKeyFrame KeyTime="0:0:1.0" Value="0">
                     <EasingDoubleKeyFrame.EasingFunction>
                         <CubicEase EasingMode="EaseInOut" />
@@ -158,21 +159,77 @@
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Card" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
-                <DiscreteDoubleKeyFrame KeyTime="0:0:1.2" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.25" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Tiles" Storyboard.TargetProperty="Height">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="30" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.7" Value="30">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+                <EasingDoubleKeyFrame KeyTime="0:0:0.88" Value="66">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="66">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+                <EasingDoubleKeyFrame KeyTime="0:0:1.54" Value="30">
+                    <EasingDoubleKeyFrame.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </EasingDoubleKeyFrame.EasingFunction>
+                </EasingDoubleKeyFrame>
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Buttons" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.7" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.85" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.35" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.54" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4TileRow" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.7" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.88" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.45" Value="0" />
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Highlight" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
-                <EasingDoubleKeyFrame KeyTime="0:0:0.8" Value="0" />
-                <EasingDoubleKeyFrame KeyTime="0:0:0.95" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.88" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.98" Value="1" />
                 <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="1" />
-                <EasingDoubleKeyFrame KeyTime="0:0:1.5" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.4" Value="0" />
             </DoubleAnimationUsingKeyFrames>
-            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Toast" Storyboard.TargetProperty="Opacity">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4DropFrame" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.88" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:0.98" Value="0.45" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4DropZone" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.3" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.4" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.5" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.75" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Result" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
                 <EasingDoubleKeyFrame KeyTime="0:0:1.4" Value="0" />
                 <EasingDoubleKeyFrame KeyTime="0:0:1.6" Value="1" />
                 <EasingDoubleKeyFrame KeyTime="0:0:3.3" Value="1" />
-                <EasingDoubleKeyFrame KeyTime="0:0:3.6" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.55" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="S4Toast" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.5" Value="0" />
+                <EasingDoubleKeyFrame KeyTime="0:0:1.7" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.2" Value="1" />
+                <EasingDoubleKeyFrame KeyTime="0:0:3.45" Value="0" />
             </DoubleAnimationUsingKeyFrames>
         </Storyboard>
     </Window.Resources>
@@ -191,44 +248,65 @@
         <Border Grid.Row="1" Margin="24,0" CornerRadius="12" Background="{DynamicResource LayerBrush}"
                 BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" ClipToBounds="True">
             <Grid ClipToBounds="True">
-                <!-- 第 1 步：欢迎 -->
+                <!-- 第 1 步：欢迎。和真实的置物架一样：左上角钉子和移动/复制切换，右上角菜单和关闭，堆叠下方是名称和数量 -->
                 <Canvas x:Name="Step1Art" Width="552" Height="262">
                     <Canvas.RenderTransform>
                         <TranslateTransform x:Name="S1Float" />
                     </Canvas.RenderTransform>
-                    <Border Canvas.Left="191" Canvas.Top="36" Width="170" Height="186" Style="{StaticResource MiniShelf}">
+                    <Border Canvas.Left="186" Canvas.Top="32" Width="180" Height="198" Style="{StaticResource MiniShelf}">
                         <Grid>
-                            <TextBlock Text="{l:Loc OnboardingSampleCount}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0"
-                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-                            <Border Style="{StaticResource MiniCard}" Margin="0,4,0,0">
-                                <Border.RenderTransform>
-                                    <TransformGroup>
-                                        <RotateTransform Angle="-10" />
-                                        <TranslateTransform X="-12" />
-                                    </TransformGroup>
-                                </Border.RenderTransform>
-                                <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
-                            </Border>
-                            <Border Style="{StaticResource MiniCard}" Margin="0,2,0,0">
-                                <Border.RenderTransform>
-                                    <TransformGroup>
-                                        <RotateTransform Angle="7" />
-                                        <TranslateTransform X="11" />
-                                    </TransformGroup>
-                                </Border.RenderTransform>
-                                <TextBlock Text="{StaticResource Glyph.Text}" Style="{StaticResource CardGlyph}" />
-                            </Border>
-                            <Border Style="{StaticResource MiniCard}">
-                                <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" />
-                            </Border>
-                            <Border Width="22" Height="22" CornerRadius="11" Background="{DynamicResource AccentBrush}"
-                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="62,-60,0,0"
-                                    BorderBrush="{DynamicResource ShelfTileBrush}" BorderThickness="2">
-                                <TextBlock Text="3" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource TextOnAccentBrush}" />
-                            </Border>
-                            <Border Height="1" VerticalAlignment="Bottom" Margin="14,0,14,40" Background="{DynamicResource DividerBrush}" />
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="38" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0">
+                                <TextBlock Text="{StaticResource Glyph.Pinned}" FontFamily="{StaticResource IconFont}" FontSize="11" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AccentTextBrush}" />
+                                <Border Margin="8,0,0,0" Padding="6,1,6,2" CornerRadius="8" Background="{DynamicResource ControlAltBrush}">
+                                    <TextBlock Text="{l:Loc TransferMove}" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </Border>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Text="{StaticResource Glyph.More}" FontFamily="{StaticResource IconFont}" FontSize="11" Margin="0,0,12,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                <TextBlock Text="{StaticResource Glyph.Close}" FontFamily="{StaticResource IconFont}" FontSize="9" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </StackPanel>
+                            <Grid Grid.Row="1">
+                                <Border Style="{StaticResource MiniCard}" Margin="0,4,0,0">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform Angle="-10" />
+                                            <TranslateTransform X="-12" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                    <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
+                                </Border>
+                                <Border Style="{StaticResource MiniCard}" Margin="0,2,0,0">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform Angle="7" />
+                                            <TranslateTransform X="11" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                    <TextBlock Text="{StaticResource Glyph.Text}" Style="{StaticResource CardGlyph}" />
+                                </Border>
+                                <Border Style="{StaticResource MiniCard}">
+                                    <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" />
+                                </Border>
+                                <Border Width="22" Height="22" CornerRadius="11" Background="{DynamicResource AccentBrush}"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="62,-60,0,0"
+                                        BorderBrush="{DynamicResource ShelfTileBrush}" BorderThickness="2">
+                                    <TextBlock Text="3" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextOnAccentBrush}" />
+                                </Border>
+                            </Grid>
+                            <TextBlock Grid.Row="2" Text="{l:Loc OnboardingSampleCount}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                       Margin="0,2,0,6" />
+                            <Border Grid.Row="3" Height="1" VerticalAlignment="Top" Margin="14,0" Background="{DynamicResource DividerBrush}" />
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <TextBlock Text="{StaticResource Glyph.Zip}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
                                 <TextBlock Text="{StaticResource Glyph.Copy}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
                                 <TextBlock Text="{StaticResource Glyph.MoveToFolder}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
@@ -248,8 +326,12 @@
                         <Grid Margin="14">
                             <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
                                        Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" Margin="0,22,0,0" />
-                            <TextBlock Text="{l:Loc ReleaseToHold}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,26"
-                                       Foreground="{DynamicResource AccentTextBrush}" />
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18">
+                                <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="18"
+                                           HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                <TextBlock Text="{l:Loc ReleaseToHold}" FontSize="12" Margin="0,4,0,0" HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource AccentTextBrush}" />
+                            </StackPanel>
                         </Grid>
                     </Border>
                     <Canvas Canvas.Left="246" Canvas.Top="96">
@@ -306,36 +388,73 @@
                     </Canvas>
                 </Canvas>
 
-                <!-- 第 4 步：快速操作 -->
+                <!-- 第 4 步：快速操作。和真实的置物架一样：拖到底部时按钮栏向上展开成一排操作，放下后压缩包留在置物架上 -->
                 <Canvas x:Name="Step4Art" Width="552" Height="262" Visibility="Collapsed">
-                    <Border Canvas.Left="176" Canvas.Top="24" Width="200" Height="214" Style="{StaticResource MiniShelf}">
-                        <Grid Margin="10">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.3" StrokeDashArray="4 3" Margin="2,16,2,6"
-                                       Stroke="{DynamicResource AccentBrush}" Opacity="0.5" />
-                            <UniformGrid Grid.Row="1" Columns="2">
-                                <Grid Margin="3" Height="40">
-                                    <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
-                                    <Border x:Name="S4Highlight" CornerRadius="8" Background="{DynamicResource AccentBrush}" Opacity="0" />
-                                    <TextBlock Text="{l:Loc ActionCompress}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Border Canvas.Left="156" Canvas.Top="24" Width="240" Height="214" Style="{StaticResource MiniShelf}">
+                        <Grid>
+                            <Grid Margin="10,14,10,8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid x:Name="S4DropZone" Margin="0,0,0,6">
+                                    <Rectangle x:Name="S4DropFrame" RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
+                                               Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" />
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="18"
+                                                   HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                                        <TextBlock Text="{l:Loc ReleaseToHold}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center"
+                                                   Foreground="{DynamicResource AccentTextBrush}" />
+                                    </StackPanel>
                                 </Grid>
-                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
-                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                    <TextBlock Text="{l:Loc ActionCopyPath}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
-                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                    <TextBlock Text="{l:Loc ActionMoveTo}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <Border Margin="3" Height="40" CornerRadius="8" Background="{DynamicResource CardBrush}"
-                                        BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                    <TextBlock Text="{l:Loc ActionProperties}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                            </UniformGrid>
-                            <Border x:Name="S4Toast" Opacity="0" VerticalAlignment="Top" Margin="6,30,6,0" Padding="8,6" CornerRadius="8"
+                                <StackPanel x:Name="S4Result" Opacity="0" VerticalAlignment="Center" Margin="0,0,0,6">
+                                    <Border Style="{StaticResource MiniCard}">
+                                        <TextBlock Text="{StaticResource Glyph.Zip}" Style="{StaticResource CardGlyph}" />
+                                    </Border>
+                                    <TextBlock Text="{l:Loc OnboardingSampleArchive}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" />
+                                </StackPanel>
+                                <Grid x:Name="S4Tiles" Grid.Row="1" Height="30" ClipToBounds="True">
+                                    <Border Height="1" VerticalAlignment="Top" Margin="4,0" Background="{DynamicResource DividerBrush}" />
+                                    <UniformGrid x:Name="S4Buttons" Rows="1" Height="30" VerticalAlignment="Bottom">
+                                        <TextBlock Text="{StaticResource Glyph.Zip}" FontFamily="{StaticResource IconFont}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Text="{StaticResource Glyph.Copy}" FontFamily="{StaticResource IconFont}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Text="{StaticResource Glyph.MoveToFolder}" FontFamily="{StaticResource IconFont}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Text="{StaticResource Glyph.Info}" FontFamily="{StaticResource IconFont}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </UniformGrid>
+                                    <UniformGrid x:Name="S4TileRow" Rows="1" VerticalAlignment="Bottom" Opacity="0">
+                                        <Grid Margin="2,0" Height="62">
+                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <Border x:Name="S4Highlight" CornerRadius="8" Background="{DynamicResource AccentBrush}" Opacity="0" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{StaticResource Glyph.Zip}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
+                                                <TextBlock Text="{l:Loc ActionCompress}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid Margin="2,0" Height="62">
+                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{StaticResource Glyph.Copy}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
+                                                <TextBlock Text="{l:Loc ActionCopyPath}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid Margin="2,0" Height="62">
+                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{StaticResource Glyph.MoveToFolder}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
+                                                <TextBlock Text="{l:Loc ActionMoveTo}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid Margin="2,0" Height="62">
+                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{StaticResource Glyph.Info}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
+                                                <TextBlock Text="{l:Loc ActionProperties}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </UniformGrid>
+                                </Grid>
+                            </Grid>
+                            <Border x:Name="S4Toast" Opacity="0" VerticalAlignment="Bottom" Margin="10,0,10,10" Padding="8,6" CornerRadius="8"
                                     Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="{StaticResource Glyph.Completed}" FontFamily="{StaticResource IconFont}" FontSize="13"
@@ -345,14 +464,14 @@
                             </Border>
                         </Grid>
                     </Border>
-                    <Canvas x:Name="S4Card" Canvas.Left="206" Canvas.Top="150">
+                    <Canvas x:Name="S4Card" Canvas.Left="155" Canvas.Top="159">
                         <Canvas.RenderTransform>
-                            <TranslateTransform x:Name="S4Move" X="-190" Y="-80" />
+                            <TranslateTransform x:Name="S4Move" X="-150" Y="-110" />
                         </Canvas.RenderTransform>
-                        <Border Style="{StaticResource MiniCard}" Width="48" Height="48">
+                        <Border Style="{StaticResource MiniCard}" Width="48" Height="48" Opacity="0.9">
                             <TextBlock Text="{StaticResource Glyph.Document}" Style="{StaticResource CardGlyph}" FontSize="22" />
                         </Border>
-                        <Path Canvas.Left="32" Canvas.Top="30" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
+                        <Path Canvas.Left="38" Canvas.Top="36" Data="{StaticResource CursorGeometry}" Fill="White" Stroke="Black"
                               StrokeThickness="1.2" StrokeLineJoin="Round" />
                     </Canvas>
                 </Canvas>

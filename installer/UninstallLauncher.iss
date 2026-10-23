@@ -1,10 +1,10 @@
 ﻿#define AppName "DropShelf"
-#define AppVersion "2.4.9"
+#define AppVersion "2.5.0"
 
 [Setup]
 AppName={#AppName} 卸载程序
 AppVersion={#AppVersion}
-VersionInfoVersion=2.4.9.0
+VersionInfoVersion=2.5.0.0
 VersionInfoDescription=卸载 {#AppName}
 DefaultDirName={tmp}
 CreateAppDir=no

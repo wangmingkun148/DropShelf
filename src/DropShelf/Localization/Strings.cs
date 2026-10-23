@@ -221,19 +221,20 @@ public static class Strings
     public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。",
         "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
-    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；在“⋯”菜单中展开列表后也能多选，只拖走需要的部分。",
-        "Release to hold the files. Drag the thumbnail stack to take everything at once, or expand the list from the ⋯ menu to pick only the files you need.");
+    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；在“⋯”菜单中展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
+        "Release to hold the files. Drag the thumbnail stack to take everything at once, or expand the list from the ⋯ menu to pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null
-        ? T("把文件拖到底部按钮上，可以直接压缩、复制路径、移动或查看属性。也可以在设置中设定快捷键，随时打开空置物架。",
-            "Drop files on the buttons at the bottom to compress, copy paths, move them or view their properties. You can also set a keyboard shortcut in Settings to open an empty shelf at any time.")
-        : T($"把文件拖到底部按钮上，可以直接压缩、复制路径、移动或查看属性。按 {hotkey} 也能随时打开空置物架。",
-            $"Drop files on the buttons at the bottom to compress, copy paths, move them or view their properties. Press {hotkey} to open an empty shelf at any time.");
+        ? T("把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。在设置中设定快捷键后，还能随时打开空置物架。",
+            "Drag files to the bottom of the shelf to reveal quick actions: compress, copy paths, move them or view their properties. You can change these actions or add your own in Settings, and set a keyboard shortcut there to open an empty shelf at any time.")
+        : T($"把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。按 {hotkey} 能随时打开空置物架。",
+            $"Drag files to the bottom of the shelf to reveal quick actions: compress, copy paths, move them or view their properties. You can change these actions or add your own in Settings. Press {hotkey} to open an empty shelf at any time.");
 
     public static string OnboardingSampleCount => ItemCount(3);
     public static string OnboardingSampleFolder => T("文档", "Documents");
-    public static string OnboardingSampleToast => Created(T("资料.zip", "Files.zip"));
+    public static string OnboardingSampleArchive => T("资料.zip", "Files.zip");
+    public static string OnboardingSampleToast => Created(OnboardingSampleArchive);
     public static string Skip => T("跳过", "Skip");
     public static string Back => T("上一步", "Back");
     public static string Next => T("下一步", "Next");
