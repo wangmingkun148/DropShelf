@@ -1613,9 +1613,13 @@ internal static class Program
         var pageCards = (System.Windows.Controls.Primitives.UniformGrid)window.FindName("PageCards")!;
         Assert(pageCards.Children.Count == 4, "概览页应有四张设置卡片");
         ((System.Windows.Controls.Button)pageCards.Children[1]).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        Pump(100);
-        Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible &&
-               ((FrameworkElement)window.FindName("OverviewPage")!).Visibility == Visibility.Collapsed, "点击设置卡片没有切换页面");
+        var shelfHost = (System.Windows.Controls.Grid)window.FindName("ShelfHost")!;
+        var shelfScroll = (System.Windows.Controls.ScrollViewer)window.FindName("ShelfScroll")!;
+        var overviewHost = (FrameworkElement)window.FindName("OverviewHost")!;
+        Pump(900);
+        Assert(shelfHost.Visibility == Visibility.Visible && overviewHost.Visibility == Visibility.Collapsed, "点击设置卡片没有切换页面");
+        Assert(shelfHost is { Clip: null, IsHitTestVisible: true } && shelfHost.RenderTransform.Value.IsIdentity && shelfHost.Children.Count == 1 &&
+               shelfScroll is { CacheMode: null, Opacity: 1 } && overviewHost.Clip is null, "翻牌结束后页面应回到静止状态：没有变换、裁剪、缓存和背面的边框");
         var pageName = (System.Windows.Controls.TextBlock)window.FindName("PanelPageName")!;
         try
         {
@@ -1668,8 +1672,10 @@ internal static class Program
         var shelfPage = (System.Windows.Controls.Panel)window.FindName("ShelfPage")!;
         var backButton = (System.Windows.Controls.Button)((System.Windows.Controls.Panel)shelfPage.Children[0]).Children[0];
         backButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        Pump(400);
+        Pump(900);
         Assert(((FrameworkElement)window.FindName("OverviewPage")!) is { Opacity: 1, CacheMode: null }, "切换页面的淡入动画结束后页面应完全显示并去掉位图缓存");
+        Assert(shelfHost.Visibility == Visibility.Collapsed && shelfHost.Children.Count == 1 && overviewHost.Clip is null &&
+               pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "返回概览页后卡片应落回原位，设置页收起");
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {
@@ -1685,7 +1691,7 @@ internal static class Program
         viewModel.Language = AppLanguage.Chinese;
         Pump(50);
         AssertFanArranged("切换语言后");
-        var pageScroll = (System.Windows.Controls.ScrollViewer)window.FindName("PageScroll")!;
+        var pageScroll = (System.Windows.Controls.ScrollViewer)window.FindName("OverviewScroll")!;
         foreach (var height in new[] { 640.0, 1100.0 })
         {
             window.Height = height;
