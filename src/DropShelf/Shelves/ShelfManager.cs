@@ -102,13 +102,16 @@ public sealed class ShelfManager : IShelfHost
         });
     }
 
-    /// <summary>重新打开最近关闭的置物架：放进指定的置物架，或在光标处打开一个。已删除或移动的文件会跳过。</summary>
-    public void Restore(ShelfHistoryEntry entry, ShelfWindow? target = null)
+    /// <summary>重新打开最近关闭的置物架：放进指定的置物架，或在光标处打开一个。已删除或移动的文件会跳过。
+    /// 文件信息在后台读取，置物架先打开，读完再一次放入，不拖住界面和动画。</summary>
+    public async void Restore(ShelfHistoryEntry entry, ShelfWindow? target = null)
     {
         var shelf = target is { IsClosing: false } ? target : OpenAtCursor(activate: true);
-        var summary = shelf.ViewModel.AddFiles(entry.Items.Select(item => item.Path));
+        // 先移出历史并标记为已使用：读取期间再次点击不会重复恢复，空置物架也不会被自动关闭或复用。
         History?.Remove(entry);
         shelf.ViewModel.HasInteracted = true;
+        var summary = await shelf.ViewModel.AddFilesAsync(entry.Items.Select(item => item.Path).ToArray());
+        if (shelf.IsClosing) return;
         shelf.ViewModel.Notify(summary.Added > 0 ? Strings.Restored(summary.Added, summary.Unavailable) : Strings.RestoreUnavailable,
             summary.Added > 0);
     }

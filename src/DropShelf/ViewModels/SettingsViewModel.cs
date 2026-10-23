@@ -130,6 +130,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly AppController _controller;
     private bool _startupFailed;
     private CustomActionEditorViewModel? _editor;
+    private string? _actionsKey;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
     private ObservableCollection<HistoryEntryViewModel> _historyEntries = [];
@@ -423,8 +424,13 @@ public sealed class SettingsViewModel : ObservableObject
             _ => Strings.SlotFarRight
         };
 
+    /// <summary>操作的布局、位置和自定义操作内容，用来判断设置变化后是否需要重建操作卡片。</summary>
+    private string ActionsKey() =>
+        $"{Settings.QuickActionLayout}|{string.Join(',', Settings.QuickActionSlots ?? [])}|{System.Text.Json.JsonSerializer.Serialize(Settings.CustomActions)}";
+
     private void RefreshActions()
     {
+        _actionsKey = ActionsKey();
         var layout = Settings.QuickActionLayout;
         var visible = (Settings.QuickActionSlots ?? []).Take((int)layout).ToArray();
         VisibleSlots = visible
@@ -502,6 +508,7 @@ public sealed class SettingsViewModel : ObservableObject
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshAll();
+        RefreshActions();
         RefreshHistory();
     }
 
@@ -518,7 +525,7 @@ public sealed class SettingsViewModel : ObservableObject
                      nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription)
                  })
             OnPropertyChanged(name);
-        RefreshActions();
+        if (ActionsKey() != _actionsKey) RefreshActions();
     }
 
     private static void OpenFolder(string path)

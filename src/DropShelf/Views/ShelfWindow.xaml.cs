@@ -133,7 +133,6 @@ public partial class ShelfWindow : Window
         _size = settings.QuickShelfSize;
         _dragOutMode = settings.DragOutMode;
         ViewModel.Actions = QuickActions.Visible(settings);
-        BuildActions();
         UpdateTransferMode();
         UpdateWindowSize();
         UpdateThumbnailSize();
@@ -368,6 +367,16 @@ public partial class ShelfWindow : Window
                 UpdateWindowSize();
                 break;
         }
+    }
+
+    private void OnRowLoaded(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is ShelfItem item) ViewModel.SetRowVisible(item, true);
+    }
+
+    private void OnRowUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is ShelfItem item) ViewModel.SetRowVisible(item, false);
     }
 
     private void UpdateViews()

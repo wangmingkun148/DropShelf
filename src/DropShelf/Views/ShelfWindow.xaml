@@ -237,7 +237,7 @@
                          PreviewMouseRightButtonDown="OnListRightButtonDown" Foreground="{DynamicResource TextPrimaryBrush}">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid x:Name="Row" Background="Transparent">
+                            <Grid x:Name="Row" Background="Transparent" Loaded="OnRowLoaded" Unloaded="OnRowUnloaded">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="36" />
                                     <ColumnDefinition Width="*" />

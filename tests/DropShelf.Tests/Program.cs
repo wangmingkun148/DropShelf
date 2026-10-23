@@ -402,6 +402,8 @@ internal static class Program
         Assert(folder.DisplayName == "Documents", "带结尾分隔符的文件夹名称不正确");
         var text = new ShelfItem { Id = "2", Kind = ShelfItemKind.Text, Value = "  第一行   内容\n第二行" };
         Assert(text.DisplayName == "第一行 内容", "文本摘要不正确");
+        Assert(ShelfItem.Summarize("\n\n  a \t b  \r\nc", 10) == "a b" && ShelfItem.Summarize(string.Concat(Enumerable.Repeat("ab ", 100_000)), 5) == "ab ab…",
+            "长文本或空白开头的文本摘要不正确");
         var link = new ShelfItem { Id = "3", Kind = ShelfItemKind.Link, Value = "https://example.com/docs/page", Title = "示例文档" };
         Assert(link.DisplayName == "示例文档" && link.Detail == "example.com", "链接显示不正确");
         var untitled = new ShelfItem { Id = "4", Kind = ShelfItemKind.Link, Value = "https://example.com/docs/" };

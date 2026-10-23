@@ -41,6 +41,8 @@ public sealed class ShelfViewModel : ObservableObject
     private int _batchDepth;
     private bool _batchChanged;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly Dictionary<ShelfItem, CancellationTokenSource> _thumbnails = [];
+    private readonly HashSet<ShelfItem> _visibleRows = [];
 
     public ShelfViewModel()
     {
@@ -138,13 +140,29 @@ public sealed class ShelfViewModel : ObservableObject
         return AddEntries(result.Entries);
     }
 
-    public ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries)
+    /// <summary>先在后台限量读取文件信息（网络路径可能很慢），再一次放入，顺序和去重规则与 <see cref="AddFiles"/> 相同。</summary>
+    public async Task<ShelfAddSummary> AddFilesAsync(IReadOnlyList<string> paths)
+    {
+        var facts = new System.Collections.Concurrent.ConcurrentDictionary<string, FileFacts?>(StringComparer.OrdinalIgnoreCase);
+        await Parallel.ForEachAsync(paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase),
+            new ParallelOptions { MaxDegreeOfParallelism = 4 }, (path, _) =>
+            {
+                facts[path] = ReadFacts(path);
+                return ValueTask.CompletedTask;
+            });
+        if (_released) return new ShelfAddSummary(0, 0, paths.Count);
+        return AddEntries(paths.Select(path => new DroppedEntry(ShelfItemKind.File, path)), facts);
+    }
+
+    public ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries) => AddEntries(entries, null);
+
+    private ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries, IReadOnlyDictionary<string, FileFacts?>? facts)
     {
         // 一次放入很多项目时，数量、标题和汇总等派生属性在全部放入后只通知一次。
         _batchDepth++;
         try
         {
-            return AddEntriesCore(entries);
+            return AddEntriesCore(entries, facts);
         }
         finally
         {
@@ -156,7 +174,27 @@ public sealed class ShelfViewModel : ObservableObject
         }
     }
 
-    private ShelfAddSummary AddEntriesCore(IEnumerable<DroppedEntry> entries)
+    private readonly record struct FileFacts(bool IsFolder, long? SizeBytes);
+
+    /// <summary>读取文件夹标记和文件大小；已删除、无权限等读不到时返回 null。</summary>
+    private static FileFacts? ReadFacts(string path)
+    {
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException
+                                              or UnauthorizedAccessException or IOException or ArgumentException
+                                              or NotSupportedException)
+        {
+            return null;
+        }
+        var isFolder = attributes.HasFlag(FileAttributes.Directory);
+        return new FileFacts(isFolder, isFolder ? null : ShellFileInfo.TryGetFileSize(path));
+    }
+
+    private ShelfAddSummary AddEntriesCore(IEnumerable<DroppedEntry> entries, IReadOnlyDictionary<string, FileFacts?>? known)
     {
         var added = 0;
         var duplicates = 0;
@@ -186,35 +224,26 @@ public sealed class ShelfViewModel : ObservableObject
                 continue;
             }
 
-            FileAttributes attributes;
-            try
-            {
-                attributes = File.GetAttributes(entry.Value);
-            }
-            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException
-                                                  or UnauthorizedAccessException or IOException or ArgumentException
-                                                  or NotSupportedException)
+            if ((known is not null && known.TryGetValue(entry.Value, out var read) ? read : ReadFacts(entry.Value)) is not { } facts)
             {
                 unavailable++;
                 continue;
             }
 
-            var isFolder = attributes.HasFlag(FileAttributes.Directory);
             var item = new ShelfItem
             {
                 Id = NewId(),
-                Kind = isFolder ? ShelfItemKind.Folder : ShelfItemKind.File,
+                Kind = facts.IsFolder ? ShelfItemKind.Folder : ShelfItemKind.File,
                 Value = entry.Value,
                 IsTemporaryAttachment = entry.IsTemporary
             };
-            if (!isFolder)
+            if (!facts.IsFolder)
             {
-                item.SizeBytes = ShellFileInfo.TryGetFileSize(entry.Value);
+                item.SizeBytes = facts.SizeBytes;
                 item.TypeName = ShellFileInfo.GetTypeName(entry.Value);
             }
             Items.Add(item);
             existingPaths.Add(entry.Value);
-            _ = LoadThumbnailAsync(item);
             added++;
         }
 
@@ -284,6 +313,8 @@ public sealed class ShelfViewModel : ObservableObject
                 TypeName = old.TypeName,
                 Thumbnail = old.Thumbnail
             };
+            // 已有的缩略图跟着新项目，之后照常按是否显示来保留或释放。
+            if (old.Thumbnail is not null && _thumbnails.Remove(old, out var load)) _thumbnails[replacement] = load;
             Items[index] = replacement;
         }
     }
@@ -397,7 +428,6 @@ public sealed class ShelfViewModel : ObservableObject
                 TypeName = ShellFileInfo.GetTypeName(output)
             };
             Items[index] = item;
-            _ = LoadThumbnailAsync(item);
         }
         if (additions.Count > 0) AddFiles(additions);
     }
@@ -580,6 +610,41 @@ public sealed class ShelfViewModel : ObservableObject
         OnPropertyChanged(nameof(StackCaption));
         OnPropertyChanged(nameof(StackDetail));
         if (Items.Count <= 1 && IsExpanded) IsExpanded = false;
+        UpdateThumbnails();
+    }
+
+    /// <summary>列表里的行显示或移出时由窗口告知，只给显示出来的行加载缩略图。</summary>
+    public void SetRowVisible(ShelfItem item, bool visible)
+    {
+        if (visible ? _visibleRows.Add(item) : _visibleRows.Remove(item)) UpdateThumbnails();
+    }
+
+    /// <summary>
+    /// 只有堆叠顶部三张和列表里显示出来的行持有缩略图：其余的取消加载并释放，内存不随项目数量增长。
+    /// 重新显示时多数能从缩略图服务的缓存里直接取到。
+    /// </summary>
+    private void UpdateThumbnails()
+    {
+        var wanted = new HashSet<ShelfItem>(_visibleRows.Where(Items.Contains));
+        for (var position = 1; position <= 3; position++)
+            if (ItemFromEnd(position) is { } top) wanted.Add(top);
+
+        foreach (var (item, load) in _thumbnails.ToArray())
+        {
+            if (wanted.Contains(item)) continue;
+            load.Cancel();
+            load.Dispose();
+            _thumbnails.Remove(item);
+            item.Thumbnail = null;
+        }
+        if (_released) return;
+        foreach (var item in wanted)
+        {
+            if (!item.IsFileSystem || _thumbnails.ContainsKey(item)) continue;
+            var load = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            _thumbnails[item] = load;
+            if (item.Thumbnail is null) _ = LoadThumbnailAsync(item, load.Token);
+        }
     }
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -589,21 +654,22 @@ public sealed class ShelfViewModel : ObservableObject
             OnPropertyChanged(nameof(StackDetail));
     }
 
-    private async Task LoadThumbnailAsync(ShelfItem item)
+    private async Task LoadThumbnailAsync(ShelfItem item, CancellationToken cancellationToken)
     {
         try
         {
-            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, ThumbnailSize, _lifetime.Token);
+            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, ThumbnailSize, cancellationToken);
             if (thumbnail is null) return;
+            // 取消只发生在界面线程上，在这里检查不会和释放错开。
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.CheckAccess())
             {
-                item.Thumbnail = thumbnail;
+                if (!cancellationToken.IsCancellationRequested) item.Thumbnail = thumbnail;
                 return;
             }
             await dispatcher.InvokeAsync(() =>
             {
-                if (Items.Contains(item)) item.Thumbnail = thumbnail;
+                if (!cancellationToken.IsCancellationRequested) item.Thumbnail = thumbnail;
             });
         }
         catch

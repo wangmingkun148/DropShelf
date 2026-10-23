@@ -142,12 +142,25 @@ public sealed class ShelfItem : INotifyPropertyChanged
         return unit == 0 ? $"{bytes} B" : $"{value:0.#} {units[unit]}";
     }
 
+    /// <summary>取第一行非空内容，连续空白合并为一个空格；逐字符扫描，凑够长度就停止，长文本不必整段拆分。</summary>
     public static string Summarize(string text, int maximumLength)
     {
-        var firstLine = text.Trim().Split('\n', 2)[0].Trim();
-        var collapsed = string.Join(' ', firstLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        if (collapsed.Length == 0) collapsed = text.Trim();
-        return collapsed.Length > maximumLength ? collapsed[..maximumLength] + "…" : collapsed;
+        var builder = new System.Text.StringBuilder(Math.Min(text.Length, maximumLength + 1));
+        var space = false;
+        foreach (var character in text)
+        {
+            if (character == '\n' && builder.Length > 0) break;
+            if (char.IsWhiteSpace(character))
+            {
+                space = builder.Length > 0;
+                continue;
+            }
+            if (space) builder.Append(' ');
+            space = false;
+            builder.Append(character);
+            if (builder.Length > maximumLength) return builder.ToString(0, maximumLength) + "…";
+        }
+        return builder.ToString();
     }
 
     private static string GetFolderName(string path)
