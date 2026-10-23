@@ -1676,6 +1676,23 @@ internal static class Program
         Assert(((FrameworkElement)window.FindName("OverviewPage")!) is { Opacity: 1, CacheMode: null }, "切换页面的淡入动画结束后页面应完全显示并去掉位图缓存");
         Assert(shelfHost.Visibility == Visibility.Collapsed && shelfHost.Children.Count == 1 && overviewHost.Clip is null &&
                pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "返回概览页后卡片应落回原位，设置页收起");
+        // 翻牌途中窗口大小变了，算好的位置失效，应直接摆到终点；返回时概览页不能停在透明状态。
+        var generalHost = (FrameworkElement)window.FindName("GeneralHost")!;
+        ((System.Windows.Controls.Button)pageCards.Children[0]).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Pump(250);
+        window.Width += 10;
+        Pump(100);
+        Assert(generalHost.Visibility == Visibility.Visible && overviewHost.Visibility == Visibility.Collapsed && generalHost.Clip is null &&
+               generalHost.RenderTransform.Value.IsIdentity, "打开途中被打断后应直接显示设置页");
+        var generalBack = (System.Windows.Controls.Button)((System.Windows.Controls.Panel)((System.Windows.Controls.Panel)window.FindName("GeneralPage")!).Children[0]).Children[0];
+        generalBack.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Pump(30);
+        window.Width -= 10;
+        Pump(100);
+        Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewHost.Clip is null &&
+               ((FrameworkElement)window.FindName("OverviewPage")!) is { Opacity: 1, CacheMode: null } &&
+               pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "返回途中被打断后概览页应完全显示，卡片回到原位");
+        Pump(400);
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {

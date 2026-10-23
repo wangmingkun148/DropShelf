@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -149,7 +151,6 @@ public partial class MainWindow : Window
         public required Action Done { get; init; }
         public TimeSpan? Start { get; set; }
         public TimeSpan Last { get; set; }
-        public List<double>? Frames { get; set; }
     }
 
     /// <summary>
@@ -159,7 +160,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void OpenPage(string page, Controls.PageTile tile)
     {
-        if (_morphing || _page != "Overview" || !_pages.TryGetValue(page, out var view)) return;
+        if (_morphing || _sidePanelFade is not null || _page != "Overview" || !_pages.TryGetValue(page, out var view)) return;
+        StartTrace($"open {page}");
+        var clicked = Stopwatch.GetTimestamp();
         // 页面通常在鼠标移到卡片上时已经排好版；用键盘直接打开时在这里补上。
         PreparePage(view);
         PageStage.UpdateLayout();
@@ -168,6 +171,7 @@ public partial class MainWindow : Window
         var edge = Lerp(home, to, FlipMidway);
         var plain = UsePlainFlip(to);
         SetPanelHeader(page, animate: true);
+        TraceMark(plain ? "prepare plain" : "prepare", clicked);
         // 排版可能触发窗口尺寸变化而打断翻牌，排完再开始计数。
         _morphing = true;
         var session = ++_flipSession;
@@ -177,6 +181,7 @@ public partial class MainWindow : Window
             ResetTile(tile);
             tile.Opacity = 1;
             ShowPage(page);
+            SettleOverview();
         };
         FlipTile(tile, home, edge, closing: true, 170, () =>
         {
@@ -194,16 +199,17 @@ public partial class MainWindow : Window
                 View = view, From = edge, To = to, Page = to, Plain = plain, Milliseconds = 300,
                 Done = () =>
                 {
+                    var landed = Stopwatch.GetTimestamp();
                     tile.Opacity = 1;
                     ShowPage(page);
-                    if (plain)
+                    if (plain) RevealPlainPage(view, session);
+                    else
                     {
-                        RevealPlainPage(view, session);
-                        return;
+                        ClearFlip(view);
+                        FadeInScrollBar(view.Scroll);
+                        EndMorph();
                     }
-                    ClearFlip(view);
-                    FadeInScrollBar(view.Scroll);
-                    EndMorph();
+                    TraceMark("land", landed);
                 }
             });
         });
@@ -215,7 +221,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void BackToOverview()
     {
-        if (_morphing || _page == "Overview") return;
+        if (_morphing || _sidePanelFade is not null || _page == "Overview") return;
         SetPanelHeader("Overview", animate: true);
         var page = _page;
         if (!_pages.TryGetValue(page, out var view) ||
@@ -225,21 +231,27 @@ public partial class MainWindow : Window
             RevealOverview();
             return;
         }
+        StartTrace($"back {page}");
         _morphing = true;
         var session = ++_flipSession;
         var from = PageArea(view);
         var plain = UsePlainFlip(from);
+        // 被打断时概览页可能还停在上次淡出后的透明状态，要明确摆回静止状态。
         _finishFlip = () =>
         {
             ClearFlip(view);
             ShowPage("Overview");
+            OverviewScroll.ScrollToTop();
+            SettleOverview();
             ResetTile(tile);
             tile.Opacity = 1;
         };
 
         void Flip()
         {
+            var revealed = Stopwatch.GetTimestamp();
             RevealOverview();
+            TraceMark("overview", revealed);
             if (session != _flipSession) return;
             // 概览页正从稍低处上移，扣掉这段位移才是卡片最终的位置。
             var home = BoundsOf(tile);
@@ -251,9 +263,14 @@ public partial class MainWindow : Window
                 View = view, From = from, To = edge, Page = from, Closing = true, Plain = plain, Milliseconds = 230,
                 Done = () =>
                 {
+                    var swapped = Stopwatch.GetTimestamp();
                     ClearFlip(view);
                     ShowPage("Overview");
-                    _finishFlip = () => ResetTile(tile);
+                    _finishFlip = () =>
+                    {
+                        ResetTile(tile);
+                        SettleOverview();
+                    };
                     // 先摆到侧面再显示，不会先在原位闪一下。
                     FlipTile(tile, home, edge, closing: false, 320, () =>
                     {
@@ -262,6 +279,7 @@ public partial class MainWindow : Window
                         EndMorph();
                     });
                     tile.Opacity = 1;
+                    TraceMark("edge", swapped);
                 }
             });
         }
@@ -315,11 +333,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>软件渲染时缓存和挖空都由处理器完成，可视区很大时生成缓存本身就会卡顿：这两种情况背面保持空白，和以前一样。</summary>
-    private bool UsePlainFlip(Rect area)
+    private bool UsePlainFlip(Rect area) => RenderCapability.Tier >> 16 == 0 || !FitsCache(this, area.Width, PageStage.ActualHeight);
+
+    /// <summary>
+    /// 按设备像素估算一张缓存的大小，单张不超过上限。翻牌时最多同时有设置页和概览页两张，合计也就不超过上限的两倍。
+    /// 这只是位图本身的大小，WPF 另有内存副本和裁剪用的中间图层，实际占用以实测为准。
+    /// </summary>
+    private static bool FitsCache(Visual visual, double width, double height)
     {
-        if (RenderCapability.Tier >> 16 == 0) return true;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        return area.Width * dpi.DpiScaleX * PageStage.ActualHeight * dpi.DpiScaleY * 4 > MaxFlipCacheBytes;
+        var dpi = VisualTreeHelper.GetDpi(visual);
+        return width * dpi.DpiScaleX * height * dpi.DpiScaleY * 4 <= MaxFlipCacheBytes;
     }
 
     /// <summary>
@@ -328,6 +351,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void AttachFlip(PageFlip flip)
     {
+        var started = Stopwatch.GetTimestamp();
         var view = flip.View;
         if (_flipDecor.Parent is Panel parent) parent.Children.Remove(_flipDecor);
         view.Host.Children.Add(_flipDecor);
@@ -339,21 +363,21 @@ public partial class MainWindow : Window
         if (ScrollBarOf(view.Scroll) is { } bar) bar.Visibility = Visibility.Hidden;
         if (!flip.Plain)
         {
-            view.Scroll.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX) { SnapsToDevicePixels = true };
+            // 缓存本身已按显示缩放比例生成，RenderAtScale 保持 1；再乘一次缩放比例，200% 时会占用四倍内存。
+            view.Scroll.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
             view.Host.Clip = _flipCard;
             _flipBounds.Rect = new Rect(-1, -1, OverviewHost.ActualWidth + 2, OverviewHost.ActualHeight + 2);
             OverviewHost.Clip = _flipHole;
         }
         view.Host.Visibility = Visibility.Visible;
         PoseFlip(flip, 0);
+        TraceMark("attach", started);
     }
 
     private void BeginFlip(PageFlip flip)
     {
         AttachFlip(flip);
         if (flip.Plain) flip.View.Scroll.Opacity = 0;
-        // 诊断日志打开时记下每帧间隔，用来核对掉帧。
-        if (LogService.TraceEnabled) flip.Frames = [];
         _flip = flip;
         CompositionTarget.Rendering += OnFlipFrame;
     }
@@ -363,9 +387,8 @@ public partial class MainWindow : Window
     {
         if (_flip is not { } flip) return;
         var time = ((RenderingEventArgs)e).RenderingTime;
-        if (flip.Start is null) flip.Start = time;
-        else if (time == flip.Last) return;
-        else flip.Frames?.Add((time - flip.Last).TotalMilliseconds);
+        if (flip.Start is not null && time == flip.Last) return;
+        flip.Start ??= time;
         flip.Last = time;
         var elapsed = (time - flip.Start.Value).TotalMilliseconds;
         PoseFlip(flip, elapsed);
@@ -428,7 +451,6 @@ public partial class MainWindow : Window
         if (_flip is not { } flip) return;
         _flip = null;
         CompositionTarget.Rendering -= OnFlipFrame;
-        if (flip.Frames is not null) TraceLanding(flip);
     }
 
     /// <summary>页面回到静止状态：去掉变换、裁剪和缓存，拿走边框和阴影，概览页不再挖空。</summary>
@@ -471,34 +493,69 @@ public partial class MainWindow : Window
     {
         _finishFlip = null;
         _morphing = false;
+        EndTrace("done");
     }
 
     /// <summary>窗口大小、缩放比例或状态变了，算好的卡片位置已经失效：不再播完，直接摆到这次翻牌的终点。</summary>
     private void CancelFlip()
     {
         if (!_morphing) return;
+        EndTrace("cancelled");
         _flipSession++;
         var finish = _finishFlip;
         EndMorph();
         finish?.Invoke();
     }
 
-    /// <summary>再等一帧，记下落定后第一帧（去掉缓存后第一次直接绘制）的间隔，然后写一行记录。</summary>
-    private static void TraceLanding(PageFlip flip)
+    /// <summary>诊断日志打开时（DROPSHELF_TRACE=1），从点击到翻牌结束记下每帧间隔，并标出几个同步步骤各用了多久。</summary>
+    private sealed class FlipTrace(string name)
     {
-        void Landing(object? sender, EventArgs e)
+        public string Name { get; } = name;
+        public long Begun { get; } = Stopwatch.GetTimestamp();
+        public StringBuilder Frames { get; } = new();
+        public List<double> Intervals { get; } = [];
+        public TimeSpan? Last { get; set; }
+        public string? Ending { get; set; }
+    }
+
+    private FlipTrace? _trace;
+
+    private void StartTrace(string name)
+    {
+        if (!LogService.TraceEnabled) return;
+        if (_trace is null) CompositionTarget.Rendering += OnTraceFrame;
+        _trace = new FlipTrace(name);
+    }
+
+    /// <summary>first 是点击到第一帧的时间，包括点击时同步准备页面；之后是每帧间隔，结束后再记一帧，即去掉缓存后第一次直接绘制。</summary>
+    private void OnTraceFrame(object? sender, EventArgs e)
+    {
+        if (_trace is not { } trace) return;
+        var time = ((RenderingEventArgs)e).RenderingTime;
+        if (trace.Last == time) return;
+        if (trace.Last is { } last)
         {
-            var time = ((RenderingEventArgs)e).RenderingTime;
-            if (time == flip.Last) return;
-            CompositionTarget.Rendering -= Landing;
-            var frames = flip.Frames!;
-            var sorted = frames.Order().ToList();
-            var p95 = sorted.Count > 0 ? sorted[(int)Math.Ceiling(sorted.Count * 0.95) - 1] : 0;
-            LogService.Trace($"Flip {(flip.Closing ? "back" : "open")} {flip.View.Content.Name} plain={flip.Plain} frames={frames.Count} " +
-                             $"first={(frames.Count > 0 ? frames[0] : 0):F1}ms p95={p95:F1}ms max={(sorted.Count > 0 ? sorted[^1] : 0):F1}ms " +
-                             $"landing={(time - flip.Last).TotalMilliseconds:F1}ms");
+            var interval = (time - last).TotalMilliseconds;
+            trace.Intervals.Add(interval);
+            trace.Frames.Append($" {interval:F0}");
         }
-        CompositionTarget.Rendering += Landing;
+        else trace.Frames.Append($" first={Stopwatch.GetElapsedTime(trace.Begun).TotalMilliseconds:F0}ms:");
+        trace.Last = time;
+        if (trace.Ending is not { } ending) return;
+        _trace = null;
+        CompositionTarget.Rendering -= OnTraceFrame;
+        var sorted = trace.Intervals.Order().ToList();
+        var p95 = sorted.Count > 0 ? sorted[(int)Math.Ceiling(sorted.Count * 0.95) - 1] : 0;
+        LogService.Trace($"Flip {trace.Name} {ending} p95={p95:F1}ms max={(sorted.Count > 0 ? sorted[^1] : 0):F1}ms{trace.Frames}");
+    }
+
+    /// <summary>在帧间隔里标出一个时刻，以及从 since 到现在同步执行用的时间。</summary>
+    private void TraceMark(string label, long since) =>
+        _trace?.Frames.Append($" [{label} {Stopwatch.GetElapsedTime(since).TotalMilliseconds:F1}ms]");
+
+    private void EndTrace(string ending)
+    {
+        if (_trace is { } trace) trace.Ending ??= ending;
     }
 
     private Rect BoundsOf(FrameworkElement element) => new(element.TranslatePoint(default, PageStage), new Size(element.ActualWidth, element.ActualHeight));
@@ -555,7 +612,7 @@ public partial class MainWindow : Window
     private static void FadeOutPage(FrameworkElement page, Action done)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
-        page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
+        CacheWhileFading(page);
         var duration = TimeSpan.FromMilliseconds(200);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
         var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
@@ -673,12 +730,31 @@ public partial class MainWindow : Window
     private static void FadeInPage(FrameworkElement page, double milliseconds)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
-        page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
+        CacheWhileFading(page);
         var duration = TimeSpan.FromMilliseconds(milliseconds);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
         var fade = new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase };
         fade.Completed += (_, _) => page.CacheMode = null;
         page.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>概览页平时正好撑满可视区；窗口很大、缩放比例很高时缓存超出上限，就直接绘制，不再额外占一大块内存。</summary>
+    private static void CacheWhileFading(FrameworkElement page)
+    {
+        if (page.CacheMode is null && FitsCache(page, page.ActualWidth, page.ActualHeight)) page.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
+    }
+
+    /// <summary>概览页停在静止状态：去掉淡入淡出的动画和缓存。</summary>
+    private void SettleOverview()
+    {
+        OverviewPage.BeginAnimation(OpacityProperty, null);
+        OverviewPage.Opacity = 1;
+        if (OverviewPage.RenderTransform is TranslateTransform shift)
+        {
+            shift.BeginAnimation(TranslateTransform.YProperty, null);
+            shift.Y = 0;
+        }
+        OverviewPage.CacheMode = null;
     }
 
     private void OnVersionClick(object sender, RoutedEventArgs e) => new AboutWindow(ViewModel) { Owner = this }.ShowDialog();
@@ -707,6 +783,8 @@ public partial class MainWindow : Window
     private FrameworkElement CurrentContent => _pages.TryGetValue(_page, out var view) ? view.Content : PageContent;
     private bool _sidePanelShown;
     private bool _sidePanelPending;
+    /// <summary>状态栏出现或收起期间页面还在平移：这时不开始翻牌，否则量到的是过渡中的位置，缓存也会每帧重建。</summary>
+    private DoubleAnimation? _sidePanelFade;
 
     private void OnContentLayerSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -738,6 +816,7 @@ public partial class MainWindow : Window
     {
         var show = _sidePanelWanted;
         if (show == _sidePanelShown) return;
+        CancelFlip();
         _sidePanelShown = show;
 
         var onOverview = _page == "Overview";
@@ -773,6 +852,7 @@ public partial class MainWindow : Window
         SidePanel.BeginAnimation(OpacityProperty, null);
         OverviewOpenButton.BeginAnimation(OpacityProperty, null);
 
+        _sidePanelFade = null;
         if (!animate)
         {
             OnSidePanelSettled();
@@ -796,7 +876,12 @@ public partial class MainWindow : Window
         SidePanelShift.BeginAnimation(TranslateTransform.XProperty, Motion(panelOffset, show ? 0 : -24));
         SidePanel.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
         var fade = Motion(panelOpacity, show ? 1 : 0);
-        fade.Completed += (_, _) => OnSidePanelSettled();
+        fade.Completed += (_, _) =>
+        {
+            if (ReferenceEquals(_sidePanelFade, fade)) _sidePanelFade = null;
+            OnSidePanelSettled();
+        };
+        _sidePanelFade = fade;
         SidePanel.BeginAnimation(OpacityProperty, fade);
     }
 
@@ -805,7 +890,7 @@ public partial class MainWindow : Window
     private static DoubleAnimation Motion(double from, double to) =>
         new(from, to, MotionDuration) { EasingFunction = MotionEase };
 
-    /// <summary>动画结束后去掉位图缓存，文字恢复清晰的 ClearType；收起的状态栏不再参与排版。</summary>
+    /// <summary>动画结束后去掉位图缓存；收起的状态栏不再参与排版。</summary>
     private void OnSidePanelSettled()
     {
         if (SidePanel.HasAnimatedProperties && SidePanel.Opacity != (_sidePanelShown ? 1 : 0)) return;
