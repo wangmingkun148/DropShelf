@@ -1163,6 +1163,8 @@ public partial class MainWindow : Window
     private void SetPanelHeader(string page, bool animate)
     {
         var onOverview = page == "Overview";
+        // 从一个设置页抽到另一个设置页：返回链接和图标都不动，只换页名。
+        var swap = !onOverview && PanelBackButton.IsHitTestVisible;
         // 绑定到卡片的标题，切换语言后跟着更新。
         if (!onOverview && PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, page)) is { } pageTile)
             PanelPageName.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(Controls.PageTile.Header)) { Source = pageTile });
@@ -1183,6 +1185,12 @@ public partial class MainWindow : Window
         PanelBackButton.Opacity = PanelPageName.Opacity = onOverview ? 0 : 1;
         PanelPageTitle.Visibility = _sidePanelShown && onOverview ? Visibility.Visible : Visibility.Collapsed;
         if (!animate || !_sidePanelShown) return;
+        if (swap)
+        {
+            PanelPageNameShift.BeginAnimation(TranslateTransform.YProperty, Header(-40, 0, RollEase, 380));
+            PanelPageName.BeginAnimation(OpacityProperty, Header(0, 1, MotionEase, 200));
+            return;
+        }
 
         // “概览”与返回链接里的“概览”之间的位移和缩放，按文字左上角对齐。
         PanelPageTitle.Visibility = Visibility.Visible;
@@ -1458,8 +1466,10 @@ public partial class MainWindow : Window
         using (var context = visual.RenderOpen())
         {
             // 只截元素自身的范围：被裁掉的溢出部分不能算进画面，否则截图会被压扁。
+            // VisualBrush 的绝对 Viewbox 在元素外层的坐标里，带着元素的偏移和变换，要换算过去，否则居中的大页面截出来整体错开。
             var bounds = new Rect(0, 0, element.ActualWidth, element.ActualHeight);
-            context.DrawRectangle(new VisualBrush(element) { Viewbox = bounds, ViewboxUnits = BrushMappingMode.Absolute }, null, bounds);
+            var viewbox = VisualTreeHelper.GetParent(element) is Visual parent ? element.TransformToAncestor(parent).TransformBounds(bounds) : bounds;
+            context.DrawRectangle(new VisualBrush(element) { Viewbox = viewbox, ViewboxUnits = BrushMappingMode.Absolute }, null, bounds);
         }
         bitmap.Render(visual);
         bitmap.Freeze();
