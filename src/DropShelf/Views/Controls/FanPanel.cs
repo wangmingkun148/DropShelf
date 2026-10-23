@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using DropShelf.Interop;
 
 namespace DropShelf.Views.Controls;
 
@@ -77,6 +78,7 @@ public sealed class FanPanel : Panel
         {
             _childrenChanged = false;
             _hot = _lastHot = -1;
+            if (_dragged is not null) UseCache(false);
             _dragged = null;
             _gap = -1;
             // 放回的牌调整顺序后整组重新生成，光标下的牌直接保持选中，不会先落下再抽出。
@@ -232,9 +234,20 @@ public sealed class FanPanel : Panel
     {
         if (dragged is null) gap = -1;
         if (dragged == _dragged && gap == _gap) return;
+        if (dragged is null != _dragged is null) UseCache(dragged is not null);
         _dragged = dragged;
         _gap = gap;
         ApplyState(animate: true);
+    }
+
+    /// <summary>
+    /// 拖动期间每张牌缓存为位图：让位、并拢时只移动这些图，不必每帧重画牌面上的文字和缩略图。
+    /// 按选出时的放大倍数缓存，选出的牌放大后也清晰。
+    /// </summary>
+    private void UseCache(bool cached)
+    {
+        foreach (UIElement child in InternalChildren)
+            child.CacheMode = cached ? new BitmapCache(CacheScale.For(this) * HotScale) : null;
     }
 
     /// <summary>面板上横坐标 x 处对应的空位。</summary>

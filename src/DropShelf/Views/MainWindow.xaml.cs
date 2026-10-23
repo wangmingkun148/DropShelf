@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -81,29 +80,6 @@ public partial class MainWindow : Window
     {
         if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
             Background = System.Windows.Media.Brushes.Transparent;
-        System.Windows.Interop.HwndSource.FromHwnd(WindowEffects.Handle(this))?.AddHook(OnSizingMessage);
-    }
-
-    private bool _sizing;
-
-    /// <summary>
-    /// 实验：拖左边或上边拉伸时，系统默认把旧画面原样留在屏幕上，等新画面画好才替换，内容会先错位一帧再跳回。
-    /// 这里告诉系统只保留一个像素，其余等重画。后加的消息处理先执行，所以在 WindowChrome 之前接手；客户区仍是整个窗口，与 WindowChrome 一致。
-    /// </summary>
-    private IntPtr OnSizingMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (message == NativeMethods.WM_ENTERSIZEMOVE) _sizing = true;
-        else if (message == NativeMethods.WM_EXITSIZEMOVE) _sizing = false;
-        if (message != NativeMethods.WM_NCCALCSIZE || wParam == IntPtr.Zero || !_sizing) return IntPtr.Zero;
-        var size = Marshal.SizeOf<RECT>();
-        var next = Marshal.PtrToStructure<RECT>(lParam);
-        var last = Marshal.PtrToStructure<RECT>(lParam + size);
-        if (next.Width == last.Width && next.Height == last.Height || next.Left == last.Left && next.Top == last.Top) return IntPtr.Zero;
-        var pixel = new RECT { Left = next.Left, Top = next.Top, Right = next.Left + 1, Bottom = next.Top + 1 };
-        Marshal.StructureToPtr(pixel, lParam + size, false);
-        Marshal.StructureToPtr(pixel, lParam + size * 2, false);
-        handled = true;
-        return new IntPtr(NativeMethods.WVR_VALIDRECTS);
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
