@@ -31,6 +31,22 @@
             <Setter Property="Margin" Value="{Binding PageInset, RelativeSource={RelativeSource AncestorType=Window}}" />
         </Style>
 
+        <!-- 设置页是翻过来的卡片背面：一张圆角的牌，内容在牌里滚动，牌底下露出其余几张牌的边 -->
+        <Style x:Key="PageSheetStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SheetBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SheetBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <!-- 上下留一点空，滚动条不会伸进圆角 -->
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="MaxWidth" Value="908" />
+            <Setter Property="Margin" Value="{Binding SheetInset, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Style>
+        <!-- 牌里的留白：两侧 23 加上 1 的边框，正好等于代码里的 SheetPadding，内容和概览页对齐 -->
+        <Style x:Key="SheetContentStyle" TargetType="FrameworkElement">
+            <Setter Property="Margin" Value="23,12,23,24" />
+        </Style>
+
         <Style x:Key="ThemeTileStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0,0,12,0" />
             <Setter Property="Cursor" Value="Hand" />
@@ -685,257 +701,268 @@
                         </ScrollViewer>
                     </Grid>
 
+                    <!-- 其余几张卡片露在设置页底下的边，翻牌时由概览页的卡片收拢而来；画在概览页之上、设置页之下 -->
+                    <Canvas x:Name="StackLayer" Visibility="Collapsed" />
+
                     <!-- 常规 -->
                     <Grid x:Name="GeneralHost" Style="{StaticResource PageHostStyle}">
-                        <ScrollViewer x:Name="GeneralScroll" Style="{StaticResource PageScrollStyle}">
-                            <StackPanel x:Name="GeneralPage" Style="{StaticResource PageContentStyle}">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                                    <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
-                                    <TextBlock Text="{l:Loc General}" Style="{StaticResource TitleTextStyle}" />
+                        <Border x:Name="GeneralSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="GeneralScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="GeneralPage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc General}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Language}" Header="{l:Loc Language}" Description="{l:Loc LanguageDescription}">
+                                        <ListBox x:Name="LanguageSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding Language}">
+                                            <ListBoxItem Content="{l:Loc FollowSystem}" Tag="{x:Static models:AppLanguage.System}" />
+                                            <!-- 语言名称始终用该语言本身书写，切换错了也能认出来 -->
+                                            <ListBoxItem Content="中文" Tag="{x:Static models:AppLanguage.Chinese}" />
+                                            <ListBoxItem Content="English" Tag="{x:Static models:AppLanguage.English}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc StartWithWindows}" Description="{Binding StartupDescription}">
+                                        <CheckBox x:Name="StartupEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding StartWithWindows}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Keyboard}" Header="{l:Loc GlobalHotkey}" Description="{Binding HotkeyDescription}">
+                                        <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
+                                        <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
+                                    </controls:SettingsCard>
                                 </StackPanel>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Language}" Header="{l:Loc Language}" Description="{l:Loc LanguageDescription}">
-                                    <ListBox x:Name="LanguageSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding Language}">
-                                        <ListBoxItem Content="{l:Loc FollowSystem}" Tag="{x:Static models:AppLanguage.System}" />
-                                        <!-- 语言名称始终用该语言本身书写，切换错了也能认出来 -->
-                                        <ListBoxItem Content="中文" Tag="{x:Static models:AppLanguage.Chinese}" />
-                                        <ListBoxItem Content="English" Tag="{x:Static models:AppLanguage.English}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc StartWithWindows}" Description="{Binding StartupDescription}">
-                                    <CheckBox x:Name="StartupEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding StartWithWindows}" />
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Keyboard}" Header="{l:Loc GlobalHotkey}" Description="{Binding HotkeyDescription}">
-                                    <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
-                                    <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
-                                </controls:SettingsCard>
-                            </StackPanel>
-                        </ScrollViewer>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
 
                     <!-- 手势与置物架 -->
                     <Grid x:Name="ShelfHost" Style="{StaticResource PageHostStyle}">
-                        <ScrollViewer x:Name="ShelfScroll" Style="{StaticResource PageScrollStyle}">
-                            <StackPanel x:Name="ShelfPage" Style="{StaticResource PageContentStyle}">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                                    <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
-                                    <TextBlock Text="{l:Loc GesturesAndShelf}" Style="{StaticResource TitleTextStyle}" />
-                                </StackPanel>
-                                <TextBlock Text="{l:Loc AutoOpen}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,8" />
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Expand}" Header="{l:Loc TriggerHeader}" Description="{l:Loc TriggerDescription}">
-                                    <ListBox x:Name="TriggerSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding Trigger}">
-                                        <ListBoxItem Content="{l:Loc TriggerShake}" Tag="{x:Static models:AutoOpenTrigger.Shake}" />
-                                        <ListBoxItem Content="{l:Loc TriggerEdge}" Tag="{x:Static models:AutoOpenTrigger.Edge}" />
-                                        <ListBoxItem Content="{l:Loc TriggerBoth}" Tag="{x:Static models:AutoOpenTrigger.Both}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
-                                                       Description="{l:Loc SensitivityDescription}"
-                                                       Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
-                                    <ListBox x:Name="SensitivitySelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding Sensitivity}">
-                                        <ListBoxItem Content="{l:Loc SensitivityResponsive}" Tag="{x:Static models:GestureSensitivity.Responsive}" />
-                                        <ListBoxItem Content="{l:Loc SensitivityBalanced}" Tag="{x:Static models:GestureSensitivity.Balanced}" />
-                                        <ListBoxItem Content="{l:Loc SensitivitySteady}" Tag="{x:Static models:GestureSensitivity.Steady}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
-                                                       Description="{l:Loc EdgeDwellDescription}"
-                                                       Visibility="{Binding UsesEdge, Converter={StaticResource BoolToVisibility}}">
-                                    <ListBox x:Name="EdgeDwellSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding EdgeDwell}">
-                                        <ListBoxItem Content="{l:Loc DwellShort}" Tag="{x:Static models:EdgeDwellTime.Short}" />
-                                        <ListBoxItem Content="{l:Loc DwellMedium}" Tag="{x:Static models:EdgeDwellTime.Medium}" />
-                                        <ListBoxItem Content="{l:Loc DwellLong}" Tag="{x:Static models:EdgeDwellTime.Long}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
+                        <Border x:Name="ShelfSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="ShelfScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="ShelfPage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc GesturesAndShelf}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{l:Loc AutoOpen}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,8" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Expand}" Header="{l:Loc TriggerHeader}" Description="{l:Loc TriggerDescription}">
+                                        <ListBox x:Name="TriggerSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding Trigger}">
+                                            <ListBoxItem Content="{l:Loc TriggerShake}" Tag="{x:Static models:AutoOpenTrigger.Shake}" />
+                                            <ListBoxItem Content="{l:Loc TriggerEdge}" Tag="{x:Static models:AutoOpenTrigger.Edge}" />
+                                            <ListBoxItem Content="{l:Loc TriggerBoth}" Tag="{x:Static models:AutoOpenTrigger.Both}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
+                                                           Description="{l:Loc SensitivityDescription}"
+                                                           Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
+                                        <ListBox x:Name="SensitivitySelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding Sensitivity}">
+                                            <ListBoxItem Content="{l:Loc SensitivityResponsive}" Tag="{x:Static models:GestureSensitivity.Responsive}" />
+                                            <ListBoxItem Content="{l:Loc SensitivityBalanced}" Tag="{x:Static models:GestureSensitivity.Balanced}" />
+                                            <ListBoxItem Content="{l:Loc SensitivitySteady}" Tag="{x:Static models:GestureSensitivity.Steady}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
+                                                           Description="{l:Loc EdgeDwellDescription}"
+                                                           Visibility="{Binding UsesEdge, Converter={StaticResource BoolToVisibility}}">
+                                        <ListBox x:Name="EdgeDwellSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding EdgeDwell}">
+                                            <ListBoxItem Content="{l:Loc DwellShort}" Tag="{x:Static models:EdgeDwellTime.Short}" />
+                                            <ListBoxItem Content="{l:Loc DwellMedium}" Tag="{x:Static models:EdgeDwellTime.Medium}" />
+                                            <ListBoxItem Content="{l:Loc DwellLong}" Tag="{x:Static models:EdgeDwellTime.Long}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
 
-                                <TextBlock Text="{l:Loc Shelf}" Style="{StaticResource SectionHeaderTextStyle}" />
-                                <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc Size}" Description="{l:Loc SizeDescription}">
-                                    <ListBox x:Name="ShelfSizeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding ShelfSize}">
-                                        <ListBoxItem Content="{l:Loc SizeSmall}" Tag="{x:Static models:QuickShelfSize.Small}" />
-                                        <ListBoxItem Content="{l:Loc SizeMedium}" Tag="{x:Static models:QuickShelfSize.Medium}" />
-                                        <ListBoxItem Content="{l:Loc SizeLarge}" Tag="{x:Static models:QuickShelfSize.Large}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Move}" Header="{l:Loc DragOutModeHeader}"
-                                                       Description="{l:Loc DragOutModeDescription}">
-                                    <ListBox x:Name="DragOutModeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding DragOutMode}">
-                                        <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
-                                        <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.Clear}" Header="{l:Loc CloseWhenEmpty}"
-                                                       Description="{l:Loc CloseWhenEmptyDescription}">
-                                    <CheckBox x:Name="CloseWhenEmptyBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
-                                </controls:SettingsCard>
-                                <controls:SettingsCard Icon="{StaticResource Glyph.History}" Header="{l:Loc ClearShelfHistory}"
-                                                       Description="{Binding HistoryDescription}">
-                                    <Button x:Name="ClearHistoryButton" Content="{l:Loc Clear}" Command="{Binding ClearHistoryCommand}" MinWidth="96" />
-                                </controls:SettingsCard>
-                            </StackPanel>
-                        </ScrollViewer>
+                                    <TextBlock Text="{l:Loc Shelf}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc Size}" Description="{l:Loc SizeDescription}">
+                                        <ListBox x:Name="ShelfSizeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding ShelfSize}">
+                                            <ListBoxItem Content="{l:Loc SizeSmall}" Tag="{x:Static models:QuickShelfSize.Small}" />
+                                            <ListBoxItem Content="{l:Loc SizeMedium}" Tag="{x:Static models:QuickShelfSize.Medium}" />
+                                            <ListBoxItem Content="{l:Loc SizeLarge}" Tag="{x:Static models:QuickShelfSize.Large}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Move}" Header="{l:Loc DragOutModeHeader}"
+                                                           Description="{l:Loc DragOutModeDescription}">
+                                        <ListBox x:Name="DragOutModeSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding DragOutMode}">
+                                            <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
+                                            <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Clear}" Header="{l:Loc CloseWhenEmpty}"
+                                                           Description="{l:Loc CloseWhenEmptyDescription}">
+                                        <CheckBox x:Name="CloseWhenEmptyBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding CloseWhenEmpty}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.History}" Header="{l:Loc ClearShelfHistory}"
+                                                           Description="{Binding HistoryDescription}">
+                                        <Button x:Name="ClearHistoryButton" Content="{l:Loc Clear}" Command="{Binding ClearHistoryCommand}" MinWidth="96" />
+                                    </controls:SettingsCard>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
 
                     <!-- 快速操作 -->
                     <Grid x:Name="ActionsHost" Style="{StaticResource PageHostStyle}">
-                        <ScrollViewer x:Name="ActionsScroll" Style="{StaticResource PageScrollStyle}">
-                            <StackPanel x:Name="ActionsPage" Style="{StaticResource PageContentStyle}"
-                                        PreviewMouseLeftButtonDown="OnActionCardMouseDown" PreviewMouseMove="OnActionCardMouseMove"
-                                        PreviewMouseLeftButtonUp="OnActionCardMouseUp" LostMouseCapture="OnActionCardLostCapture">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
-                                    <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource TitleTextStyle}" />
-                                </StackPanel>
-                                <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,0,0,20"
-                                           Text="{l:Loc ActionsPageDescription}" />
-                                <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc ActionLayoutHeader}">
-                                    <controls:SettingsCard.Style>
-                                        <Style TargetType="controls:SettingsCard" BasedOn="{StaticResource {x:Type controls:SettingsCard}}">
-                                            <Setter Property="Description" Value="{l:Loc ActionLayoutDescription}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding HasActionSlots}" Value="False">
-                                                    <Setter Property="Description" Value="{l:Loc ActionLayoutOffDescription}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </controls:SettingsCard.Style>
-                                    <ListBox x:Name="ActionLayoutSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                             SelectedValue="{Binding ActionLayout}">
-                                        <ListBoxItem Content="{l:Loc LayoutOff}" Tag="{x:Static models:QuickActionLayout.Off}" />
-                                        <ListBoxItem Content="{l:Loc LayoutTwo}" Tag="{x:Static models:QuickActionLayout.Two}" />
-                                        <ListBoxItem Content="{l:Loc LayoutFour}" Tag="{x:Static models:QuickActionLayout.Four}" />
-                                    </ListBox>
-                                </controls:SettingsCard>
-
-                                <StackPanel Visibility="{Binding HasActionSlots, Converter={StaticResource BoolToVisibility}}">
-                                    <TextBlock Text="{l:Loc CurrentActions}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,24,0,2" />
-                                    <TextBlock Text="{l:Loc DragToSwapHint}" Style="{StaticResource CaptionTextStyle}" Margin="2,0,0,10" />
-                                    <!-- 与置物架底部按钮的排列一致，排成一行 -->
-                                    <ItemsControl x:Name="ActionSlotsList" ItemsSource="{Binding VisibleSlots}" Focusable="False"
-                                                  ItemTemplate="{StaticResource ActionSlotTemplate}" Margin="0,0,-4,0">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <UniformGrid Rows="1" />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                    </ItemsControl>
-                                </StackPanel>
-
-                                <TextBlock Text="{l:Loc MoreActions}" Style="{StaticResource SectionHeaderTextStyle}" />
-                                <ItemsControl x:Name="MoreActionsList" ItemsSource="{Binding MoreActions}" Focusable="False"
-                                              ItemTemplate="{StaticResource MoreActionTemplate}" />
-                                <Button x:Name="AddCustomActionButton" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="12,5,14,6"
-                                        Command="{Binding AddCustomActionCommand}" IsEnabled="{Binding CanAddCustomAction}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="12"
-                                                   Margin="0,1,8,0" VerticalAlignment="Center" />
-                                        <TextBlock Text="{l:Loc AddCustomAction}" />
+                        <Border x:Name="ActionsSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="ActionsScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="ActionsPage" Style="{StaticResource SheetContentStyle}"
+                                            PreviewMouseLeftButtonDown="OnActionCardMouseDown" PreviewMouseMove="OnActionCardMouseMove"
+                                            PreviewMouseLeftButtonUp="OnActionCardMouseUp" LostMouseCapture="OnActionCardLostCapture">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource TitleTextStyle}" />
                                     </StackPanel>
-                                </Button>
-                            </StackPanel>
-                        </ScrollViewer>
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" FontSize="13" Margin="0,0,0,20"
+                                               Text="{l:Loc ActionsPageDescription}" />
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc ActionLayoutHeader}">
+                                        <controls:SettingsCard.Style>
+                                            <Style TargetType="controls:SettingsCard" BasedOn="{StaticResource {x:Type controls:SettingsCard}}">
+                                                <Setter Property="Description" Value="{l:Loc ActionLayoutDescription}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasActionSlots}" Value="False">
+                                                        <Setter Property="Description" Value="{l:Loc ActionLayoutOffDescription}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </controls:SettingsCard.Style>
+                                        <ListBox x:Name="ActionLayoutSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding ActionLayout}">
+                                            <ListBoxItem Content="{l:Loc LayoutOff}" Tag="{x:Static models:QuickActionLayout.Off}" />
+                                            <ListBoxItem Content="{l:Loc LayoutTwo}" Tag="{x:Static models:QuickActionLayout.Two}" />
+                                            <ListBoxItem Content="{l:Loc LayoutFour}" Tag="{x:Static models:QuickActionLayout.Four}" />
+                                        </ListBox>
+                                    </controls:SettingsCard>
+
+                                    <StackPanel Visibility="{Binding HasActionSlots, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{l:Loc CurrentActions}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,24,0,2" />
+                                        <TextBlock Text="{l:Loc DragToSwapHint}" Style="{StaticResource CaptionTextStyle}" Margin="2,0,0,10" />
+                                        <!-- 与置物架底部按钮的排列一致，排成一行 -->
+                                        <ItemsControl x:Name="ActionSlotsList" ItemsSource="{Binding VisibleSlots}" Focusable="False"
+                                                      ItemTemplate="{StaticResource ActionSlotTemplate}" Margin="0,0,-4,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <UniformGrid Rows="1" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
+                                    </StackPanel>
+
+                                    <TextBlock Text="{l:Loc MoreActions}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                    <ItemsControl x:Name="MoreActionsList" ItemsSource="{Binding MoreActions}" Focusable="False"
+                                                  ItemTemplate="{StaticResource MoreActionTemplate}" />
+                                    <Button x:Name="AddCustomActionButton" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="12,5,14,6"
+                                            Command="{Binding AddCustomActionCommand}" IsEnabled="{Binding CanAddCustomAction}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                                       Margin="0,1,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{l:Loc AddCustomAction}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
 
                     <!-- 外观 -->
                     <Grid x:Name="AppearanceHost" Style="{StaticResource PageHostStyle}">
-                        <ScrollViewer x:Name="AppearanceScroll" Style="{StaticResource PageScrollStyle}">
-                            <StackPanel x:Name="AppearancePage" Style="{StaticResource PageContentStyle}">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                                    <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
-                                    <TextBlock Text="{l:Loc Appearance}" Style="{StaticResource TitleTextStyle}" />
-                                </StackPanel>
-                                <TextBlock Text="{l:Loc Theme}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,10" />
-                                <ListBox x:Name="ThemeSelector" SelectedValuePath="Tag" SelectedValue="{Binding Theme}" Background="Transparent"
-                                         BorderThickness="0" ItemContainerStyle="{StaticResource ThemeTileStyle}"
-                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                    <ListBox.Template>
-                                        <ControlTemplate TargetType="ListBox">
-                                            <ItemsPresenter />
-                                        </ControlTemplate>
-                                    </ListBox.Template>
-                                    <ListBox.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel />
-                                        </ItemsPanelTemplate>
-                                    </ListBox.ItemsPanel>
-                                    <ListBoxItem Tag="{x:Static models:AppTheme.System}">
-                                        <StackPanel>
-                                            <Grid Width="140" Height="92">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <Border CornerRadius="7,0,0,7" Background="#F3F3F3" />
-                                                <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
-                                                <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
-                                                    <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
+                        <Border x:Name="AppearanceSheet" Style="{StaticResource PageSheetStyle}">
+                            <ScrollViewer x:Name="AppearanceScroll" Style="{StaticResource PageScrollStyle}">
+                                <StackPanel x:Name="AppearancePage" Style="{StaticResource SheetContentStyle}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                        <Button Style="{StaticResource BackButtonStyle}" Click="OnBackClick" />
+                                        <TextBlock Text="{l:Loc Appearance}" Style="{StaticResource TitleTextStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{l:Loc Theme}" Style="{StaticResource SectionHeaderTextStyle}" Margin="2,0,0,10" />
+                                    <ListBox x:Name="ThemeSelector" SelectedValuePath="Tag" SelectedValue="{Binding Theme}" Background="Transparent"
+                                             BorderThickness="0" ItemContainerStyle="{StaticResource ThemeTileStyle}"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.Template>
+                                            <ControlTemplate TargetType="ListBox">
+                                                <ItemsPresenter />
+                                            </ControlTemplate>
+                                        </ListBox.Template>
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.System}">
+                                            <StackPanel>
+                                                <Grid Width="140" Height="92">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border CornerRadius="7,0,0,7" Background="#F3F3F3" />
+                                                    <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
+                                                    <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock Text="{l:Loc FollowSystem}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
+                                            <StackPanel>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#F3F3F3" BorderBrush="#14000000" BorderThickness="1">
+                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#F3F3F3" BorderBrush="#26000000" BorderThickness="1" />
+                                                    </Border>
                                                 </Border>
-                                            </Grid>
-                                            <TextBlock Text="{l:Loc FollowSystem}" Margin="2,8,0,2" FontSize="13" />
-                                        </StackPanel>
-                                    </ListBoxItem>
-                                    <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
-                                        <StackPanel>
-                                            <Border Width="140" Height="92" CornerRadius="7" Background="#F3F3F3" BorderBrush="#14000000" BorderThickness="1">
-                                                <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
-                                                    <Border Width="30" Height="30" CornerRadius="5" Background="#F3F3F3" BorderBrush="#26000000" BorderThickness="1" />
+                                                <TextBlock Text="{l:Loc ThemeLight}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                        <ListBoxItem Tag="{x:Static models:AppTheme.Dark}">
+                                            <StackPanel>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#202020" BorderBrush="#33FFFFFF" BorderThickness="1">
+                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#2B2B2B" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#3B3B3B" BorderBrush="#33FFFFFF" BorderThickness="1" />
+                                                    </Border>
                                                 </Border>
-                                            </Border>
-                                            <TextBlock Text="{l:Loc ThemeLight}" Margin="2,8,0,2" FontSize="13" />
-                                        </StackPanel>
-                                    </ListBoxItem>
-                                    <ListBoxItem Tag="{x:Static models:AppTheme.Dark}">
-                                        <StackPanel>
-                                            <Border Width="140" Height="92" CornerRadius="7" Background="#202020" BorderBrush="#33FFFFFF" BorderThickness="1">
-                                                <Border Width="64" Height="64" CornerRadius="8" Background="#2B2B2B" BorderBrush="#26FFFFFF" BorderThickness="1">
-                                                    <Border Width="30" Height="30" CornerRadius="5" Background="#3B3B3B" BorderBrush="#33FFFFFF" BorderThickness="1" />
-                                                </Border>
-                                            </Border>
-                                            <TextBlock Text="{l:Loc ThemeDark}" Margin="2,8,0,2" FontSize="13" />
-                                        </StackPanel>
-                                    </ListBoxItem>
-                                </ListBox>
+                                                <TextBlock Text="{l:Loc ThemeDark}" Margin="2,8,0,2" FontSize="13" />
+                                            </StackPanel>
+                                        </ListBoxItem>
+                                    </ListBox>
 
-                                <Border Style="{StaticResource CardBorderStyle}" Margin="0,20,0,0" Padding="20,14,16,14">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="{StaticResource Glyph.Brush}" FontFamily="{StaticResource IconFont}" FontSize="20" Margin="0,0,20,0"
-                                                   VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1">
-                                            <TextBlock Text="{l:Loc AccentColor}" FontSize="14" />
-                                            <TextBlock Text="{l:Loc AccentDescription}" FontSize="12" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                        </StackPanel>
-                                        <ListBox x:Name="AccentSelector" Grid.Row="1" Grid.Column="1" Margin="-5,10,0,0" ItemsSource="{Binding AccentOptions}"
-                                                 SelectedValuePath="Value" SelectedValue="{Binding Accent}" Background="Transparent" BorderThickness="0"
-                                                 ItemContainerStyle="{StaticResource AccentSwatchStyle}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                            <ListBox.Template>
-                                                <ControlTemplate TargetType="ListBox">
-                                                    <ItemsPresenter />
-                                                </ControlTemplate>
-                                            </ListBox.Template>
-                                            <ListBox.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel />
-                                                </ItemsPanelTemplate>
-                                            </ListBox.ItemsPanel>
-                                        </ListBox>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-                        </ScrollViewer>
+                                    <Border Style="{StaticResource CardBorderStyle}" Margin="0,20,0,0" Padding="20,14,16,14">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="{StaticResource Glyph.Brush}" FontFamily="{StaticResource IconFont}" FontSize="20" Margin="0,0,20,0"
+                                                       VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{l:Loc AccentColor}" FontSize="14" />
+                                                <TextBlock Text="{l:Loc AccentDescription}" FontSize="12" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            </StackPanel>
+                                            <ListBox x:Name="AccentSelector" Grid.Row="1" Grid.Column="1" Margin="-5,10,0,0" ItemsSource="{Binding AccentOptions}"
+                                                     SelectedValuePath="Value" SelectedValue="{Binding Accent}" Background="Transparent" BorderThickness="0"
+                                                     ItemContainerStyle="{StaticResource AccentSwatchStyle}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                <ListBox.Template>
+                                                    <ControlTemplate TargetType="ListBox">
+                                                        <ItemsPresenter />
+                                                    </ControlTemplate>
+                                                </ListBox.Template>
+                                                <ListBox.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ListBox.ItemsPanel>
+                                            </ListBox>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
                 </Grid>
                 <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"

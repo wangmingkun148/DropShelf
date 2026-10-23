@@ -1624,6 +1624,14 @@ internal static class Program
         Assert(shelfHost.Visibility == Visibility.Visible && overviewHost.Visibility == Visibility.Collapsed, "点击设置卡片没有切换页面");
         Assert(shelfHost is { Clip: null, IsHitTestVisible: true } && shelfHost.RenderTransform.Value.IsIdentity && shelfHost.Children.Count == 1 &&
                shelfScroll is { CacheMode: null, Opacity: 1 } && overviewHost.Clip is null, "翻牌结束后页面应回到静止状态：没有变换、裁剪、缓存和背面的边框");
+        var stackLayer = (System.Windows.Controls.Canvas)window.FindName("StackLayer")!;
+        var shelfSheet = (FrameworkElement)window.FindName("ShelfSheet")!;
+        var edges = stackLayer.Children.OfType<System.Windows.Controls.Grid>().ToList();
+        var sheetBottom = shelfSheet.TranslatePoint(new System.Windows.Point(0, shelfSheet.ActualHeight), stackLayer).Y;
+        Assert(stackLayer is { Visibility: Visibility.Visible, Clip: null, IsHitTestVisible: true } && edges.Count == 3 &&
+               edges.All(edge => edge.Visibility == Visibility.Visible && System.Windows.Controls.Canvas.GetTop(edge) >= sheetBottom - 0.5 && edge.ActualWidth < shelfSheet.ActualWidth),
+            "设置页底下应露出其余三张牌的边");
+        Assert(pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1), "翻牌结束后概览页的卡片应恢复显示");
         var pageName = (System.Windows.Controls.TextBlock)window.FindName("PanelPageName")!;
         try
         {
@@ -1717,16 +1725,18 @@ internal static class Program
         var generalScroll = (System.Windows.Controls.ScrollViewer)window.FindName("GeneralScroll")!;
         if (window.BeginFlipDrag(generalTile))
         {
+            var tileFace = (UIElement)stackLayer.Children[^1];
             window.DragFlip(0.3);
             Pump(50);
-            Assert(generalTile.Opacity == 1 && !generalTile.RenderTransform.Value.IsIdentity && generalHost.Visibility == Visibility.Hidden,
-                "拖到侧立前应只转动卡片");
+            Assert(generalTile.Opacity == 0 && tileFace.Visibility == Visibility.Visible && !tileFace.RenderTransform.Value.IsIdentity &&
+                   generalHost.Visibility == Visibility.Hidden, "拖到侧立前应只转动卡片的截图");
             window.DragFlip(0.7);
             Pump(50);
-            Assert(generalTile.Opacity == 0 && generalHost.Visibility == Visibility.Visible && overviewHost.Clip is not null, "拖过侧立后应换成页面");
+            Assert(tileFace.Visibility == Visibility.Hidden && generalHost.Visibility == Visibility.Visible && overviewHost.Clip is not null && stackLayer.Clip is not null,
+                "拖过侧立后应换成页面");
             window.DragFlip(0.2);
             Pump(50);
-            Assert(generalTile.Opacity == 1 && generalHost.Visibility == Visibility.Hidden && overviewHost.Clip is null, "往回拖过侧立后应换回卡片");
+            Assert(tileFace.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Hidden && overviewHost.Clip is null, "往回拖过侧立后应换回卡片");
             window.ReleaseFlip(0);
             Pump(700);
             Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewPage is { Opacity: 1, CacheMode: null } &&
@@ -1754,7 +1764,8 @@ internal static class Program
             Pump(900);
         }
         Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewPage is { Opacity: 1, CacheMode: null } &&
-               pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "甩动应翻回概览页，卡片落回原位");
+               pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity) &&
+               stackLayer.Visibility == Visibility.Collapsed, "甩动应翻回概览页，卡片落回原位，牌的边收起");
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {

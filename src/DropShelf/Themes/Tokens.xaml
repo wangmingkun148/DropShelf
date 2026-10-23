@@ -21,6 +21,13 @@
     <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
     <SolidColorBrush x:Key="CardHoverBrush" Color="#E6FFFFFF" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#14000000" />
+    <SolidColorBrush x:Key="StackEdgeBrush" Color="#0D0067C0" />
+    <SolidColorBrush x:Key="SheetGlowBrush" Color="#1A0067C0" />
+    <SolidColorBrush x:Key="SheetBorderBrush" Color="#290067C0" />
+    <RadialGradientBrush x:Key="SheetBrush" Center="0,0" GradientOrigin="0,0" RadiusX="1.1" RadiusY="0.7">
+        <GradientStop Color="#1A0067C0" Offset="0" />
+        <GradientStop Color="#0D0067C0" Offset="0.7" />
+    </RadialGradientBrush>
     <SolidColorBrush x:Key="ControlBrush" Color="#B3FFFFFF" />
     <SolidColorBrush x:Key="ControlHoverBrush" Color="#80F9F9F9" />
     <SolidColorBrush x:Key="ControlPressedBrush" Color="#4DF9F9F9" />

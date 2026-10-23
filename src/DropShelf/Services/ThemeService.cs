@@ -111,7 +111,11 @@ public static class ThemeService
             ["AccentPressedBrush"] = WithAlpha(fill, 0xCC),
             ["AccentTextBrush"] = EnsureContrast(dark ? accent.Light3 : accent.Dark2, background, 4.5, dark),
             ["AccentSubtleBrush"] = WithAlpha(fill, dark ? (byte)0x2E : (byte)0x1F),
-            ["AccentFaintBrush"] = WithAlpha(fill, dark ? (byte)0x18 : (byte)0x10)
+            ["AccentFaintBrush"] = WithAlpha(fill, dark ? (byte)0x18 : (byte)0x10),
+            // 设置页是翻过来的卡片背面：整张铺一层很淡的强调色，左上角稍浓；深色主题下面再垫一层淡淡的黑，里面的设置卡片才显得出来。
+            ["StackEdgeBrush"] = Tint(fill, 0.05, dark ? 0.12 : 0),
+            ["SheetGlowBrush"] = Tint(fill, 0.10, dark ? 0.12 : 0),
+            ["SheetBorderBrush"] = WithAlpha(fill, 0x29)
         };
 
         foreach (var (key, light, darkValue) in NeutralPalette)
@@ -169,11 +173,26 @@ public static class ThemeService
             brush.Freeze();
             resources[key] = brush;
         }
+        var sheet = new RadialGradientBrush
+        {
+            Center = new System.Windows.Point(0, 0), GradientOrigin = new System.Windows.Point(0, 0), RadiusX = 1.1, RadiusY = 0.7,
+            GradientStops = { new GradientStop(((SolidColorBrush)resources["SheetGlowBrush"]).Color, 0), new GradientStop(((SolidColorBrush)resources["StackEdgeBrush"]).Color, 0.7) }
+        };
+        sheet.Freeze();
+        resources["SheetBrush"] = sheet;
         resources["AccentColor"] = AccentFill;
         var systemBrush = new SolidColorBrush(systemAccent);
         systemBrush.Freeze();
         resources["SystemAccentBrush"] = systemBrush;
         ThemeChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>先垫一层透明度为 shade 的黑，再铺一层透明度为 alpha 的 color，合成为一种半透明色。</summary>
+    private static WpfColor Tint(WpfColor color, double alpha, double shade)
+    {
+        var total = 1 - (1 - shade) * (1 - alpha);
+        var k = alpha / total;
+        return WpfColor.FromArgb((byte)Math.Round(total * 255), (byte)Math.Round(color.R * k), (byte)Math.Round(color.G * k), (byte)Math.Round(color.B * k));
     }
 
     public static double RelativeLuminance(WpfColor color)
