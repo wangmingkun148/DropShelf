@@ -1342,6 +1342,17 @@ internal static class Program
         Assert(bannerResult.Status == ImageCompressionStatus.Failed ||
                (bannerResult.Status == ImageCompressionStatus.Compressed && new FileInfo(bannerResult.Output!).Length <= 10 * 1024),
             "细长图片压缩后超过了限制却报告成功");
+
+        // 分成多个条带复制时，每一行都要与原图一致。
+        var source = System.Windows.Media.Imaging.BitmapFrame.Create(new MemoryStream(CreateNoisyPng(1200, 1500)));
+        var bgr = new System.Windows.Media.Imaging.FormatConvertedBitmap(source, System.Windows.Media.PixelFormats.Bgr24, null, 0);
+        var copy = ImageCompressor.Materialize(bgr);
+        var stride = (1200 * 3 + 3) & ~3;
+        var expected = new byte[stride * 1500];
+        var actual = new byte[stride * 1500];
+        bgr.CopyPixels(expected, stride, 0);
+        copy.CopyPixels(actual, stride, 0);
+        Assert(copy.PixelWidth == 1200 && copy.PixelHeight == 1500 && expected.AsSpan().SequenceEqual(actual), "分段复制的像素与原图不一致");
     }
 
     private static async Task TestCompressImageReplacesItems()

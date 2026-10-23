@@ -183,6 +183,8 @@ public sealed class CardGhostWindow : Window
     {
         CompositionTarget.Rendering -= OnFrame;
         _running = false;
+        // 不再引用旧卡片的位置回调。
+        _target = () => null;
         _arrived = null;
         _clock.Stop();
         Hide();

@@ -269,15 +269,6 @@ internal static class ShellInterop
     public static int? TryGetInt32(IDataObject data, string format) =>
         TryGetBytes(data, format) is { Length: >= 4 } bytes ? BitConverter.ToInt32(bytes, 0) : null;
 
-    public static string? TryGetUnicodeString(IDataObject data, string format)
-    {
-        var bytes = TryGetBytes(data, format);
-        if (bytes is null) return null;
-        var text = Encoding.Unicode.GetString(bytes);
-        var end = text.IndexOf('\0');
-        return end >= 0 ? text[..end] : text;
-    }
-
     public static bool TrySetDropDescription(IDataObject data, int type, string message, string insert = "")
     {
         var description = new DROPDESCRIPTION { Type = type, Message = message, Insert = insert };

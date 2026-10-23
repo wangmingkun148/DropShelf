@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using DropShelf.Localization;
 
@@ -11,19 +10,6 @@ public sealed class FileOperationService
     private const string FolderIntoItselfMessage = "不能把文件夹复制或移动到它自己的内部。";
     private const string FolderContainsLinksMessage = "文件夹中包含目录链接，无法完整复制。";
     private static readonly EnumerationOptions ScanOptions = new() { AttributesToSkip = 0, IgnoreInaccessible = false };
-
-    public void Open(string path)
-    {
-        EnsureExists(path);
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-    }
-
-    public void Reveal(string path)
-    {
-        EnsureExists(path);
-        var arguments = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
-        Process.Start(new ProcessStartInfo("explorer.exe", arguments) { UseShellExecute = true });
-    }
 
     /// <summary>整个过程在后台线程中进行，目录扫描和复制不会占住界面线程。</summary>
     public Task<IReadOnlyList<FileOperationResult>> CopyAsync(

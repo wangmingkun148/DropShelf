@@ -77,28 +77,32 @@ public static class ImageCompressor
         }
     }
 
-    /// <summary>找出不超过上限的最高画质；最低画质仍然过大时按比例缩小后重试。</summary>
+    /// <summary>
+    /// 找出不超过上限的最高画质；最低画质仍然过大时按比例缩小后重试。
+    /// 搜索要编码很多次：两个缓冲区轮流使用，一个存目前最好的结果，另一个写新的候选，只在最后复制一次。
+    /// </summary>
     public static byte[] EncodeWithinLimit(BitmapSource image, long maximumBytes)
     {
+        var best = new MemoryStream();
+        var candidate = new MemoryStream();
         var current = image;
         for (var round = 0; round < 10; round++)
         {
-            var best = Encode(current, MaximumQuality);
-            if (best.Length <= maximumBytes) return best;
+            Encode(current, MaximumQuality, best);
+            if (best.Length <= maximumBytes) return best.ToArray();
 
-            var smallest = Encode(current, MinimumQuality);
-            if (smallest.Length <= maximumBytes)
+            Encode(current, MinimumQuality, best);
+            if (best.Length <= maximumBytes)
             {
-                best = smallest;
                 var low = MinimumQuality;
                 var high = MaximumQuality - 1;
                 while (low < high)
                 {
                     var middle = (low + high + 1) / 2;
-                    var candidate = Encode(current, middle);
+                    Encode(current, middle, candidate);
                     if (candidate.Length <= maximumBytes)
                     {
-                        best = candidate;
+                        (best, candidate) = (candidate, best);
                         low = middle;
                     }
                     else
@@ -106,17 +110,18 @@ public static class ImageCompressor
                         high = middle - 1;
                     }
                 }
-                return best;
+                return best.ToArray();
             }
 
             // 文件大小与像素数大致成正比，按面积比例缩小并多留一点余量。
-            var ratio = Math.Clamp(Math.Sqrt((double)maximumBytes / smallest.Length) * 0.92, 0.2, 0.92);
+            var ratio = Math.Clamp(Math.Sqrt((double)maximumBytes / best.Length) * 0.92, 0.2, 0.92);
             // 两边都已经很小时停止；细长的图片允许短边继续缩小。
-            if (current.PixelWidth * ratio < MinimumEdge && current.PixelHeight * ratio < MinimumEdge) return smallest;
-            if (current.PixelWidth * ratio < 1 || current.PixelHeight * ratio < 1) return smallest;
+            if (current.PixelWidth * ratio < MinimumEdge && current.PixelHeight * ratio < MinimumEdge) return best.ToArray();
+            if (current.PixelWidth * ratio < 1 || current.PixelHeight * ratio < 1) return best.ToArray();
             current = Resize(current, ratio);
         }
-        return Encode(current, MinimumQuality);
+        Encode(current, MinimumQuality, best);
+        return best.ToArray();
     }
 
     /// <summary>
@@ -150,20 +155,20 @@ public static class ImageCompressor
     private static FileStream OpenRead(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
-    private static byte[] Encode(BitmapSource bitmap, int quality)
+    /// <summary>编码到 output 中，覆盖原有内容，已分配的容量留着下次用。</summary>
+    private static void Encode(BitmapSource bitmap, int quality, MemoryStream output)
     {
         var encoder = new JpegBitmapEncoder { QualityLevel = quality };
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
+        output.SetLength(0);
+        encoder.Save(output);
     }
 
     private static BitmapSource Resize(BitmapSource bitmap, double ratio)
     {
         var scaled = new TransformedBitmap(bitmap, new ScaleTransform(ratio, ratio));
         scaled.Freeze();
-        return Materialize(scaled, scaled.Format);
+        return Materialize(scaled);
     }
 
     private static int ReadOrientation(BitmapFrame frame)
@@ -236,12 +241,21 @@ public static class ImageCompressor
         return flattened;
     }
 
-    private static BitmapSource Materialize(BitmapSource bitmap, PixelFormat format)
+    /// <summary>把缩放结果固定下来，之后多次编码不必每次重新缩放；与 Flatten 一样按条带复制，不建整张图大小的临时数组。</summary>
+    internal static BitmapSource Materialize(BitmapSource bitmap)
     {
-        var stride = (bitmap.PixelWidth * format.BitsPerPixel + 31) / 32 * 4;
-        var pixels = new byte[stride * bitmap.PixelHeight];
-        bitmap.CopyPixels(pixels, stride, 0);
-        var copy = BitmapSource.Create(bitmap.PixelWidth, bitmap.PixelHeight, 96, 96, format, bitmap.Palette, pixels, stride);
+        var width = bitmap.PixelWidth;
+        var height = bitmap.PixelHeight;
+        var stride = (width * bitmap.Format.BitsPerPixel + 31) / 32 * 4;
+        var rows = Math.Clamp(4_000_000 / stride, 1, height);
+        var buffer = new byte[stride * rows];
+        var copy = new WriteableBitmap(width, height, 96, 96, bitmap.Format, bitmap.Palette);
+        for (var top = 0; top < height; top += rows)
+        {
+            var strip = new Int32Rect(0, top, width, Math.Min(rows, height - top));
+            bitmap.CopyPixels(strip, buffer, stride, 0);
+            copy.WritePixels(strip, buffer, stride, 0);
+        }
         copy.Freeze();
         return copy;
     }

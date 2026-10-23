@@ -136,8 +136,6 @@ public static class QuickActions
     public static IReadOnlyList<QuickActionType> Defaults { get; } =
         [QuickActionType.CompressZip, QuickActionType.CopyFullPath, QuickActionType.MoveTo, QuickActionType.Properties];
 
-    public static bool IsSupported(QuickActionType type) => All.Any(info => info.Type == type);
-
     public static bool IsBuiltInId(string? id) => All.Any(info => info.Id == id);
 
     public static QuickActionInfo Get(QuickActionType type) =>

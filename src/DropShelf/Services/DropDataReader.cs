@@ -296,9 +296,12 @@ public static class DropDataReader
                 extension = formatExtension;
                 break;
             }
-            if (encoded is null && data.GetData(WpfDataFormats.Bitmap, true) is BitmapSource source) bitmap = source;
-            bitmap ??= DecodeDib(data, DibV5Format) ?? DecodeDib(data, WpfDataFormats.Dib);
-            if (bitmap is { CanFreeze: true }) bitmap.Freeze();
+            // 已有编码图片时直接保存它，不再解码用不到的位图。
+            if (encoded is null)
+            {
+                bitmap = data.GetData(WpfDataFormats.Bitmap, true) as BitmapSource ?? DecodeDib(data, DibV5Format) ?? DecodeDib(data, WpfDataFormats.Dib);
+                if (bitmap is { CanFreeze: true }) bitmap.Freeze();
+            }
         }
         catch (Exception exception)
         {

@@ -248,14 +248,16 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, animation);
     }
 
-    /// <summary>页面略微下沉并淡出，动画期间缓存为位图。</summary>
+    /// <summary>页面略微下沉并淡出，动画期间缓存为位图，淡出后去掉缓存。</summary>
     private static void FadeOutPage(FrameworkElement page)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
         page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
         var duration = TimeSpan.FromMilliseconds(200);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
-        page.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase });
+        var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
+        fade.Completed += (_, _) => page.CacheMode = null;
+        page.BeginAnimation(OpacityProperty, fade);
     }
 
     // ───────────── 状态栏顶部的页面标题 ─────────────
