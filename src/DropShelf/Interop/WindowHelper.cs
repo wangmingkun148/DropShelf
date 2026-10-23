@@ -96,6 +96,23 @@ internal static class WindowEffects
         }
     }
 
+    /// <summary>Windows 11 上不画圆角和边框，透明窗口里只看得到内容。</summary>
+    public static void SetFrameless(Window window)
+    {
+        if (!IsWindows11) return;
+        try
+        {
+            var handle = Handle(window);
+            var corner = NativeMethods.DWMWCP_DONOTROUND;
+            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+            var border = NativeMethods.DWMWA_COLOR_NONE;
+            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_BORDER_COLOR, ref border, sizeof(uint));
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>不在任务栏和 Alt+Tab 中显示；可选不抢占当前程序的焦点。</summary>
     public static void SetToolWindow(Window window, bool noActivate)
     {

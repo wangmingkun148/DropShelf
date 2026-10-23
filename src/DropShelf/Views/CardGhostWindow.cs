@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using DropShelf.Interop;
@@ -11,6 +12,7 @@ public readonly record struct CardPose(Point Center, double Scale, double Angle)
 
 /// <summary>
 /// 从概览页拖出的卡牌：用一个不接收鼠标的透明小窗口显示卡牌截图，因此可以拖出主窗口。
+/// 透明靠 DWM 把玻璃区扩展到整个窗口，不用分层窗口：分层窗口每帧要把画面从显卡读回内存再提交，拖动时会掉帧。
 /// 位置、大小和角度每帧按指数衰减向目标靠拢，跟手但略有滞后；横向移动越快卡牌越向移动方向倾斜，停下后慢慢回正，带出阻尼感。
 /// 只在拖动和收尾动画期间挂接每帧回调，平时不占用资源。
 /// </summary>
@@ -45,8 +47,12 @@ public sealed class CardGhostWindow : Window
     {
         Title = "DropShelf Card";
         WindowStyle = WindowStyle.None;
-        AllowsTransparency = true;
         Background = Brushes.Transparent;
+        System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
+        {
+            CaptionHeight = 0, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = default, CornerRadius = default,
+            UseAeroCaptionButtons = false
+        });
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
         ShowActivated = false;
@@ -65,9 +71,14 @@ public sealed class CardGhostWindow : Window
         SourceInitialized += (_, _) =>
         {
             WindowEffects.SetToolWindow(this, noActivate: true);
-            var handle = WindowEffects.Handle(this);
-            var style = NativeMethods.GetWindowLong(handle, NativeMethods.GWL_EXSTYLE);
-            NativeMethods.SetWindowLong(handle, NativeMethods.GWL_EXSTYLE, style | NativeMethods.WS_EX_TRANSPARENT);
+            WindowEffects.SetFrameless(this);
+            // 收尾动画期间点到卡牌上的鼠标交给下面的窗口。
+            HwndSource.FromHwnd(WindowEffects.Handle(this))?.AddHook((IntPtr _, int message, IntPtr _, IntPtr _, ref bool handled) =>
+            {
+                if (message != NativeMethods.WM_NCHITTEST) return IntPtr.Zero;
+                handled = true;
+                return new IntPtr(NativeMethods.HTTRANSPARENT);
+            });
         };
         // 提前创建窗口句柄，开始拖动时不必再等。
         _handle = WindowEffects.Handle(this);

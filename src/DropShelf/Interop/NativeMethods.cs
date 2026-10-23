@@ -222,7 +222,6 @@ internal static class NativeMethods
     public const int VK_RBUTTON = 0x02;
 
     public const int GWL_EXSTYLE = -20;
-    public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int WS_EX_APPWINDOW = 0x00040000;
@@ -250,6 +249,10 @@ internal static class NativeMethods
     public const int DWMWA_BORDER_COLOR = 34;
     public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     public const uint DWMWA_COLOR_DEFAULT = 0xFFFFFFFF;
+    public const uint DWMWA_COLOR_NONE = 0xFFFFFFFE;
+    public const int DWMWCP_DONOTROUND = 1;
+    public const int WM_NCHITTEST = 0x0084;
+    public const int HTTRANSPARENT = -1;
 
     public const uint NIM_ADD = 0;
     public const uint NIM_MODIFY = 1;
