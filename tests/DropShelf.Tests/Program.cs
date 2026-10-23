@@ -774,6 +774,7 @@ internal static class Program
         Assert(history.Record(viewModel.Items), "没有记录关闭的置物架");
         var entry = history.Latest!;
         Assert(entry.Items.Select(item => item.Path).SequenceEqual(files) && entry.Items[0].Name == "h1.txt", "记录的路径或名称不正确");
+        history.Flush();
         var json = File.ReadAllText(historyPath);
         Assert(!json.Contains("secret text") && !json.Contains("example.com") && !json.Contains("attachment.txt"), "记录中包含了文本、链接或临时附件");
         Assert(!history.Record([]), "空置物架不应记录");
@@ -789,16 +790,19 @@ internal static class Program
             history.Record(single.Items);
         }
         Assert(history.Entries.Count == ShelfHistoryService.Capacity && history.Latest!.Items[0].Name == "single-11.txt", "最多保留 10 个");
+        history.Flush();
 
         var reloaded = new ShelfHistoryService(historyPath);
         Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity && reloaded.Latest!.Items[0].Path.EndsWith("single-11.txt"), "重新启动后记录丢失");
         var moved = reloaded.Entries[0];
         reloaded.Move(moved, 3);
+        reloaded.Flush();
         Assert(reloaded.Entries[3] == moved && new ShelfHistoryService(historyPath).Entries[3].Items[0].Path == moved.Items[0].Path, "调整记录顺序没有生效或没有保存");
         reloaded.Move(moved, 0);
         reloaded.Remove(reloaded.Latest!);
         Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity - 1, "恢复后记录没有移除");
         reloaded.Clear();
+        reloaded.Flush();
         Assert(new ShelfHistoryService(historyPath).Entries.Count == 0, "清除记录没有保存");
         // 拖动卡片收尾时列表可能已被清空，延迟执行的换序不应出错。
         reloaded.Move(moved, 3);
@@ -1760,6 +1764,16 @@ internal static class Program
                    cards.All(card => !DropShelf.Views.Controls.FanPanel.GetIsHot(card)), $"{when}牌堆应以中间的牌在最上面排开，默认不选出任何一张");
         }
         AssertFanArranged("");
+        // 调整顺序时卡片沿用原来的，只换位置。
+        var firstEntry = viewModel.HistoryEntries[0];
+        var firstCard = historyList.ItemContainerGenerator.ContainerFromItem(firstEntry);
+        controller.History.Move(firstEntry.Entry, 3);
+        Pump(50);
+        Assert(viewModel.HistoryEntries[3] == firstEntry && historyList.ItemContainerGenerator.ContainerFromItem(firstEntry) == firstCard,
+            "调整顺序后卡片应沿用原来的，不重新生成");
+        AssertFanArranged("调整顺序后");
+        controller.History.Move(firstEntry.Entry, 0);
+        Pump(50);
         // 切换语言会重新生成同样数量的牌，也要重新排开。
         viewModel.Language = AppLanguage.English;
         Pump(50);

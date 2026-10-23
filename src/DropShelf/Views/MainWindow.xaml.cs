@@ -121,10 +121,10 @@ public partial class MainWindow : Window
     // 整次翻牌用一条转动曲线和一条移动曲线从头连到尾，两段动画只是各取一截，侧立换面时速度连续：
     // 不会先停住再突然加速，也不拖很长的尾巴。转过的角度 = 180° × 转动曲线，横向缩放为 |cos 角度|，纵向放大和阴影按 sin 角度变化。
     // 打开：转动从静止起步，侧立前后最快，再慢慢转正；移动比转动晚一点起步，侧立后最快，两者差不多同时停稳。
-    private static readonly IEasingFunction OpenTurn = HalfwayAt(OpenEdge, 0.3);
+    private static readonly BezierEase OpenTurn = HalfwayAt(OpenEdge, 0.3);
     private static readonly IEasingFunction OpenTravel = new BezierEase(0.55, 0, 0.25, 1);
     // 返回：页面缩小时逐渐加速，侧立前后最快；卡片落位时略微越过原位（约为全程的 1.8%）再回来，停下时速度为零。
-    private static readonly IEasingFunction BackTurn = HalfwayAt(BackEdge, 0.42);
+    private static readonly BezierEase BackTurn = HalfwayAt(BackEdge, 0.42);
     private static readonly IEasingFunction BackTravel = new CurveEase(t =>
     {
         var x = -Math.Cos(Math.PI * t / 2);
@@ -183,6 +183,19 @@ public partial class MainWindow : Window
                 else high = middle;
             }
             return Cubic(y1, y2, (low + high) / 2);
+        }
+
+        /// <summary>反过来由 y 求 x：y1、y2 在 0 到 1 之间时 y 也随参数单调增加，二分求出 y(s) = y 的参数，再取 x(s)。</summary>
+        public double Inverse(double y)
+        {
+            double low = 0, high = 1;
+            for (var i = 0; i < 30; i++)
+            {
+                var middle = (low + high) / 2;
+                if (Cubic(y1, y2, middle) < y) low = middle;
+                else high = middle;
+            }
+            return Cubic(x1, x2, (low + high) / 2);
         }
 
         private static double Cubic(double p1, double p2, double s) => 3 * p1 * s * (1 - s) * (1 - s) + 3 * p2 * s * s * (1 - s) + s * s * s;
@@ -404,15 +417,8 @@ public partial class MainWindow : Window
         if (_flip is not { Dragging: true } flip) return;
         turn = Math.Clamp(turn, 0, 1);
         flip.Peak = Math.Max(flip.Peak, turn);
-        // 转动曲线单调，二分求出对应的进度；位置、大小和概览页都按这个进度摆放，和点击时走的是同一条路线。
-        double low = 0, high = 1;
-        for (var i = 0; i < 30; i++)
-        {
-            var middle = (low + high) / 2;
-            if (TurnAt(flip, middle) < turn) low = middle;
-            else high = middle;
-        }
-        flip.Progress = (low + high) / 2;
+        // 由转动曲线反求进度；位置、大小和概览页都按这个进度摆放，和点击时走的是同一条路线。
+        flip.Progress = (flip.Opening ? OpenTurn : BackTurn).Inverse(turn);
         HookFlipFrames();
     }
 
@@ -494,8 +500,7 @@ public partial class MainWindow : Window
         if (ScrollBarOf(view.Scroll) is { } bar) bar.Visibility = Visibility.Hidden;
         if (!plain)
         {
-            // 缓存本身已按显示缩放比例生成，RenderAtScale 保持 1；再乘一次缩放比例，200% 时会占用四倍内存。
-            view.Scroll.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
+            view.Scroll.CacheMode = new BitmapCache(CacheScale.For(this)) { SnapsToDevicePixels = true };
             view.Host.Clip = _flipCard;
             _flipBounds.Rect = new Rect(-1, -1, OverviewHost.ActualWidth + 2, OverviewHost.ActualHeight + 2);
         }
@@ -747,8 +752,8 @@ public partial class MainWindow : Window
     private System.Windows.Point? _flipPress;
     private Controls.PageTile? _pressedTile;
     private double _dragOrigin, _dragSign, _dragSpan;
-    /// <summary>最近各次移动的时刻和转过的比例，松手时用来算速度。</summary>
-    private readonly Queue<(long Time, double Turn)> _dragSamples = new();
+    /// <summary>最近各次移动的时刻和转过的比例，松手时用来算速度；最早的一条在 VelocityWindowMs 之前，用来插值出窗口起点的位置。</summary>
+    private readonly List<(long Time, double Turn)> _dragSamples = [];
 
     private void OnFlipPress(object sender, MouseButtonEventArgs e)
     {
@@ -799,8 +804,8 @@ public partial class MainWindow : Window
         }
         var turn = Math.Clamp((position.X - _dragOrigin) * _dragSign / _dragSpan, 0, 1);
         var now = Stopwatch.GetTimestamp();
-        _dragSamples.Enqueue((now, turn));
-        while (_dragSamples.Count > 2 && Stopwatch.GetElapsedTime(_dragSamples.Peek().Time, now).TotalMilliseconds > VelocityWindowMs) _dragSamples.Dequeue();
+        _dragSamples.Add((now, turn));
+        while (_dragSamples.Count > 2 && Stopwatch.GetElapsedTime(_dragSamples[1].Time, now).TotalMilliseconds > VelocityWindowMs) _dragSamples.RemoveAt(0);
         DragFlip(turn);
     }
 
@@ -825,13 +830,27 @@ public partial class MainWindow : Window
         ReleaseFlip(0, cancel: true);
     }
 
-    /// <summary>从最早一次记录到松手这一刻的平均速度（每毫秒转过的比例）：停住一会儿再松手时速度接近 0。</summary>
+    /// <summary>
+    /// 松手前 VelocityWindowMs 内的平均速度（每毫秒转过的比例）。窗口起点的位置按前后两次移动插值，之后停住的时间也算在内：
+    /// 停住超过这段时间再松手时起点和终点都是最后的位置，速度为 0。
+    /// </summary>
     private double DragVelocity()
     {
         if (_dragSamples.Count == 0) return 0;
-        var (time, turn) = _dragSamples.Peek();
-        var elapsed = Stopwatch.GetElapsedTime(time).TotalMilliseconds;
-        return elapsed > 1 ? (_dragSamples.Last().Turn - turn) / elapsed : 0;
+        var now = Stopwatch.GetTimestamp();
+        double Age(long time) => Stopwatch.GetElapsedTime(time, now).TotalMilliseconds;
+        var span = Math.Min(VelocityWindowMs, Age(_dragSamples[0].Time));
+        if (span <= 1) return 0;
+        var start = _dragSamples[^1].Turn;
+        for (var index = 0; index < _dragSamples.Count; index++)
+        {
+            var (time, turn) = _dragSamples[index];
+            if (Age(time) > span) continue;
+            var (before, from) = _dragSamples[Math.Max(0, index - 1)];
+            start = Age(before) > Age(time) ? from + (turn - from) * (Age(before) - span) / (Age(before) - Age(time)) : turn;
+            break;
+        }
+        return (_dragSamples[^1].Turn - start) / span;
     }
 
     /// <summary>诊断日志打开时（DROPSHELF_TRACE=1），从点击到翻牌结束记下每帧间隔，并标出几个同步步骤各用了多久。</summary>
@@ -1015,7 +1034,7 @@ public partial class MainWindow : Window
     /// <summary>概览页平时正好撑满可视区；窗口很大、缩放比例很高时缓存超出上限，就直接绘制，不再额外占一大块内存。</summary>
     private static void CacheWhileFading(FrameworkElement page)
     {
-        if (page.CacheMode is null && FitsCache(page, page.ActualWidth, page.ActualHeight)) page.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
+        if (page.CacheMode is null && FitsCache(page, page.ActualWidth, page.ActualHeight)) page.CacheMode = new BitmapCache(CacheScale.For(page)) { SnapsToDevicePixels = true };
     }
 
     /// <summary>概览页停在静止状态：去掉淡入淡出的动画和缓存。</summary>
@@ -1148,7 +1167,7 @@ public partial class MainWindow : Window
         if (buttonSnapshot is { } snapshot) FadeOutSnapshot(snapshot, -pageOffset);
 
         SidePanelShift.BeginAnimation(TranslateTransform.XProperty, Motion(panelOffset, show ? 0 : -24));
-        SidePanel.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
+        SidePanel.CacheMode ??= new BitmapCache(CacheScale.For(SidePanel)) { SnapsToDevicePixels = true };
         var fade = Motion(panelOpacity, show ? 1 : 0);
         fade.Completed += (_, _) =>
         {
@@ -1591,7 +1610,7 @@ public partial class MainWindow : Window
                     panel?.SetGap(null, -1);
                     return;
                 }
-                // 牌堆保持放回后的排法，等卡牌落定、画面静止后再重排列表，重新生成卡片的停顿不会出现在动画中。
+                // 牌堆保持放回后的排法，等卡牌落定、画面静止后再调整列表顺序；卡片沿用原来的，只换位置，记录在后台保存。
                 Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => _controller.History.Move(entry.Entry, index));
             });
             return;

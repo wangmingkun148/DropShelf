@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -290,8 +291,15 @@ public sealed class FanPanel : Panel
         return (scale, rotate, move);
     }
 
+    /// <summary>每个变换各属性最后一次要去的值。</summary>
+    private static readonly ConditionalWeakTable<Animatable, Dictionary<DependencyProperty, double>> Goals = new();
+
+    /// <summary>选出一张牌时只有几张牌的位置会变：目标没变的属性不重新开始动画，正在播放的照常播完。</summary>
     private static void Set(Animatable target, DependencyProperty property, double value, IEasingFunction ease, bool animate)
     {
+        var goals = Goals.GetOrCreateValue(target);
+        if (animate && goals.TryGetValue(property, out var goal) && goal == value) return;
+        goals[property] = value;
         if (animate)
         {
             target.BeginAnimation(property, new DoubleAnimation(value, MoveDuration) { EasingFunction = ease });

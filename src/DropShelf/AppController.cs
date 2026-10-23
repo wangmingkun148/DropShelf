@@ -251,6 +251,7 @@ public sealed class AppController : IDisposable
         _gestures?.Dispose();
         _probe?.Close();
         Shelves.CloseAll();
+        History.Flush();
         _hotkey?.Dispose();
         _tray?.Dispose();
         _onboarding?.Close();

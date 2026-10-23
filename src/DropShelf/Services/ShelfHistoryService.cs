@@ -26,6 +26,9 @@ public sealed class ShelfHistoryService
     private const int MaximumItemsPerEntry = 500;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly List<ShelfHistoryEntry> _entries = [];
+    private readonly object _saveLock = new();
+    private Task _saving = Task.CompletedTask;
+    private int _version;
 
     public ShelfHistoryService(string path)
     {
@@ -106,21 +109,46 @@ public sealed class ShelfHistoryService
         }
     }
 
+    /// <summary>等后台的保存写完；退出前调用，最后一次改动不会丢。</summary>
+    public void Flush()
+    {
+        Task saving;
+        lock (_saveLock) saving = _saving;
+        saving.Wait();
+    }
+
+    /// <summary>
+    /// 在后台按顺序保存，界面不用等文件写完。记录创建后不再修改，保存的是此刻列表的副本；
+    /// 排在后面的保存已经到来时跳过这一次，只写最新的内容。
+    /// </summary>
     private void SaveAndNotify()
+    {
+        var snapshot = _entries.ToArray();
+        lock (_saveLock)
+        {
+            var version = ++_version;
+            _saving = _saving.ContinueWith(_ =>
+            {
+                if (version == Volatile.Read(ref _version)) Save(snapshot);
+            }, TaskScheduler.Default);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Save(ShelfHistoryEntry[] entries)
     {
         try
         {
             var directory = System.IO.Path.GetDirectoryName(HistoryPath);
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
             var temporaryPath = HistoryPath + ".tmp";
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(_entries, JsonOptions));
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(entries, JsonOptions));
             File.Move(temporaryPath, HistoryPath, true);
         }
         catch (Exception exception)
         {
             LogService.Error("保存最近关闭的置物架失败", exception);
         }
-        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static string KeyOf(IEnumerable<ShelfHistoryItem> items) =>

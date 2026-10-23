@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Input;
@@ -131,7 +132,7 @@ public sealed class SettingsViewModel : ObservableObject
     private CustomActionEditorViewModel? _editor;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
-    private IReadOnlyList<HistoryEntryViewModel> _historyEntries = [];
+    private ObservableCollection<HistoryEntryViewModel> _historyEntries = [];
 
     public SettingsViewModel(AppController controller)
     {
@@ -441,13 +442,31 @@ public sealed class SettingsViewModel : ObservableObject
         _editor?.RefreshText();
     }
 
-    /// <summary>reuse 时沿用已有的卡片，调整顺序或删除一张后其余卡片的缩略图不必重新读取。</summary>
+    /// <summary>
+    /// reuse 时沿用已有的卡片，只在原列表上删除、移动和插入：调整顺序或删除一张后，其余卡片不必重新生成，缩略图也不必重新读取。
+    /// 否则（如切换语言）整组换新。
+    /// </summary>
     private void RefreshHistory(bool reuse = false)
     {
-        var existing = reuse ? _historyEntries.ToDictionary(entry => entry.Entry) : [];
-        _historyEntries = _controller.History.Entries
-            .Select(entry => existing.GetValueOrDefault(entry) ?? new HistoryEntryViewModel(entry, _controller)).ToArray();
-        OnPropertyChanged(nameof(HistoryEntries));
+        if (reuse)
+        {
+            var existing = _historyEntries.ToDictionary(entry => entry.Entry);
+            var wanted = _controller.History.Entries.Select(entry => existing.GetValueOrDefault(entry) ?? new HistoryEntryViewModel(entry, _controller)).ToList();
+            for (var index = _historyEntries.Count - 1; index >= 0; index--)
+                if (!wanted.Contains(_historyEntries[index])) _historyEntries.RemoveAt(index);
+            for (var index = 0; index < wanted.Count; index++)
+            {
+                var current = _historyEntries.IndexOf(wanted[index]);
+                if (current == index) continue;
+                if (current >= 0) _historyEntries.Move(current, index);
+                else _historyEntries.Insert(index, wanted[index]);
+            }
+        }
+        else
+        {
+            _historyEntries = new(_controller.History.Entries.Select(entry => new HistoryEntryViewModel(entry, _controller)));
+            OnPropertyChanged(nameof(HistoryEntries));
+        }
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistoryDescription));
         CommandManager.InvalidateRequerySuggested();

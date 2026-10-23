@@ -87,7 +87,7 @@ public sealed class CardGhostWindow : Window
         _image.Height = size.Height;
         _card.Opacity = 1;
         // 卡牌连同阴影只在开始时画一次并缓存为位图，之后每帧只移动、转动这张图，不再重新计算阴影模糊。
-        _card.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
+        _card.CacheMode = new BitmapCache(CacheScale.For(this));
         // 留出旋转、放大和阴影的空间。
         Width = Height = Math.Ceiling(Math.Sqrt(size.Width * size.Width + size.Height * size.Height) * 1.2 + 48);
         _pose = start;

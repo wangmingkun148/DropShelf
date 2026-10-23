@@ -300,9 +300,9 @@ public partial class ShelfWindow : Window
 
     /// <summary>
     /// 缩放和淡入淡出期间把内容缓存为位图，每帧只需合成，不必重新绘制虚线边框、阴影和文字。
-    /// 按显示缩放比例缓存，高分屏上也保持清晰。
+    /// 按所在显示器的缩放比例缓存，高分屏上也保持清晰，见 CacheScale。
     /// </summary>
-    private void CacheSurface() => Surface.CacheMode = new BitmapCache(DpiScale());
+    private void CacheSurface() => Surface.CacheMode = new BitmapCache(CacheScale.For(this));
 
     /// <summary>逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。</summary>
     private void SlideWindow(int fromX, int fromY, int toX, int toY, TimeSpan duration, IEasingFunction ease, Action? completed = null)

@@ -109,6 +109,15 @@ internal static class WindowEffects
     }
 }
 
+internal static class CacheScale
+{
+    /// <summary>
+    /// 位图缓存的 RenderAtScale。缓存本身已按系统 DPI（主显示器）生成，只需补上元素所在显示器与它之比：
+    /// 两者相同时为 1，再乘一次显示缩放比例在 200% 时会占用四倍内存；所在显示器缩放更高时按比例补足，不会发虚。
+    /// </summary>
+    public static double For(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerInchX / Math.Max(1, NativeMethods.GetDpiForSystem());
+}
+
 internal static class WindowPlacement
 {
     public static POINT GetCursor() => NativeMethods.GetCursorPos(out var point) ? point : new POINT(0, 0);
