@@ -249,7 +249,7 @@ public static class Strings
     // ───────────── 置物架 ─────────────
 
     public static string ShelfWindowTitle(string title) => T($"DropShelf 置物架 - {title}", $"DropShelf shelf - {title}");
-    public static string PinTooltip => T("钉住：空了也保持打开", "Pin: keep open even when empty");
+    public static string PinTooltip => T("置顶：保持在其他窗口上方", "Pin: keep on top of other windows");
     public static string MoreTooltip => T("更多", "More");
     public static string CloseShelfTooltip => T("关闭置物架 (Esc)", "Close shelf (Esc)");
     public static string DropHere => T("拖到这里暂存", "Drop here to hold");

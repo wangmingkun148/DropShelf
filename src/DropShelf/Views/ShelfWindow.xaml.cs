@@ -126,7 +126,7 @@ public partial class ShelfWindow : Window
     public bool BackdropActive { get; private set; }
 
     /// <summary>空的、未被使用过的置物架可以直接挪到新的位置复用。</summary>
-    public bool IsReusable => !IsClosing && ViewModel.IsEmpty && !ViewModel.IsPinned && !ViewModel.IsBusy && !ViewModel.HasInteracted;
+    public bool IsReusable => !IsClosing && ViewModel.IsEmpty && !ViewModel.IsBusy && !ViewModel.HasInteracted;
 
     public void ApplySettings(AppSettings settings)
     {
@@ -722,9 +722,9 @@ public partial class ShelfWindow : Window
 
     private async Task CloseIfStillEmptyAsync()
     {
-        if (!ViewModel.IsEmpty || ViewModel.IsPinned) return;
+        if (!ViewModel.IsEmpty) return;
         await Task.Delay(1500);
-        if (ViewModel.IsEmpty && !ViewModel.IsPinned && !ViewModel.IsBusy && !IsDraggingOut) CloseAnimated();
+        if (ViewModel.IsEmpty && !ViewModel.IsBusy && !IsDraggingOut) CloseAnimated();
     }
 
     // ───────────── 拖出 ─────────────
@@ -750,7 +750,7 @@ public partial class ShelfWindow : Window
         if (dragged.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
         var closeWhenEmpty = _host.Settings.CloseWhenEmpty;
         ViewModel.ApplyDragOut(dragged, result, removeCopied: closeWhenEmpty);
-        if (ViewModel.IsEmpty && !ViewModel.IsPinned && closeWhenEmpty) CloseAnimated();
+        if (ViewModel.IsEmpty && closeWhenEmpty) CloseAnimated();
     }
 
     private bool PassedDragThreshold(System.Windows.Input.MouseEventArgs e)
@@ -872,7 +872,7 @@ public partial class ShelfWindow : Window
         if (items.Count == 0) return;
         ViewModel.Remove(items);
         ViewModel.HasInteracted = true;
-        if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty && !ViewModel.IsPinned) CloseAnimated();
+        if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty) CloseAnimated();
     }
 
     private IReadOnlyList<ShelfItem> GetSelectedItems() =>

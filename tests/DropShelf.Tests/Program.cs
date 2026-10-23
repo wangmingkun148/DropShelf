@@ -1538,6 +1538,10 @@ internal static class Program
         window.ViewModel.AddFiles([file, folder]);
         Pump(100);
         Assert(!window.IsReusable, "有内容的置物架不应被复用");
+        Assert(window.ViewModel.IsPinned && window.Topmost, "置物架默认应置顶");
+        window.ViewModel.IsPinned = false;
+        Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
+        window.ViewModel.IsPinned = true;
         window.ViewModel.IsExpanded = true;
         Pump(100);
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");

@@ -33,7 +33,7 @@ public sealed class ShelfViewModel : ObservableObject
     private readonly HashSet<string> _cacheDirectories = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<QuickActionInfo> _actions = [];
     private bool _isExpanded;
-    private bool _isPinned;
+    private bool _isPinned = true;
     private bool _isBusy;
     private string _busyText = string.Empty;
     private bool _delayCacheCleanup;
@@ -93,6 +93,7 @@ public sealed class ShelfViewModel : ObservableObject
     /// <summary>缩略图的像素尺寸，由窗口按堆叠卡片的实际显示大小设置。</summary>
     public int ThumbnailSize { get; set; } = 128;
 
+    /// <summary>置顶：保持在其他窗口上方，默认开启；关闭后和普通窗口一样会被遮挡。</summary>
     public bool IsPinned
     {
         get => _isPinned;
@@ -117,7 +118,7 @@ public sealed class ShelfViewModel : ObservableObject
     /// <summary>通过晃动手势打开，松开鼠标时若仍为空就自动关闭。</summary>
     public bool OpenedByGesture { get; set; }
 
-    /// <summary>用户已经点击、钉住或放入过内容，空置物架也不再自动关闭。</summary>
+    /// <summary>用户已经点击、切换置顶或放入过内容，空置物架也不再自动关闭。</summary>
     public bool HasInteracted { get; set; }
 
     public bool HasTemporaryFiles => Items.Any(item => item.IsTemporaryAttachment);
