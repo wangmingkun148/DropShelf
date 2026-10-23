@@ -47,6 +47,18 @@
             <Setter Property="Margin" Value="23,12,23,24" />
         </Style>
 
+        <Style x:Key="StackEdgeButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ThemeTileStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0,0,12,0" />
             <Setter Property="Cursor" Value="Hand" />
@@ -701,6 +713,8 @@
                         </ScrollViewer>
                     </Grid>
 
+                    <!-- 抽牌时旧页面退到牌堆后面，新页面从牌堆前面抽出。 -->
+                    <Canvas x:Name="StackBackLayer" Visibility="Collapsed" IsHitTestVisible="False" />
                     <!-- 其余几张卡片露在设置页底下的边，翻牌时由概览页的卡片收拢而来；画在概览页之上、设置页之下 -->
                     <Canvas x:Name="StackLayer" Visibility="Collapsed" />
 
@@ -964,6 +978,7 @@
                             </ScrollViewer>
                         </Border>
                     </Grid>
+                    <Canvas x:Name="StackFrontLayer" Visibility="Collapsed" IsHitTestVisible="False" />
                 </Grid>
                 <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"
                         HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick" />

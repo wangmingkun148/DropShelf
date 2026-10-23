@@ -72,6 +72,7 @@ public partial class MainWindow : Window
         _edges = [.. Enumerable.Range(0, PageCards.Children.Count - 1).Select(CreateEdge)];
         foreach (var edge in Enumerable.Reverse(_edges)) StackLayer.Children.Add(edge.Root);
         _tileFace.RenderTransform = _tileMatrix;
+        Panel.SetZIndex(_tileFace, _edges.Length + 1);
         StackLayer.Children.Add(_tileFace);
     }
 
@@ -474,11 +475,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>页面设为 Hidden：参与排版但不显示，也不挡住概览页。每页滚动区独立，不会改变概览页的滚动范围；一次只准备一页。</summary>
-    private void PreparePage(PageView view)
+    private void PreparePage(PageView view, bool resetScroll = true)
     {
         foreach (var other in _pages.Values)
             if (other != view && other.Host.Visibility == Visibility.Hidden) other.Host.Visibility = Visibility.Collapsed;
-        view.Scroll.ScrollToTop();
+        if (resetScroll) view.Scroll.ScrollToTop();
         if (view.Host.Visibility == Visibility.Collapsed) view.Host.Visibility = Visibility.Hidden;
     }
 
@@ -612,7 +613,7 @@ public partial class MainWindow : Window
         TraceMark(pageSide ? "page" : "tile", swapped);
     }
 
-    /// <summary>卡片本身：从原位走向侧立处的比例为 travel，转过 angle（弧度，0 为正对屏幕，π/2 为侧立）。只改变卡片截图的变换，不影响排版。</summary>
+    /// <summary>卡片本身：从原位走向侧立处的比例为 travel，转过 angle（弧度，0 为正对屏幕，π/2 为侧立）。只改变卡面的变换，不影响排版。</summary>
     private void PoseTile(Flip flip, double travel, double angle)
     {
         var home = flip.Home;
@@ -765,12 +766,12 @@ public partial class MainWindow : Window
     /// <summary>牌面上的字在走完这一段比例前淡出，之后只剩牌的轮廓，拉宽、压扁时不会把字拉变形。</summary>
     private const double EdgeFaceFade = 0.45;
 
-    private sealed record StackEdge(Grid Root, Border Frame, System.Windows.Controls.Image Face, TextBlock Icon, TextBlock Header,
+    private sealed record StackEdge(Button Root, Border Frame, Border Face, TextBlock Icon, TextBlock Header,
         FrameworkElement Label, TranslateTransform Shift);
 
     private readonly StackEdge[] _edges;
-    /// <summary>翻牌途中转动的卡片换成它的截图，压在其余卡片的边上面。</summary>
-    private readonly System.Windows.Controls.Image _tileFace = new() { Stretch = Stretch.Fill, Visibility = Visibility.Hidden, IsHitTestVisible = false };
+    /// <summary>独立绘制模板里的卡面，按钮本身隐藏也不会把卡面一起隐藏。</summary>
+    private readonly Border _tileFace = new() { Visibility = Visibility.Hidden, IsHitTestVisible = false };
     /// <summary>上次摆放牌的边时页面那张牌的位置。</summary>
     private Rect _edgeSheet = Rect.Empty;
 
@@ -779,7 +780,7 @@ public partial class MainWindow : Window
         var frame = new Border { BorderThickness = new Thickness(1, 0, 1, 1) };
         frame.SetResourceReference(Border.BackgroundProperty, "StackEdgeBrush");
         frame.SetResourceReference(Border.BorderBrushProperty, "SheetBorderBrush");
-        var face = new System.Windows.Controls.Image { Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+        var face = new Border();
         var icon = new TextBlock { FontSize = 12, Margin = new Thickness(0, 1, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         icon.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");
         var header = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -790,9 +791,16 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Bottom, Opacity = 0, Children = { icon, header }
         };
         var shift = new TranslateTransform();
-        var root = new Grid { ClipToBounds = true, RenderTransform = shift, Children = { frame, face, label } };
+        var root = new Button
+        {
+            Style = (Style)FindResource("StackEdgeButtonStyle"), ClipToBounds = true, RenderTransform = shift,
+            Content = new Grid { Children = { frame, face, label } }
+        };
         root.MouseEnter += (_, _) => RevealEdge(index);
         root.MouseLeave += (_, _) => RevealEdge(-1);
+        root.GotKeyboardFocus += (_, _) => RevealEdge(index);
+        root.LostKeyboardFocus += (_, _) => RevealEdge(-1);
+        root.Click += (_, _) => SwitchStackPage(index);
         return new StackEdge(root, frame, face, icon, header, label, shift);
     }
 
@@ -806,13 +814,16 @@ public partial class MainWindow : Window
 
     private static void AssignEdge(StackEdge edge, Controls.PageTile tile)
     {
+        edge.Root.Tag = tile.Tag;
+        edge.Root.SetBinding(System.Windows.Automation.AutomationProperties.NameProperty,
+            new System.Windows.Data.Binding(nameof(Controls.PageTile.Header)) { Source = tile });
         edge.Icon.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(Controls.PageTile.Icon)) { Source = tile });
         edge.Header.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(Controls.PageTile.Header)) { Source = tile });
     }
 
     /// <summary>
-    /// 翻牌期间概览页上的卡片换成截图：转动的卡片压在最上面，其余卡片的截图收拢成牌的边，返回时反过来。
-    /// 截图都在概览页之外，每帧只改它们的位置和大小，概览页淡入淡出时的缓存不用重建。背面空白时其余卡片留在概览页上，边藏起来。
+    /// 模板里的卡面独立画在概览页之外，再隐藏按钮。画刷不包含按钮及其祖先的透明度，
+    /// 也不用连续同步生成四张截图；返回时同一张卡面一直画到落位，再交还给按钮。
     /// </summary>
     private void AttachTiles(Flip flip)
     {
@@ -822,7 +833,7 @@ public partial class MainWindow : Window
         StackLayer.Opacity = 1;
         StackLayer.IsHitTestVisible = false;
         StackLayer.Visibility = Visibility.Visible;
-        _tileFace.Source = Capture(flip.Tile);
+        _tileFace.Background = TileFace(flip.Tile);
         Canvas.SetLeft(_tileFace, flip.Home.X);
         Canvas.SetTop(_tileFace, flip.Home.Y);
         _tileFace.Width = flip.Home.Width;
@@ -832,14 +843,27 @@ public partial class MainWindow : Window
         {
             var edge = _edges[k];
             AssignEdge(edge, flip.Others[k]);
+            Panel.SetZIndex(edge.Root, _edges.Length - k);
             // 翻牌途中边的大小每帧都变，页名收起来，不用每帧重新排字。
             edge.Label.Visibility = Visibility.Collapsed;
             edge.Root.Visibility = flip.Plain ? Visibility.Hidden : Visibility.Visible;
             if (flip.Plain) continue;
-            edge.Face.Source = Capture(flip.Others[k]);
+            edge.Face.Background = TileFace(flip.Others[k]);
             flip.Others[k].Opacity = 0;
         }
-        TraceMark("capture", captured);
+        TraceMark("faces", captured);
+    }
+
+    private static VisualBrush TileFace(Controls.PageTile tile)
+    {
+        tile.ApplyTemplate();
+        // 画模板的根，而不是马上会被设为透明的 Button。固定 Viewbox，变宽、变矮时整张卡面一起变化。
+        var face = (FrameworkElement)VisualTreeHelper.GetChild(tile, 0);
+        return new VisualBrush(face)
+        {
+            Stretch = Stretch.Fill, ViewboxUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(face.RenderSize), AutoLayoutContent = false
+        };
     }
 
     /// <summary>
@@ -857,7 +881,7 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>在卡片原位 home 和露出的边 band 之间按 travel 摆放一条边：圆角由卡片的四个角变成只有下面两个，截图淡出，外框淡入。</summary>
+    /// <summary>在卡片原位 home 和露出的边 band 之间按 travel 摆放一条边：圆角由卡片的四个角变成只有下面两个，卡面淡出，外框淡入。</summary>
     private static void PlaceEdge(StackEdge edge, Rect home, Rect band, double travel)
     {
         var rect = Lerp(home, band, travel);
@@ -881,14 +905,14 @@ public partial class MainWindow : Window
         return new Rect(sheet.Left + inset, sheet.Bottom + EdgeBand * k, Math.Max(0, sheet.Width - 2 * inset), EdgeBand);
     }
 
-    /// <summary>翻牌结束：概览页上的卡片恢复显示，截图都拿走。</summary>
+    /// <summary>翻牌结束：概览页上的卡片恢复显示，解除临时卡面对模板的引用。</summary>
     private void SettleTiles()
     {
         foreach (var tile in PageCards.Children.OfType<UIElement>()) tile.Opacity = 1;
-        _tileFace.Source = null;
+        _tileFace.Background = null;
         _tileFace.Visibility = Visibility.Hidden;
         _tileMatrix.Matrix = Matrix.Identity;
-        foreach (var edge in _edges) edge.Face.Source = null;
+        foreach (var edge in _edges) edge.Face.Background = null;
     }
 
     /// <summary>设置页静止时露出其余几张牌的边，回到概览页时收起。</summary>
@@ -905,6 +929,7 @@ public partial class MainWindow : Window
         for (var k = 0; k < _edges.Length; k++)
         {
             AssignEdge(_edges[k], others[k]);
+            Panel.SetZIndex(_edges[k].Root, _edges.Length - k);
             _edges[k].Label.Visibility = Visibility.Visible;
             _edges[k].Root.Visibility = Visibility.Visible;
         }
@@ -1283,7 +1308,7 @@ public partial class MainWindow : Window
     }
 
     // 设置页那张牌比页面内容两侧各宽出 SheetPadding（牌里的留白，见 SheetContentStyle），离顶部 SheetTop，底下留 StackRoom 给牌的边和鼠标移上去时露出的部分。
-    private const double SheetPadding = 24, SheetTop = 14, StackRoom = 44;
+    private const double SheetPadding = 24, SheetTop = 14, StackRoom = 64;
 
     private static Thickness SheetInsetFor(Thickness page) => new(page.Left - SheetPadding, SheetTop, page.Right - SheetPadding, StackRoom);
 

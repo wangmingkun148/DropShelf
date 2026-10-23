@@ -1626,7 +1626,7 @@ internal static class Program
                shelfScroll is { CacheMode: null, Opacity: 1 } && overviewHost.Clip is null, "翻牌结束后页面应回到静止状态：没有变换、裁剪、缓存和背面的边框");
         var stackLayer = (System.Windows.Controls.Canvas)window.FindName("StackLayer")!;
         var shelfSheet = (FrameworkElement)window.FindName("ShelfSheet")!;
-        var edges = stackLayer.Children.OfType<System.Windows.Controls.Grid>().ToList();
+        var edges = stackLayer.Children.OfType<System.Windows.Controls.Button>().ToList();
         var sheetBottom = shelfSheet.TranslatePoint(new System.Windows.Point(0, shelfSheet.ActualHeight), stackLayer).Y;
         Assert(stackLayer is { Visibility: Visibility.Visible, Clip: null, IsHitTestVisible: true } && edges.Count == 3 &&
                edges.All(edge => edge.Visibility == Visibility.Visible && System.Windows.Controls.Canvas.GetTop(edge) >= sheetBottom - 0.5 && edge.ActualWidth < shelfSheet.ActualWidth),
@@ -1645,6 +1645,55 @@ internal static class Program
             LanguageService.SetMode(AppLanguage.Chinese);
             Pump(50);
         }
+        var backLayer = (System.Windows.Controls.Canvas)window.FindName("StackBackLayer")!;
+        var frontLayer = (System.Windows.Controls.Canvas)window.FindName("StackFrontLayer")!;
+        var stage = (FrameworkElement)window.FindName("PageStage")!;
+        // 露出的牌边是真按钮；鼠标点击实际命中按钮，键盘也可激活同一个跳转。
+        foreach (var edge in edges)
+        {
+            var point = edge.TranslatePoint(new System.Windows.Point(edge.ActualWidth / 2, edge.ActualHeight / 2), window);
+            var hit = window.InputHitTest(point) as DependencyObject;
+            while (hit is System.Windows.Media.Visual && hit != edge) hit = System.Windows.Media.VisualTreeHelper.GetParent(hit);
+            Assert(hit == edge, "露出的牌边必须能被鼠标命中，不能被设置页的透明区域挡住");
+        }
+        edges[^1].RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+        Pump(240);
+        var lowest = edges.Max(edge => edge.TranslatePoint(new System.Windows.Point(0, edge.ActualHeight), stage).Y);
+        Assert(stage.ActualHeight - lowest >= 20, "牌边悬停展开后距离窗口底部仍应至少留 20 DIP");
+        var savedOffset = Math.Min(80, shelfScroll.ScrollableHeight);
+        shelfScroll.ScrollToVerticalOffset(savedOffset);
+        Pump(50);
+        foreach (var page in new[] { "General", "Appearance", "Actions", "Shelf" })
+        {
+            edges.Single(edge => Equals(edge.Tag, page)).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            if (frontLayer.Visibility == Visibility.Visible)
+            {
+                var image = frontLayer.Children.OfType<System.Windows.Controls.Image>().Single();
+                var bitmap = (System.Windows.Media.Imaging.BitmapSource)image.Source;
+                var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+                bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+                Assert(Enumerable.Range(0, pixels.Length / 4).Count(i => pixels[i * 4 + 3] > 127) > 50,
+                    "抽牌开始前卡面上就必须有设置 UI，不能是一张透明位图");
+                Pump(190);
+                Assert(frontLayer.Clip is System.Windows.Media.RectangleGeometry geometry && geometry.Rect.Height > 40 &&
+                       backLayer.Visibility == Visibility.Visible, "动画中途应已抽出带设置内容的新卡，旧卡同时退回");
+                if (page == "General")
+                {
+                    window.Width += 1;
+                    Pump(60);
+                    window.Width -= 1;
+                }
+            }
+            Pump(650);
+            Assert(((FrameworkElement)window.FindName(page + "Host")!).Visibility == Visibility.Visible &&
+                   overviewHost.Visibility == Visibility.Collapsed &&
+                   new[] { backLayer, frontLayer }.All(layer => layer.Visibility == Visibility.Collapsed && layer.Children.Count == 0 && layer.Clip is null) &&
+                   stackLayer is { Clip: null, IsHitTestVisible: true },
+                "抽牌完成或被窗口变化打断后应显示目标页，并释放两张临时卡面");
+            Assert(edges.Select(edge => (string)edge.Tag).Distinct().Count() == 3 && edges.All(edge => !Equals(edge.Tag, page)),
+                "切换后牌堆应恰好包含另外三页，旧页也能再点回来");
+        }
+        Assert(Math.Abs(shelfScroll.VerticalOffset - savedOffset) < 1, "设置页之间切换不应重置各页的滚动位置");
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Collapsed, "没有记录时不应显示最近关闭");
 
         var viewModel = (SettingsViewModel)window.DataContext;
@@ -1725,6 +1774,21 @@ internal static class Program
         var generalScroll = (System.Windows.Controls.ScrollViewer)window.FindName("GeneralScroll")!;
         if (window.BeginFlipDrag(generalTile))
         {
+            void AssertCardFacesVisible(string when)
+            {
+                stackLayer.UpdateLayout();
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(stackLayer.ActualWidth),
+                    (int)Math.Ceiling(stackLayer.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                bitmap.Render(stackLayer);
+                foreach (var edge in edges)
+                {
+                    var point = edge.TranslatePoint(new System.Windows.Point(edge.ActualWidth / 2, edge.ActualHeight / 2), stackLayer);
+                    var pixel = new byte[4];
+                    bitmap.CopyPixels(new Int32Rect((int)point.X, (int)point.Y, 1, 1), pixel, 4, 0);
+                    Assert(pixel[3] > 0, $"{when}其余卡牌的卡面必须连续可见，不能只在结束时恢复真实按钮");
+                }
+            }
+            AssertCardFacesVisible("打开的第一帧");
             var tileFace = (UIElement)stackLayer.Children[^1];
             window.DragFlip(0.3);
             Pump(50);
@@ -1753,6 +1817,9 @@ internal static class Program
             Pump(700);
             Assert(generalHost is { Visibility: Visibility.Visible, Clip: null } && overviewHost.Visibility == Visibility.Collapsed, "返回时没拖过侧立就松手应留在设置页");
             Assert(window.BeginFlipDrag(null), "退回后应能再次拖回概览页");
+            window.DragFlip(1);
+            Pump(50);
+            AssertCardFacesVisible("返回即将落位时");
             window.DragFlip(0.2);
             window.ReleaseFlip(0.01);
             Pump(700);
