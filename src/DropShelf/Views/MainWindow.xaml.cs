@@ -271,7 +271,9 @@ public partial class MainWindow : Window
     private void SetPanelHeader(string page, bool animate)
     {
         var onOverview = page == "Overview";
-        if (!onOverview) PanelPageName.Text = PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, page))?.Header;
+        // 绑定到卡片的标题，切换语言后跟着更新。
+        if (!onOverview && PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, page)) is { } pageTile)
+            PanelPageName.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(Controls.PageTile.Header)) { Source = pageTile });
         PanelBackButton.IsHitTestVisible = !onOverview;
         foreach (var (target, property) in new (Animatable, DependencyProperty)[]
                  {

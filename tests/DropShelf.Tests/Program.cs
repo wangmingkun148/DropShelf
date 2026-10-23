@@ -639,7 +639,10 @@ internal static class Program
         }).ToArray();
 
         var viewModel = new ShelfViewModel();
+        var countNotifications = 0;
+        viewModel.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ShelfViewModel.Count)) countNotifications++; };
         var first = viewModel.AddFiles(paths);
+        Assert(countNotifications == 1 && viewModel.StackDetail.StartsWith(Strings.FileCount(100)), "批量添加时数量通知没有合并或汇总不正确");
         var second = viewModel.AddFiles(paths);
         Assert(viewModel.Items.Count == 100, $"预期 100 项，实际 {viewModel.Items.Count} 项");
         Assert(first.Added == 100 && second.Duplicates == 100 && second.Message == "这些项目已在置物架中", "添加结果统计不正确");
@@ -797,6 +800,9 @@ internal static class Program
         Assert(reloaded.Entries.Count == ShelfHistoryService.Capacity - 1, "恢复后记录没有移除");
         reloaded.Clear();
         Assert(new ShelfHistoryService(historyPath).Entries.Count == 0, "清除记录没有保存");
+        // 拖动卡片收尾时列表可能已被清空，延迟执行的换序不应出错。
+        reloaded.Move(moved, 3);
+        Assert(reloaded.Entries.Count == 0, "对已移除的记录换序不应改动列表");
     }
 
     private static void TestDragOutEffects()
@@ -865,7 +871,7 @@ internal static class Program
         var picture = await DropDataReader.ReadAsync(image, filesOnly: true);
         Assert(picture.Entries.Single().IsTemporary && File.Exists(picture.Entries[0].Value), "图片没有保存为临时文件");
         Assert(File.ReadAllBytes(picture.Entries[0].Value).Take(4).SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47 }), "保存的图片不是 PNG");
-        foreach (var cache in picture.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+        foreach (var cache in picture.CacheDirectories) await VirtualFileDropService.ReleaseCacheAsync(cache);
         Assert(!File.Exists(picture.Entries[0].Value), "图片临时目录没有清理");
     }
 
@@ -939,16 +945,45 @@ internal static class Program
 
         var data = new WpfDataObject();
         data.SetData(System.Windows.DataFormats.FileDrop, new[] { file });
-        var second = new ShelfViewModel();
-        second.Add(await DropDataReader.ReadAsync(data));
-        Assert(second.Items.Single().IsTemporaryAttachment && second.Items[0].Value == file, "从其他置物架拖来的临时附件没有标记为临时附件");
-
+        var read = await DropDataReader.ReadAsync(data);
+        // 读取完成、还没放进新置物架时原置物架就关闭了：读取结果已持有缓存。
         first.ReleaseResources();
         await Task.Delay(300);
-        Assert(File.Exists(file), "原置物架关闭后，另一个置物架中的临时附件被删除");
+        Assert(File.Exists(file), "读取后原置物架关闭，临时附件被删除");
+        var second = new ShelfViewModel();
+        second.Add(read);
+        Assert(second.Items.Single().IsTemporaryAttachment && second.Items[0].Value == file, "从其他置物架拖来的临时附件没有标记为临时附件");
         second.ReleaseResources();
         await Task.Delay(300);
         Assert(!Directory.Exists(cache), "所有置物架关闭后临时附件没有清理");
+
+        // 最后一个持有者释放后、后台删除执行前又被持有：不能删除。
+        var raced = VirtualFileDropService.CreateCacheDirectory();
+        File.WriteAllText(Path.Combine(raced, "keep.txt"), "keep");
+        var deletion = VirtualFileDropService.ReleaseCacheAsync(raced);
+        VirtualFileDropService.RetainCache(raced);
+        await deletion;
+        Assert(File.Exists(Path.Combine(raced, "keep.txt")), "重新持有后缓存仍被删除");
+        await VirtualFileDropService.ReleaseCacheAsync(raced);
+        Assert(!Directory.Exists(raced), "释放后缓存没有清理");
+
+        // 操作进行中关闭置物架：操作自己持有缓存，文件仍能处理完。
+        var busyCache = VirtualFileDropService.CreateCacheDirectory();
+        var attachment = Path.Combine(busyCache, "处理中.txt");
+        File.WriteAllText(attachment, "busy");
+        var shelf = new ShelfViewModel();
+        shelf.Add(new DropReadResult([new DroppedEntry(ShelfItemKind.File, attachment, IsTemporary: true)], [busyCache], 0, null));
+        var target = CreateFolder("close-during-action");
+        var moveTo = QuickActions.Get(QuickActionType.MoveTo);
+        var moved = await shelf.RunActionAsync(moveTo, shelf.Items.ToArray(), IntPtr.Zero, () =>
+        {
+            shelf.ReleaseResources();
+            Thread.Sleep(300);
+            return target;
+        });
+        Assert(moved.Succeeded && File.ReadAllText(Path.Combine(target, "处理中.txt")) == "busy", "处理途中关闭置物架，正在使用的临时附件被提前删除");
+        await Task.Delay(300);
+        Assert(!Directory.Exists(busyCache), "操作结束后临时附件没有清理");
     }
 
     private static async Task TestVolatileFileSnapshot()
@@ -957,6 +992,7 @@ internal static class Program
         Directory.CreateDirectory(temporary);
         var source = Path.Combine(temporary, "聊天图片.png");
         File.WriteAllBytes(source, CreatePng());
+        File.WriteAllText(source + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
         var stable = Path.Combine(CreateStableFolder("volatile-stable"), "keep.txt");
         File.WriteAllText(stable, "keep");
         Assert(ChatAppCompatibility.IsVolatilePath(source) && !ChatAppCompatibility.IsVolatilePath(stable), "临时文件判断不正确");
@@ -969,8 +1005,9 @@ internal static class Program
         Directory.Delete(temporary, true);
         Assert(read.Entries.Count == 2 && read.Entries[0].IsTemporary && read.Entries[0].Value != source, "临时文件没有保存到置物架缓存");
         Assert(File.Exists(read.Entries[0].Value) && Path.GetFileName(read.Entries[0].Value) == "聊天图片.png", "来源程序删除临时文件后内容丢失");
+        Assert(File.ReadAllText(read.Entries[0].Value + ":Zone.Identifier").Contains("ZoneId=3"), "临时文件的副本丢失了下载来源标记");
         Assert(!read.Entries[1].IsTemporary && read.Entries[1].Value == stable, "普通文件不应复制");
-        foreach (var cache in read.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+        foreach (var cache in read.CacheDirectories) await VirtualFileDropService.ReleaseCacheAsync(cache);
     }
 
     private static void TestRichTextRejectsNetworkPaths()
@@ -1006,7 +1043,7 @@ internal static class Program
         Assert(DropDataReader.Classify(mime) == DropContentKind.Image, "带有图片数据的拖动被当成了链接");
         var picture = await DropDataReader.ReadAsync(mime);
         Assert(picture.Entries.Single().Value.EndsWith(".png") && File.Exists(picture.Entries[0].Value), "image/png 图片没有保存");
-        foreach (var cache in picture.CacheDirectories) await VirtualFileDropService.DeleteCacheAsync(cache);
+        foreach (var cache in picture.CacheDirectories) await VirtualFileDropService.ReleaseCacheAsync(cache);
 
         var folder = CreateStableFolder("chat-images");
         var image = Path.Combine(folder, "qq-image.png");
@@ -1108,6 +1145,25 @@ internal static class Program
         var same = await new FileOperationService().CopyAsync([source], source);
         Assert(same.Count == 1 && !same[0].Succeeded && !Directory.Exists(Path.Combine(source, "nested-source")),
             "复制到文件夹自身未被阻止");
+
+        // 目标路径本身或它的上级是指向源文件夹的联接点。
+        var junction = Path.Combine(CreateFolder("nested-links"), "to-source");
+        CreateJunction(junction, source);
+        var viaLink = await new FileOperationService().CopyAsync([source], Path.Combine(junction, "inner"));
+        Assert(viaLink.Count == 1 && !viaLink[0].Succeeded && !Directory.Exists(Path.Combine(source, "inner", "nested-source")),
+            "通过联接点复制到文件夹自身内部未被阻止");
+        var parentJunction = Path.Combine(CreateFolder("nested-parent-links"), "root");
+        CreateJunction(parentJunction, Path.GetDirectoryName(source)!);
+        var viaParent = await new FileOperationService().CopyAsync([source], Path.Combine(parentJunction, "nested-source", "deep"));
+        Assert(viaParent.Count == 1 && !viaParent[0].Succeeded, "通过上级目录的联接点复制到文件夹自身内部未被阻止");
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+               { CreateNoWindow = true, UseShellExecute = false })!)
+            mklink.WaitForExit();
+        Assert(Directory.Exists(link), "无法创建测试用的联接点");
     }
 
     private static void TestArchiveActions()
@@ -1129,6 +1185,12 @@ internal static class Program
         var extracted = QuickActionService.Archive([compressed.OutputPath!]);
         Assert(extracted.Succeeded && Directory.Exists(extracted.OutputPath), extracted.Message);
         Assert(File.ReadAllText(Path.Combine(extracted.OutputPath!, "quick-action.txt")) == "quick action content", "ZIP 解压后的文件内容不正确");
+
+        // 来自网络的压缩包：解出的文件带上同样的来源区域。
+        File.WriteAllText(compressed.OutputPath! + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+        var downloaded = QuickActionService.Archive([compressed.OutputPath!]);
+        Assert(downloaded.Succeeded && File.ReadAllText(Path.Combine(downloaded.OutputPath!, "quick-action.txt") + ":Zone.Identifier").Contains("ZoneId=3"),
+            "解压来自网络的 ZIP 后没有传递下载来源标记");
 
         var unsafeZip = Path.Combine(folder, "unsafe.zip");
         using (var archive = ZipFile.Open(unsafeZip, ZipArchiveMode.Create)) archive.CreateEntry("../escaped.txt");
@@ -1325,6 +1387,12 @@ internal static class Program
         var second = await ImagingThread.RunAsync(() => Environment.CurrentManagedThreadId);
         Assert(first.Item1 == second && first.Item2 == ApartmentState.STA, "图片处理没有在同一个单线程套间线程上运行");
         Assert(Environment.CurrentManagedThreadId != second, "图片处理占用了界面线程");
+        var longWork = await ImagingThread.RunLongAsync(() => (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()));
+        Assert(longWork.Item1 != second && longWork.Item2 == ApartmentState.STA, "整批压缩图片和缩略图共用了同一个线程");
+        var cancelled = false;
+        try { await ImagingThread.RunAsync(() => 1, new CancellationToken(canceled: true)); }
+        catch (OperationCanceledException) { cancelled = true; }
+        Assert(cancelled, "已取消的图片处理仍然执行");
         var failed = false;
         try { await ImagingThread.RunAsync(() => throw new InvalidOperationException()); }
         catch (InvalidOperationException) { failed = true; }
@@ -1536,6 +1604,19 @@ internal static class Program
         Pump(100);
         Assert(((FrameworkElement)window.FindName("ShelfPage")!).Visibility == Visibility.Visible &&
                ((FrameworkElement)window.FindName("OverviewPage")!).Visibility == Visibility.Collapsed, "点击设置卡片没有切换页面");
+        var pageName = (System.Windows.Controls.TextBlock)window.FindName("PanelPageName")!;
+        try
+        {
+            LanguageService.SetMode(AppLanguage.English);
+            Pump(50);
+            Assert(pageName.Text == ((DropShelf.Views.Controls.PageTile)pageCards.Children[1]).Header && !pageName.Text.Any(c => c > 0x2E80),
+                "切换语言后侧栏页面标题没有更新");
+        }
+        finally
+        {
+            LanguageService.SetMode(AppLanguage.Chinese);
+            Pump(50);
+        }
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Collapsed, "没有记录时不应显示最近关闭");
 
         var viewModel = (SettingsViewModel)window.DataContext;

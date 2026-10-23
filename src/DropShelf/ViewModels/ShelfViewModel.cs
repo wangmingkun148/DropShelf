@@ -38,6 +38,9 @@ public sealed class ShelfViewModel : ObservableObject
     private string _busyText = string.Empty;
     private bool _delayCacheCleanup;
     private bool _released;
+    private int _batchDepth;
+    private bool _batchChanged;
+    private readonly CancellationTokenSource _lifetime = new();
 
     public ShelfViewModel()
     {
@@ -128,11 +131,29 @@ public sealed class ShelfViewModel : ObservableObject
 
     public ShelfAddSummary Add(DropReadResult result)
     {
-        foreach (var cache in result.CacheDirectories) RegisterCache(cache);
+        foreach (var cache in result.CacheDirectories) AdoptCache(cache);
         return AddEntries(result.Entries);
     }
 
     public ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries)
+    {
+        // 一次放入很多项目时，数量、标题和汇总等派生属性在全部放入后只通知一次。
+        _batchDepth++;
+        try
+        {
+            return AddEntriesCore(entries);
+        }
+        finally
+        {
+            if (--_batchDepth == 0 && _batchChanged)
+            {
+                _batchChanged = false;
+                NotifyItemsChanged();
+            }
+        }
+    }
+
+    private ShelfAddSummary AddEntriesCore(IEnumerable<DroppedEntry> entries)
     {
         var added = 0;
         var duplicates = 0;
@@ -205,10 +226,11 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Clear() => Items.Clear();
 
-    public void RegisterCache(string? cacheDirectory)
+    /// <summary>接管读取结果替置物架持有的缓存；已经持有或置物架已关闭时释放多出来的这一次。</summary>
+    private void AdoptCache(string? cacheDirectory)
     {
-        if (!string.IsNullOrWhiteSpace(cacheDirectory) && _cacheDirectories.Add(cacheDirectory))
-            VirtualFileDropService.RetainCache(cacheDirectory);
+        if (string.IsNullOrWhiteSpace(cacheDirectory)) return;
+        if (_released || !_cacheDirectories.Add(cacheDirectory)) _ = VirtualFileDropService.ReleaseCacheAsync(cacheDirectory);
     }
 
     public void RefreshAvailability()
@@ -280,7 +302,7 @@ public sealed class ShelfViewModel : ObservableObject
     public async Task<QuickActionResult> RunActionAsync(QuickActionInfo action, DropReadResult dropped, IntPtr owner,
         Func<string?>? pickFolder)
     {
-        foreach (var cache in dropped.CacheDirectories) RegisterCache(cache);
+        foreach (var cache in dropped.CacheDirectories) AdoptCache(cache);
         if (dropped.FilePaths.Count == 0)
         {
             var failed = new QuickActionResult(false, dropped.ErrorMessage ?? Strings.FilesAndFoldersOnly);
@@ -294,6 +316,9 @@ public sealed class ShelfViewModel : ObservableObject
         IntPtr owner, Func<string?>? pickFolder)
     {
         HasInteracted = true;
+        // 操作自己再持有一次输入所在的缓存，处理途中关闭置物架也不会删掉正在使用的文件。
+        var held = _cacheDirectories.ToArray();
+        foreach (var cache in held) VirtualFileDropService.RetainCache(cache);
         // “移动到”先弹出文件夹选择，选好后才显示进度。
         var asksForFolder = action.Type == QuickActionType.MoveTo;
         QuickActionResult result;
@@ -326,6 +351,15 @@ public sealed class ShelfViewModel : ObservableObject
             IsBusy = false;
         }
 
+        var delay = result.KeepsTemporaryFiles ? TemporaryFileGrace : TimeSpan.Zero;
+        foreach (var cache in held) _ = DeleteCacheLaterAsync(cache, delay);
+        if (_released)
+        {
+            // 置物架已在处理途中关闭：不再更新它，生成的文件放进新的置物架。
+            var produced = result.ProducedNewItems ? result.OutputPaths : result.Replacements?.Select(pair => pair.Output).ToArray();
+            if (produced is { Count: > 0 }) NewItemsProduced?.Invoke(this, produced);
+            return result;
+        }
         if (result.KeepsTemporaryFiles) _delayCacheCleanup = true;
         if (result.Moves is { Count: > 0 } moves) ApplyMoves(moves);
         if (result.Replacements is { Count: > 0 } replacements) ApplyReplacements(replacements);
@@ -451,12 +485,16 @@ public sealed class ShelfViewModel : ObservableObject
     {
         if (_released) return;
         _released = true;
+        // 还在排队的缩略图不再需要。
+        _lifetime.Cancel();
         var caches = _cacheDirectories.ToArray();
         _cacheDirectories.Clear();
-        var delay = _delayCacheCleanup ? TimeSpan.FromMinutes(10) : TimeSpan.Zero;
+        var delay = _delayCacheCleanup ? TemporaryFileGrace : TimeSpan.Zero;
         foreach (var cache in caches) _ = DeleteCacheLaterAsync(cache, delay);
         Items.Clear();
     }
+
+    private static readonly TimeSpan TemporaryFileGrace = TimeSpan.FromMinutes(10);
 
     private static async Task DeleteCacheLaterAsync(string cache, TimeSpan delay)
     {
@@ -488,16 +526,26 @@ public sealed class ShelfViewModel : ObservableObject
     private string BuildSummary()
     {
         if (Items.Count == 0) return string.Empty;
-        var files = Items.Count(item => item.Kind == ShelfItemKind.File);
-        var folders = Items.Count(item => item.Kind == ShelfItemKind.Folder);
-        var texts = Items.Count(item => item.Kind == ShelfItemKind.Text);
-        var links = Items.Count(item => item.Kind == ShelfItemKind.Link);
+        int files = 0, folders = 0, texts = 0, links = 0;
+        long total = 0;
+        foreach (var item in Items)
+        {
+            switch (item.Kind)
+            {
+                case ShelfItemKind.File:
+                    files++;
+                    total += item.SizeBytes ?? 0;
+                    break;
+                case ShelfItemKind.Folder: folders++; break;
+                case ShelfItemKind.Text: texts++; break;
+                case ShelfItemKind.Link: links++; break;
+            }
+        }
         var parts = new List<string>();
         if (files > 0) parts.Add(Strings.FileCount(files));
         if (folders > 0) parts.Add(Strings.FolderCount(folders));
         if (texts > 0) parts.Add(Strings.TextCount(texts));
         if (links > 0) parts.Add(Strings.LinkCount(links));
-        var total = Items.Where(item => item.Kind == ShelfItemKind.File).Sum(item => item.SizeBytes ?? 0);
         if (total > 0) parts.Add(ShelfItem.FormatSize(total));
         return string.Join(" · ", parts);
     }
@@ -511,6 +559,12 @@ public sealed class ShelfViewModel : ObservableObject
         if (e.Action == NotifyCollectionChangedAction.Reset)
             foreach (var item in Items) item.PropertyChanged += OnItemPropertyChanged;
 
+        if (_batchDepth > 0) _batchChanged = true;
+        else NotifyItemsChanged();
+    }
+
+    private void NotifyItemsChanged()
+    {
         OnPropertyChanged(nameof(Count));
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(IsEmpty));
@@ -527,6 +581,7 @@ public sealed class ShelfViewModel : ObservableObject
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_batchDepth > 0) return;
         if (e.PropertyName is nameof(ShelfItem.Detail) or nameof(ShelfItem.SizeBytes))
             OnPropertyChanged(nameof(StackDetail));
     }
@@ -535,7 +590,7 @@ public sealed class ShelfViewModel : ObservableObject
     {
         try
         {
-            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, 128);
+            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, 128, _lifetime.Token);
             if (thumbnail is null) return;
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.CheckAccess())

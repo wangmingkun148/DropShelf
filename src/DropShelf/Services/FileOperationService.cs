@@ -10,6 +10,7 @@ public sealed class FileOperationService
 {
     private const string FolderIntoItselfMessage = "不能把文件夹复制或移动到它自己的内部。";
     private const string FolderContainsLinksMessage = "文件夹中包含目录链接，无法完整复制。";
+    private static readonly EnumerationOptions ScanOptions = new() { AttributesToSkip = 0, IgnoreInaccessible = false };
 
     public void Open(string path)
     {
@@ -24,74 +25,60 @@ public sealed class FileOperationService
         Process.Start(new ProcessStartInfo("explorer.exe", arguments) { UseShellExecute = true });
     }
 
-    public async Task<IReadOnlyList<FileOperationResult>> CopyAsync(
+    /// <summary>整个过程在后台线程中进行，目录扫描和复制不会占住界面线程。</summary>
+    public Task<IReadOnlyList<FileOperationResult>> CopyAsync(
         IEnumerable<string> sources,
         string destination,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateDestination(destination);
-        Directory.CreateDirectory(destination);
-
-        var results = new List<FileOperationResult>();
-        foreach (var source in sources)
+        CancellationToken cancellationToken = default) =>
+        RunEachAsync(sources, destination, "复制", (source, target) =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            string? target = null;
-            try
-            {
-                EnsureExists(source);
-                EnsureDestinationIsNotInsideSource(source, destination);
-                target = GetAvailablePath(destination, GetSourceName(source), Directory.Exists(source));
+            if (File.Exists(source)) CopyFile(source, target);
+            else CopyDirectory(source, target, cancellationToken);
+        }, cancellationToken);
 
-                if (File.Exists(source))
-                    await CopyFileAsync(source, target, cancellationToken);
-                else
-                    await CopyDirectoryAsync(source, target, cancellationToken);
-
-                results.Add(new FileOperationResult(source, target, true));
-                LogService.Info($"复制完成：{source} -> {target}");
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                results.Add(new FileOperationResult(source, target, false, ToUserMessage(exception)));
-                LogService.Error($"复制失败：{source}", exception);
-            }
-        }
-        return results;
-    }
-
-    public async Task<IReadOnlyList<FileOperationResult>> MoveAsync(
+    public Task<IReadOnlyList<FileOperationResult>> MoveAsync(
         IEnumerable<string> sources,
         string destination,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateDestination(destination);
-        Directory.CreateDirectory(destination);
+        CancellationToken cancellationToken = default) =>
+        RunEachAsync(sources, destination, "移动", (source, target) => MoveOne(source, target, cancellationToken), cancellationToken);
 
-        var results = new List<FileOperationResult>();
-        foreach (var source in sources)
+    private static Task<IReadOnlyList<FileOperationResult>> RunEachAsync(
+        IEnumerable<string> sources,
+        string destination,
+        string verb,
+        Action<string, string> operation,
+        CancellationToken cancellationToken)
+    {
+        var list = sources.ToArray();
+        return Task.Run<IReadOnlyList<FileOperationResult>>(() =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            string? target = null;
-            try
+            ValidateDestination(destination);
+            Directory.CreateDirectory(destination);
+            var results = new List<FileOperationResult>();
+            foreach (var source in list)
             {
-                EnsureExists(source);
-                EnsureDestinationIsNotInsideSource(source, destination);
-                target = GetAvailablePath(destination, GetSourceName(source), Directory.Exists(source));
-                await MoveOneAsync(source, target, cancellationToken);
-                results.Add(new FileOperationResult(source, target, true));
-                LogService.Info($"移动完成：{source} -> {target}");
+                cancellationToken.ThrowIfCancellationRequested();
+                string? target = null;
+                try
+                {
+                    EnsureExists(source);
+                    EnsureDestinationIsNotInsideSource(source, destination);
+                    target = GetAvailablePath(destination, GetSourceName(source), Directory.Exists(source));
+                    operation(source, target);
+                    results.Add(new FileOperationResult(source, target, true));
+                    LogService.Info($"{verb}完成：{source} -> {target}");
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    results.Add(new FileOperationResult(source, target, false, ToUserMessage(exception)));
+                    LogService.Error($"{verb}失败：{source}", exception);
+                }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                results.Add(new FileOperationResult(source, target, false, ToUserMessage(exception)));
-                LogService.Error($"移动失败：{source}", exception);
-            }
-        }
-        return results;
+            return results;
+        }, cancellationToken);
     }
 
-    private static async Task MoveOneAsync(string source, string target, CancellationToken cancellationToken)
+    private static void MoveOne(string source, string target, CancellationToken cancellationToken)
     {
         try
         {
@@ -102,55 +89,55 @@ public sealed class FileOperationService
         {
             if (File.Exists(source))
             {
-                await CopyFileAsync(source, target, cancellationToken);
+                CopyFile(source, target);
                 File.Delete(source);
             }
             else
             {
-                await CopyDirectoryAsync(source, target, cancellationToken);
+                CopyDirectory(source, target, cancellationToken);
                 Directory.Delete(source, true);
             }
         }
     }
 
     /// <summary>由系统复制，连同下载来源标记（Zone.Identifier 等备用数据流）、文件属性和修改时间一起保留。</summary>
-    private static Task CopyFileAsync(string source, string destination, CancellationToken cancellationToken) =>
-        Task.Run(() => File.Copy(source, destination, overwrite: false), cancellationToken);
+    private static void CopyFile(string source, string destination) => File.Copy(source, destination, overwrite: false);
 
-    private static async Task CopyDirectoryAsync(string source, string destination, CancellationToken cancellationToken)
+    /// <summary>
+    /// 联接点和目录符号链接无法原样复制，跳过又会让移动后删掉源文件夹时丢失它们；
+    /// 扫描时一并检查，发现链接就在复制之前报错，源文件夹保持不变。整棵目录只遍历一次。
+    /// </summary>
+    private static void CopyDirectory(string source, string destination, CancellationToken cancellationToken)
     {
-        EnsureNoDirectoryLinks(source);
-        Directory.CreateDirectory(destination);
-        var pending = new Stack<(string Source, string Destination)>();
-        pending.Push((source, destination));
-
+        var directories = new List<string>();
+        var files = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(source);
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = pending.Pop();
-
-            foreach (var file in Directory.EnumerateFiles(current.Source))
-                await CopyFileAsync(file, Path.Combine(current.Destination, Path.GetFileName(file)), cancellationToken);
-
-            foreach (var directory in Directory.EnumerateDirectories(current.Source))
+            foreach (var entry in new DirectoryInfo(current).EnumerateFileSystemInfos("*", ScanOptions))
             {
-                var info = new DirectoryInfo(directory);
-                var childDestination = Path.Combine(current.Destination, info.Name);
-                Directory.CreateDirectory(childDestination);
-                pending.Push((directory, childDestination));
+                if (entry is FileInfo) files.Add(entry.FullName);
+                else if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException(FolderContainsLinksMessage);
+                else
+                {
+                    directories.Add(entry.FullName);
+                    pending.Push(entry.FullName);
+                }
             }
         }
-    }
 
-    /// <summary>
-    /// 联接点和目录符号链接无法原样复制，跳过又会让移动后删掉源文件夹时丢失它们；
-    /// 在开始复制之前就报错，源文件夹保持不变。
-    /// </summary>
-    private static void EnsureNoDirectoryLinks(string source)
-    {
-        var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false };
-        if (new DirectoryInfo(source).EnumerateDirectories("*", options).Any(directory => (directory.Attributes & FileAttributes.ReparsePoint) != 0))
-            throw new IOException(FolderContainsLinksMessage);
+        var sourceRoot = new DirectoryInfo(source).FullName;
+        string Target(string path) => Path.Combine(destination, Path.GetRelativePath(sourceRoot, path));
+        Directory.CreateDirectory(destination);
+        foreach (var directory in directories) Directory.CreateDirectory(Target(directory));
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CopyFile(file, Target(file));
+        }
     }
 
     private static string GetAvailablePath(string destination, string name, bool isDirectory)
@@ -184,12 +171,36 @@ public sealed class FileOperationService
     private static void EnsureDestinationIsNotInsideSource(string source, string destination)
     {
         if (!Directory.Exists(source)) return;
-        var sourcePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
-        var destinationPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
         // 目标就是源文件夹本身也不行：复制时会把新建的子文件夹一起遍历进去，无限嵌套。
-        if (string.Equals(destinationPath, sourcePath, StringComparison.OrdinalIgnoreCase) ||
-            destinationPath.StartsWith(sourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        // 路径本身或它的上级可能是指向源文件夹的联接点、符号链接，按实际位置再比较一次。
+        if (IsSameOrInside(destination, source) || IsSameOrInside(ResolveLinks(destination), ResolveLinks(source)))
             throw new IOException(FolderIntoItselfMessage);
+    }
+
+    private static bool IsSameOrInside(string path, string folder)
+    {
+        var folderPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        return string.Equals(candidate, folderPath, StringComparison.OrdinalIgnoreCase) ||
+               candidate.StartsWith(folderPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>从根目录起逐级把联接点和目录符号链接换成它实际指向的位置。</summary>
+    internal static string ResolveLinks(string path, int depth = 0)
+    {
+        if (depth > 32) throw new IOException("目录链接层级过多。");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        var root = Path.GetPathRoot(full) ?? string.Empty;
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            var info = new DirectoryInfo(current);
+            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) == 0) continue;
+            if (info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                current = ResolveLinks(target.FullName, depth + 1);
+        }
+        return current;
     }
 
     private static string GetSourceName(string source)

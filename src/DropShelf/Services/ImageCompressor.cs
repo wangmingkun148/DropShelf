@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -118,18 +119,36 @@ public static class ImageCompressor
         return Encode(current, MinimumQuality);
     }
 
-    /// <summary>读取图片：按拍摄方向转正，透明部分铺白色背景（JPG 不支持透明）。</summary>
+    /// <summary>
+    /// 读取图片：按拍摄方向转正，透明部分铺白色背景（JPG 不支持透明）。
+    /// 先只读尺寸和方向，超大的图片在解码时就缩小到处理上限以内，不会先完整解码再缩小。
+    /// </summary>
     public static BitmapSource Load(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-        BitmapSource bitmap = decoder.Frames[0];
-        var pixels = (long)bitmap.PixelWidth * bitmap.PixelHeight;
+        int width, height, orientation;
+        using (var stream = OpenRead(path))
+        {
+            var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.DelayCreation,
+                BitmapCacheOption.None).Frames[0];
+            (width, height, orientation) = (frame.PixelWidth, frame.PixelHeight, ReadOrientation(frame));
+        }
+
+        using var content = OpenRead(path);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.StreamSource = content;
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+        var pixels = (long)width * height;
         if (pixels > MaximumWorkingPixels)
-            bitmap = Resize(new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0), Math.Sqrt((double)MaximumWorkingPixels / pixels));
-        bitmap = ApplyOrientation(bitmap, ReadOrientation(decoder.Frames[0]));
-        return Flatten(bitmap);
+            image.DecodePixelWidth = Math.Max(1, (int)(width * Math.Sqrt((double)MaximumWorkingPixels / pixels)));
+        image.EndInit();
+        image.Freeze();
+        return Flatten(ApplyOrientation(image, orientation));
     }
+
+    private static FileStream OpenRead(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
     private static byte[] Encode(BitmapSource bitmap, int quality)
     {
@@ -181,31 +200,38 @@ public static class ImageCompressor
         return oriented;
     }
 
+    /// <summary>按条带逐段转换，只需要几十行像素的临时缓冲区，不会同时占用整张图的两份像素数组。</summary>
     private static BitmapSource Flatten(BitmapSource bitmap)
     {
         var source = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
         var width = source.PixelWidth;
         var height = source.PixelHeight;
-        var input = new byte[width * height * 4];
-        source.CopyPixels(input, width * 4, 0);
-
         var stride = (width * 3 + 3) & ~3;
-        var output = new byte[stride * height];
-        for (var y = 0; y < height; y++)
+        var rows = Math.Clamp(4_000_000 / (width * 4), 1, height);
+        var input = new byte[width * 4 * rows];
+        var output = new byte[stride * rows];
+        var flattened = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgr24, null);
+
+        for (var top = 0; top < height; top += rows)
         {
-            var from = y * width * 4;
-            var to = y * stride;
-            for (var x = 0; x < width; x++, from += 4, to += 3)
+            var count = Math.Min(rows, height - top);
+            source.CopyPixels(new Int32Rect(0, top, width, count), input, width * 4, 0);
+            for (var y = 0; y < count; y++)
             {
-                var alpha = input[from + 3];
-                var inverse = 255 - alpha;
-                output[to] = (byte)((input[from] * alpha + 255 * inverse) / 255);
-                output[to + 1] = (byte)((input[from + 1] * alpha + 255 * inverse) / 255);
-                output[to + 2] = (byte)((input[from + 2] * alpha + 255 * inverse) / 255);
+                var from = y * width * 4;
+                var to = y * stride;
+                for (var x = 0; x < width; x++, from += 4, to += 3)
+                {
+                    var alpha = input[from + 3];
+                    var inverse = 255 - alpha;
+                    output[to] = (byte)((input[from] * alpha + 255 * inverse) / 255);
+                    output[to + 1] = (byte)((input[from + 1] * alpha + 255 * inverse) / 255);
+                    output[to + 2] = (byte)((input[from + 2] * alpha + 255 * inverse) / 255);
+                }
             }
+            flattened.WritePixels(new Int32Rect(0, top, width, count), output, stride, 0);
         }
 
-        var flattened = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgr24, null, output, stride);
         flattened.Freeze();
         return flattened;
     }

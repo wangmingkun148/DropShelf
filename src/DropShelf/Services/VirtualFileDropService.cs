@@ -30,7 +30,8 @@ public static class VirtualFileDropService
         data.GetDataPresent(FileDescriptorUnicodeFormat, false) ||
         data.GetDataPresent(FileDescriptorAnsiFormat, false);
 
-    public static async Task<VirtualFileImportResult> ImportAsync(WpfDataObject data)
+    /// <summary>置物架关闭时取消；写入总量不超过磁盘剩余空间减去保留量，异常的附件流不会写满磁盘。</summary>
+    public static async Task<VirtualFileImportResult> ImportAsync(WpfDataObject data, CancellationToken cancellationToken = default)
     {
         if (!CanImport(data)) return new VirtualFileImportResult([], null, 0, Strings.NoVirtualAttachments);
         if (data is not ComDataObject comDataObject)
@@ -60,16 +61,16 @@ public static class VirtualFileDropService
             preparedFiles = PrepareContents(comDataObject, descriptors, cacheDirectory, out preparationFailures);
             if (preparedFiles.Count == 0)
             {
-                await DeleteCacheAsync(cacheDirectory);
+                await ReleaseCacheAsync(cacheDirectory);
                 return new VirtualFileImportResult([], null, preparationFailures, Strings.AttachmentUnavailable);
             }
 
-            return await Task.Run(() => ImportPreparedContents(preparedFiles, cacheDirectory, preparationFailures));
+            return await Task.Run(() => ImportPreparedContents(preparedFiles, cacheDirectory, preparationFailures, cancellationToken));
         }
         catch (Exception exception)
         {
             LogService.Error("接收虚拟附件失败", exception);
-            await DeleteCacheAsync(cacheDirectory);
+            await ReleaseCacheAsync(cacheDirectory);
             return new VirtualFileImportResult([], null, descriptors.Count, Strings.AttachmentReceiveFailed);
         }
         finally
@@ -79,11 +80,12 @@ public static class VirtualFileDropService
         }
     }
 
-    /// <summary>为一次接收创建独立的临时目录，关闭置物架后整体删除。</summary>
+    /// <summary>为一次接收创建独立的临时目录，创建者持有一次，最后一个持有者释放后整体删除。</summary>
     public static string CreateCacheDirectory()
     {
         var directory = Path.Combine(CacheRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
+        RetainCache(directory);
         return directory;
     }
 
@@ -100,7 +102,10 @@ public static class VirtualFileDropService
         }
     }
 
-    /// <summary>临时附件可以从一个置物架拖到另一个，每个缓存目录记录有几个置物架在使用。</summary>
+    /// <summary>
+    /// 临时附件可以从一个置物架拖到另一个，每个缓存目录记录有几个使用者（置物架、读取结果、正在进行的操作）。
+    /// 持有、释放和删除都在同一把锁内判断，删除时也持有这把锁，删除开始后不会再有人取得这个缓存。
+    /// </summary>
     private static readonly Dictionary<string, int> CacheHolders = new(StringComparer.OrdinalIgnoreCase);
 
     public static void RetainCache(string cacheDirectory)
@@ -108,7 +113,7 @@ public static class VirtualFileDropService
         lock (CacheHolders) CacheHolders[CacheKey(cacheDirectory)] = CacheHolders.GetValueOrDefault(CacheKey(cacheDirectory)) + 1;
     }
 
-    /// <summary>置物架不再使用这个缓存；最后一个使用者释放时才删除。</summary>
+    /// <summary>释放一次持有；最后一个使用者释放时在后台删除，删除前重新确认没有人再次持有。</summary>
     public static Task ReleaseCacheAsync(string cacheDirectory)
     {
         lock (CacheHolders)
@@ -122,7 +127,7 @@ public static class VirtualFileDropService
             }
             CacheHolders.Remove(key);
         }
-        return DeleteCacheAsync(cacheDirectory);
+        return DeleteUnheldCacheAsync(cacheDirectory);
     }
 
     /// <summary>文件所在的 DropShelf 缓存目录；不在缓存中时返回 null。</summary>
@@ -144,23 +149,22 @@ public static class VirtualFileDropService
 
     private static string CacheKey(string cacheDirectory) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheDirectory));
 
-    /// <summary>删除缓存目录；仍有置物架在使用时保留。</summary>
-    public static Task DeleteCacheAsync(string? cacheDirectory)
+    private static Task DeleteUnheldCacheAsync(string cacheDirectory)
     {
         if (!IsOwnedCacheDirectory(cacheDirectory)) return Task.CompletedTask;
-        lock (CacheHolders)
-        {
-            if (CacheHolders.ContainsKey(CacheKey(cacheDirectory!))) return Task.CompletedTask;
-        }
         return Task.Run(() =>
         {
-            try
+            lock (CacheHolders)
             {
-                if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, true);
-            }
-            catch (Exception exception)
-            {
-                LogService.Error("清理临时附件失败", exception);
+                if (CacheHolders.ContainsKey(CacheKey(cacheDirectory))) return;
+                try
+                {
+                    if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, true);
+                }
+                catch (Exception exception)
+                {
+                    LogService.Error("清理临时附件失败", exception);
+                }
             }
         });
     }
@@ -241,20 +245,25 @@ public static class VirtualFileDropService
     private static VirtualFileImportResult ImportPreparedContents(
         IReadOnlyList<PreparedVirtualFile> preparedFiles,
         string cacheDirectory,
-        int failed)
+        int failed,
+        CancellationToken cancellationToken)
     {
         var paths = new List<string>();
+        var budget = new WriteBudget(
+            QuickActionService.GetAvailableSpace(cacheDirectory) is { } available ? available - QuickActionService.FreeSpaceReserve : long.MaxValue,
+            cancellationToken);
         foreach (var prepared in preparedFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                CopyPreparedContent(prepared, prepared.Destination);
+                CopyPreparedContent(prepared, prepared.Destination, budget);
                 var descriptor = prepared.Descriptor;
                 if (descriptor.LastWriteTimeUtc is { } lastWriteTime)
                     File.SetLastWriteTimeUtc(prepared.Destination, lastWriteTime);
                 paths.Add(prepared.Destination);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 failed++;
                 LogService.Error($"无法写入虚拟附件 {Path.GetFileName(prepared.Destination)}", exception);
@@ -269,23 +278,31 @@ public static class VirtualFileDropService
             paths.Count == 0 ? Strings.AttachmentReceiveFailed : null);
     }
 
-    private static void CopyPreparedContent(PreparedVirtualFile prepared, string destination)
+    private static void CopyPreparedContent(PreparedVirtualFile prepared, string destination, WriteBudget budget)
     {
         var medium = prepared.Medium;
         using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan);
         switch (medium.tymed)
         {
             case TYMED.TYMED_ISTREAM:
-                CopyComStream(prepared.TakeStream(), output);
+                CopyComStream(prepared.TakeStream(), output, budget);
                 break;
             case TYMED.TYMED_HGLOBAL:
-                CopyGlobalMemory(medium.unionmember, output);
+                CopyGlobalMemory(medium.unionmember, output, budget);
                 break;
             case TYMED.TYMED_FILE:
                 var sourcePath = Marshal.PtrToStringUni(medium.unionmember);
                 if (string.IsNullOrWhiteSpace(sourcePath)) throw new IOException("附件来源没有提供临时文件");
                 using (var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    input.CopyTo(output);
+                {
+                    var buffer = new byte[81920];
+                    int read;
+                    while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        budget.Take(read);
+                        output.Write(buffer, 0, read);
+                    }
+                }
                 break;
             default:
                 throw new NotSupportedException($"不支持的附件传输方式：{medium.tymed}");
@@ -297,7 +314,7 @@ public static class VirtualFileDropService
         foreach (var prepared in preparedFiles) prepared.Release();
     }
 
-    private static void CopyComStream(object? streamObject, Stream output)
+    private static void CopyComStream(object? streamObject, Stream output, WriteBudget budget)
     {
         if (streamObject is null) throw new IOException("附件内容流为空");
         try
@@ -313,6 +330,7 @@ public static class VirtualFileDropService
                     input.Read(buffer, buffer.Length, bytesReadPointer);
                     var bytesRead = Marshal.ReadInt32(bytesReadPointer);
                     if (bytesRead <= 0) break;
+                    budget.Take(bytesRead);
                     output.Write(buffer, 0, bytesRead);
                 }
             }
@@ -327,7 +345,7 @@ public static class VirtualFileDropService
         }
     }
 
-    private static void CopyGlobalMemory(IntPtr handle, Stream output)
+    private static void CopyGlobalMemory(IntPtr handle, Stream output, WriteBudget budget)
     {
         if (handle == IntPtr.Zero) throw new IOException("附件内存内容为空");
         var size = checked((long)NativeMethods.GlobalSize(handle));
@@ -341,6 +359,7 @@ public static class VirtualFileDropService
             while (offset < size)
             {
                 var count = (int)Math.Min(buffer.Length, size - offset);
+                budget.Take(count);
                 Marshal.Copy(new IntPtr(pointer.ToInt64() + offset), buffer, 0, count);
                 output.Write(buffer, 0, count);
                 offset += count;
@@ -474,6 +493,17 @@ public static class VirtualFileDropService
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>一次接收的累计写入量上限；每写一段之前扣除，超出或已取消时中止。</summary>
+    private sealed class WriteBudget(long remaining, CancellationToken cancellationToken)
+    {
+        public void Take(int count)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            remaining -= count;
+            if (remaining < 0) throw new IOException("磁盘剩余空间不足，附件过大");
         }
     }
 

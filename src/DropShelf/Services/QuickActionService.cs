@@ -42,6 +42,10 @@ public sealed record QuickActionRequest(
 public static class QuickActionService
 {
     private const uint ShopFilePath = 2;
+    private static readonly TimeSpan TarTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>解压和接收附件时给磁盘留下的最少剩余空间。</summary>
+    internal const long FreeSpaceReserve = 512L * 1024 * 1024;
     private static readonly Guid DownloadsFolderId = new("374DE290-123F-4565-9164-39C4925E467B");
 
     public static async Task<QuickActionResult> ExecuteAsync(QuickActionRequest request)
@@ -110,7 +114,7 @@ public static class QuickActionService
                 {
                     var outputDirectory = request.HasTemporaryFiles ? GetPersistentOutputDirectory() : null;
                     var maximumBytes = custom.ImageSizeKb * 1024L;
-                    var results = await ImagingThread.RunAsync(() => ImageCompressor.CompressAll(paths, maximumBytes, outputDirectory));
+                    var results = await ImagingThread.RunLongAsync(() => ImageCompressor.CompressAll(paths, maximumBytes, outputDirectory));
                     return SummarizeImageCompression(results, custom.ImageSizeKb);
                 }
                 catch (Exception exception)
@@ -375,6 +379,7 @@ public static class QuickActionService
             temporaryDirectory = Path.Combine(parent, $".dropshelf-{Guid.NewGuid():N}");
             Directory.CreateDirectory(temporaryDirectory);
             ExtractZipSafely(source, temporaryDirectory);
+            ZoneIdentifier.Propagate(source, temporaryDirectory);
             Directory.Move(temporaryDirectory, destination);
             temporaryDirectory = null;
             return new QuickActionResult(true, Strings.ExtractedTo(Path.GetFileName(destination)), [destination]);
@@ -414,12 +419,13 @@ public static class QuickActionService
                     ? "Windows 无法读取此 7z 文件"
                     : listing.Error.Trim());
 
-            var extraction = RunWindowsTar(tarPath, ["-xf", source, "-C", temporaryDirectory]);
+            var extraction = RunWindowsTar(tarPath, ["-xf", source, "-C", temporaryDirectory], temporaryDirectory);
             if (extraction.ExitCode != 0)
                 throw new InvalidDataException(string.IsNullOrWhiteSpace(extraction.Error)
                     ? "Windows 无法解压此 7z 文件"
                     : extraction.Error.Trim());
             RejectExtractedLinks(temporaryDirectory);
+            ZoneIdentifier.Propagate(source, temporaryDirectory);
 
             Directory.Move(temporaryDirectory, destination);
             temporaryDirectory = null;
@@ -471,17 +477,20 @@ public static class QuickActionService
     /// <summary>压缩包声明的解压后总大小放不下时直接失败，不会先把磁盘写满。</summary>
     private static void EnsureFreeSpace(string directory, long required)
     {
-        long available;
+        // 网络位置等无法查询剩余空间时照常解压，仍受每个条目声明大小的限制。
+        if (required > (GetAvailableSpace(directory) ?? long.MaxValue)) throw new IOException("磁盘空间不足，无法解压");
+    }
+
+    internal static long? GetAvailableSpace(string directory)
+    {
         try
         {
-            available = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(directory))!).AvailableFreeSpace;
+            return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(directory))!).AvailableFreeSpace;
         }
         catch
         {
-            // 网络位置等无法查询剩余空间时照常解压，仍受每个条目声明大小的限制。
-            return;
+            return null;
         }
-        if (required > available) throw new IOException("磁盘空间不足，无法解压");
     }
 
     /// <summary>实际解出的内容超过条目声明的大小时视为损坏或恶意的压缩包，防止声明很小、解出很大的压缩包写满磁盘。</summary>
@@ -505,6 +514,8 @@ public static class QuickActionService
     {
         var startInfo = CreateTarStartInfo(tarPath, ["-tf", source]);
         using var process = Process.Start(startInfo) ?? throw new IOException("Windows 解压程序无法启动");
+        // 超时后结束进程，读取列表的循环随之结束，按失败处理。
+        using var timeout = new System.Threading.Timer(_ => StopProcess(process), null, TarTimeout, Timeout.InfiniteTimeSpan);
         var errorTask = process.StandardError.ReadToEndAsync();
         var destinationBase = Path.GetFullPath(destination);
         var destinationRoot = destinationBase + Path.DirectorySeparatorChar;
@@ -517,8 +528,7 @@ public static class QuickActionService
         }
         catch
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch { }
+            StopProcess(process);
             throw;
         }
     }
@@ -554,15 +564,46 @@ public static class QuickActionService
         }
     }
 
-    private static (int ExitCode, string Error) RunWindowsTar(string tarPath, IReadOnlyList<string> arguments)
+    /// <summary>
+    /// 7z 无法预先得知解压后的大小：解压期间盯住磁盘剩余空间，低于保留量或超时就结束 tar，
+    /// 调用方随后删除解出的部分内容。
+    /// </summary>
+    private static (int ExitCode, string Error) RunWindowsTar(string tarPath, IReadOnlyList<string> arguments, string outputDirectory)
     {
         var startInfo = CreateTarStartInfo(tarPath, arguments);
         using var process = Process.Start(startInfo) ?? throw new IOException("Windows 解压程序无法启动");
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
+        var elapsed = Stopwatch.StartNew();
+        while (!process.WaitForExit(500))
+        {
+            if (elapsed.Elapsed > TarTimeout)
+            {
+                StopProcess(process);
+                throw new TimeoutException("7z 解压时间过长");
+            }
+            if (GetAvailableSpace(outputDirectory) < FreeSpaceReserve)
+            {
+                StopProcess(process);
+                throw new IOException("磁盘空间不足，无法解压");
+            }
+        }
         process.WaitForExit();
         _ = outputTask.GetAwaiter().GetResult();
         return (process.ExitCode, errorTask.GetAwaiter().GetResult());
+    }
+
+    /// <summary>结束进程并等它真正退出，之后才能删除它写了一半的文件。</summary>
+    private static void StopProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            process.WaitForExit(5000);
+        }
+        catch
+        {
+        }
     }
 
     private static ProcessStartInfo CreateTarStartInfo(string tarPath, IReadOnlyList<string> arguments)

@@ -63,12 +63,13 @@ public sealed class ShelfHistoryService
         if (_entries.Remove(entry)) SaveAndNotify();
     }
 
-    /// <summary>把记录移到列表中的指定位置。</summary>
+    /// <summary>把记录移到列表中的指定位置；记录已被移除（例如拖动收尾时清空了列表）时不做任何事。</summary>
     public void Move(ShelfHistoryEntry entry, int index)
     {
         var from = _entries.IndexOf(entry);
+        if (from < 0) return;
         index = Math.Clamp(index, 0, _entries.Count - 1);
-        if (from < 0 || from == index) return;
+        if (from == index) return;
         _entries.RemoveAt(from);
         _entries.Insert(index, entry);
         SaveAndNotify();

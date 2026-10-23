@@ -21,6 +21,7 @@ public enum DropContentKind
 
 public sealed record DroppedEntry(ShelfItemKind Kind, string Value, string? Title = null, bool IsTemporary = false);
 
+/// <summary>读取结果中的每个缓存目录都替接收方持有一次：放进置物架后由置物架接管，不用时调用 <see cref="VirtualFileDropService.ReleaseCacheAsync"/>。</summary>
 public sealed record DropReadResult(
     IReadOnlyList<DroppedEntry> Entries,
     IReadOnlyList<string> CacheDirectories,
@@ -97,7 +98,7 @@ public static class DropDataReader
     /// <summary>
     /// 读取拖放内容。必须在 Drop 回调中调用：需要同步取得来源程序交出的数据，之后的写盘在后台完成。
     /// </summary>
-    public static async Task<DropReadResult> ReadAsync(WpfDataObject data, bool filesOnly = false)
+    public static async Task<DropReadResult> ReadAsync(WpfDataObject data, bool filesOnly = false, CancellationToken cancellationToken = default)
     {
         var kind = Classify(data);
         if (filesOnly && kind == DropContentKind.Link && VirtualFileDropService.CanImport(data))
@@ -109,7 +110,7 @@ public static class DropDataReader
                 return await ReadFileDropAsync(data);
 
             case DropContentKind.VirtualFiles:
-                var imported = await VirtualFileDropService.ImportAsync(data);
+                var imported = await VirtualFileDropService.ImportAsync(data, cancellationToken);
                 return new DropReadResult(
                     imported.Paths.Select(path => new DroppedEntry(ShelfItemKind.File, path, IsTemporary: true)).ToArray(),
                     imported.CacheDirectory is { Length: > 0 } cache ? [cache] : [],
@@ -157,13 +158,18 @@ public static class DropDataReader
         paths = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
         if (paths.Length == 0) return DropReadResult.Failed(Strings.NoFilesRead);
 
-        // 从另一个置物架拖来的临时附件仍是临时附件，并一起持有它所在的缓存，原置物架关闭时不会被删掉。
+        // 从另一个置物架拖来的临时附件仍是临时附件，读取时就一起持有它所在的缓存，
+        // 原置物架在读取完成、放进置物架之前关闭也不会删掉它。
         var shared = new List<string>();
         var entries = paths.Select(path =>
         {
             var kind = Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File;
             if (VirtualFileDropService.GetCacheDirectory(path) is not { } cache) return new DroppedEntry(kind, path);
-            if (!shared.Contains(cache, StringComparer.OrdinalIgnoreCase)) shared.Add(cache);
+            if (!shared.Contains(cache, StringComparer.OrdinalIgnoreCase))
+            {
+                VirtualFileDropService.RetainCache(cache);
+                shared.Add(cache);
+            }
             return new DroppedEntry(kind, path, IsTemporary: true);
         }).ToArray();
         var snapshots = OpenVolatileFiles(entries);
@@ -173,7 +179,7 @@ public static class DropDataReader
         await Task.Run(() =>
         {
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (index, stream) in snapshots)
+            foreach (var (index, stream, zone) in snapshots)
             {
                 var source = entries[index].Value;
                 var destination = Path.Combine(cacheDirectory, VirtualFileDropService.CreateUniqueSafeName(Path.GetFileName(source), usedNames));
@@ -187,6 +193,7 @@ public static class DropDataReader
                         catch { }
                         using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
                             stream.CopyTo(output);
+                        ZoneIdentifier.Write(destination, zone);
                         if (modified is { Year: > 1601 } time)
                         {
                             try { File.SetLastWriteTimeUtc(destination, time); }
@@ -206,9 +213,10 @@ public static class DropDataReader
         return new DropReadResult(entries, [.. shared, cacheDirectory], 0, null);
     }
 
-    private static List<(int Index, FileStream Stream)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries)
+    /// <summary>打开文件的同时读出下载来源标记，另存的副本带上同样的标记。</summary>
+    private static List<(int Index, FileStream Stream, string? Zone)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries)
     {
-        var opened = new List<(int, FileStream)>();
+        var opened = new List<(int, FileStream, string?)>();
         for (var index = 0; index < entries.Count; index++)
         {
             var path = entries[index].Value;
@@ -217,7 +225,7 @@ public static class DropDataReader
             {
                 if (new FileInfo(path).Length > ChatAppCompatibility.MaximumSnapshotBytes) continue;
                 opened.Add((index, new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920,
-                    FileOptions.SequentialScan)));
+                    FileOptions.SequentialScan), ZoneIdentifier.Read(path)));
             }
             catch
             {
@@ -320,7 +328,7 @@ public static class DropDataReader
         catch (Exception exception)
         {
             LogService.Error("保存拖入的图片失败", exception);
-            await VirtualFileDropService.DeleteCacheAsync(cacheDirectory);
+            await VirtualFileDropService.ReleaseCacheAsync(cacheDirectory);
             return DropReadResult.Failed(Strings.ImageSaveFailed);
         }
     }

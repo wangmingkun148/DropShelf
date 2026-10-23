@@ -67,6 +67,8 @@ public partial class ShelfWindow : Window
     private readonly DropTargetHelper _dropHelper = new();
     private readonly DispatcherTimer _toastTimer;
     private readonly DispatcherTimer _leaveCheck;
+    /// <summary>窗口关闭时取消还在接收的附件。</summary>
+    private readonly CancellationTokenSource _lifetime = new();
     private readonly List<(Border Tile, TextBlock Glyph, TextBlock Label, QuickActionInfo Info)> _tiles = [];
     private QuickShelfSize _size;
     private TransferMode _dragOutMode;
@@ -189,6 +191,7 @@ public partial class ShelfWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        _lifetime.Cancel();
         StopSlide();
         _toastTimer.Stop();
         _leaveCheck.Stop();
@@ -574,10 +577,10 @@ public partial class ShelfWindow : Window
         {
             if (action is not null)
             {
-                var files = await DropDataReader.ReadAsync(e.Data, filesOnly: true);
+                var files = await DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token);
                 if (IsClosing)
                 {
-                    foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.DeleteCacheAsync(cache);
+                    foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                     return;
                 }
                 var result = await ViewModel.RunActionAsync(action, files, new WindowInteropHelper(this).Handle, PickFolder);
@@ -585,10 +588,10 @@ public partial class ShelfWindow : Window
             }
             else
             {
-                var read = await DropDataReader.ReadAsync(e.Data);
+                var read = await DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token);
                 if (IsClosing)
                 {
-                    foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.DeleteCacheAsync(cache);
+                    foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                     return;
                 }
                 var summary = ViewModel.Add(read);
@@ -971,10 +974,10 @@ public partial class ShelfWindow : Window
         }
         try
         {
-            var read = await DropDataReader.ReadAsync(data);
+            var read = await DropDataReader.ReadAsync(data, cancellationToken: _lifetime.Token);
             if (IsClosing)
             {
-                foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.DeleteCacheAsync(cache);
+                foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                 return;
             }
             var summary = ViewModel.Add(read);

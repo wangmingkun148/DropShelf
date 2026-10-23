@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -8,17 +9,43 @@ namespace DropShelf.Services;
 
 public static class ShellThumbnailService
 {
-    public static async Task<ImageSource?> LoadAsync(string path, int size = 128)
+    /// <summary>最近用过的缩略图，同一文件放进多个置物架或从最近关闭中恢复时不用重新生成。只在图片处理线程上访问。</summary>
+    private const int CacheCapacity = 32;
+    private static readonly Dictionary<string, LinkedListNode<(string Key, ImageSource Image)>> CacheIndex = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly LinkedList<(string Key, ImageSource Image)> CacheOrder = new();
+
+    public static async Task<ImageSource?> LoadAsync(string path, int size = 128, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
         try
         {
-            return await ImagingThread.RunAsync(() => LoadFromWindows(path, size)).ConfigureAwait(false);
+            return await ImagingThread.RunAsync(() => LoadCached(path, size), cancellationToken).ConfigureAwait(false);
         }
         catch
         {
             return null;
         }
+    }
+
+    private static ImageSource? LoadCached(string path, int size)
+    {
+        // 文件被修改后键随之改变，旧的缩略图自然被挤出。
+        var key = $"{size}|{File.GetLastWriteTimeUtc(path).Ticks}|{path}";
+        if (CacheIndex.TryGetValue(key, out var node))
+        {
+            CacheOrder.Remove(node);
+            CacheOrder.AddFirst(node);
+            return node.Value.Image;
+        }
+        var image = LoadFromWindows(path, size);
+        if (image is null) return null;
+        CacheIndex[key] = CacheOrder.AddFirst((key, image));
+        if (CacheOrder.Count > CacheCapacity)
+        {
+            CacheIndex.Remove(CacheOrder.Last!.Value.Key);
+            CacheOrder.RemoveLast();
+        }
+        return image;
     }
 
     private static ImageSource? LoadFromWindows(string path, int size)
