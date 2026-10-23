@@ -64,97 +64,101 @@ public partial class MainWindow : Window
 
     private void OnBackClick(object sender, RoutedEventArgs e) => BackToOverview();
 
-    // ───────────── 卡片展开成页面 ─────────────
+    // ───────────── 卡片翻开成页面 ─────────────
 
-    private static readonly Duration GrowDuration = TimeSpan.FromMilliseconds(340);
-    private static readonly Duration ShrinkDuration = TimeSpan.FromMilliseconds(380);
-    private static readonly IEasingFunction GrowEase = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 5 };
-    private static readonly IEasingFunction ShrinkEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 };
+    /// <summary>卡片转到侧面时，已从起点走向终点的比例；先就地翻起，再展开成页面。</summary>
+    private const double FlipMidway = 0.2;
+    /// <summary>转到侧面时卡片离屏幕最近，略微变高，背面带一点阴影，看起来像在三维空间里翻转。</summary>
+    private const double FlipLift = 1.06;
+    private const double FlipShade = 0.22;
+    // 匀速转动时宽度按余弦变化：转向侧面越来越快，从侧面转回越来越慢。
+    private static readonly IEasingFunction EdgeOnEase = new SineEase { EasingMode = EasingMode.EaseIn };
+    private static readonly IEasingFunction GlideEase = new SineEase { EasingMode = EasingMode.EaseInOut };
+    private static readonly IEasingFunction OpenEase = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 4 };
+    private static readonly IEasingFunction LandEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
     private static readonly IEasingFunction LeaveEase = new CubicEase { EasingMode = EasingMode.EaseIn };
     private string _page = "Overview";
     private bool _morphing;
 
     /// <summary>
-    /// 点开的卡片放大成整个页面：卡片背景从卡片的位置和大小长到页面区域，卡片上的图标和文字跟着左上角走并淡出；
-    /// 概览页同时下沉淡出，长到接近页面大小时换成新页面，卡片背景淡出露出页面内容。
-    /// 卡片背景是一个空的圆角矩形，内容用截图，每帧只改变几个矩形的位置和大小，不会重新排版页面。
+    /// 把点开的卡片翻过来：卡片本身转到侧面，换成空白的卡片背面，背面一边转回正面一边展开成整个页面，最后淡出露出页面内容。
+    /// 概览页在卡片转到侧面后下沉淡出。正面一直是卡片本身，转到侧面（宽度为 0）时才换成背面，看不出切换。
+    /// 每帧只改变卡片的变换和一个空白圆角矩形的位置大小，不会重新排版页面，也不用截图。
     /// </summary>
     private void OpenPage(string page, Controls.PageTile tile)
     {
         if (_morphing || _page != "Overview") return;
         _morphing = true;
-        var from = BoundsOf(tile);
+        var home = BoundsOf(tile);
         var to = PageArea();
-        var card = AddMorphCard(from);
-        var content = Snapshot(tile)?.Image;
-        Morph(card, from, to, GrowDuration, GrowEase, resize: true);
-        if (content is not null)
-        {
-            DragLayer.Children.Add(content);
-            Morph(content, from, to, GrowDuration, GrowEase, resize: false);
-            content.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(140)));
-        }
+        var edge = Lerp(home, to, FlipMidway);
         SetPanelHeader(page, animate: true);
-        FadeOutPage(OverviewPage, () =>
+        FlipTile(tile, home, edge, closing: true, 170, () =>
         {
-            ShowPage(page);
-            var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = MotionEase };
-            reveal.Completed += (_, _) =>
+            tile.Opacity = 0;
+            ResetTile(tile);
+            FadeOutPage(OverviewPage);
+            var card = AddMorphCard(edge);
+            FlipCard(card, edge, to, closing: false, 300, OpenEase, () =>
             {
-                DragLayer.Children.Remove(card);
-                if (content is not null) DragLayer.Children.Remove(content);
-                _morphing = false;
-            };
-            card.BeginAnimation(OpacityProperty, reveal);
+                ShowPage(page);
+                tile.Opacity = 1;
+                var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase };
+                reveal.Completed += (_, _) =>
+                {
+                    DragLayer.Children.Remove(card);
+                    _morphing = false;
+                };
+                card.BeginAnimation(OpacityProperty, reveal);
+            });
         });
     }
 
     /// <summary>
-    /// 返回时反过来：卡片背景先盖住页面，换回概览页后缩回原来那张卡片，落位时略微回弹，卡片内容在落位前淡入。
+    /// 返回时反过来：卡片背面盖住页面，换回概览页后一边缩小一边转到侧面，换成卡片本身转回正面落进原位，落位时略微回弹。
     /// </summary>
     private void BackToOverview()
     {
         if (_morphing || _page == "Overview") return;
+        SetPanelHeader("Overview", animate: true);
         if (PageCards.Children.OfType<Controls.PageTile>().FirstOrDefault(tile => Equals(tile.Tag, _page)) is not { } tile)
         {
             ShowPage("Overview");
-            SetPanelHeader("Overview", animate: true);
             return;
         }
         _morphing = true;
         var from = PageArea();
         var card = AddMorphCard(from);
         card.Opacity = 0;
-        SetPanelHeader("Overview", animate: true);
-        var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(130));
+        var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120));
         cover.Completed += (_, _) =>
         {
             ShowPage("Overview");
             ContentLayer.UpdateLayout();
             // 概览页正从稍低处上移，扣掉这段位移才是卡片最终的位置。
-            var to = BoundsOf(tile);
-            to.Y -= (OverviewPage.RenderTransform as TranslateTransform)?.Y ?? 0;
-            var content = Snapshot(tile)?.Image;
+            var home = BoundsOf(tile);
+            home.Y -= (OverviewPage.RenderTransform as TranslateTransform)?.Y ?? 0;
+            var edge = Lerp(home, from, FlipMidway);
             tile.Opacity = 0;
-            if (content is not null)
+            FlipCard(card, from, edge, closing: true, 230, GlideEase, () =>
             {
-                content.Opacity = 0;
-                DragLayer.Children.Add(content);
-                Morph(content, from, to, ShrinkDuration, ShrinkEase, resize: false);
-                content.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)) { BeginTime = TimeSpan.FromMilliseconds(170) });
-            }
-            Morph(card, from, to, ShrinkDuration, ShrinkEase, resize: true, () =>
-            {
-                tile.Opacity = 1;
                 DragLayer.Children.Remove(card);
-                if (content is not null) DragLayer.Children.Remove(content);
-                _morphing = false;
+                // 先摆到侧面再显示，不会先在原位闪一下。
+                FlipTile(tile, home, edge, closing: false, 320, () =>
+                {
+                    ResetTile(tile);
+                    _morphing = false;
+                });
+                tile.Opacity = 1;
             });
         };
         card.BeginAnimation(OpacityProperty, cover);
     }
 
     private Rect BoundsOf(FrameworkElement element) => new(element.TranslatePoint(default, DragLayer), new Size(element.ActualWidth, element.ActualHeight));
+
+    private static Rect Lerp(Rect from, Rect to, double amount) => new(from.X + (to.X - from.X) * amount, from.Y + (to.Y - from.Y) * amount,
+        from.Width + (to.Width - from.Width) * amount, from.Height + (to.Height - from.Height) * amount);
 
     /// <summary>页面在窗口中可见的区域：页面内容的宽度，从内容顶部（滚动后为可视区域顶部）到可视区域底部的页边距。</summary>
     private Rect PageArea()
@@ -165,10 +169,18 @@ public partial class MainWindow : Window
         return new Rect(content.Left, top, content.Width, Math.Max(0, view.Bottom - PageMargin - top));
     }
 
-    /// <summary>与设置卡片外观相同的空卡片（没有内容），放大缩小时只需重画一个圆角矩形。</summary>
+    /// <summary>卡片背面：与设置卡片外观相同的空卡片，上面盖一层翻转时的阴影；放大缩小时只需重画两个圆角矩形。</summary>
     private Border AddMorphCard(Rect bounds)
     {
-        var card = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), IsHitTestVisible = false };
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new System.Windows.Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform(),
+            Child = new Border { CornerRadius = new CornerRadius(7), Background = Brushes.Black, Opacity = 0 }
+        };
         card.SetResourceReference(Border.BackgroundProperty, "CardBrush");
         card.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         Canvas.SetLeft(card, bounds.Left);
@@ -179,34 +191,71 @@ public partial class MainWindow : Window
         return card;
     }
 
+    /// <summary>卡片背面转半圈并从 from 移到 to：closing 时从正对屏幕转到侧面，否则从侧面转回正对屏幕。</summary>
+    private static void FlipCard(Border card, Rect from, Rect to, bool closing, double milliseconds, IEasingFunction ease, Action done)
+    {
+        var flip = (ScaleTransform)card.RenderTransform;
+        Morph(card, from, to, TimeSpan.FromMilliseconds(milliseconds), ease);
+        Tween(card.Child, OpacityProperty, closing ? 0 : FlipShade, closing ? FlipShade : 0, milliseconds, ease);
+        Tween(flip, ScaleTransform.ScaleYProperty, closing ? 1 : FlipLift, closing ? FlipLift : 1, milliseconds, ease);
+        Tween(flip, ScaleTransform.ScaleXProperty, closing ? 1 : 0, closing ? 0 : 1, milliseconds, closing ? EdgeOnEase : ease, done);
+    }
+
     /// <summary>
-    /// 从一个矩形移到另一个矩形；resize 为 false 时只移动左上角（卡片内容保持原大小，文字不会被拉伸）。
-    /// done 在动画结束时调用；Completed 必须在 BeginAnimation 之前挂上，之后挂上的不会触发。
+    /// 卡片本身转半圈：closing 时从原位 home 转到侧面并移到 away，否则从 away 的侧面转回原位，落位时略微回弹。
+    /// 只改变卡片的变换，不影响排版；转动期间压在相邻的卡片上面。
     /// </summary>
-    private static void Morph(FrameworkElement element, Rect from, Rect to, Duration duration, IEasingFunction ease, bool resize, Action? done = null)
+    private static void FlipTile(FrameworkElement tile, Rect home, Rect away, bool closing, double milliseconds, Action done)
+    {
+        var size = new ScaleTransform();
+        var flip = new ScaleTransform();
+        var move = new TranslateTransform();
+        tile.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+        tile.RenderTransform = new TransformGroup { Children = { size, flip, move } };
+        Panel.SetZIndex(tile, 1);
+        var ease = closing ? GlideEase : LandEase;
+        void Turn(Animatable target, DependencyProperty property, double atHome, double atAway, IEasingFunction? turnEase = null, Action? finished = null) =>
+            Tween(target, property, closing ? atHome : atAway, closing ? atAway : atHome, milliseconds, turnEase ?? ease, finished);
+        Turn(size, ScaleTransform.ScaleXProperty, 1, away.Width / home.Width);
+        Turn(size, ScaleTransform.ScaleYProperty, 1, away.Height / home.Height);
+        Turn(move, TranslateTransform.XProperty, 0, away.X + away.Width / 2 - home.X - home.Width / 2);
+        Turn(move, TranslateTransform.YProperty, 0, away.Y + away.Height / 2 - home.Y - home.Height / 2);
+        Turn(flip, ScaleTransform.ScaleYProperty, 1, FlipLift);
+        Turn(flip, ScaleTransform.ScaleXProperty, 1, 0, closing ? EdgeOnEase : LandEase, done);
+    }
+
+    private static void ResetTile(FrameworkElement tile)
+    {
+        tile.RenderTransform = Transform.Identity;
+        Panel.SetZIndex(tile, 0);
+    }
+
+    /// <summary>从一个矩形移到另一个矩形，每帧只改变一个画布子元素的位置和大小。</summary>
+    private static void Morph(FrameworkElement element, Rect from, Rect to, Duration duration, IEasingFunction ease)
     {
         DoubleAnimation Step(double start, double end) => new(start, end, duration) { EasingFunction = ease };
-        var left = Step(from.Left, to.Left);
-        if (done is not null) left.Completed += (_, _) => done();
+        element.BeginAnimation(Canvas.LeftProperty, Step(from.Left, to.Left));
         element.BeginAnimation(Canvas.TopProperty, Step(from.Top, to.Top));
-        if (resize)
-        {
-            element.BeginAnimation(WidthProperty, Step(from.Width, to.Width));
-            element.BeginAnimation(HeightProperty, Step(from.Height, to.Height));
-        }
-        element.BeginAnimation(Canvas.LeftProperty, left);
+        element.BeginAnimation(WidthProperty, Step(from.Width, to.Width));
+        element.BeginAnimation(HeightProperty, Step(from.Height, to.Height));
+    }
+
+    /// <summary>done 在动画结束时调用；Completed 必须在 BeginAnimation 之前挂上，之后挂上的不会触发。</summary>
+    private static void Tween(IAnimatable target, DependencyProperty property, double from, double to, double milliseconds, IEasingFunction ease, Action? done = null)
+    {
+        var animation = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = ease };
+        if (done is not null) animation.Completed += (_, _) => done();
+        target.BeginAnimation(property, animation);
     }
 
     /// <summary>页面略微下沉并淡出，动画期间缓存为位图。</summary>
-    private static void FadeOutPage(FrameworkElement page, Action done)
+    private static void FadeOutPage(FrameworkElement page)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
         page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
         var duration = TimeSpan.FromMilliseconds(200);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
-        var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
-        fade.Completed += (_, _) => done();
-        page.BeginAnimation(OpacityProperty, fade);
+        page.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase });
     }
 
     // ───────────── 状态栏顶部的页面标题 ─────────────
