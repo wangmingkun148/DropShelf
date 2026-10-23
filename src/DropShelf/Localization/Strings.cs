@@ -41,7 +41,7 @@ public static class Strings
     public static string QuickActionsTitle => T("快速操作", "Quick actions");
     public static string Appearance => T("外观", "Appearance");
     public static string About => T("关于", "About");
-    public static string BackTooltip => T("返回", "Back");
+    public static string BackTooltip => T("返回（Esc）", "Back (Esc)");
     public static string AboutTooltip => T("关于 DropShelf", "About DropShelf");
     public static string SettingsSection => T("设置", "Settings");
     public static string ClickToRestore => T("点击恢复", "Click to restore");

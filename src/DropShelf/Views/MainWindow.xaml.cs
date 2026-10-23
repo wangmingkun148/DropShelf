@@ -1433,6 +1433,29 @@ public partial class MainWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
+    // 设置页里 Esc、Alt+← 和鼠标后退键都回到概览；录快捷键、下拉框等先处理过的按键不算。
+    protected override void OnKeyDown(System.Windows.Input.KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var modifiers = Keyboard.Modifiers;
+        if (e.Handled || !CanGoBack || !(key == Key.Escape && modifiers == ModifierKeys.None ||
+            key == Key.Left && modifiers == ModifierKeys.Alt || key == Key.BrowserBack)) return;
+        BackToOverview();
+        e.Handled = true;
+    }
+
+    protected override void OnMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Handled || e.ChangedButton != MouseButton.XButton1 || !CanGoBack) return;
+        BackToOverview();
+        e.Handled = true;
+    }
+
+    // 对话框开着时 Esc 留给它的取消按钮。
+    private bool CanGoBack => _page != "Overview" && !ViewModel.IsEditorOpen && _pendingDelete is null && !_draggingCard && !_draggingHistory;
+
     private static T? FindAncestor<T>(DependencyObject? source, Func<T, bool>? match = null) where T : DependencyObject
     {
         while (source is not null)

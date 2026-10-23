@@ -1693,6 +1693,19 @@ internal static class Program
                ((FrameworkElement)window.FindName("OverviewPage")!) is { Opacity: 1, CacheMode: null } &&
                pageCards.Children.OfType<UIElement>().All(tile => tile.Opacity == 1 && tile.RenderTransform.Value.IsIdentity), "返回途中被打断后概览页应完全显示，卡片回到原位");
         Pump(400);
+        // 设置页里按 Esc 或鼠标后退键也能回到概览。
+        foreach (var (name, goBack) in new (string, Action)[]
+                 {
+                     ("Esc", () => window.RaiseEvent(new System.Windows.Input.KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, 0, Key.Escape) { RoutedEvent = Keyboard.KeyDownEvent })),
+                     ("鼠标后退键", () => window.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.XButton1) { RoutedEvent = Mouse.MouseDownEvent })),
+                 })
+        {
+            ((System.Windows.Controls.Button)pageCards.Children[0]).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Pump(900);
+            goBack();
+            Pump(900);
+            Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed, $"设置页里按{name}应回到概览");
+        }
         var historyList = (System.Windows.Controls.ItemsControl)window.FindName("HistoryList")!;
         void AssertFanArranged(string when)
         {
