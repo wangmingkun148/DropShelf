@@ -97,13 +97,14 @@ public partial class MainWindow : Window
         {
             tile.Opacity = 0;
             ResetTile(tile);
-            FadeOutPage(OverviewPage);
             var card = AddMorphCard(edge);
-            FlipCard(card, edge, to, closing: false, 300, OpenEase, () =>
+            FlipCard(card, edge, to, closing: false, 300, OpenEase, () => { });
+            // 概览页淡出后背面已接近展开完，不等它停稳就让页面淡入；背面慢起慢收地淡出，页面先于背面显出来，中间不会透出底色闪一下。
+            FadeOutPage(OverviewPage, () =>
             {
-                ShowPage(page);
+                ShowPage(page, 180);
                 tile.Opacity = 1;
-                var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase };
+                var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = GlideEase };
                 reveal.Completed += (_, _) =>
                 {
                     DragLayer.Children.Remove(card);
@@ -249,14 +250,18 @@ public partial class MainWindow : Window
     }
 
     /// <summary>页面略微下沉并淡出，动画期间缓存为位图，淡出后去掉缓存。</summary>
-    private static void FadeOutPage(FrameworkElement page)
+    private static void FadeOutPage(FrameworkElement page, Action done)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
         page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
         var duration = TimeSpan.FromMilliseconds(200);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, 10, duration) { EasingFunction = LeaveEase });
         var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = LeaveEase };
-        fade.Completed += (_, _) => page.CacheMode = null;
+        fade.Completed += (_, _) =>
+        {
+            page.CacheMode = null;
+            done();
+        };
         page.BeginAnimation(OpacityProperty, fade);
     }
 
@@ -352,7 +357,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>概览页列出各项设置，点进去显示对应页面，左上角返回。</summary>
-    private void ShowPage(string page)
+    private void ShowPage(string page, double fadeMilliseconds = 300)
     {
         _page = page;
         OverviewPage.Visibility = page == "Overview" ? Visibility.Visible : Visibility.Collapsed;
@@ -368,18 +373,18 @@ public partial class MainWindow : Window
             "Actions" => ActionsPage,
             "Appearance" => AppearancePage,
             _ => OverviewPage
-        });
+        }, fadeMilliseconds);
     }
 
     /// <summary>
     /// 新页面从稍低处上移并淡入；只改变位移和透明度，不影响排版。
     /// 动画期间页面缓存为位图，每帧只叠一张图，不用重画整页内容；结束后去掉缓存，文字恢复清晰的 ClearType。
     /// </summary>
-    private static void FadeInPage(FrameworkElement page)
+    private static void FadeInPage(FrameworkElement page, double milliseconds)
     {
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
         page.CacheMode ??= new BitmapCache { SnapsToDevicePixels = true };
-        var duration = TimeSpan.FromMilliseconds(300);
+        var duration = TimeSpan.FromMilliseconds(milliseconds);
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
         var fade = new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase };
         fade.Completed += (_, _) => page.CacheMode = null;
