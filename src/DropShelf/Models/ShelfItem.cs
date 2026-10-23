@@ -30,8 +30,6 @@ public sealed class ShelfItem : INotifyPropertyChanged
     /// <summary>链接的标题。</summary>
     public string? Title { get; init; }
 
-    public DateTime AddedAt { get; init; } = DateTime.Now;
-
     /// <summary>由 DropShelf 接收并暂存在临时目录中的附件。</summary>
     public bool IsTemporaryAttachment { get; init; }
 

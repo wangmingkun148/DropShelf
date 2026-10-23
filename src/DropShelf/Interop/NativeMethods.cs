@@ -202,9 +202,6 @@ internal static class NativeMethods
     public const int WM_RBUTTONUP = 0x0205;
     public const int WM_CONTEXTMENU = 0x007B;
     public const int WM_HOTKEY = 0x0312;
-    public const int WM_NCACTIVATE = 0x0086;
-    public const int WM_MOUSEACTIVATE = 0x0021;
-    public const int MA_NOACTIVATE = 3;
     public const int WM_APP = 0x8000;
     public const int WM_COPYDATA = 0x004A;
 
@@ -223,7 +220,6 @@ internal static class NativeMethods
 
     public const int VK_LBUTTON = 0x01;
     public const int VK_RBUTTON = 0x02;
-    public const int VK_ESCAPE = 0x1B;
 
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_TRANSPARENT = 0x00000020;
@@ -247,8 +243,6 @@ internal static class NativeMethods
     public const int SM_YVIRTUALSCREEN = 77;
     public const int SM_CXVIRTUALSCREEN = 78;
     public const int SM_CYVIRTUALSCREEN = 79;
-    public const int SM_CXDRAG = 68;
-    public const int SM_CYDRAG = 69;
 
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -283,14 +277,12 @@ internal static class NativeMethods
 
     public const uint SHGFI_TYPENAME = 0x000000400;
     public const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
-    public const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
     public const uint FILE_ATTRIBUTE_NORMAL = 0x80;
 
     public const int DRAGDROP_S_DROP = 0x00040100;
     public const int DRAGDROP_S_CANCEL = 0x00040101;
     public const int DRAGDROP_S_USEDEFAULTCURSORS = 0x00040102;
     public const int MK_LBUTTON = 0x0001;
-    public const int MK_RBUTTON = 0x0002;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -326,9 +318,6 @@ internal static class NativeMethods
 
     [DllImport("shcore.dll")]
     public static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
-
-    [DllImport("user32.dll")]
-    public static extern uint GetDpiForWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     public static extern uint GetDpiForSystem();

@@ -18,7 +18,6 @@ public sealed class EdgeDwellDetector
     public EdgeDwellDetector(int dwellMilliseconds) => DwellMilliseconds = dwellMilliseconds;
 
     public int DwellMilliseconds { get; set; }
-    public ScreenEdge CurrentEdge => _edge;
 
     /// <summary>报告光标的最新位置；在同一边缘停留满设定时间时返回 true（之后需要重新进入边缘才会再次触发）。</summary>
     public bool Update(ScreenEdge edge, int x, int y, long timestampMilliseconds)

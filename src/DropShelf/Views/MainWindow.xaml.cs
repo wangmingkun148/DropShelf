@@ -172,30 +172,22 @@ public partial class MainWindow : Window
     /// <summary>与 CSS 的 cubic-bezier 相同：从 (0,0) 到 (1,1)，两个控制点决定快慢。</summary>
     private sealed class BezierEase(double x1, double y1, double x2, double y2) : IEasingFunction
     {
-        public double Ease(double t)
-        {
-            // 控制点的 x 在 0 到 1 之间时 x 随参数单调增加：二分求出 x(s) = t 的参数，再取 y(s)。
-            double low = 0, high = 1;
-            for (var i = 0; i < 30; i++)
-            {
-                var middle = (low + high) / 2;
-                if (Cubic(x1, x2, middle) < t) low = middle;
-                else high = middle;
-            }
-            return Cubic(y1, y2, (low + high) / 2);
-        }
+        public double Ease(double t) => Cubic(y1, y2, Solve(x1, x2, t));
 
-        /// <summary>反过来由 y 求 x：y1、y2 在 0 到 1 之间时 y 也随参数单调增加，二分求出 y(s) = y 的参数，再取 x(s)。</summary>
-        public double Inverse(double y)
+        /// <summary>反过来由 y 求 x。</summary>
+        public double Inverse(double y) => Cubic(x1, x2, Solve(y1, y2, y));
+
+        /// <summary>两个控制点的这一坐标在 0 到 1 之间时，坐标随参数单调增加：二分求出坐标等于 value 的参数。</summary>
+        private static double Solve(double p1, double p2, double value)
         {
             double low = 0, high = 1;
             for (var i = 0; i < 30; i++)
             {
                 var middle = (low + high) / 2;
-                if (Cubic(y1, y2, middle) < y) low = middle;
+                if (Cubic(p1, p2, middle) < value) low = middle;
                 else high = middle;
             }
-            return Cubic(x1, x2, (low + high) / 2);
+            return (low + high) / 2;
         }
 
         private static double Cubic(double p1, double p2, double s) => 3 * p1 * s * (1 - s) * (1 - s) + 3 * p2 * s * s * (1 - s) + s * s * s;
