@@ -51,17 +51,36 @@
             <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
         </Style>
 
-        <Style x:Key="StackCardStyle" TargetType="Border">
+        <!--
+            阴影是单独的底层并缓存为位图（预制阴影）：卡片内容变化、窗口缩放或周围有动画时只合成这张图，不重新计算模糊。
+            卡片底色不透明，正好盖住阴影层自身的底色。
+        -->
+        <Style x:Key="StackCardStyle" TargetType="ContentControl">
             <Setter Property="Width" Value="84" />
             <Setter Property="Height" Value="84" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Focusable" Value="False" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-            <Setter Property="Effect">
+            <Setter Property="Content" Value="{Binding}" />
+            <Setter Property="Template">
                 <Setter.Value>
-                    <DropShadowEffect BlurRadius="10" ShadowDepth="1.5" Direction="270" Opacity="0.16" Color="Black" />
+                    <ControlTemplate TargetType="ContentControl">
+                        <Grid>
+                            <Border>
+                                <Border.CacheMode>
+                                    <BitmapCache RenderAtScale="2" />
+                                </Border.CacheMode>
+                                <Border CornerRadius="10" Background="{DynamicResource ShelfTileBrush}">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="10" ShadowDepth="1.5" Direction="270" Opacity="0.16" Color="Black" />
+                                    </Border.Effect>
+                                </Border>
+                            </Border>
+                            <Border CornerRadius="10" Background="{DynamicResource ShelfTileBrush}" BorderBrush="{DynamicResource ShelfTileBorderBrush}"
+                                    BorderThickness="1">
+                                <ContentPresenter />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
                 </Setter.Value>
             </Setter>
             <Style.Triggers>
@@ -173,30 +192,26 @@
                     </Grid.RowDefinitions>
                     <Viewbox Stretch="Uniform">
                         <Canvas Width="160" Height="116">
-                            <Border x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="20"
-                                    DataContext="{Binding Stack2}">
-                                <Border.RenderTransform>
+                            <ContentControl x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="20"
+                                            DataContext="{Binding Stack2}" ContentTemplate="{StaticResource CardContentTemplate}">
+                                <ContentControl.RenderTransform>
                                     <TransformGroup>
                                         <RotateTransform Angle="-10" />
                                         <TranslateTransform X="-12" Y="2" />
                                     </TransformGroup>
-                                </Border.RenderTransform>
-                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardContentTemplate}" />
-                            </Border>
-                            <Border x:Name="Card1" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="18"
-                                    DataContext="{Binding Stack1}">
-                                <Border.RenderTransform>
+                                </ContentControl.RenderTransform>
+                            </ContentControl>
+                            <ContentControl x:Name="Card1" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="18"
+                                            DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}">
+                                <ContentControl.RenderTransform>
                                     <TransformGroup>
                                         <RotateTransform Angle="7" />
                                         <TranslateTransform X="11" Y="1" />
                                     </TransformGroup>
-                                </Border.RenderTransform>
-                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardContentTemplate}" />
-                            </Border>
-                            <Border x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="16"
-                                    DataContext="{Binding Stack0}">
-                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource CardContentTemplate}" />
-                            </Border>
+                                </ContentControl.RenderTransform>
+                            </ContentControl>
+                            <ContentControl x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="16"
+                                            DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}" />
                             <Border x:Name="CountBadge" Canvas.Left="106" Canvas.Top="6" MinWidth="24" Height="24" CornerRadius="12"
                                     Padding="6,0" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource ShelfTileBrush}"
                                     BorderThickness="2" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}">

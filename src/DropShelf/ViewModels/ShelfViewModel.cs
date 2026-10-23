@@ -88,6 +88,9 @@ public sealed class ShelfViewModel : ObservableObject
         set => SetField(ref _isExpanded, value);
     }
 
+    /// <summary>缩略图的像素尺寸，由窗口按堆叠卡片的实际显示大小设置。</summary>
+    public int ThumbnailSize { get; set; } = 128;
+
     public bool IsPinned
     {
         get => _isPinned;
@@ -590,7 +593,7 @@ public sealed class ShelfViewModel : ObservableObject
     {
         try
         {
-            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, 128, _lifetime.Token);
+            var thumbnail = await ShellThumbnailService.LoadAsync(item.Value, ThumbnailSize, _lifetime.Token);
             if (thumbnail is null) return;
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.CheckAccess())

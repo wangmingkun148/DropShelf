@@ -1388,6 +1388,7 @@ internal static class Program
         File.WriteAllText(path, "thumbnail preview");
         var thumbnail = await ShellThumbnailService.LoadAsync(path, 96);
         Assert(thumbnail is System.Windows.Media.Imaging.BitmapSource { PixelWidth: > 0 } && thumbnail.IsFrozen, "没有获取到可跨线程使用的缩略图");
+        Assert(thumbnail is System.Windows.Media.Imaging.BitmapSource { PixelWidth: <= 96, PixelHeight: <= 96 }, "缩略图大于需要的尺寸");
         Assert(!string.IsNullOrWhiteSpace(ShellFileInfo.GetTypeName(path)), "没有获取到文件类型名称");
         Assert(ShellFileInfo.GetTypeName("noextension") == "文件", "无扩展名文件类型不正确");
     }

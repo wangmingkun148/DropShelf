@@ -8,15 +8,17 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>DropShelf</AssemblyName>
     <RootNamespace>DropShelf</RootNamespace>
-    <Version>2.3.5</Version>
-    <AssemblyVersion>2.3.5.0</AssemblyVersion>
-    <FileVersion>2.3.5.0</FileVersion>
+    <Version>2.3.6</Version>
+    <AssemblyVersion>2.3.6.0</AssemblyVersion>
+    <FileVersion>2.3.6.0</FileVersion>
     <Product>DropShelf for Windows</Product>
     <Company>DropShelf</Company>
     <Authors>DropShelf Project</Authors>
     <Description>通过鼠标手势呼出的 Windows 临时文件置物架</Description>
     <ApplicationIcon>Assets\DropShelf.ico</ApplicationIcon>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <!-- 托盘程序的内存堆很小，不需要后台并发回收；少一个常驻的后台回收线程和它的内存。 -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\DropShelf.ico" />

@@ -254,6 +254,31 @@
             </Style.Triggers>
         </Style>
 
+        <!--
+            对话框的预制阴影：放在对话框下面单独缓存为位图，对话框里输入文字、光标闪烁和弹出缩放时都不用重新计算模糊。
+            对话框底色不透明，正好盖住阴影层自身的底色。
+        -->
+        <Style x:Key="DialogShadowStyle" TargetType="Control">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Control">
+                        <Border>
+                            <Border.CacheMode>
+                                <BitmapCache />
+                            </Border.CacheMode>
+                            <Border CornerRadius="8" Background="{DynamicResource FlyoutBrush}">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="270" Opacity="0.22" Color="Black" />
+                                </Border.Effect>
+                            </Border>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 最近关闭的置物架：缩略图堆叠中的一张 -->
         <Style x:Key="MiniStackCardStyle" TargetType="Border">
             <Setter Property="Width" Value="60" />
@@ -1018,127 +1043,126 @@
         <!-- 添加或编辑自定义操作（Windows 11 对话框样式） -->
         <Grid x:Name="EditorOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}"
               Visibility="{Binding IsEditorOpen, Converter={StaticResource BoolToVisibility}}">
-            <Border x:Name="EditorDialog" DataContext="{Binding Editor}" Width="480" HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Margin="24" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
-                    BorderThickness="1" CornerRadius="8">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="270" Opacity="0.22" Color="Black" />
-                </Border.Effect>
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Margin="24,22,24,24">
-                        <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleTextStyle}" />
+            <Grid Width="480" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                <Control Style="{StaticResource DialogShadowStyle}" />
+                <Border x:Name="EditorDialog" DataContext="{Binding Editor}" Background="{DynamicResource FlyoutBrush}"
+                        BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="24,22,24,24">
+                            <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleTextStyle}" />
 
-                        <TextBlock Text="{l:Loc ActionKind}" Style="{StaticResource FieldLabelStyle}" Margin="0,18,0,6" />
-                        <ListBox x:Name="EditorKindSelector" Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left"
-                                 SelectedValuePath="Tag" SelectedValue="{Binding Kind}">
-                            <ListBoxItem Content="{l:Loc KindFolder}" Tag="{x:Static models:CustomActionKind.Folder}" />
-                            <ListBoxItem Content="{l:Loc KindCompressImage}" Tag="{x:Static models:CustomActionKind.CompressImage}" />
-                            <ListBoxItem Content="{l:Loc KindOpenWith}" Tag="{x:Static models:CustomActionKind.OpenWith}" />
-                        </ListBox>
-
-                        <!-- 文件夹 -->
-                        <StackPanel Visibility="{Binding IsFolder, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="{l:Loc FolderLabel}" Style="{StaticResource FieldLabelStyle}" />
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="EditorFolderBox" Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}" />
-                                <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseFolderClick" />
-                            </Grid>
-                            <TextBlock Text="{l:Loc FolderModeLabel}" Style="{StaticResource FieldLabelStyle}" />
-                            <ListBox Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left" SelectedValuePath="Tag"
-                                     SelectedValue="{Binding FolderMode}">
-                                <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
-                                <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
+                            <TextBlock Text="{l:Loc ActionKind}" Style="{StaticResource FieldLabelStyle}" Margin="0,18,0,6" />
+                            <ListBox x:Name="EditorKindSelector" Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left"
+                                     SelectedValuePath="Tag" SelectedValue="{Binding Kind}">
+                                <ListBoxItem Content="{l:Loc KindFolder}" Tag="{x:Static models:CustomActionKind.Folder}" />
+                                <ListBoxItem Content="{l:Loc KindCompressImage}" Tag="{x:Static models:CustomActionKind.CompressImage}" />
+                                <ListBoxItem Content="{l:Loc KindOpenWith}" Tag="{x:Static models:CustomActionKind.OpenWith}" />
                             </ListBox>
-                        </StackPanel>
 
-                        <!-- 压缩图片 -->
-                        <StackPanel Visibility="{Binding IsCompressImage, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="{l:Loc ImageSizeLabel}" Style="{StaticResource FieldLabelStyle}" />
-                            <StackPanel Orientation="Horizontal">
-                                <TextBox x:Name="EditorSizeBox" Width="120" Text="{Binding SizeText, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock Text="KB" Margin="10,0,0,1" VerticalAlignment="Center" />
+                            <!-- 文件夹 -->
+                            <StackPanel Visibility="{Binding IsFolder, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc FolderLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="EditorFolderBox" Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseFolderClick" />
+                                </Grid>
+                                <TextBlock Text="{l:Loc FolderModeLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <ListBox Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left" SelectedValuePath="Tag"
+                                         SelectedValue="{Binding FolderMode}">
+                                    <ListBoxItem Content="{l:Loc TransferMove}" Tag="{x:Static models:TransferMode.Move}" />
+                                    <ListBoxItem Content="{l:Loc TransferCopy}" Tag="{x:Static models:TransferMode.Copy}" />
+                                </ListBox>
                             </StackPanel>
-                            <TextBlock Text="{l:Loc ImageSizeHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+
+                            <!-- 压缩图片 -->
+                            <StackPanel Visibility="{Binding IsCompressImage, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc ImageSizeLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBox x:Name="EditorSizeBox" Width="120" Text="{Binding SizeText, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Text="KB" Margin="10,0,0,1" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Text="{l:Loc ImageSizeHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+
+                            <!-- 用程序打开 -->
+                            <StackPanel Visibility="{Binding IsOpenWith, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc ProgramLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="EditorProgramBox" Text="{Binding ProgramPath, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseProgramClick" />
+                                </Grid>
+                                <TextBlock Text="{l:Loc ArgumentsLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding Arguments, UpdateSourceTrigger=PropertyChanged}" Tag="{}{files}" />
+                                <TextBlock Text="{l:Loc ArgumentsHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+
+                            <TextBlock Text="{l:Loc NameLabel}" Style="{StaticResource FieldLabelStyle}" />
+                            <TextBox x:Name="EditorNameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding NamePlaceholder}"
+                                     MaxLength="40" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0"
+                                        Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{StaticResource Glyph.Error}" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                           Foreground="{DynamicResource CriticalBrush}" Margin="0,2,8,0" />
+                                <TextBlock x:Name="EditorErrorText" Text="{Binding Error}" FontSize="13" Foreground="{DynamicResource CriticalBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
                         </StackPanel>
 
-                        <!-- 用程序打开 -->
-                        <StackPanel Visibility="{Binding IsOpenWith, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="{l:Loc ProgramLabel}" Style="{StaticResource FieldLabelStyle}" />
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="EditorProgramBox" Text="{Binding ProgramPath, UpdateSourceTrigger=PropertyChanged}" />
-                                <Button Grid.Column="1" Content="{l:Loc Browse}" Margin="8,0,0,0" Click="OnBrowseProgramClick" />
-                            </Grid>
-                            <TextBlock Text="{l:Loc ArgumentsLabel}" Style="{StaticResource FieldLabelStyle}" />
-                            <TextBox Text="{Binding Arguments, UpdateSourceTrigger=PropertyChanged}" Tag="{}{files}" />
-                            <TextBlock Text="{l:Loc ArgumentsHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
-                        </StackPanel>
-
-                        <TextBlock Text="{l:Loc NameLabel}" Style="{StaticResource FieldLabelStyle}" />
-                        <TextBox x:Name="EditorNameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding NamePlaceholder}"
-                                 MaxLength="40" />
-
-                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0"
-                                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="{StaticResource Glyph.Error}" FontFamily="{StaticResource IconFont}" FontSize="13"
-                                       Foreground="{DynamicResource CriticalBrush}" Margin="0,2,8,0" />
-                            <TextBlock x:Name="EditorErrorText" Text="{Binding Error}" FontSize="13" Foreground="{DynamicResource CriticalBrush}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </StackPanel>
-
-                    <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
-                            BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
-                        <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
-                            <Button x:Name="EditorSaveButton" Style="{StaticResource AccentButtonStyle}" Content="{l:Loc Save}"
-                                    Command="{Binding SaveCommand}" Margin="0,0,4,0" IsDefault="True" />
-                            <Button x:Name="EditorCancelButton" Content="{l:Loc Cancel}" Command="{Binding CancelCommand}" Margin="4,0,0,0"
-                                    IsCancel="True" />
-                        </UniformGrid>
-                    </Border>
-                </Grid>
-            </Border>
+                        <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                                BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                            <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
+                                <Button x:Name="EditorSaveButton" Style="{StaticResource AccentButtonStyle}" Content="{l:Loc Save}"
+                                        Command="{Binding SaveCommand}" Margin="0,0,4,0" IsDefault="True" />
+                                <Button x:Name="EditorCancelButton" Content="{l:Loc Cancel}" Command="{Binding CancelCommand}" Margin="4,0,0,0"
+                                        IsCancel="True" />
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- 确认删除自定义操作（与编辑对话框相同的 Windows 11 对话框样式） -->
         <Grid x:Name="ConfirmOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}" Visibility="Collapsed">
-            <Border Width="400" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" Background="{DynamicResource FlyoutBrush}"
-                    BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8" RenderTransformOrigin="0.5,0.5">
-                <Border.RenderTransform>
+            <Grid Width="400" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
                     <ScaleTransform x:Name="ConfirmDialogScale" />
-                </Border.RenderTransform>
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="270" Opacity="0.22" Color="Black" />
-                </Border.Effect>
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Margin="24,22,24,24">
-                        <TextBlock Text="{l:Loc ConfirmDeleteTitle}" Style="{StaticResource SubtitleTextStyle}" />
-                        <TextBlock x:Name="ConfirmMessage" FontSize="14" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="20" />
-                    </StackPanel>
-                    <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
-                            BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
-                        <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
-                            <Button Style="{StaticResource AccentButtonStyle}" Content="{l:Loc DeleteTooltip}" Click="OnConfirmDeleteClick" Margin="0,0,4,0" />
-                            <Button x:Name="ConfirmCancelButton" Content="{l:Loc Cancel}" Click="OnConfirmCancelClick" Margin="4,0,0,0" />
-                        </UniformGrid>
-                    </Border>
-                </Grid>
-            </Border>
+                </Grid.RenderTransform>
+                <Control Style="{StaticResource DialogShadowStyle}" />
+                <Border Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1"
+                        CornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="24,22,24,24">
+                            <TextBlock Text="{l:Loc ConfirmDeleteTitle}" Style="{StaticResource SubtitleTextStyle}" />
+                            <TextBlock x:Name="ConfirmMessage" FontSize="14" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="20" />
+                        </StackPanel>
+                        <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                                BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                            <UniformGrid Columns="2" HorizontalAlignment="Right" Width="260">
+                                <Button Style="{StaticResource AccentButtonStyle}" Content="{l:Loc DeleteTooltip}" Click="OnConfirmDeleteClick" Margin="0,0,4,0" />
+                                <Button x:Name="ConfirmCancelButton" Content="{l:Loc Cancel}" Click="OnConfirmCancelClick" Margin="4,0,0,0" />
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- 拖动快速操作时窗口底部发光：自定义操作为红色，拖进去后提示松开删除；内置操作为灰色，提示不能删除 -->

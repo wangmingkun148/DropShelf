@@ -25,6 +25,7 @@ public sealed class CardGhostWindow : Window
     private const double SettleTimeout = 0.8;
 
     private readonly System.Windows.Controls.Image _image = new() { Stretch = Stretch.Fill };
+    private readonly System.Windows.Controls.Grid _card = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly System.Windows.Controls.Grid _root = new();
     private readonly RectangleGeometry _clip = new();
     private readonly ScaleTransform _scale = new();
@@ -55,10 +56,11 @@ public sealed class CardGhostWindow : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = -32000;
         Top = -32000;
-        _image.RenderTransformOrigin = new Point(0.5, 0.5);
-        _image.RenderTransform = new TransformGroup { Children = { _scale, _rotate } };
+        _card.RenderTransformOrigin = new Point(0.5, 0.5);
+        _card.RenderTransform = new TransformGroup { Children = { _scale, _rotate } };
         _image.Effect = new DropShadowEffect { BlurRadius = 24, ShadowDepth = 6, Direction = 270, Opacity = 0.25, Color = Colors.Black };
-        _root.Children.Add(_image);
+        _card.Children.Add(_image);
+        _root.Children.Add(_card);
         Content = _root;
         SourceInitialized += (_, _) =>
         {
@@ -83,7 +85,9 @@ public sealed class CardGhostWindow : Window
         _image.Source = image;
         _image.Width = size.Width;
         _image.Height = size.Height;
-        _image.Opacity = 1;
+        _card.Opacity = 1;
+        // 卡牌连同阴影只在开始时画一次并缓存为位图，之后每帧只移动、转动这张图，不再重新计算阴影模糊。
+        _card.CacheMode = new BitmapCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
         // 留出旋转、放大和阴影的空间。
         Width = Height = Math.Ceiling(Math.Sqrt(size.Width * size.Width + size.Height * size.Height) * 1.2 + 48);
         _pose = start;
@@ -145,8 +149,8 @@ public sealed class CardGhostWindow : Window
 
         if (_fading)
         {
-            _image.Opacity = Math.Max(0, _image.Opacity - dt / FadeSeconds);
-            if (_image.Opacity <= 0) Stop();
+            _card.Opacity = Math.Max(0, _card.Opacity - dt / FadeSeconds);
+            if (_card.Opacity <= 0) Stop();
             return;
         }
 
@@ -189,5 +193,6 @@ public sealed class CardGhostWindow : Window
         _clock.Stop();
         Hide();
         _image.Source = null;
+        _card.CacheMode = null;
     }
 }

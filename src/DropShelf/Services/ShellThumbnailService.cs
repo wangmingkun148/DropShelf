@@ -58,7 +58,8 @@ public static class ShellThumbnailService
             NativeMethods.SHCreateItemFromParsingName(path, IntPtr.Zero, ref interfaceId, out imageFactory);
             var result = imageFactory.GetImage(
                 new NativeSize(size, size),
-                ShellItemImageFlags.ResizeToFit | ShellItemImageFlags.BiggerSizeOk,
+                // 不允许返回更大的图：系统按需要的尺寸缩好，缓存里不留用不到的像素。
+                ShellItemImageFlags.ResizeToFit,
                 out bitmapHandle);
             if (result < 0 || bitmapHandle == IntPtr.Zero) return null;
 

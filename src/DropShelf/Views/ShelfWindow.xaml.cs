@@ -136,6 +136,21 @@ public partial class ShelfWindow : Window
         BuildActions();
         UpdateTransferMode();
         UpdateWindowSize();
+        UpdateThumbnailSize();
+    }
+
+    /// <summary>按堆叠卡片里缩略图的实际像素大小取缩略图：不多占内存，显示时也不用大幅缩小。</summary>
+    private void UpdateThumbnailSize()
+    {
+        // 卡片 84 减去内边距后显示区域为 66；堆叠画布 160×116 随置物架大小缩放，两侧各留 10 的边距。
+        var stackScale = Math.Min((QuickShelfSizeOptions.ResolveWidth(_size) - 20) / 160, QuickShelfSizeOptions.ResolveStackHeight(_size) / 116);
+        ViewModel.ThumbnailSize = (int)Math.Ceiling(66 * stackScale * DpiScale());
+    }
+
+    protected override void OnDpiChanged(System.Windows.DpiScale oldDpi, System.Windows.DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        UpdateThumbnailSize();
     }
 
     /// <summary>以屏幕像素坐标为中心显示置物架。</summary>
