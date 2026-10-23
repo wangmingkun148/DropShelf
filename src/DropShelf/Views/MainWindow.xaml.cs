@@ -100,8 +100,6 @@ public partial class MainWindow : Window
 
     // ───────────── 卡片翻开成页面 ─────────────
 
-    /// <summary>卡片转到侧面时，已从起点走向终点的比例；先就地翻起，再展开成页面。</summary>
-    private const double FlipMidway = 0.2;
     /// <summary>转到侧面时卡片离屏幕最近，略微变高，背面带一点阴影，看起来像在三维空间里翻转。</summary>
     private const double FlipLift = 1.06;
     private const double FlipShade = 0.22;
@@ -110,11 +108,26 @@ public partial class MainWindow : Window
     private const double OutlineFade = 70;
     /// <summary>背面上页面缓存的上限；更大时生成缓存本身就会卡顿，背面改为空白。</summary>
     private const double MaxFlipCacheBytes = 16 * 1024 * 1024;
-    // 匀速转动时宽度按余弦变化：转向侧面越来越快，从侧面转回越来越慢。
-    private static readonly IEasingFunction EdgeOnEase = new SineEase { EasingMode = EasingMode.EaseIn };
+    // 打开：正面翻到侧面，再由背面展开；返回：页面收到侧面，再由正面落位（毫秒）。
+    private const double OpenFrontMs = 170, OpenBackMs = 300, BackPageMs = 230, BackFrontMs = 320;
+    /// <summary>卡片侧立换面的时刻在整次翻牌中的位置。</summary>
+    private const double OpenEdge = OpenFrontMs / (OpenFrontMs + OpenBackMs), BackEdge = BackPageMs / (BackPageMs + BackFrontMs);
+
+    // 整次翻牌用一条转动曲线和一条移动曲线从头连到尾，两段动画只是各取一截，侧立换面时速度连续：
+    // 不会先停住再突然加速，也不拖很长的尾巴。转过的角度 = 180° × 转动曲线，横向缩放为 |cos 角度|，纵向放大和阴影按 sin 角度变化。
+    // 打开：转动从静止起步，侧立前后最快，再慢慢转正；移动比转动晚一点起步，侧立后最快，两者差不多同时停稳。
+    private static readonly IEasingFunction OpenTurn = HalfwayAt(OpenEdge, 0.3);
+    private static readonly IEasingFunction OpenTravel = new BezierEase(0.55, 0, 0.25, 1);
+    // 返回：页面缩小时逐渐加速，侧立前后最快；卡片落位时略微越过原位（约为全程的 1.8%）再回来，停下时速度为零。
+    private static readonly IEasingFunction BackTurn = HalfwayAt(BackEdge, 0.42);
+    private static readonly IEasingFunction BackTravel = new CurveEase(t =>
+    {
+        var x = -Math.Cos(Math.PI * t / 2);
+        return 1 + 1.7 * x * x * x + 0.7 * x * x;
+    });
+    /// <summary>侧立时已经走过的路程比例；卡片在这里换面。</summary>
+    private static readonly double OpenEdgeTravel = OpenTravel.Ease(OpenEdge), BackEdgeTravel = BackTravel.Ease(BackEdge);
     private static readonly IEasingFunction GlideEase = new SineEase { EasingMode = EasingMode.EaseInOut };
-    private static readonly IEasingFunction OpenEase = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 4 };
-    private static readonly IEasingFunction LandEase = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
     private static readonly IEasingFunction LeaveEase = new CubicEase { EasingMode = EasingMode.EaseIn };
     private string _page = "Overview";
     private bool _morphing;
@@ -138,6 +151,33 @@ public partial class MainWindow : Window
 
     private sealed record PageView(Grid Host, ScrollViewer Scroll, FrameworkElement Content);
 
+    /// <summary>与 CSS 的 cubic-bezier 相同：从 (0,0) 到 (1,1)，两个控制点决定快慢。</summary>
+    private sealed class BezierEase(double x1, double y1, double x2, double y2) : IEasingFunction
+    {
+        public double Ease(double t)
+        {
+            // 控制点的 x 在 0 到 1 之间时 x 随参数单调增加：二分求出 x(s) = t 的参数，再取 y(s)。
+            double low = 0, high = 1;
+            for (var i = 0; i < 30; i++)
+            {
+                var middle = (low + high) / 2;
+                if (Cubic(x1, x2, middle) < t) low = middle;
+                else high = middle;
+            }
+            return Cubic(y1, y2, (low + high) / 2);
+        }
+
+        private static double Cubic(double p1, double p2, double s) => 3 * p1 * s * (1 - s) * (1 - s) + 3 * p2 * s * s * (1 - s) + s * s * s;
+    }
+
+    private sealed class CurveEase(Func<double, double> curve) : IEasingFunction
+    {
+        public double Ease(double t) => curve(t);
+    }
+
+    /// <summary>起止都静止、在 edge 处正好过半的曲线：y1 = 0、y2 = 1 时参数 0.5 处 y = 0.5，x = 0.125 + 0.375 × (x1 + x2)。</summary>
+    private static BezierEase HalfwayAt(double edge, double x1) => new(x1, 0, (edge - 0.125) / 0.375 - x1, 1);
+
     /// <summary>后半段翻牌：背面从 From 变到 To；Page 是页面静止时的可见区域，背面上的页面按它等比缩放。</summary>
     private sealed class PageFlip
     {
@@ -148,6 +188,9 @@ public partial class MainWindow : Window
         public bool Closing { get; init; }
         public bool Plain { get; init; }
         public double Milliseconds { get; init; }
+        /// <summary>按时间比例给出从 From 走向 To 的比例，和背面转过的角度（弧度，侧立为 π/2，背面正对屏幕为 π）。</summary>
+        public required Func<double, double> Travel { get; init; }
+        public required Func<double, double> Angle { get; init; }
         public required Action Done { get; init; }
         public TimeSpan? Start { get; set; }
         public TimeSpan Last { get; set; }
@@ -168,7 +211,7 @@ public partial class MainWindow : Window
         PageStage.UpdateLayout();
         var home = BoundsOf(tile);
         var to = PageArea(view);
-        var edge = Lerp(home, to, FlipMidway);
+        var edge = Lerp(home, to, OpenEdgeTravel);
         var plain = UsePlainFlip(to);
         SetPanelHeader(page, animate: true);
         TraceMark(plain ? "prepare plain" : "prepare", clicked);
@@ -183,7 +226,7 @@ public partial class MainWindow : Window
             ShowPage(page);
             SettleOverview();
         };
-        FlipTile(tile, home, edge, closing: true, 170, () =>
+        FlipTile(tile, home, edge, OpenFrontMs, u => OpenTravel.Ease(OpenEdge * u) / OpenEdgeTravel, u => Math.PI * OpenTurn.Ease(OpenEdge * u), () =>
         {
             if (session != _flipSession) return;
             tile.Opacity = 0;
@@ -196,7 +239,9 @@ public partial class MainWindow : Window
             });
             BeginFlip(new PageFlip
             {
-                View = view, From = edge, To = to, Page = to, Plain = plain, Milliseconds = 300,
+                View = view, From = edge, To = to, Page = to, Plain = plain, Milliseconds = OpenBackMs,
+                Travel = t => (OpenTravel.Ease(OpenEdge + (1 - OpenEdge) * t) - OpenEdgeTravel) / (1 - OpenEdgeTravel),
+                Angle = t => Math.PI * OpenTurn.Ease(OpenEdge + (1 - OpenEdge) * t),
                 Done = () =>
                 {
                     var landed = Stopwatch.GetTimestamp();
@@ -256,11 +301,13 @@ public partial class MainWindow : Window
             // 概览页正从稍低处上移，扣掉这段位移才是卡片最终的位置。
             var home = BoundsOf(tile);
             home.Y -= (OverviewPage.RenderTransform as TranslateTransform)?.Y ?? 0;
-            var edge = Lerp(home, from, FlipMidway);
+            var edge = Lerp(from, home, BackEdgeTravel);
             tile.Opacity = 0;
             BeginFlip(new PageFlip
             {
-                View = view, From = from, To = edge, Page = from, Closing = true, Plain = plain, Milliseconds = 230,
+                View = view, From = from, To = edge, Page = from, Closing = true, Plain = plain, Milliseconds = BackPageMs,
+                Travel = t => BackTravel.Ease(BackEdge * t) / BackEdgeTravel,
+                Angle = t => Math.PI * (1 - BackTurn.Ease(BackEdge * t)),
                 Done = () =>
                 {
                     var swapped = Stopwatch.GetTimestamp();
@@ -272,7 +319,9 @@ public partial class MainWindow : Window
                         SettleOverview();
                     };
                     // 先摆到侧面再显示，不会先在原位闪一下。
-                    FlipTile(tile, home, edge, closing: false, 320, () =>
+                    double Time(double u) => BackEdge + (1 - BackEdge) * u;
+                    FlipTile(tile, home, edge, BackFrontMs, u => 1 - (BackTravel.Ease(Time(u)) - BackEdgeTravel) / (1 - BackEdgeTravel),
+                        u => Math.PI * (1 - BackTurn.Ease(Time(u))), () =>
                     {
                         if (session != _flipSession) return;
                         ResetTile(tile);
@@ -290,7 +339,7 @@ public partial class MainWindow : Window
             return;
         }
         // 背面空白时和以前一样：先让空白卡片盖住页面，再换回概览页开始翻转。
-        AttachFlip(new PageFlip { View = view, From = from, To = from, Page = from, Closing = true, Plain = true, Milliseconds = 230, Done = () => { } });
+        AttachFlip(new PageFlip { View = view, From = from, To = from, Page = from, Closing = true, Plain = true, Milliseconds = BackPageMs, Travel = _ => 0, Angle = _ => Math.PI, Done = () => { } });
         var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120));
         cover.Completed += (_, _) =>
         {
@@ -399,30 +448,17 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 背面当前的矩形 R 由 From 走向 To，绕中心横向缩放 kx、纵向缩放 ky；页面按 s = R 宽 / 页面宽 等比缩放后裁成 R 的高度。
-    /// 打开时 kx 从 0 到 1，返回时从 1 到 0；缓动、FlipLift 和 FlipShade 与原来的背面动画相同。终点时 s = kx = ky = 1，矩阵正好是单位矩阵。
+    /// 打开时 kx 从 0 到 1，返回时从 1 到 0。打开的终点 s = kx = ky = 1，矩阵正好是单位矩阵。
     /// </summary>
     private void PoseFlip(PageFlip flip, double elapsed)
     {
         var t = Math.Clamp(elapsed / flip.Milliseconds, 0, 1);
-        double g, kx, ky, shade, outline;
-        if (flip.Closing)
-        {
-            g = GlideEase.Ease(t);
-            kx = 1 - EdgeOnEase.Ease(t);
-            ky = 1 + (FlipLift - 1) * g;
-            shade = FlipShade * g;
-            outline = Smooth(elapsed / OutlineFade);
-        }
-        else
-        {
-            g = OpenEase.Ease(t);
-            kx = g;
-            ky = FlipLift + (1 - FlipLift) * g;
-            shade = FlipShade * (1 - g);
-            outline = Smooth((flip.Milliseconds - elapsed) / OutlineFade);
-        }
-        if (flip.Plain) outline = 1;
-        var card = Lerp(flip.From, flip.To, g);
+        var angle = flip.Angle(t);
+        var kx = Math.Abs(Math.Cos(angle));
+        var ky = 1 + (FlipLift - 1) * Math.Sin(angle);
+        var shade = FlipShade * Math.Sin(angle);
+        var outline = flip.Plain ? 1 : Smooth(flip.Closing ? elapsed / OutlineFade : (flip.Milliseconds - elapsed) / OutlineFade);
+        var card = Lerp(flip.From, flip.To, flip.Travel(t));
         var page = flip.Page;
         var s = card.Width / page.Width;
         var cx = card.X + card.Width / 2;
@@ -572,10 +608,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 卡片本身转半圈：closing 时从原位 home 转到侧面并移到 away，否则从 away 的侧面转回原位，落位时略微回弹。
-    /// 只改变卡片的变换，不影响排版；转动期间压在相邻的卡片上面。
+    /// 卡片本身转四分之一圈：travel 给出从原位 home 走向 away 的比例，angle 给出转过的角度（弧度，0 为正对屏幕，π/2 为侧立）。
+    /// 每个属性的缓动直接给出它的值，和背面的动画取自同一组曲线。只改变卡片的变换，不影响排版；转动期间压在相邻的卡片上面。
     /// </summary>
-    private static void FlipTile(FrameworkElement tile, Rect home, Rect away, bool closing, double milliseconds, Action done)
+    private static void FlipTile(FrameworkElement tile, Rect home, Rect away, double milliseconds, Func<double, double> travel, Func<double, double> angle, Action done)
     {
         var size = new ScaleTransform();
         var flip = new ScaleTransform();
@@ -583,15 +619,13 @@ public partial class MainWindow : Window
         tile.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
         tile.RenderTransform = new TransformGroup { Children = { size, flip, move } };
         Panel.SetZIndex(tile, 1);
-        var ease = closing ? GlideEase : LandEase;
-        void Turn(Animatable target, DependencyProperty property, double atHome, double atAway, IEasingFunction? turnEase = null, Action? finished = null) =>
-            Tween(target, property, closing ? atHome : atAway, closing ? atAway : atHome, milliseconds, turnEase ?? ease, finished);
-        Turn(size, ScaleTransform.ScaleXProperty, 1, away.Width / home.Width);
-        Turn(size, ScaleTransform.ScaleYProperty, 1, away.Height / home.Height);
-        Turn(move, TranslateTransform.XProperty, 0, away.X + away.Width / 2 - home.X - home.Width / 2);
-        Turn(move, TranslateTransform.YProperty, 0, away.Y + away.Height / 2 - home.Y - home.Height / 2);
-        Turn(flip, ScaleTransform.ScaleYProperty, 1, FlipLift);
-        Turn(flip, ScaleTransform.ScaleXProperty, 1, 0, closing ? EdgeOnEase : LandEase, done);
+        var path = new CurveEase(travel);
+        Tween(size, ScaleTransform.ScaleXProperty, 1, away.Width / home.Width, milliseconds, path);
+        Tween(size, ScaleTransform.ScaleYProperty, 1, away.Height / home.Height, milliseconds, path);
+        Tween(move, TranslateTransform.XProperty, 0, away.X + away.Width / 2 - home.X - home.Width / 2, milliseconds, path);
+        Tween(move, TranslateTransform.YProperty, 0, away.Y + away.Height / 2 - home.Y - home.Height / 2, milliseconds, path);
+        Tween(flip, ScaleTransform.ScaleYProperty, 1, FlipLift, milliseconds, new CurveEase(u => Math.Sin(angle(u))));
+        Tween(flip, ScaleTransform.ScaleXProperty, 1, 0, milliseconds, new CurveEase(u => 1 - Math.Cos(angle(u))), done);
     }
 
     private static void ResetTile(FrameworkElement tile)
