@@ -36,6 +36,7 @@ public partial class MainWindow : Window
         LayoutUpdated += (_, _) =>
         {
             UpdateCardHeight(OverviewScroll.ViewportHeight);
+            UpdateTableBand();
             if (!_morphing) LayoutEdges();
         };
         ThemeService.ThemeChanged += OnThemeChanged;
@@ -63,7 +64,7 @@ public partial class MainWindow : Window
         _flipFill = new System.Windows.Shapes.Path { Data = _flipCard };
         _flipFill.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "SheetBrush");
         _flipShade = new System.Windows.Shapes.Path { Data = _flipCard, Fill = System.Windows.Media.Brushes.Black };
-        _flipBorder = new System.Windows.Shapes.Path { Data = _flipEdge };
+        _flipBorder = new System.Windows.Shapes.Path { Data = _flipEdge, StrokeThickness = SheetBand };
         _flipBorder.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "SheetBorderBrush");
         // 放在画布里：图形每帧变化时只重新测量它们自己，不影响页面排版。
         _flipDecor = new Canvas { IsHitTestVisible = false, Children = { _flipFill, _flipShade, _flipBorder } };
@@ -78,14 +79,13 @@ public partial class MainWindow : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
-            Background = System.Windows.Media.Brushes.Transparent;
+        WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         CancelFlip();
-        WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
+        WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
 
     private SettingsViewModel ViewModel => (SettingsViewModel)DataContext;
@@ -120,6 +120,8 @@ public partial class MainWindow : Window
     private const double FlipShade = 0.22;
     /// <summary>背面就是页面那张牌，圆角和边框与静止时一样，见 PageSheetStyle。</summary>
     private const double SheetRadius = 12;
+    /// <summary>设置页四周牌背纹样的宽度，与 PageSheetStyle 的边框一致；翻牌、抽牌途中由背面的轮廓画出这一圈。</summary>
+    private const double SheetBand = 10;
     /// <summary>背面上页面缓存的上限；更大时生成缓存本身就会卡顿，背面改为空白。</summary>
     private const double MaxFlipCacheBytes = 16 * 1024 * 1024;
     // 打开：正面翻到侧面，再由背面展开；返回：页面收到侧面，再由正面落位（毫秒）。
@@ -640,9 +642,25 @@ public partial class MainWindow : Window
         var height = card.Height / s;
         _flipCard.Rect = new Rect(page.X, page.Y, page.Width, height);
         _flipCard.RadiusX = _flipCard.RadiusY = SheetRadius;
-        _flipEdge.Rect = new Rect(page.X + 0.5, page.Y + 0.5, Math.Max(0, page.Width - 1), Math.Max(0, height - 1));
-        _flipEdge.RadiusX = _flipEdge.RadiusY = SheetRadius - 0.5;
+        _flipEdge.Rect = SheetOutline(new Rect(page.X, page.Y, page.Width, height));
+        _flipEdge.RadiusX = _flipEdge.RadiusY = SheetRadius - SheetBand / 2;
         _flipShade.Opacity = FlipShade * Math.Sin(angle);
+    }
+
+    /// <summary>牌背那一圈的描边路径：描边沿路径两侧各画一半，路径缩进半个宽度，正好画满牌的边缘。</summary>
+    private static Rect SheetOutline(Rect card) => new(card.X + SheetBand / 2, card.Y + SheetBand / 2,
+        Math.Max(0, card.Width - SheetBand), Math.Max(0, card.Height - SheetBand));
+
+    /// <summary>牌桌铺满可视区的宽度：页面内容有最大宽度且居中，左右各差多少就向外伸出多少，下沿伸到窗口底边。</summary>
+    private void UpdateTableBand()
+    {
+        var width = OverviewScroll.ViewportWidth;
+        var content = PageContent.ActualWidth;
+        if (width <= 0 || content <= 0) return;
+        var inset = PageInset;
+        var left = inset.Left + Math.Max(0, (width - inset.Left - inset.Right - content) / 2);
+        var margin = new Thickness(-left, 12, -(width - left - content), -inset.Bottom);
+        if (TableBand.Margin != margin) TableBand.Margin = margin;
     }
 
     /// <summary>
@@ -778,13 +796,14 @@ public partial class MainWindow : Window
     private StackEdge CreateEdge(int index)
     {
         var frame = new Border { BorderThickness = new Thickness(1, 0, 1, 1) };
-        frame.SetResourceReference(Border.BackgroundProperty, "StackEdgeBrush");
-        frame.SetResourceReference(Border.BorderBrushProperty, "SheetBorderBrush");
+        // 其余几张牌背面朝上，露出的边是牌背的斜格纹，悬停时露出的页名用牌桌上的文字颜色。
+        frame.SetResourceReference(Border.BackgroundProperty, "SheetBorderBrush");
+        frame.SetResourceReference(Border.BorderBrushProperty, "CardBackLineBrush");
         var face = new Border();
         var icon = new TextBlock { FontSize = 12, Margin = new Thickness(0, 1, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         icon.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");
         var header = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var text in new[] { icon, header }) text.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        foreach (var text in new[] { icon, header }) text.SetResourceReference(TextBlock.ForegroundProperty, "TableTextBrush");
         var label = new StackPanel
         {
             Orientation = System.Windows.Controls.Orientation.Horizontal, Height = EdgeReveal, Margin = new Thickness(14, 0, 0, 0),

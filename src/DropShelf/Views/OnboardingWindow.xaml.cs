@@ -22,11 +22,7 @@ public partial class OnboardingWindow : Window
         for (var index = 0; index < StepCount; index++)
             Dots.Children.Add(new System.Windows.Shapes.Rectangle { Width = 6, Height = 6, RadiusX = 3, RadiusY = 3, Margin = new Thickness(0, 0, 8, 0) });
 
-        SourceInitialized += (_, _) =>
-        {
-            if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
-                Background = System.Windows.Media.Brushes.Transparent;
-        };
+        SourceInitialized += (_, _) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
         ThemeService.ThemeChanged += OnThemeChanged;
         LanguageService.LanguageChanged += OnLanguageChanged;
         PreviewKeyDown += OnPreviewKeyDown;
@@ -111,7 +107,7 @@ public partial class OnboardingWindow : Window
         }
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
+    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {

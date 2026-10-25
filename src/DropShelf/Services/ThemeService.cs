@@ -43,17 +43,24 @@ public static class ThemeService
     private static bool _initialized;
     private static AppTheme _mode = AppTheme.System;
     private static WpfColor? _customAccent;
+    private static bool _followSystem;
+
+    /// <summary>强调色设置为这个值时跟随 Windows；为空时用默认的钴蓝。</summary>
+    public const string SystemAccent = "system";
+
+    /// <summary>默认强调色：牌背和牌桌的钴蓝。</summary>
+    public static WpfColor Cobalt { get; } = WpfColor.FromRgb(0x2B, 0x4E, 0xFF);
 
     /// <summary>可选的强调色，取自 Windows 的强调色色板。</summary>
     public static IReadOnlyList<string> AccentPresets { get; } =
-        ["#0078D4", "#8764B8", "#C239B3", "#E74856", "#CA5010", "#498205", "#038387", "#68768A"];
+        ["#8764B8", "#C239B3", "#E74856", "#CA5010", "#498205", "#038387", "#68768A"];
 
     public static event EventHandler? ThemeChanged;
     public static AppTheme Mode => _mode;
     public static bool IsDark { get; private set; }
     public static AccentPalette Accent { get; private set; } = AccentPalette.Default;
 
-    public static WpfColor AccentFill => IsDark ? Accent.Light2 : Accent.Dark1;
+    public static WpfColor AccentFill => Accent.Base;
 
     public static void Initialize(AppTheme mode, string? accent)
     {
@@ -65,10 +72,11 @@ public static class ThemeService
         SetMode(mode, accent);
     }
 
-    /// <summary>切换主题；强调色为 #RRGGBB，为空时跟随 Windows。</summary>
+    /// <summary>切换主题；强调色为 #RRGGBB，为 <see cref="SystemAccent"/> 时跟随 Windows，为空时用钴蓝。</summary>
     public static void SetMode(AppTheme mode, string? accent = null)
     {
         _mode = mode;
+        _followSystem = accent == SystemAccent;
         _customAccent = ParseAccent(accent);
         Refresh();
     }
@@ -76,7 +84,7 @@ public static class ThemeService
     private static void Refresh()
     {
         var system = ReadAccentPalette() ?? AccentPalette.Default;
-        Accent = _customAccent is { } custom ? AccentPalette.FromColor(custom) : system;
+        Accent = _followSystem ? system : AccentPalette.FromColor(_customAccent ?? Cobalt);
         ApplyTheme(ResolveIsDark(_mode, ReadSystemDarkMode()), system.Base);
     }
 
@@ -102,63 +110,73 @@ public static class ThemeService
 
     public static IReadOnlyDictionary<string, WpfColor> BuildPalette(bool dark, AccentPalette accent)
     {
-        var fill = dark ? accent.Light2 : accent.Dark1;
-        var background = dark ? WpfColor.FromRgb(0x20, 0x20, 0x20) : WpfColor.FromRgb(0xF3, 0xF3, 0xF3);
+        var fill = accent.Base;
+        var background = Parse(dark ? DarkBackground : LightBackground);
+        // 牌背和牌桌：浅色主题直接用强调色，深色主题压暗，免得在暗处一大片发亮。
+        var back = dark ? Mix(fill, Colors.Black, 0.45) : fill;
+        var table = dark ? Mix(fill, Colors.Black, 0.52) : fill;
         var palette = new Dictionary<string, WpfColor>
         {
             ["AccentBrush"] = fill,
             ["AccentHoverBrush"] = WithAlpha(fill, 0xE6),
             ["AccentPressedBrush"] = WithAlpha(fill, 0xCC),
-            ["AccentTextBrush"] = EnsureContrast(dark ? accent.Light3 : accent.Dark2, background, 4.5, dark),
+            ["AccentTextBrush"] = EnsureContrast(fill, background, 4.5, dark),
             ["AccentSubtleBrush"] = WithAlpha(fill, dark ? (byte)0x2E : (byte)0x1F),
             ["AccentFaintBrush"] = WithAlpha(fill, dark ? (byte)0x18 : (byte)0x10),
-            // 设置页是翻过来的卡片背面：整张铺一层很淡的强调色，左上角稍浓；深色主题下面再垫一层淡淡的黑，里面的设置卡片才显得出来。
-            ["StackEdgeBrush"] = Tint(fill, 0.05, dark ? 0.12 : 0),
-            ["SheetGlowBrush"] = Tint(fill, 0.10, dark ? 0.12 : 0),
-            ["SheetBorderBrush"] = WithAlpha(fill, 0x29)
+            ["CardBackFillBrush"] = back,
+            ["CardBackLineBrush"] = Mix(back, Colors.Black, 0.25),
+            ["TableFillBrush"] = table
         };
 
         foreach (var (key, light, darkValue) in NeutralPalette)
             palette[key] = Parse(dark ? darkValue : light);
 
         // 强调色由用户自选，可能很暗也可能很亮：按实际亮度选择对比度更高的黑字或白字。
-        palette["TextOnAccentBrush"] = PrefersDarkText(fill) ? WpfColor.FromArgb(0xE4, 0, 0, 0) : Colors.White;
+        palette["TextOnAccentBrush"] = PrefersDarkText(fill) ? Parse(NeutralInk) : Colors.White;
+        palette["TableTextBrush"] = PrefersDarkText(table) ? Parse(NeutralInk) : dark ? palette["TextPrimaryBrush"] : Colors.White;
         return palette;
     }
 
+    private const string LightBackground = "#FFE8E5DE", DarkBackground = "#FF1C1B19", NeutralInk = "#FF15171C";
+
+    // 浅色是象牙白的牌桌和牌面，深色是暖调的深炭色，两套的冷暖一致。
     private static readonly (string Key, string Light, string Dark)[] NeutralPalette =
     [
-        ("TextPrimaryBrush", "#E4000000", "#FFFFFFFF"),
-        ("TextSecondaryBrush", "#9E000000", "#C5FFFFFF"),
-        ("TextTertiaryBrush", "#72000000", "#87FFFFFF"),
-        ("TextDisabledBrush", "#5C000000", "#5DFFFFFF"),
-        ("TextOnAccentBrush", "#FFFFFFFF", "#E4000000"),
-        ("WindowBackgroundBrush", "#FFF3F3F3", "#FF202020"),
-        ("LayerBrush", "#80FFFFFF", "#4C3A3A3A"),
-        ("CardBrush", "#B3FFFFFF", "#0DFFFFFF"),
-        ("CardHoverBrush", "#E6FFFFFF", "#14FFFFFF"),
-        ("CardBorderBrush", "#14000000", "#33000000"),
-        ("ControlBrush", "#B3FFFFFF", "#0FFFFFFF"),
-        ("ControlHoverBrush", "#80F9F9F9", "#15FFFFFF"),
-        ("ControlPressedBrush", "#4DF9F9F9", "#08FFFFFF"),
-        ("ControlBorderBrush", "#1F000000", "#17FFFFFF"),
-        ("ControlStrongBorderBrush", "#72000000", "#8BFFFFFF"),
-        ("ControlAltBrush", "#06000000", "#19000000"),
-        ("SubtleHoverBrush", "#09000000", "#0FFFFFFF"),
-        ("SubtlePressedBrush", "#06000000", "#0AFFFFFF"),
-        ("SubtleSelectedBrush", "#0D000000", "#12FFFFFF"),
-        ("DividerBrush", "#0F000000", "#15FFFFFF"),
-        ("FlyoutBrush", "#FFF9F9F9", "#FF2C2C2C"),
-        ("FlyoutBorderBrush", "#1A000000", "#26FFFFFF"),
-        ("ShelfSolidBrush", "#FFF6F6F6", "#FF2B2B2B"),
-        ("ShelfAcrylicTintBrush", "#B3F7F7F7", "#B32A2A2A"),
-        ("ShelfTileBrush", "#FFFFFFFF", "#FF4D4D4D"),
-        ("ShelfTileBorderBrush", "#17000000", "#2EFFFFFF"),
-        ("ScrollThumbBrush", "#72000000", "#8BFFFFFF"),
+        ("TextPrimaryBrush", NeutralInk, "#FFEDEAE3"),
+        ("TextSecondaryBrush", "#FF575A63", "#FFA6A39C"),
+        ("TextTertiaryBrush", "#FF7A7D85", "#FF86837C"),
+        ("TextDisabledBrush", "#FFA3A5AB", "#FF5F5C56"),
+        ("WindowBackgroundBrush", LightBackground, DarkBackground),
+        ("LayerBrush", "#00000000", "#00000000"),
+        ("CardBrush", "#FFFBFAF6", "#FF262522"),
+        ("CardHoverBrush", "#FFFFFFFF", "#FF2E2D2A"),
+        ("CardBorderBrush", "#FFD2CEC5", "#FF34322E"),
+        ("TableCardBorderBrush", "#FFC9C5BB", "#FF3D3B36"),
+        ("ControlBrush", "#FFFBFAF6", "#FF2A2926"),
+        ("ControlHoverBrush", "#FFFFFFFF", "#FF32312D"),
+        ("ControlPressedBrush", "#FFF2EFE8", "#FF262522"),
+        ("ControlBorderBrush", "#FFBDB8AE", "#FF4A4843"),
+        ("ControlStrongBorderBrush", "#FF5E6066", "#FFA6A39C"),
+        ("ControlAltBrush", "#0D15171C", "#14EDEAE3"),
+        ("SubtleHoverBrush", "#0F15171C", "#12EDEAE3"),
+        ("SubtlePressedBrush", "#0A15171C", "#0AEDEAE3"),
+        ("SubtleSelectedBrush", "#1415171C", "#1AEDEAE3"),
+        ("DividerBrush", "#FFDDD9D0", "#FF34322E"),
+        ("FlyoutBrush", "#FFFBFAF6", "#FF262522"),
+        ("FlyoutBorderBrush", "#FFC9C5BB", "#FF3D3B36"),
+        ("SettingRowBrush", "#FFF2EFE8", "#FF2E2D2A"),
+        ("SettingRowBorderBrush", "#FFE2DED5", "#FF3A3834"),
+        ("ShelfSolidBrush", LightBackground, DarkBackground),
+        ("ShelfBorderBrush", "#FFB4AFA4", "#FF3A3834"),
+        ("ShelfTileBrush", "#FFFFFFFF", "#FF2E2D2A"),
+        ("ShelfTileBorderBrush", NeutralInk, "#FFA6A39C"),
+        ("ShelfUnderCardBorderBrush", NeutralInk, "#FF6E6B65"),
+        ("ArtFrameBrush", "#FFDDD9D0", "#FF3A3834"),
+        ("ScrollThumbBrush", "#FF8A8C93", "#FF6E6B65"),
         ("SuccessBrush", "#FF0F7B0F", "#FF6CCB5F"),
         ("CautionBrush", "#FF9D5D00", "#FFFCE100"),
         ("CriticalBrush", "#FFC42B1C", "#FFFF99A4"),
-        ("SmokeBrush", "#CCF6F6F6", "#CC2B2B2B")
+        ("SmokeBrush", "#CCE8E5DE", "#CC1C1B19")
     ];
 
     /// <param name="systemAccent">Windows 当前的强调色，用于设置页“跟随 Windows”色块的预览。</param>
@@ -173,13 +191,12 @@ public static class ThemeService
             brush.Freeze();
             resources[key] = brush;
         }
-        var sheet = new RadialGradientBrush
-        {
-            Center = new System.Windows.Point(0, 0), GradientOrigin = new System.Windows.Point(0, 0), RadiusX = 1.1, RadiusY = 0.7,
-            GradientStops = { new GradientStop(((SolidColorBrush)resources["SheetGlowBrush"]).Color, 0), new GradientStop(((SolidColorBrush)resources["StackEdgeBrush"]).Color, 0.7) }
-        };
-        sheet.Freeze();
-        resources["SheetBrush"] = sheet;
+        var back = ((SolidColorBrush)resources["CardBackFillBrush"]).Color;
+        // 牌背：斜格纹；设置页四周那圈边框和翻牌途中的轮廓都用它。牌背露出的窄边改用斜条纹，几像素宽也看得清。
+        resources["SheetBorderBrush"] = Lattice(back, WithAlpha(Colors.White, dark ? (byte)0x1F : (byte)0x29), 8);
+        resources["StackEdgeBrush"] = Stripes(back, Mix(back, Colors.White, dark ? 0.15 : 0.3));
+        resources["TableBrush"] = Lattice(((SolidColorBrush)resources["TableFillBrush"]).Color, WithAlpha(Colors.White, dark ? (byte)0x0F : (byte)0x12), 12);
+        resources["SheetBrush"] = resources["CardBrush"];
         resources["AccentColor"] = AccentFill;
         var systemBrush = new SolidColorBrush(systemAccent);
         systemBrush.Freeze();
@@ -187,13 +204,47 @@ public static class ThemeService
         ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 
-    /// <summary>先垫一层透明度为 shade 的黑，再铺一层透明度为 alpha 的 color，合成为一种半透明色。</summary>
-    private static WpfColor Tint(WpfColor color, double alpha, double shade)
+    /// <summary>斜格纹：每格画一个叉，平铺后连成菱形格子。格子在缓存里只画一次。</summary>
+    private static System.Windows.Media.Brush Lattice(WpfColor fill, WpfColor line, double size)
     {
-        var total = 1 - (1 - shade) * (1 - alpha);
-        var k = alpha / total;
-        return WpfColor.FromArgb((byte)Math.Round(total * 255), (byte)Math.Round(color.R * k), (byte)Math.Round(color.G * k), (byte)Math.Round(color.B * k));
+        var pen = new System.Windows.Media.Pen(new SolidColorBrush(line), 1);
+        var drawing = new DrawingGroup
+        {
+            Children =
+            {
+                new GeometryDrawing(new SolidColorBrush(fill), null, new RectangleGeometry(new Rect(0, 0, size, size))),
+                new GeometryDrawing(null, pen, new LineGeometry(new System.Windows.Point(0, 0), new System.Windows.Point(size, size))),
+                new GeometryDrawing(null, pen, new LineGeometry(new System.Windows.Point(size, 0), new System.Windows.Point(0, size)))
+            }
+        };
+        var brush = new DrawingBrush(drawing)
+        {
+            TileMode = TileMode.Tile, Stretch = Stretch.None,
+            Viewport = new Rect(0, 0, size, size), ViewportUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(0, 0, size, size), ViewboxUnits = BrushMappingMode.Absolute
+        };
+        RenderOptions.SetCachingHint(brush, CachingHint.Cache);
+        brush.Freeze();
+        return brush;
     }
+
+    /// <summary>45° 的细条纹，两种颜色各 2 像素宽。</summary>
+    private static System.Windows.Media.Brush Stripes(WpfColor first, WpfColor second)
+    {
+        var brush = new LinearGradientBrush
+        {
+            MappingMode = BrushMappingMode.Absolute, SpreadMethod = GradientSpreadMethod.Repeat,
+            StartPoint = new System.Windows.Point(0, 0), EndPoint = new System.Windows.Point(2.83, 2.83),
+            GradientStops = { new GradientStop(first, 0), new GradientStop(first, 0.5), new GradientStop(second, 0.5), new GradientStop(second, 1) }
+        };
+        brush.Freeze();
+        return brush;
+    }
+
+    public static WpfColor Mix(WpfColor from, WpfColor to, double amount) => WpfColor.FromRgb(
+        (byte)Math.Round(from.R + (to.R - from.R) * amount),
+        (byte)Math.Round(from.G + (to.G - from.G) * amount),
+        (byte)Math.Round(from.B + (to.B - from.B) * amount));
 
     public static double RelativeLuminance(WpfColor color)
     {

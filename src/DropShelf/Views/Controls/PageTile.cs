@@ -22,6 +22,9 @@ public sealed class PageTile : Button
         DependencyProperty.Register(nameof(Summary), typeof(string), typeof(PageTile),
             new PropertyMetadata(null, (element, _) => ((PageTile)element).UpdateItems()));
 
+    public static readonly DependencyProperty GlanceProperty =
+        DependencyProperty.Register(nameof(Glance), typeof(object), typeof(PageTile), new PropertyMetadata(null));
+
     private static readonly DependencyPropertyKey ItemsPropertyKey =
         DependencyProperty.RegisterReadOnly(nameof(Items), typeof(string[]), typeof(PageTile), new PropertyMetadata(Array.Empty<string>()));
 
@@ -53,6 +56,13 @@ public sealed class PageTile : Button
     {
         get => (string?)GetValue(SummaryProperty);
         set => SetValue(SummaryProperty, value);
+    }
+
+    /// <summary>卡片右侧画出的当前设置，如快捷键的键帽、底部按钮的排法。</summary>
+    public object? Glance
+    {
+        get => GetValue(GlanceProperty);
+        set => SetValue(GlanceProperty, value);
     }
 
     /// <summary>摘要拆成的各项，大卡片上显示为标签。</summary>

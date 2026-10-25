@@ -13,16 +13,16 @@
         <Style x:Key="MiniCard" TargetType="Border">
             <Setter Property="Width" Value="58" />
             <Setter Property="Height" Value="58" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="4" />
             <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderThickness" Value="1.2" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
         </Style>
         <Style x:Key="MiniShelf" TargetType="Border">
-            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Background" Value="{DynamicResource ShelfSolidBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ShelfBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Effect">
                 <Setter.Value>
@@ -245,7 +245,7 @@
         <TextBlock Text="{l:Loc OnboardingWelcomeTitle}" Margin="18,0,0,0" FontSize="12" VerticalAlignment="Center" />
 
         <!-- 动画演示 -->
-        <Border Grid.Row="1" Margin="24,0" CornerRadius="12" Background="{DynamicResource LayerBrush}"
+        <Border Grid.Row="1" Margin="24,0" CornerRadius="8" Background="{DynamicResource CardBrush}"
                 BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" ClipToBounds="True">
             <Grid ClipToBounds="True">
                 <!-- 第 1 步：欢迎。和真实的置物架一样：左上角钉子和移动/复制切换，右上角菜单和关闭，堆叠下方是名称和数量 -->
@@ -324,7 +324,7 @@
                             <ScaleTransform x:Name="S2ShelfScale" ScaleX="0.9" ScaleY="0.9" />
                         </Border.RenderTransform>
                         <Grid Margin="14">
-                            <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
+                            <Rectangle RadiusX="6" RadiusY="6" StrokeThickness="1.4" StrokeDashArray="3 2"
                                        Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" Margin="0,22,0,0" />
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18">
                                 <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="18"
@@ -398,7 +398,7 @@
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid x:Name="S4DropZone" Margin="0,0,0,6">
-                                    <Rectangle x:Name="S4DropFrame" RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
+                                    <Rectangle x:Name="S4DropFrame" RadiusX="6" RadiusY="6" StrokeThickness="1.4" StrokeDashArray="3 2"
                                                Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" />
                                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="18"
@@ -423,29 +423,29 @@
                                     </UniformGrid>
                                     <UniformGrid x:Name="S4TileRow" Rows="1" VerticalAlignment="Bottom" Opacity="0">
                                         <Grid Margin="2,0" Height="62">
-                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
-                                            <Border x:Name="S4Highlight" CornerRadius="8" Background="{DynamicResource AccentBrush}" Opacity="0" />
+                                            <Border CornerRadius="6" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}" BorderThickness="1" />
+                                            <Border x:Name="S4Highlight" CornerRadius="6" Background="{DynamicResource AccentBrush}" Opacity="0" />
                                             <StackPanel VerticalAlignment="Center">
                                                 <TextBlock Text="{StaticResource Glyph.Zip}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
                                                 <TextBlock Text="{l:Loc ActionCompress}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                         </Grid>
                                         <Grid Margin="2,0" Height="62">
-                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <Border CornerRadius="6" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}" BorderThickness="1" />
                                             <StackPanel VerticalAlignment="Center">
                                                 <TextBlock Text="{StaticResource Glyph.Copy}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
                                                 <TextBlock Text="{l:Loc ActionCopyPath}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                         </Grid>
                                         <Grid Margin="2,0" Height="62">
-                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <Border CornerRadius="6" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}" BorderThickness="1" />
                                             <StackPanel VerticalAlignment="Center">
                                                 <TextBlock Text="{StaticResource Glyph.MoveToFolder}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
                                                 <TextBlock Text="{l:Loc ActionMoveTo}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                         </Grid>
                                         <Grid Margin="2,0" Height="62">
-                                            <Border CornerRadius="8" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" />
+                                            <Border CornerRadius="6" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}" BorderThickness="1" />
                                             <StackPanel VerticalAlignment="Center">
                                                 <TextBlock Text="{StaticResource Glyph.Info}" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center" />
                                                 <TextBlock Text="{l:Loc ActionProperties}" FontSize="10" Margin="0,5,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />

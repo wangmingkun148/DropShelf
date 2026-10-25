@@ -55,6 +55,8 @@ public partial class ShelfWindow : Window
     private const double CaptionHeight = 38;
     private const double ActionBarHeight = 50;
     private const double ActionTileHeight = 94;
+    private static readonly TimeSpan RankRollDuration = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan DealDuration = TimeSpan.FromMilliseconds(180);
     private const double RowHeight = 46;
     private const int WS_SYSMENU = 0x00080000;
     private const int WS_MINIMIZEBOX = 0x00020000;
@@ -82,6 +84,7 @@ public partial class ShelfWindow : Window
     private QuickActionInfo? _hoveredAction;
     private bool _tilesExpanded;
     private bool _layoutPending;
+    private int _shownCount;
     private string? _lastDescription;
     private long _lastDragOverTick;
     private WpfPoint _pressPoint;
@@ -97,6 +100,7 @@ public partial class ShelfWindow : Window
         _host = host;
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _shownCount = viewModel.Count;
         viewModel.ToastRequested += (_, toast) => ShowToast(toast);
         viewModel.NewItemsProduced += (_, paths) => _host.OpenBeside(this, paths);
 
@@ -123,7 +127,6 @@ public partial class ShelfWindow : Window
     public ShelfViewModel ViewModel { get; }
     public bool IsClosing => _closing || _closed;
     public bool IsDraggingOut { get; private set; }
-    public bool BackdropActive { get; private set; }
 
     /// <summary>空的、未被使用过的置物架可以直接挪到新的位置复用。</summary>
     public bool IsReusable => !IsClosing && ViewModel.IsEmpty && !ViewModel.IsBusy && !ViewModel.HasInteracted;
@@ -228,11 +231,10 @@ public partial class ShelfWindow : Window
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
             NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_FRAMECHANGED);
         WindowEffects.SetRoundedCorners(this);
-        BackdropActive = WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
-        Root.SetResourceReference(Border.BackgroundProperty, BackdropActive ? "ShelfAcrylicTintBrush" : "ShelfSolidBrush");
+        WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
+    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
@@ -349,6 +351,9 @@ public partial class ShelfWindow : Window
         switch (e.PropertyName)
         {
             case nameof(ShelfViewModel.Count):
+                if (ViewModel.Count > _shownCount && _shownCount > 0) RollRank();
+                _shownCount = ViewModel.Count;
+                goto case nameof(ShelfViewModel.IsExpanded);
             case nameof(ShelfViewModel.IsExpanded):
                 // 数量变化时项目集合还在通知列表的途中；此时改窗口大小会立即重新布局，
                 // 列表与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
@@ -367,6 +372,15 @@ public partial class ShelfWindow : Window
                 UpdateWindowSize();
                 break;
         }
+    }
+
+    /// <summary>新牌落进这一摞：角标的数字从下面滚上来。</summary>
+    private void RollRank()
+    {
+        if (!ShelfMotion.Enabled || !IsVisible) return;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        StackRankShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, RankRollDuration) { EasingFunction = ease });
+        StackRank.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, RankRollDuration) { EasingFunction = ease });
     }
 
     private void OnRowLoaded(object sender, RoutedEventArgs e)
@@ -423,7 +437,7 @@ public partial class ShelfWindow : Window
         {
             var button = new System.Windows.Controls.Button
             {
-                Style = (Style)FindResource("IconButtonStyle"),
+                Style = (Style)FindResource("ShelfActionButtonStyle"),
                 Width = double.NaN,
                 Height = 36,
                 Margin = new Thickness(2, 0, 2, 0),
@@ -470,7 +484,7 @@ public partial class ShelfWindow : Window
                 Height = ActionTileHeight,
                 Margin = new Thickness(2, 3, 2, 3),
                 Padding = new Thickness(large ? 6 : 2, 0, large ? 6 : 2, 0),
-                CornerRadius = new CornerRadius(10),
+                CornerRadius = new CornerRadius(6),
                 BorderThickness = new Thickness(1),
                 Child = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { glyph, label } }
             };
@@ -488,7 +502,7 @@ public partial class ShelfWindow : Window
         {
             var active = ReferenceEquals(info, action);
             tile.SetResourceReference(Border.BackgroundProperty, active ? "AccentBrush" : "CardBrush");
-            tile.SetResourceReference(Border.BorderBrushProperty, active ? "AccentBrush" : "CardBorderBrush");
+            tile.SetResourceReference(Border.BorderBrushProperty, active ? "AccentBrush" : "ShelfUnderCardBorderBrush");
             glyph.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextOnAccentBrush" : "TextPrimaryBrush");
             label.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextOnAccentBrush" : "TextPrimaryBrush");
         }
@@ -507,7 +521,7 @@ public partial class ShelfWindow : Window
             _lastDescription = null;
             _dragFromSelf = DropDataReader.GetSourceShelfId(e.Data) == ViewModel.Id;
             _dragKind = _dragFromSelf ? DropContentKind.None : DropDataReader.Classify(e.Data);
-            if (!_dragFromSelf && _dragKind != DropContentKind.None && !ViewModel.IsBusy) ShowDropOverlay();
+            if (!_dragFromSelf && _dragKind != DropContentKind.None && !ViewModel.IsBusy) ShowDropOverlay(e.Data);
             _dropHelper.Enter(this, e.Data, e.AllowedEffects & PreferredEffect(e.AllowedEffects));
         }
         UpdateDrag(e);
@@ -632,15 +646,55 @@ public partial class ShelfWindow : Window
         }
     }
 
-    private void ShowDropOverlay()
+    private void ShowDropOverlay(System.Windows.IDataObject data)
     {
         DropZoneText.Text = ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
+        var incoming = IncomingCount(data);
+        IncomingText.Text = $"+{incoming}";
+        IncomingBadge.Visibility = incoming > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DealGhostCards();
         Body.Visibility = Visibility.Hidden;
         ResetTiles();
         DropOverlay.Visibility = Visibility.Visible;
         // 立即完成布局，紧接着判断光标是否在按钮区域时才能拿到正确的位置。
         DropOverlay.UpdateLayout();
         WindowEffects.SetBorderColor(this, ThemeService.AccentFill);
+    }
+
+    /// <summary>拖进来的文件数；读不到文件列表（文字、链接、虚拟文件）时为 0，不显示数字。</summary>
+    private static int IncomingCount(System.Windows.IDataObject data)
+    {
+        try
+        {
+            return data.GetDataPresent(System.Windows.DataFormats.FileDrop) && data.GetData(System.Windows.DataFormats.FileDrop) is string[] files
+                ? files.Length
+                : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>发牌：两张虚线牌从两侧斜着滑进来，转正一些后停住，等松手。</summary>
+    private void DealGhostCards()
+    {
+        // 每张牌：牌、转角、位移、从哪一侧滑入、停住时的角度（与 XAML 中的静止角度一致）。
+        var cards = new[] { (GhostLeft, GhostLeftTurn, GhostLeftShift, -1.0, -14.0), (GhostRight, GhostRightTurn, GhostRightShift, 1.0, 13.0) };
+        foreach (var (card, turn, shift, side, angle) in cards)
+        {
+            if (!ShelfMotion.Enabled)
+            {
+                card.BeginAnimation(OpacityProperty, null);
+                turn.BeginAnimation(RotateTransform.AngleProperty, null);
+                shift.BeginAnimation(TranslateTransform.XProperty, null);
+                continue;
+            }
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            card.BeginAnimation(OpacityProperty, new DoubleAnimation(0.4, 1, DealDuration) { EasingFunction = ease });
+            turn.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(angle + side * 9, angle, DealDuration) { EasingFunction = ease });
+            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(side * 22, 0, DealDuration) { EasingFunction = ease });
+        }
     }
 
     private void EndDrag()

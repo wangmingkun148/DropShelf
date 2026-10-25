@@ -31,20 +31,20 @@
             <Setter Property="Margin" Value="{Binding PageInset, RelativeSource={RelativeSource AncestorType=Window}}" />
         </Style>
 
-        <!-- 设置页是翻过来的卡片背面：一张圆角的牌，内容在牌里滚动，牌底下露出其余几张牌的边 -->
+        <!-- 设置页是翻过来的牌背：四周一圈牌背纹样，中间是象牙白的页面，内容在里面滚动，牌底下露出其余几张牌的背面 -->
         <Style x:Key="PageSheetStyle" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SheetBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource SheetBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderThickness" Value="10" />
             <Setter Property="CornerRadius" Value="12" />
             <!-- 上下留一点空，滚动条不会伸进圆角 -->
             <Setter Property="Padding" Value="0,6" />
             <Setter Property="MaxWidth" Value="908" />
             <Setter Property="Margin" Value="{Binding SheetInset, RelativeSource={RelativeSource AncestorType=Window}}" />
         </Style>
-        <!-- 牌里的留白：两侧 23 加上 1 的边框，正好等于代码里的 SheetPadding，内容和概览页对齐 -->
+        <!-- 牌里的留白：两侧 14 加上 10 的牌背边框，正好等于代码里的 SheetPadding，内容和概览页对齐 -->
         <Style x:Key="SheetContentStyle" TargetType="FrameworkElement">
-            <Setter Property="Margin" Value="23,12,23,24" />
+            <Setter Property="Margin" Value="14,10,14,24" />
         </Style>
 
         <Style x:Key="StackEdgeButtonStyle" TargetType="Button">
@@ -84,17 +84,18 @@
             </Setter>
         </Style>
 
-        <!-- 强调色色块：选中时外圈和对勾 -->
+        <!-- 强调色色块：一张小牌，选中时外圈和对勾 -->
         <Style x:Key="AccentSwatchStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0,0,4,0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="ToolTip" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Grid Width="32" Height="32" Background="Transparent">
-                            <Ellipse x:Name="Ring" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="2" Opacity="0" />
-                            <Ellipse x:Name="Swatch" Margin="5" Fill="{Binding Brush}" />
+                        <Grid Width="30" Height="38" Background="Transparent">
+                            <Border x:Name="Ring" CornerRadius="6" BorderThickness="2" BorderBrush="{DynamicResource TextPrimaryBrush}" Opacity="0" />
+                            <Border x:Name="Swatch" Margin="5" CornerRadius="3" Background="{Binding Brush}" />
                             <TextBlock x:Name="Check" Text="{StaticResource Glyph.Check}" FontFamily="{StaticResource IconFont}" FontSize="11"
                                        Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Hidden" />
                         </Grid>
@@ -106,9 +107,12 @@
                                 <Setter TargetName="Ring" Property="Opacity" Value="1" />
                                 <Setter TargetName="Check" Property="Visibility" Value="Visible" />
                             </Trigger>
-                            <!-- 跟随 Windows：显示系统当前的强调色，并与固定颜色之间留出间隔 -->
                             <DataTrigger Binding="{Binding Value}" Value="">
-                                <Setter TargetName="Swatch" Property="Fill" Value="{DynamicResource SystemAccentBrush}" />
+                                <Setter Property="ToolTip" Value="{l:Loc AccentCobalt}" />
+                            </DataTrigger>
+                            <!-- 跟随 Windows：显示系统当前的强调色，并与固定颜色之间留出间隔 -->
+                            <DataTrigger Binding="{Binding Value}" Value="system">
+                                <Setter TargetName="Swatch" Property="Background" Value="{DynamicResource SystemAccentBrush}" />
                                 <Setter Property="ToolTip" Value="{l:Loc AccentFollowSystem}" />
                                 <Setter Property="Margin" Value="0,0,16,0" />
                             </DataTrigger>
@@ -119,7 +123,13 @@
         </Style>
 
         <Style x:Key="TipCardStyle" TargetType="Border" BasedOn="{StaticResource CardBorderStyle}">
-            <Setter Property="Padding" Value="16,16,16,18" />
+            <Setter Property="Padding" Value="14,12,16,16" />
+        </Style>
+        <!-- 入门提示右上角的小图：线条用墨色，重点用强调色 -->
+        <Style x:Key="TipLineStyle" TargetType="Path">
+            <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="StrokeThickness" Value="1.4" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
         </Style>
 
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
@@ -146,18 +156,9 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Grid MinHeight="38" Background="Transparent">
-                            <Border x:Name="Bd" CornerRadius="6" Background="{DynamicResource AccentBrush}">
-                                <Border.OpacityMask>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                        <GradientStop Color="Black" Offset="0" />
-                                        <GradientStop Color="Black" Offset="0.62" />
-                                        <GradientStop Color="#00000000" Offset="1" />
-                                    </LinearGradientBrush>
-                                </Border.OpacityMask>
-                            </Border>
+                        <Border x:Name="Bd" MinHeight="38" CornerRadius="6" Background="{DynamicResource AccentBrush}">
                             <ContentPresenter Margin="14,0" HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        </Grid>
+                        </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentHoverBrush}" />
@@ -179,7 +180,7 @@
             <Setter Property="FontSize" Value="15" />
             <Setter Property="Width" Value="26" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
         <!-- 概览页的设置卡片：高度随窗口变化，矮时一行，够高时交叉淡入成大卡片，背景图案随高度渐显 -->
@@ -192,53 +193,70 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="controls:PageTile">
-                        <Border x:Name="Bd" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}"
-                                BorderThickness="1" CornerRadius="8">
-                            <Grid ClipToBounds="True">
-                                <Grid Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='140,230'}">
-                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="150" Opacity="0.07"
-                                               Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                               Margin="0,0,-16,-24" />
+                        <!-- 卡片就是点开后会翻过来的那张牌：底下露出一道牌背，悬停时卡片微微抬起，牌背多露出一点 -->
+                        <Grid>
+                            <Border CornerRadius="{StaticResource CardCornerRadius}" Background="{DynamicResource StackEdgeBrush}" Margin="3,3,-3,-3">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="BackShift" />
+                                </Border.RenderTransform>
+                            </Border>
+                            <Border x:Name="Bd" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="Lift" />
+                                </Border.RenderTransform>
+                                <Grid ClipToBounds="True">
+                                    <Grid Opacity="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Ramp}, ConverterParameter='140,230'}">
+                                        <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="150" Opacity="0.06"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                   Margin="0,0,-16,-24" />
+                                    </Grid>
+                                    <Grid x:Name="Compact" Margin="14,0,16,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="Emblem" Width="40" Height="40" CornerRadius="6" BorderThickness="1" Margin="0,0,14,0"
+                                                BorderBrush="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center">
+                                            <TextBlock x:Name="EmblemGlyph" Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="19"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{TemplateBinding Header}" Style="{StaticResource BodyStrongTextStyle}" />
+                                            <TextBlock Text="{TemplateBinding Summary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0"
+                                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <ContentPresenter Grid.Column="2" Content="{TemplateBinding Glance}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid x:Name="Tall" Margin="20,20,18,20" Opacity="0">
+                                        <Border x:Name="TallEmblem" Width="44" Height="44" CornerRadius="6" BorderThickness="1"
+                                                BorderBrush="{DynamicResource TextPrimaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                            <TextBlock x:Name="TallEmblemGlyph" Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="21"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Bottom">
+                                            <TextBlock Text="{TemplateBinding Header}" FontSize="16" FontWeight="SemiBold" />
+                                            <ItemsControl ItemsSource="{TemplateBinding Items}" Focusable="False" Margin="0,10,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Margin="0,0,6,6" Padding="9,3,9,4" CornerRadius="4" BorderThickness="1"
+                                                                BorderBrush="{DynamicResource CardBorderBrush}" Background="{DynamicResource SettingRowBrush}">
+                                                            <TextBlock Text="{Binding}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Grid>
                                 </Grid>
-                                <Grid x:Name="Compact" Margin="18,0,16,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22" Margin="0,0,16,0"
-                                               VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{TemplateBinding Header}" Style="{StaticResource BodyStrongTextStyle}" />
-                                        <TextBlock Text="{TemplateBinding Summary}" Style="{StaticResource CaptionTextStyle}" Margin="0,3,0,0"
-                                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                </Grid>
-                                <Grid x:Name="Tall" Margin="22,22,18,20" Opacity="0">
-                                    <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource AccentFaintBrush}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Top">
-                                        <TextBlock Text="{TemplateBinding Icon}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                                    </Border>
-                                    <StackPanel VerticalAlignment="Bottom">
-                                        <TextBlock Text="{TemplateBinding Header}" FontSize="16" FontWeight="SemiBold" />
-                                        <ItemsControl ItemsSource="{TemplateBinding Items}" Focusable="False" Margin="0,10,0,0">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel />
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border Margin="0,0,6,0" Padding="9,3,9,4" CornerRadius="11" Background="{DynamicResource SubtleSelectedBrush}">
-                                                        <TextBlock Text="{Binding}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </Grid>
-                            </Grid>
-                        </Border>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsTall" Value="True">
                                 <Trigger.EnterActions>
@@ -260,9 +278,34 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardHoverBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="Emblem" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="Emblem" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="EmblemGlyph" Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+                                <Setter TargetName="TallEmblem" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="TallEmblem" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="TallEmblemGlyph" Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Lift" Storyboard.TargetProperty="Y" To="-2" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="BackShift" Storyboard.TargetProperty="X" To="2" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="BackShift" Storyboard.TargetProperty="Y" To="2" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Lift" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="BackShift" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="BackShift" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Opacity" Value="0.8" />
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -321,10 +364,10 @@
         <Style x:Key="MiniStackCardStyle" TargetType="Border">
             <Setter Property="Width" Value="60" />
             <Setter Property="Height" Value="60" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="4" />
             <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderThickness" Value="1.5" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding}" Value="{x:Null}">
@@ -351,7 +394,7 @@
             </Grid>
         </DataTemplate>
 
-        <!-- 牌堆中的一张牌：被选出时显示强调色边框、“点击恢复”和删除按钮 -->
+        <!-- 牌堆中的一张牌：被选出时牌面提亮、描出墨色边框，显示“点击恢复”和删除按钮 -->
         <Style x:Key="FanCardStyle" TargetType="Button">
             <Setter Property="Width" Value="150" />
             <Setter Property="Height" Value="200" />
@@ -361,13 +404,15 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
-                                BorderThickness="1" CornerRadius="12">
+                        <Border x:Name="Bd" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource TableCardBorderBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
                             <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="controls:FanPanel.IsHot" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardHoverBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="1.5" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
@@ -400,11 +445,32 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 一张历史牌：左上角是项目数和数量最多的文件类型，右上角是关闭时间，右下角是倒过来的角标 -->
         <DataTemplate x:Key="HistoryCardTemplate">
             <Button Style="{StaticResource FanCardStyle}" Command="{Binding RestoreCommand}" ToolTip="{l:Loc RestoreShelf}">
                 <Grid>
-                    <StackPanel Margin="12,16,12,0">
-                        <Viewbox Height="60" Stretch="Uniform">
+                    <StackPanel Margin="9,7,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" />
+                        <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Margin="0,3,0,0" />
+                    </StackPanel>
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Margin" Value="0,9,9,0" />
+                                <Style.Triggers>
+                                    <Trigger Property="controls:FanPanel.IsHot" Value="True">
+                                        <Setter Property="Margin" Value="0,9,30,0" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="{Binding ClosedTime}" FontFamily="{StaticResource NumberFont}" FontSize="11" HorizontalAlignment="Right"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <TextBlock Text="{Binding ClosedDay}" FontSize="10" HorizontalAlignment="Right" Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                    <Border Width="94" Height="62" Margin="0,38,0,0" HorizontalAlignment="Center" VerticalAlignment="Top" CornerRadius="3"
+                            BorderThickness="1" BorderBrush="{DynamicResource ArtFrameBrush}">
+                        <Viewbox Height="52" Stretch="Uniform">
                             <Canvas Width="120" Height="84">
                                 <Border Style="{StaticResource MiniStackCardStyle}" Canvas.Left="30" Canvas.Top="14" DataContext="{Binding Stack2}">
                                     <Border.RenderTransform>
@@ -429,16 +495,22 @@
                                 </Border>
                             </Canvas>
                         </Viewbox>
-                        <TextBlock Text="{Binding Title}" FontSize="13" Margin="0,10,0,0" TextAlignment="Center" TextWrapping="Wrap"
-                                   TextTrimming="CharacterEllipsis" MaxHeight="36" LineHeight="18" />
-                        <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                   Foreground="{DynamicResource TextSecondaryBrush}" />
-                        <Border x:Name="RestoreHint" Style="{StaticResource HotOnlyStyle}" Margin="0,10,0,0" Padding="10,2,10,3" CornerRadius="10" HorizontalAlignment="Center"
-                                Background="{DynamicResource AccentBrush}">
-                            <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}" />
-                        </Border>
+                    </Border>
+                    <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Margin="10,106,10,0" VerticalAlignment="Top"
+                               TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Border Style="{StaticResource HotOnlyStyle}" Height="24" Margin="16,140,16,0" VerticalAlignment="Top" CornerRadius="12"
+                            Background="{DynamicResource AccentBrush}">
+                        <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="0,0,9,7" HorizontalAlignment="Right" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5">
+                        <StackPanel.RenderTransform>
+                            <RotateTransform Angle="180" />
+                        </StackPanel.RenderTransform>
+                        <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" />
+                        <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Margin="0,3,0,0" />
                     </StackPanel>
-                    <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,4,4,0"
+                    <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,3,3,0"
                             HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip="{l:Loc RemoveHistoryTooltip}" Command="{Binding RemoveCommand}">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
@@ -483,8 +555,8 @@
             <Setter Property="Padding" Value="16,10,12,10" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SettingRowBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SettingRowBorderBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="ToolTip" Value="{Binding Description}" />
             <Style.Triggers>
@@ -588,7 +660,7 @@
                             <Setter Property="Fill" Value="{DynamicResource CautionBrush}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsHealthy}" Value="True">
-                                    <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                    <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -632,11 +704,11 @@
                                             </TextBlock.RenderTransform>
                                         </TextBlock>
                                         <Button x:Name="OverviewOpenButton" Style="{StaticResource AccentButtonStyle}" Command="{Binding OpenShelfCommand}" HorizontalAlignment="Right"
-                                                VerticalAlignment="Center" Padding="16,6,16,7">
+                                                VerticalAlignment="Center" Padding="16,6,10,7">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{StaticResource Glyph.Add}" FontFamily="{StaticResource IconFont}" FontSize="13"
-                                                           Margin="0,1,8,0" VerticalAlignment="Center" />
-                                                <TextBlock Text="{l:Loc OpenShelf}" />
+                                                <TextBlock Text="{l:Loc OpenShelf}" VerticalAlignment="Center" />
+                                                <ItemsControl ItemsSource="{Binding HotkeyKeys}" Style="{StaticResource KeycapListStyle}" Margin="12,0,0,0"
+                                                              Opacity="0.75" />
                                             </StackPanel>
                                         </Button>
                                     </Grid>
@@ -652,28 +724,63 @@
                                                         FontSize="10" Width="28" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,4"
                                                         ToolTip="{l:Loc DismissTooltip}" Command="{Binding DismissGettingStartedCommand}" />
                                             </Grid>
+                                            <!-- 三张入门提示按顺序编号，右上角的小图画出这一步怎么做 -->
                                             <UniformGrid Columns="3">
                                                 <Border Style="{StaticResource TipCardStyle}" Margin="0,0,6,0">
                                                     <StackPanel>
-                                                        <TextBlock Text="{StaticResource Glyph.Mouse}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                                   Foreground="{DynamicResource AccentTextBrush}" />
-                                                        <TextBlock Text="{l:Loc TipShakeTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <Grid Height="26">
+                                                            <TextBlock Text="1" Style="{StaticResource CardRankTextStyle}" FontSize="24" HorizontalAlignment="Left"
+                                                                       VerticalAlignment="Center" />
+                                                            <Canvas Width="72" Height="24" HorizontalAlignment="Right">
+                                                                <Path Style="{StaticResource TipLineStyle}" Data="M2,12 L9,4 L17,20 L25,4 L33,20 L40,12 M50,12 H62 M58,8 L62,12 L58,16" />
+                                                                <Path Data="M69,1 V23" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2.4" />
+                                                            </Canvas>
+                                                        </Grid>
+                                                        <TextBlock Text="{l:Loc TipShakeTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,8,0,4" />
                                                         <TextBlock Text="{l:Loc TipShakeBody}" Style="{StaticResource CaptionTextStyle}" />
                                                     </StackPanel>
                                                 </Border>
                                                 <Border Style="{StaticResource TipCardStyle}" Margin="3,0,3,0">
                                                     <StackPanel>
-                                                        <TextBlock Text="{StaticResource Glyph.Library}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                                   Foreground="{DynamicResource AccentTextBrush}" />
-                                                        <TextBlock Text="{l:Loc TipStackTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <Grid Height="26">
+                                                            <TextBlock Text="2" Style="{StaticResource CardRankTextStyle}" FontSize="24" HorizontalAlignment="Left"
+                                                                       VerticalAlignment="Center" />
+                                                            <Canvas Width="72" Height="24" HorizontalAlignment="Right">
+                                                                <Rectangle Canvas.Left="2.5" Canvas.Top="5.5" Width="14" Height="17" RadiusX="2" RadiusY="2"
+                                                                           Fill="{DynamicResource CardBrush}" Stroke="{DynamicResource TextPrimaryBrush}" RenderTransformOrigin="0.5,0.5">
+                                                                    <Rectangle.RenderTransform>
+                                                                        <RotateTransform Angle="-8" />
+                                                                    </Rectangle.RenderTransform>
+                                                                </Rectangle>
+                                                                <Rectangle Canvas.Left="8.5" Canvas.Top="4.5" Width="14" Height="17" RadiusX="2" RadiusY="2"
+                                                                           Fill="{DynamicResource CardBrush}" Stroke="{DynamicResource TextPrimaryBrush}" RenderTransformOrigin="0.5,0.5">
+                                                                    <Rectangle.RenderTransform>
+                                                                        <RotateTransform Angle="6" />
+                                                                    </Rectangle.RenderTransform>
+                                                                </Rectangle>
+                                                                <Rectangle Canvas.Left="5.5" Canvas.Top="4.5" Width="14" Height="17" RadiusX="2" RadiusY="2"
+                                                                           Fill="{DynamicResource AccentBrush}" Stroke="{DynamicResource TextPrimaryBrush}" />
+                                                                <Path Style="{StaticResource TipLineStyle}" Data="M30,13 H64 M60,9 L64,13 L60,17" />
+                                                            </Canvas>
+                                                        </Grid>
+                                                        <TextBlock Text="{l:Loc TipStackTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,8,0,4" />
                                                         <TextBlock Text="{l:Loc TipStackBody}" Style="{StaticResource CaptionTextStyle}" />
                                                     </StackPanel>
                                                 </Border>
                                                 <Border Style="{StaticResource TipCardStyle}" Margin="6,0,0,0">
                                                     <StackPanel>
-                                                        <TextBlock Text="{StaticResource Glyph.Lightning}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                                                   Foreground="{DynamicResource AccentTextBrush}" />
-                                                        <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,12,0,4" />
+                                                        <Grid Height="26">
+                                                            <TextBlock Text="3" Style="{StaticResource CardRankTextStyle}" FontSize="24" HorizontalAlignment="Left"
+                                                                       VerticalAlignment="Center" />
+                                                            <Canvas Width="72" Height="24" HorizontalAlignment="Right">
+                                                                <Path Style="{StaticResource TipLineStyle}" Data="M20,1 V10 M16,7 L20,11 L24,7" />
+                                                                <Rectangle Canvas.Left="4.5" Canvas.Top="13.5" Width="31" Height="10" RadiusX="2" RadiusY="2"
+                                                                           Fill="{DynamicResource AccentBrush}" Stroke="{DynamicResource TextPrimaryBrush}" />
+                                                                <Rectangle Canvas.Left="38.5" Canvas.Top="13.5" Width="31" Height="10" RadiusX="2" RadiusY="2"
+                                                                           Stroke="{DynamicResource TextPrimaryBrush}" StrokeDashArray="2 2" />
+                                                            </Canvas>
+                                                        </Grid>
+                                                        <TextBlock Text="{l:Loc QuickActionsTitle}" Style="{StaticResource BodyStrongTextStyle}" Margin="0,8,0,4" />
                                                         <TextBlock Text="{l:Loc TipActionsBody}" Style="{StaticResource CaptionTextStyle}" />
                                                     </StackPanel>
                                                 </Border>
@@ -683,20 +790,119 @@
 
                                         <TextBlock Text="{l:Loc SettingsSection}" Style="{StaticResource SectionHeaderTextStyle}" />
                                         <UniformGrid x:Name="PageCards" Columns="2" Margin="0,0,-6,0">
+                                            <!-- 卡片右侧直接画出当前设置：快捷键、呼出方式、底部按钮、主题 -->
                                             <controls:PageTile Tag="General" Click="OnPageCardClick" Icon="{StaticResource Glyph.Settings}" Header="{l:Loc General}"
-                                                               Summary="{Binding GeneralSummary}" />
+                                                               Summary="{Binding GeneralSummary}">
+                                                <controls:PageTile.Glance>
+                                                    <ItemsControl ItemsSource="{Binding HotkeyKeys}" Style="{StaticResource KeycapListStyle}"
+                                                                  Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                </controls:PageTile.Glance>
+                                            </controls:PageTile>
                                             <controls:PageTile Tag="Shelf" Click="OnPageCardClick" Icon="{StaticResource Glyph.Mouse}" Header="{l:Loc GesturesAndShelf}"
-                                                               Summary="{Binding ShelfSummary}" />
+                                                               Summary="{Binding ShelfSummary}">
+                                                <controls:PageTile.Glance>
+                                                    <Canvas Width="74" Height="26">
+                                                        <Path Data="M2,13 L8,5 L15,21 L22,5 L29,21 L35,13">
+                                                            <Path.Style>
+                                                                <Style TargetType="Path" BasedOn="{StaticResource TipLineStyle}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Trigger}" Value="{x:Static models:AutoOpenTrigger.Edge}">
+                                                                            <Setter Property="Opacity" Value="0.25" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Path.Style>
+                                                        </Path>
+                                                        <Canvas>
+                                                            <Canvas.Style>
+                                                                <Style TargetType="Canvas">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Trigger}" Value="{x:Static models:AutoOpenTrigger.Shake}">
+                                                                            <Setter Property="Opacity" Value="0.25" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Canvas.Style>
+                                                            <Path Style="{StaticResource TipLineStyle}" Data="M48,13 H62 M57,8 L62,13 L57,18" />
+                                                            <Path Data="M71,1 V25" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2.4" />
+                                                        </Canvas>
+                                                    </Canvas>
+                                                </controls:PageTile.Glance>
+                                            </controls:PageTile>
                                             <controls:PageTile Tag="Actions" Click="OnPageCardClick" Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc QuickActionsTitle}"
-                                                               Summary="{Binding ActionsSummary}" />
+                                                               Summary="{Binding ActionsSummary}">
+                                                <controls:PageTile.Glance>
+                                                    <ItemsControl ItemsSource="{Binding VisibleSlots}" Focusable="False">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Width="28" Height="26" Margin="0,0,3,0" CornerRadius="4" BorderThickness="1"
+                                                                        BorderBrush="{DynamicResource TextPrimaryBrush}">
+                                                                    <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </controls:PageTile.Glance>
+                                            </controls:PageTile>
                                             <controls:PageTile Tag="Appearance" Click="OnPageCardClick" Icon="{StaticResource Glyph.Color}" Header="{l:Loc Appearance}"
-                                                               Summary="{Binding AppearanceSummary}" />
+                                                               Summary="{Binding AppearanceSummary}">
+                                                <controls:PageTile.Glance>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <StackPanel.Resources>
+                                                            <Style x:Key="ThemeChipStyle" TargetType="Border">
+                                                                <Setter Property="Width" Value="18" />
+                                                                <Setter Property="Height" Value="24" />
+                                                                <Setter Property="Margin" Value="0,0,4,0" />
+                                                                <Setter Property="CornerRadius" Value="3" />
+                                                                <Setter Property="BorderThickness" Value="1" />
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
+                                                            </Style>
+                                                        </StackPanel.Resources>
+                                                        <Border Background="#FBFAF6">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border" BasedOn="{StaticResource ThemeChipStyle}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Theme}" Value="{x:Static models:AppTheme.Dark}">
+                                                                            <Setter Property="Opacity" Value="0.45" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                        </Border>
+                                                        <Border Background="#262522">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border" BasedOn="{StaticResource ThemeChipStyle}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Theme}" Value="{x:Static models:AppTheme.Light}">
+                                                                            <Setter Property="Opacity" Value="0.45" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                        </Border>
+                                                        <Border Style="{StaticResource ThemeChipStyle}" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}" />
+                                                    </StackPanel>
+                                                </controls:PageTile.Glance>
+                                            </controls:PageTile>
                                         </UniformGrid>
                                     </StackPanel>
 
                                     <!-- 最近关闭的置物架排成一手牌，贴着窗口底边，下半截被裁掉；没有记录时整块隐藏 -->
+                                    <!-- 牌桌：铺满窗口宽度，左右边距由代码按可视区算出，见 UpdateTableBand -->
+                                    <Border x:Name="TableBand" Grid.Row="2" Background="{DynamicResource TableBrush}" IsHitTestVisible="False"
+                                            Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}" />
                                     <StackPanel x:Name="HistorySection" Grid.Row="2" Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisibility}}">
-                                        <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" />
+                                        <Grid>
+                                            <TextBlock Text="{l:Loc RecentShelves}" Style="{StaticResource SectionHeaderTextStyle}" Foreground="{DynamicResource TableTextBrush}" />
+                                            <TextBlock Text="{Binding HistoryTally}" FontFamily="{StaticResource NumberFont}" FontSize="13" Margin="0,0,0,9"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Bottom" Foreground="{DynamicResource TableTextBrush}" />
+                                        </Grid>
                                         <ItemsControl x:Name="HistoryList" ItemsSource="{Binding HistoryEntries}" ItemTemplate="{StaticResource HistoryCardTemplate}"
                                                       Focusable="False" Height="165" Margin="0,4,0,-36"
                                                       PreviewMouseLeftButtonDown="OnHistoryMouseDown" PreviewMouseMove="OnHistoryMouseMove"
@@ -904,6 +1110,7 @@
                                                 <WrapPanel />
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>
+                                        <!-- 主题预览：牌桌上放一张牌，跟随系统时左右各一半 -->
                                         <ListBoxItem Tag="{x:Static models:AppTheme.System}">
                                             <StackPanel>
                                                 <Grid Width="140" Height="92">
@@ -911,38 +1118,40 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <Border CornerRadius="7,0,0,7" Background="#F3F3F3" />
-                                                    <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
-                                                    <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
-                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
-                                                    </Border>
+                                                    <Border CornerRadius="7,0,0,7" Background="#E8E5DE" />
+                                                    <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#1C1B19" />
+                                                    <Grid Grid.ColumnSpan="2" Width="44" Height="60">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border CornerRadius="5,0,0,5" Background="#FBFAF6" BorderBrush="#15171C" BorderThickness="1,1,0,1" />
+                                                        <Border Grid.Column="1" CornerRadius="0,5,5,0" Background="#262522" BorderBrush="#A6A39C" BorderThickness="0,1,1,1" />
+                                                    </Grid>
                                                 </Grid>
                                                 <TextBlock Text="{l:Loc FollowSystem}" Margin="2,8,0,2" FontSize="13" />
                                             </StackPanel>
                                         </ListBoxItem>
                                         <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
                                             <StackPanel>
-                                                <Border Width="140" Height="92" CornerRadius="7" Background="#F3F3F3" BorderBrush="#14000000" BorderThickness="1">
-                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
-                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#F3F3F3" BorderBrush="#26000000" BorderThickness="1" />
-                                                    </Border>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#E8E5DE" BorderBrush="#D2CEC5" BorderThickness="1">
+                                                    <Border Width="44" Height="60" CornerRadius="5" Background="#FBFAF6" BorderBrush="#15171C" BorderThickness="1" />
                                                 </Border>
                                                 <TextBlock Text="{l:Loc ThemeLight}" Margin="2,8,0,2" FontSize="13" />
                                             </StackPanel>
                                         </ListBoxItem>
                                         <ListBoxItem Tag="{x:Static models:AppTheme.Dark}">
                                             <StackPanel>
-                                                <Border Width="140" Height="92" CornerRadius="7" Background="#202020" BorderBrush="#33FFFFFF" BorderThickness="1">
-                                                    <Border Width="64" Height="64" CornerRadius="8" Background="#2B2B2B" BorderBrush="#26FFFFFF" BorderThickness="1">
-                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#3B3B3B" BorderBrush="#33FFFFFF" BorderThickness="1" />
-                                                    </Border>
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#1C1B19" BorderBrush="#3A3834" BorderThickness="1">
+                                                    <Border Width="44" Height="60" CornerRadius="5" Background="#262522" BorderBrush="#A6A39C" BorderThickness="1" />
                                                 </Border>
                                                 <TextBlock Text="{l:Loc ThemeDark}" Margin="2,8,0,2" FontSize="13" />
                                             </StackPanel>
                                         </ListBoxItem>
                                     </ListBox>
 
-                                    <Border Style="{StaticResource CardBorderStyle}" Margin="0,20,0,0" Padding="20,14,16,14">
+                                    <Border Style="{StaticResource CardBorderStyle}" Background="{DynamicResource SettingRowBrush}"
+                                            BorderBrush="{DynamicResource SettingRowBorderBrush}" CornerRadius="6" Margin="0,20,0,0" Padding="20,14,16,14">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
@@ -980,45 +1189,63 @@
                     </Grid>
                     <Canvas x:Name="StackFrontLayer" Visibility="Collapsed" IsHitTestVisible="False" />
                 </Grid>
-                <Button x:Name="VersionButton" Grid.Row="1" Style="{StaticResource TextLinkStyle}" Content="{Binding Version}"
-                        HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick" />
+                <!-- 概览页有历史牌时版本号压在牌桌上，跟牌桌上的文字同色 -->
+                <Button x:Name="VersionButton" Grid.Row="1" Content="{Binding Version}"
+                        HorizontalAlignment="Right" Margin="0,0,10,6" ToolTip="{l:Loc AboutTooltip}" Click="OnVersionClick">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource TextLinkStyle}">
+                            <Setter Property="FontFamily" Value="{StaticResource NumberFont}" />
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding HasHistory}" Value="True" />
+                                        <Condition Binding="{Binding Visibility, ElementName=OverviewHost}" Value="Visible" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Foreground" Value="{DynamicResource TableTextBrush}" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
 
                 <!-- 窗口足够宽时在左侧显示状态栏：没有边框，背景向右渐隐，与内容区融为一体 -->
                 <Grid x:Name="SidePanel" Grid.RowSpan="2" Width="300" HorizontalAlignment="Left" Visibility="Collapsed">
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="SidePanelShift" />
                     </Grid.RenderTransform>
-                    <!-- 椭圆渐隐：上半部分几乎是竖直的边，往下沿弧线收窄到左下角 -->
-                    <Border Background="{DynamicResource CardBrush}">
-                        <Border.OpacityMask>
-                            <RadialGradientBrush Center="0,0.2" GradientOrigin="0,0.2" RadiusX="1" RadiusY="0.8">
-                                <GradientStop Color="Black" Offset="0" />
-                                <GradientStop Color="#B0000000" Offset="0.6" />
-                                <GradientStop Color="Transparent" Offset="1" />
-                            </RadialGradientBrush>
-                        </Border.OpacityMask>
-                    </Border>
-                    <!-- 左上角的强调色光晕 -->
-                    <Border Background="{DynamicResource AccentBrush}" Opacity="0.2">
-                        <Border.OpacityMask>
-                            <RadialGradientBrush Center="0,0" GradientOrigin="0,0" RadiusX="1" RadiusY="0.5">
-                                <GradientStop Color="Black" Offset="0" />
-                                <GradientStop Color="Transparent" Offset="1" />
-                            </RadialGradientBrush>
-                        </Border.OpacityMask>
-                    </Border>
+                    <!-- 状态栏是一张竖放的牌：牌面底色，右边露出一道牌背，和概览页的卡片一样 -->
+                    <Border Background="{DynamicResource StackEdgeBrush}" Width="3" HorizontalAlignment="Right" Margin="0,0,-3,0" />
+                    <Border Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,1,0" />
 
                     <StackPanel Margin="30,30,30,0">
-                        <!-- 线框版应用图标，跟随文字颜色，不与强调色冲突。 -->
+                        <!-- 应用图标：一张牌背上叠一张牌，牌背跟随强调色 -->
                         <Viewbox x:Name="SidePanelIcon" Width="52" Height="52" HorizontalAlignment="Left" RenderTransformOrigin="0.5,0.5">
                             <Viewbox.RenderTransform>
                                 <ScaleTransform x:Name="SidePanelIconScale" />
                             </Viewbox.RenderTransform>
                             <Canvas Width="256" Height="256">
-                                <Rectangle Canvas.Left="22" Canvas.Top="22" Width="212" Height="212" RadiusX="44" RadiusY="44"
-                                           Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="12" />
-                                <Path Data="M128,64 V156 M90,120 L128,158 L166,120 M68,170 V190 H188 V170" Stroke="{DynamicResource TextPrimaryBrush}"
-                                      StrokeThickness="12" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                <Rectangle Canvas.Left="92" Canvas.Top="22" Width="140" Height="190" RadiusX="18" RadiusY="18"
+                                           Fill="{DynamicResource SheetBorderBrush}" RenderTransformOrigin="0.5,0.5">
+                                    <Rectangle.RenderTransform>
+                                        <RotateTransform Angle="10" />
+                                    </Rectangle.RenderTransform>
+                                </Rectangle>
+                                <Rectangle Canvas.Left="30" Canvas.Top="46" Width="140" Height="190" RadiusX="18" RadiusY="18"
+                                           Fill="{DynamicResource CardBrush}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="8"
+                                           RenderTransformOrigin="0.5,0.5">
+                                    <Rectangle.RenderTransform>
+                                        <RotateTransform Angle="-6" />
+                                    </Rectangle.RenderTransform>
+                                </Rectangle>
+                                <Canvas RenderTransformOrigin="0,0">
+                                    <Canvas.RenderTransform>
+                                        <RotateTransform Angle="-6" CenterX="100" CenterY="141" />
+                                    </Canvas.RenderTransform>
+                                    <Path Data="M100,90 V160 M72,134 L100,162 L128,134" Stroke="{DynamicResource AccentBrush}" StrokeThickness="16"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                    <Path Data="M66,194 H134" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="14"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                </Canvas>
                             </Canvas>
                         </Viewbox>
                         <TextBlock x:Name="SidePanelTitle" Text="{Binding PanelTitle}" Style="{StaticResource SubtitleTextStyle}" Margin="0,20,0,0"
@@ -1051,9 +1278,9 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="4" BorderThickness="1,1,1,2"
-                                                    Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource ControlBorderBrush}">
-                                                <TextBlock Text="{Binding}" FontSize="11" />
+                                            <Border Margin="0,0,4,0" Padding="6,1,6,2" CornerRadius="3" BorderThickness="1,1,1,2"
+                                                    BorderBrush="{DynamicResource TextPrimaryBrush}">
+                                                <TextBlock Text="{Binding}" FontFamily="{StaticResource NumberFont}" FontSize="11" />
                                             </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>

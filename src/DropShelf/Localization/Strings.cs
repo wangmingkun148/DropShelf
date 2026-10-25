@@ -72,9 +72,14 @@ public static class Strings
     public static string ActionsSummary(IEnumerable<string> labels) =>
         string.Join(T("、", ", "), labels) is { Length: > 0 } text ? text : T("不显示快速操作", "Quick actions are off");
 
-    public static string AppearanceSummary(AppTheme theme, bool customAccent) => string.Join(" · ",
+    public static string AppearanceSummary(AppTheme theme, string? accent) => string.Join(" · ",
         theme switch { AppTheme.Light => ThemeLight, AppTheme.Dark => ThemeDark, _ => T("主题跟随系统", "System theme") },
-        customAccent ? T("自选强调色", "Custom accent color") : T("Windows 强调色", "Windows accent color"));
+        accent switch
+        {
+            null => AccentCobalt,
+            ThemeService.SystemAccent => T("Windows 强调色", "Windows accent color"),
+            _ => T("自选强调色", "Custom accent color")
+        });
 
     public static string StatusRunning => T("正在运行", "Running");
     public static string StatusGestureFailed => T("手势识别未能启动", "Gesture detection couldn't start");
@@ -198,6 +203,7 @@ public static class Strings
     public static string AccentColor => T("强调色", "Accent color");
     public static string AccentDescription => T("按钮、开关和选中状态的颜色", "Used for buttons, switches and selections");
     public static string AccentFollowSystem => T("跟随 Windows", "Match Windows");
+    public static string AccentCobalt => T("钴蓝", "Cobalt");
 
     public static string Version(string? version) => T($"版本 {version}", $"Version {version}");
     public static string AboutTagline => T("通过鼠标手势呼出的临时文件置物架", "A temporary file shelf you open with a mouse gesture");
@@ -285,6 +291,14 @@ public static class Strings
         var time = closedAt.ToString("HH:mm", CultureInfo.InvariantCulture);
         if (closedAt.Date == DateTime.Today) return time;
         if (closedAt.Date == DateTime.Today.AddDays(-1)) return T($"昨天 {time}", $"Yesterday {time}");
+        return T($"{closedAt.Month}月{closedAt.Day}日", closedAt.ToString("MMM d", CultureInfo.GetCultureInfo("en-US")));
+    }
+
+    /// <summary>历史牌右上角时间下面的一行：今天、昨天或日期。</summary>
+    public static string HistoryDay(DateTime closedAt)
+    {
+        if (closedAt.Date == DateTime.Today) return T("今天", "Today");
+        if (closedAt.Date == DateTime.Today.AddDays(-1)) return T("昨天", "Yesterday");
         return T($"{closedAt.Month}月{closedAt.Day}日", closedAt.ToString("MMM d", CultureInfo.GetCultureInfo("en-US")));
     }
 

@@ -40,46 +40,74 @@
             </Setter>
         </Style>
 
-        <!-- 标题栏中的“移动/复制”切换 -->
-        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-            <Setter Property="Height" Value="26" />
-            <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Padding" Value="7,0,9,1" />
+        <!-- 标题栏中的“移动/复制”切换：描边的小标签 -->
+        <Style x:Key="ModeChipStyle" TargetType="Button">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="7,0,8,1" />
             <Setter Property="Margin" Value="2,0,0,0" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource ControlStrongBorderBrush}"
+                                Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtlePressedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
-        <!--
-            阴影是单独的底层并缓存为位图（预制阴影）：卡片内容变化、窗口缩放或周围有动画时只合成这张图，不重新计算模糊。
-            卡片底色不透明，正好盖住阴影层自身的底色。
-        -->
+        <!-- 底部的快速操作：一格一张描边的小牌 -->
+        <Style x:Key="ShelfActionButtonStyle" TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="5" BorderThickness="1" Background="{DynamicResource CardBrush}"
+                                BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardHoverBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 堆叠里的一张竖版小牌，缩略图印在牌面上；最上面一张的角标另外画在堆叠上面 -->
         <Style x:Key="StackCardStyle" TargetType="ContentControl">
-            <Setter Property="Width" Value="84" />
-            <Setter Property="Height" Value="84" />
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="86" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
             <Setter Property="Content" Value="{Binding}" />
+            <Setter Property="Background" Value="{DynamicResource ShelfTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ShelfTileBorderBrush}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ContentControl">
-                        <Grid>
-                            <Border>
-                                <Border.CacheMode>
-                                    <BitmapCache RenderAtScale="2" />
-                                </Border.CacheMode>
-                                <Border CornerRadius="10" Background="{DynamicResource ShelfTileBrush}">
-                                    <Border.Effect>
-                                        <DropShadowEffect BlurRadius="10" ShadowDepth="1.5" Direction="270" Opacity="0.16" Color="Black" />
-                                    </Border.Effect>
-                                </Border>
-                            </Border>
-                            <Border CornerRadius="10" Background="{DynamicResource ShelfTileBrush}" BorderBrush="{DynamicResource ShelfTileBorderBrush}"
-                                    BorderThickness="1">
-                                <ContentPresenter />
-                            </Border>
-                        </Grid>
+                        <Border CornerRadius="5" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1.2">
+                            <ContentPresenter />
+                        </Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -90,10 +118,23 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 拖入时发到桌上的虚线牌 -->
+        <Style x:Key="GhostCardStyle" TargetType="Rectangle">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="86" />
+            <Setter Property="RadiusX" Value="5" />
+            <Setter Property="RadiusY" Value="5" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeDashArray" Value="3 2" />
+            <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource AccentFaintBrush}" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        </Style>
+
         <DataTemplate x:Key="CardContentTemplate">
-            <Grid Margin="9">
+            <Grid Margin="7,20,7,16">
                 <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
-                <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="34"
+                <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="26"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -170,15 +211,17 @@
                 <!-- 空置物架 -->
                 <Grid x:Name="EmptyView" Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown"
                       Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
-                    <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.2" StrokeDashArray="4 3"
-                               Stroke="{DynamicResource ControlStrongBorderBrush}" Opacity="0.45" />
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8">
-                        <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="26"
-                                   HorizontalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <!-- 桌上留着的一个空牌位 -->
+                        <Grid Width="54" Height="72" HorizontalAlignment="Center">
+                            <Rectangle RadiusX="5" RadiusY="5" StrokeThickness="1.5" StrokeDashArray="3 2" Stroke="{DynamicResource TextPrimaryBrush}" />
+                            <Path Data="M7,0 V14 M0,7 H14" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
                         <TextBlock Text="{l:Loc DropHere}" Margin="0,10,0,0" FontSize="13" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextPrimaryBrush}" />
                         <TextBlock Text="{l:Loc OrPaste}" Margin="0,3,0,0" FontSize="11" HorizontalAlignment="Center"
-                                   Foreground="{DynamicResource TextTertiaryBrush}" />
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
                     </StackPanel>
                 </Grid>
 
@@ -192,8 +235,9 @@
                     </Grid.RowDefinitions>
                     <Viewbox Stretch="Uniform">
                         <Canvas Width="160" Height="116">
-                            <ContentControl x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="20"
-                                            DataContext="{Binding Stack2}" ContentTemplate="{StaticResource CardContentTemplate}">
+                            <ContentControl x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="16"
+                                            DataContext="{Binding Stack2}" ContentTemplate="{StaticResource CardContentTemplate}"
+                                            Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
                                 <ContentControl.RenderTransform>
                                     <TransformGroup>
                                         <RotateTransform Angle="-10" />
@@ -201,8 +245,9 @@
                                     </TransformGroup>
                                 </ContentControl.RenderTransform>
                             </ContentControl>
-                            <ContentControl x:Name="Card1" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="18"
-                                            DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}">
+                            <ContentControl x:Name="Card1" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="14"
+                                            DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}"
+                                            Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
                                 <ContentControl.RenderTransform>
                                     <TransformGroup>
                                         <RotateTransform Angle="7" />
@@ -210,14 +255,26 @@
                                     </TransformGroup>
                                 </ContentControl.RenderTransform>
                             </ContentControl>
-                            <ContentControl x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="16"
+                            <ContentControl x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="12"
                                             DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}" />
-                            <Border x:Name="CountBadge" Canvas.Left="106" Canvas.Top="6" MinWidth="24" Height="24" CornerRadius="12"
-                                    Padding="6,0" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource ShelfTileBrush}"
-                                    BorderThickness="2" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource TextOnAccentBrush}" />
-                            </Border>
+                            <!-- 最上面一张的角标：项目数和数量最多的文件类型，右下角倒过来再印一个 -->
+                            <Grid Canvas.Left="48" Canvas.Top="12" Width="64" Height="86" IsHitTestVisible="False" ClipToBounds="True">
+                                <StackPanel Margin="5,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                    <TextBlock x:Name="StackRank" Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15">
+                                        <TextBlock.RenderTransform>
+                                            <TranslateTransform x:Name="StackRankShift" />
+                                        </TextBlock.RenderTransform>
+                                    </TextBlock>
+                                    <Path Style="{StaticResource SuitStyle}" Tag="{Binding StackSuit}" Width="6" Height="6" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,5,4" HorizontalAlignment="Right" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5">
+                                    <StackPanel.RenderTransform>
+                                        <RotateTransform Angle="180" />
+                                    </StackPanel.RenderTransform>
+                                    <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15" />
+                                    <Path Style="{StaticResource SuitStyle}" Tag="{Binding StackSuit}" Width="6" Height="6" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Grid>
                         </Canvas>
                     </Viewbox>
                     <StackPanel Grid.Row="1" Margin="2,2,2,4">
@@ -276,7 +333,6 @@
 
             <!-- 快速操作栏 -->
             <Grid x:Name="ActionBarHost" Grid.Row="2" Margin="8,6,8,8">
-                <Border Height="1" VerticalAlignment="Top" Margin="2,-4,2,0" Background="{DynamicResource DividerBrush}" />
                 <UniformGrid x:Name="ActionBar" Rows="1" Margin="0,2,0,0" />
             </Grid>
 
@@ -287,14 +343,44 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid x:Name="ShelfDropZone" Margin="10,2,10,6">
-                    <Rectangle x:Name="ShelfDropFrame" RadiusX="10" RadiusY="10" StrokeThickness="1.6" StrokeDashArray="4 3"
-                               Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" />
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                   HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                        <TextBlock x:Name="DropZoneText" Text="{l:Loc ReleaseToAdd}" Margin="0,6,0,0" FontSize="12" HorizontalAlignment="Center"
-                                   Foreground="{DynamicResource AccentTextBrush}" />
-                    </StackPanel>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <!-- 拖进来的东西先发两张虚线牌到桌上，夹着原来那一摞；拖到快速操作上时整组变淡 -->
+                    <Viewbox x:Name="ShelfDropFrame" Stretch="Uniform" MaxHeight="104">
+                        <Canvas Width="176" Height="108">
+                            <Border x:Name="DropStackCard" Canvas.Left="56" Canvas.Top="10" Width="64" Height="86" CornerRadius="5" BorderThickness="1.2"
+                                    Background="{DynamicResource ShelfTileBrush}" BorderBrush="{DynamicResource ShelfTileBorderBrush}"
+                                    Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15"
+                                           Margin="5,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                            </Border>
+                            <Rectangle x:Name="GhostLeft" Style="{StaticResource GhostCardStyle}" Canvas.Left="12" Canvas.Top="16">
+                                <Rectangle.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform x:Name="GhostLeftTurn" Angle="-14" />
+                                        <TranslateTransform x:Name="GhostLeftShift" />
+                                    </TransformGroup>
+                                </Rectangle.RenderTransform>
+                            </Rectangle>
+                            <Rectangle x:Name="GhostRight" Style="{StaticResource GhostCardStyle}" Canvas.Left="100" Canvas.Top="16">
+                                <Rectangle.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform x:Name="GhostRightTurn" Angle="13" />
+                                        <TranslateTransform x:Name="GhostRightShift" />
+                                    </TransformGroup>
+                                </Rectangle.RenderTransform>
+                            </Rectangle>
+                            <Border x:Name="IncomingBadge" Canvas.Left="132" Canvas.Top="0" Height="20" Padding="7,0" CornerRadius="10"
+                                    Background="{DynamicResource AccentBrush}" Visibility="Collapsed">
+                                <TextBlock x:Name="IncomingText" FontFamily="{StaticResource NumberFont}" FontSize="12" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextOnAccentBrush}" />
+                            </Border>
+                        </Canvas>
+                    </Viewbox>
+                    <TextBlock x:Name="DropZoneText" Grid.Row="1" Text="{l:Loc ReleaseToAdd}" Margin="0,4,0,0" FontSize="12" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}" />
                 </Grid>
                 <Border x:Name="ActionTilesHost" Grid.Row="1" ClipToBounds="True">
                     <UniformGrid x:Name="ActionTiles" Rows="1" Margin="8,0,8,7" VerticalAlignment="Bottom" />

@@ -90,6 +90,10 @@ public sealed class HistoryEntryViewModel
         Entry = entry;
         Title = Strings.HistoryEntryTitle(entry);
         Detail = $"{Strings.ItemCount(entry.Items.Count)} · {Strings.HistoryEntryTime(entry.ClosedAt)}";
+        Count = entry.Items.Count;
+        Suit = FileSuits.Dominant(entry.Items.Select(item => FileSuits.Of(item.Path)));
+        ClosedTime = entry.ClosedAt.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        ClosedDay = Strings.HistoryDay(entry.ClosedAt);
         // 最后放入的项目在最上面。
         var top = entry.Items.TakeLast(3).Reverse().Select(item => new HistoryThumbnailViewModel(item.Path)).ToArray();
         Stack0 = top.ElementAtOrDefault(0);
@@ -102,6 +106,12 @@ public sealed class HistoryEntryViewModel
     public ShelfHistoryEntry Entry { get; }
     public string Title { get; }
     public string Detail { get; }
+
+    /// <summary>牌角上的数字和花色：项目数和数量最多的文件类型。</summary>
+    public int Count { get; }
+    public FileSuit Suit { get; }
+    public string ClosedTime { get; }
+    public string ClosedDay { get; }
     public HistoryThumbnailViewModel? Stack0 { get; }
     public HistoryThumbnailViewModel? Stack1 { get; }
     public HistoryThumbnailViewModel? Stack2 { get; }
@@ -109,20 +119,26 @@ public sealed class HistoryEntryViewModel
     public ICommand RemoveCommand { get; }
 }
 
-/// <summary>强调色选项；Value 为空字符串表示跟随 Windows，色块使用主题资源中的系统强调色。</summary>
+/// <summary>
+/// 强调色选项；Value 为空字符串表示默认的钴蓝，为 <see cref="ThemeService.SystemAccent"/> 表示跟随 Windows，
+/// 后者的色块使用主题资源中的系统强调色。
+/// </summary>
 public sealed record AccentOption(string Value, SolidColorBrush? Brush)
 {
-    /// <summary>选项列表保持不变：替换列表会让选择框把选中值写回为空，误把强调色改回跟随 Windows。</summary>
+    /// <summary>选项列表保持不变：替换列表会让选择框把选中值写回为空，误把强调色改回默认。</summary>
     public static IReadOnlyList<AccentOption> All { get; } =
     [
-        new(string.Empty, null),
-        .. ThemeService.AccentPresets.Select(hex =>
-        {
-            var brush = new SolidColorBrush(ThemeService.ParseAccent(hex)!.Value);
-            brush.Freeze();
-            return new AccentOption(hex, brush);
-        })
+        new(string.Empty, Frozen(ThemeService.Cobalt)),
+        new(ThemeService.SystemAccent, null),
+        .. ThemeService.AccentPresets.Select(hex => new AccentOption(hex, Frozen(ThemeService.ParseAccent(hex)!.Value)))
     ];
+
+    private static SolidColorBrush Frozen(System.Windows.Media.Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
 }
 
 public sealed class SettingsViewModel : ObservableObject
@@ -209,12 +225,15 @@ public sealed class SettingsViewModel : ObservableObject
     public string GeneralSummary => Strings.GeneralSummary(Settings.Language, Settings.StartWithWindows, Settings.HotkeyGesture);
     public string ShelfSummary => Strings.ShelfSummary(Settings.AutoOpenTrigger, Settings.DragOutMode);
     public string ActionsSummary => Strings.ActionsSummary(QuickActions.Visible(Settings).Select(info => info.Label));
-    public string AppearanceSummary => Strings.AppearanceSummary(Settings.Theme, Settings.AccentColor is not null);
+    public string AppearanceSummary => Strings.AppearanceSummary(Settings.Theme, Settings.AccentColor);
 
     /// <summary>概览页底部牌堆中的最近关闭的置物架，最新的在最左边。</summary>
     public IReadOnlyList<HistoryEntryViewModel> HistoryEntries => _historyEntries;
 
     public bool HasHistory => _controller.History.Entries.Count > 0;
+
+    /// <summary>牌桌右上角的“5 / 10”：已保留几个，最多保留几个。</summary>
+    public string HistoryTally => $"{_controller.History.Entries.Count} / {ShelfHistoryService.Capacity}";
 
     public string HistoryDescription => HasHistory
         ? Strings.HistoryCount(_controller.History.Entries.Count)
@@ -315,7 +334,7 @@ public sealed class SettingsViewModel : ObservableObject
 
     public IReadOnlyList<AccentOption> AccentOptions => AccentOption.All;
 
-    /// <summary>选中的强调色；空字符串表示跟随 Windows。</summary>
+    /// <summary>选中的强调色；空字符串表示默认的钴蓝。</summary>
     public string Accent
     {
         get => Settings.AccentColor ?? string.Empty;
@@ -474,6 +493,7 @@ public sealed class SettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(HistoryEntries));
         }
         OnPropertyChanged(nameof(HasHistory));
+        OnPropertyChanged(nameof(HistoryTally));
         OnPropertyChanged(nameof(HistoryDescription));
         CommandManager.InvalidateRequerySuggested();
     }

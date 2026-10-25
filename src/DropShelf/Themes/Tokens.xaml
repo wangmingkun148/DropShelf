@@ -1,65 +1,76 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
-    <!-- 以下为浅色默认值，ThemeService 启动后会按当前主题与系统强调色整体替换。 -->
-    <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#E60067C0" />
-    <SolidColorBrush x:Key="AccentPressedBrush" Color="#CC0067C0" />
-    <SolidColorBrush x:Key="AccentTextBrush" Color="#003E92" />
-    <SolidColorBrush x:Key="AccentSubtleBrush" Color="#1F0067C0" />
-    <SolidColorBrush x:Key="AccentFaintBrush" Color="#100067C0" />
-    <Color x:Key="AccentColor">#0067C0</Color>
+    <!-- 以下为浅色默认值，ThemeService 启动后会按当前主题与强调色整体替换。 -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#E62B4EFF" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#CC2B4EFF" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="AccentSubtleBrush" Color="#1F2B4EFF" />
+    <SolidColorBrush x:Key="AccentFaintBrush" Color="#102B4EFF" />
+    <Color x:Key="AccentColor">#2B4EFF</Color>
     <SolidColorBrush x:Key="SystemAccentBrush" Color="#0078D4" />
 
-    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E4000000" />
-    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#9E000000" />
-    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#72000000" />
-    <SolidColorBrush x:Key="TextDisabledBrush" Color="#5C000000" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#15171C" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#575A63" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#7A7D85" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#A3A5AB" />
     <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
-    <SolidColorBrush x:Key="LayerBrush" Color="#80FFFFFF" />
-    <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
-    <SolidColorBrush x:Key="CardHoverBrush" Color="#E6FFFFFF" />
-    <SolidColorBrush x:Key="CardBorderBrush" Color="#14000000" />
-    <SolidColorBrush x:Key="StackEdgeBrush" Color="#0D0067C0" />
-    <SolidColorBrush x:Key="SheetGlowBrush" Color="#1A0067C0" />
-    <SolidColorBrush x:Key="SheetBorderBrush" Color="#290067C0" />
-    <RadialGradientBrush x:Key="SheetBrush" Center="0,0" GradientOrigin="0,0" RadiusX="1.1" RadiusY="0.7">
-        <GradientStop Color="#1A0067C0" Offset="0" />
-        <GradientStop Color="#0D0067C0" Offset="0.7" />
-    </RadialGradientBrush>
-    <SolidColorBrush x:Key="ControlBrush" Color="#B3FFFFFF" />
-    <SolidColorBrush x:Key="ControlHoverBrush" Color="#80F9F9F9" />
-    <SolidColorBrush x:Key="ControlPressedBrush" Color="#4DF9F9F9" />
-    <SolidColorBrush x:Key="ControlBorderBrush" Color="#1F000000" />
-    <SolidColorBrush x:Key="ControlStrongBorderBrush" Color="#72000000" />
-    <SolidColorBrush x:Key="ControlAltBrush" Color="#06000000" />
-    <SolidColorBrush x:Key="SubtleHoverBrush" Color="#09000000" />
-    <SolidColorBrush x:Key="SubtlePressedBrush" Color="#06000000" />
-    <SolidColorBrush x:Key="SubtleSelectedBrush" Color="#0D000000" />
-    <SolidColorBrush x:Key="DividerBrush" Color="#0F000000" />
-    <SolidColorBrush x:Key="FlyoutBrush" Color="#F9F9F9" />
-    <SolidColorBrush x:Key="FlyoutBorderBrush" Color="#1A000000" />
-    <SolidColorBrush x:Key="ShelfSolidBrush" Color="#F6F6F6" />
-    <SolidColorBrush x:Key="ShelfAcrylicTintBrush" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#E8E5DE" />
+    <SolidColorBrush x:Key="LayerBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="CardBrush" Color="#FBFAF6" />
+    <SolidColorBrush x:Key="CardHoverBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#D2CEC5" />
+    <SolidColorBrush x:Key="TableCardBorderBrush" Color="#C9C5BB" />
+    <!-- 牌背、牌桌：运行时换成斜格纹和斜条纹，见 ThemeService -->
+    <SolidColorBrush x:Key="CardBackFillBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="CardBackLineBrush" Color="#203BBF" />
+    <SolidColorBrush x:Key="StackEdgeBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="SheetBorderBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="SheetBrush" Color="#FBFAF6" />
+    <SolidColorBrush x:Key="TableFillBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="TableBrush" Color="#2B4EFF" />
+    <SolidColorBrush x:Key="TableTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ControlBrush" Color="#FBFAF6" />
+    <SolidColorBrush x:Key="ControlHoverBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ControlPressedBrush" Color="#F2EFE8" />
+    <SolidColorBrush x:Key="ControlBorderBrush" Color="#BDB8AE" />
+    <SolidColorBrush x:Key="ControlStrongBorderBrush" Color="#5E6066" />
+    <SolidColorBrush x:Key="ControlAltBrush" Color="#0D15171C" />
+    <SolidColorBrush x:Key="SubtleHoverBrush" Color="#0F15171C" />
+    <SolidColorBrush x:Key="SubtlePressedBrush" Color="#0A15171C" />
+    <SolidColorBrush x:Key="SubtleSelectedBrush" Color="#1415171C" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#DDD9D0" />
+    <SolidColorBrush x:Key="FlyoutBrush" Color="#FBFAF6" />
+    <SolidColorBrush x:Key="FlyoutBorderBrush" Color="#C9C5BB" />
+    <SolidColorBrush x:Key="SettingRowBrush" Color="#F2EFE8" />
+    <SolidColorBrush x:Key="SettingRowBorderBrush" Color="#E2DED5" />
+    <SolidColorBrush x:Key="ShelfSolidBrush" Color="#E8E5DE" />
+    <SolidColorBrush x:Key="ShelfBorderBrush" Color="#B4AFA4" />
     <SolidColorBrush x:Key="ShelfTileBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="ShelfTileBorderBrush" Color="#17000000" />
-    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#72000000" />
+    <SolidColorBrush x:Key="ShelfTileBorderBrush" Color="#15171C" />
+    <SolidColorBrush x:Key="ShelfUnderCardBorderBrush" Color="#15171C" />
+    <SolidColorBrush x:Key="ArtFrameBrush" Color="#DDD9D0" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#8A8C93" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#0F7B0F" />
     <SolidColorBrush x:Key="CautionBrush" Color="#9D5D00" />
     <SolidColorBrush x:Key="CriticalBrush" Color="#C42B1C" />
-    <SolidColorBrush x:Key="SmokeBrush" Color="#CCF6F6F6" />
+    <SolidColorBrush x:Key="SmokeBrush" Color="#CCE8E5DE" />
 
     <FontFamily x:Key="TextFont">Segoe UI, Microsoft YaHei UI</FontFamily>
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+    <!-- 角标数字等窄体字：Windows 自带的 Bahnschrift，配合 FontStretch="Condensed" 使用 -->
+    <FontFamily x:Key="NumberFont">Bahnschrift, Segoe UI</FontFamily>
 
     <sys:Double x:Key="CaptionFontSize">12</sys:Double>
     <sys:Double x:Key="BodyFontSize">14</sys:Double>
     <sys:Double x:Key="SubtitleFontSize">20</sys:Double>
     <sys:Double x:Key="TitleFontSize">28</sys:Double>
 
-    <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
+    <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+    <!-- 牌的圆角 -->
+    <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
 
     <!-- 图标字形，Segoe Fluent Icons 与 Segoe MDL2 Assets 共有 -->
     <sys:String x:Key="Glyph.Close">&#xE711;</sys:String>

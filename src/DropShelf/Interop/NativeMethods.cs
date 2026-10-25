@@ -112,17 +112,6 @@ internal struct INPUT
     public MOUSEINPUT Mouse;
 }
 
-[StructLayout(LayoutKind.Sequential)]
-internal struct MARGINS
-{
-    public int Left;
-    public int Right;
-    public int Top;
-    public int Bottom;
-
-    public static MARGINS Sheet => new() { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-}
-
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 internal struct NOTIFYICONDATAW
 {
@@ -247,7 +236,6 @@ internal static class NativeMethods
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWA_BORDER_COLOR = 34;
-    public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     public const uint DWMWA_COLOR_DEFAULT = 0xFFFFFFFF;
     public const uint DWMWA_COLOR_NONE = 0xFFFFFFFE;
     public const int DWMWCP_DONOTROUND = 1;
@@ -455,9 +443,6 @@ internal static class NativeMethods
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref uint value, int size);
-
-    [DllImport("dwmapi.dll")]
-    public static extern int DwmExtendFrameIntoClientArea(IntPtr window, ref MARGINS margins);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]

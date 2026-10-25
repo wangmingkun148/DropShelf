@@ -5,59 +5,26 @@ using DropShelf.Models;
 
 namespace DropShelf.Interop;
 
-internal enum SystemBackdrop
-{
-    None = 1,
-    Mica = 2,
-    Acrylic = 3,
-    MicaAlt = 4
-}
-
 internal static class WindowEffects
 {
     public static int Build => Environment.OSVersion.Version.Build;
     public static bool IsWindows11 => Build >= 22000;
-    public static bool SupportsSystemBackdrop => Build >= 22621;
 
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).EnsureHandle();
 
     /// <summary>
-    /// 按主题设置窗口深浅色并启用系统材质，旧系统返回 false 并保持纯色背景。
-    /// 材质的深浅在启用时确定，之后只改深浅色不会重绘，所以先设深浅色，主题切换时再调用一次重新启用材质。
+    /// 标题栏和系统按钮跟随主题深浅。窗口本身是不透明的纯色，不用系统材质；
+    /// 窗口底层也涂成同样的底色，拉大窗口时新露出的部分在内容画上去之前不会闪白或闪黑。
     /// </summary>
-    public static bool ApplyTheme(Window window, SystemBackdrop backdrop, bool dark)
-    {
-        SetDarkMode(window, dark);
-        return TryApplyBackdrop(window, backdrop);
-    }
-
-    private static bool TryApplyBackdrop(Window window, SystemBackdrop backdrop)
-    {
-        if (!SupportsSystemBackdrop || backdrop == SystemBackdrop.None) return false;
-        try
-        {
-            var handle = Handle(window);
-            if (HwndSource.FromHwnd(handle)?.CompositionTarget is not { } target) return false;
-            target.BackgroundColor = Colors.Transparent;
-            var margins = MARGINS.Sheet;
-            NativeMethods.DwmExtendFrameIntoClientArea(handle, ref margins);
-            var none = (int)SystemBackdrop.None;
-            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
-            var value = (int)backdrop;
-            return NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref value, sizeof(int)) == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void SetDarkMode(Window window, bool dark)
+    public static void SetDarkMode(Window window, bool dark)
     {
         try
         {
             var handle = new WindowInteropHelper(window).Handle;
             if (handle == IntPtr.Zero) return;
+            if (HwndSource.FromHwnd(handle)?.CompositionTarget is { } target &&
+                System.Windows.Application.Current?.TryFindResource("WindowBackgroundBrush") is SolidColorBrush background)
+                target.BackgroundColor = background.Color;
             var value = dark ? 1 : 0;
             if (NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int)) != 0)
                 NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref value, sizeof(int));

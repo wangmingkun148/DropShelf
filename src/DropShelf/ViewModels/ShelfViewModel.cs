@@ -75,6 +75,9 @@ public sealed class ShelfViewModel : ObservableObject
     public ShelfItem? Stack1 => ItemFromEnd(2);
     public ShelfItem? Stack2 => ItemFromEnd(3);
 
+    /// <summary>堆叠角标上的花色：数量最多的文件类型。</summary>
+    public FileSuit StackSuit => FileSuits.Dominant(Items.Select(FileSuits.Of));
+
     public string StackCaption => Items.Count switch
     {
         0 => string.Empty,
@@ -608,6 +611,7 @@ public sealed class ShelfViewModel : ObservableObject
         OnPropertyChanged(nameof(Stack0));
         OnPropertyChanged(nameof(Stack1));
         OnPropertyChanged(nameof(Stack2));
+        OnPropertyChanged(nameof(StackSuit));
         OnPropertyChanged(nameof(StackCaption));
         OnPropertyChanged(nameof(StackDetail));
         if (Items.Count <= 1 && IsExpanded) IsExpanded = false;

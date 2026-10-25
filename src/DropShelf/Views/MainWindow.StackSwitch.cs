@@ -30,6 +30,7 @@ public partial class MainWindow
         public RectangleGeometry OldCard { get; } = new();
         public RectangleGeometry NewCard { get; } = new();
         public RectangleGeometry Border { get; } = new();
+        public Path? Outline { get; set; }
     }
 
     private StackSlide? _stackSlide;
@@ -106,6 +107,7 @@ public partial class MainWindow
         StackBackLayer.Clip = new CombinedGeometry(GeometryCombineMode.Exclude, slide.OldCard, slide.NewCard);
         StackFrontLayer.Children.Add(newFace);
         var outline = new Path { Data = slide.Border, IsHitTestVisible = false };
+        slide.Outline = outline;
         outline.SetResourceReference(Shape.StrokeProperty, "SheetBorderBrush");
         StackFrontLayer.Children.Add(outline);
         StackFrontLayer.Clip = slide.NewCard;
@@ -142,8 +144,11 @@ public partial class MainWindow
         slide.NewCard.RadiusX = slide.NewCard.RadiusY = SheetRadius;
         slide.OldCard.Rect = back;
         slide.OldCard.RadiusX = slide.OldCard.RadiusY = SheetRadius;
-        slide.Border.Rect = new Rect(front.X + 0.5, front.Y + 0.5, Math.Max(0, front.Width - 1), Math.Max(0, front.Height - 1));
-        slide.Border.RadiusX = slide.Border.RadiusY = SheetRadius - 0.5;
+        // 新牌按宽度缩放着展开，外面那圈牌背跟着一起缩放。
+        var band = SheetBand * front.Width / slide.ToArea.Width;
+        slide.Outline!.StrokeThickness = band;
+        slide.Border.Rect = new Rect(front.X + band / 2, front.Y + band / 2, Math.Max(0, front.Width - band), Math.Max(0, front.Height - band));
+        slide.Border.RadiusX = slide.Border.RadiusY = Math.Max(0, SheetRadius - band / 2);
         var faceFade = Smooth((travel - 0.55) / 0.4);
         slide.OldFace.Opacity = 1 - faceFade;
         for (var k = 0; k < _edges.Length; k++)

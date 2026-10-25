@@ -126,7 +126,7 @@ public sealed class SettingsService
             settings.EdgeDwell = EdgeDwellTime.Medium;
         if (!Enum.IsDefined(settings.Theme))
             settings.Theme = AppTheme.System;
-        if (ThemeService.ParseAccent(settings.AccentColor) is null)
+        if (settings.AccentColor != ThemeService.SystemAccent && ThemeService.ParseAccent(settings.AccentColor) is null)
             settings.AccentColor = null;
         if (!Enum.IsDefined(settings.Language))
             settings.Language = AppLanguage.System;

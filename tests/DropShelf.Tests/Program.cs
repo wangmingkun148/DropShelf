@@ -123,6 +123,7 @@ internal static class Program
         Run("后台图片处理集中在同一个常驻线程", TestImagingThread);
         Run("开机启动命令正确处理空格路径", TestStartupCommand);
         Run("主题解析与强调色对比度", TestThemeAndAccent);
+        Run("牌角花色按文件类型", TestFileSuits);
         Run("托盘图标可从图标资源创建", TestTrayIconLoader);
         Run("全局快捷键可注册和注销", TestHotkeyRegistration);
         Run("命令行文件可转交给运行中的实例", TestArgumentForwarding);
@@ -150,7 +151,7 @@ internal static class Program
         var service = new SettingsService();
         var defaults = service.Load();
         Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
-        Assert(defaults.AccentColor is null, "默认强调色应跟随 Windows");
+        Assert(defaults.AccentColor is null, "默认强调色应为钴蓝");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
                defaults.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "默认快速操作不正确");
@@ -274,6 +275,8 @@ internal static class Program
         Assert(normalized.AutoOpenTrigger == AutoOpenTrigger.Both && normalized.EdgeDwell == EdgeDwellTime.Medium, "异常呼出方式没有恢复默认值");
         Assert(normalized.DragOutMode == TransferMode.Move, "异常拖出方式没有恢复默认值");
         Assert(normalized.Theme == AppTheme.System && normalized.AccentColor is null, "异常主题或强调色没有恢复默认值");
+        Assert(SettingsService.Normalize(new AppSettings { AccentColor = ThemeService.SystemAccent }).AccentColor == ThemeService.SystemAccent,
+            "跟随 Windows 的强调色不应被清除");
         Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
         Assert(normalized.QuickActionLayout == QuickActionLayout.Four, "异常按钮数量没有恢复默认值");
@@ -1436,11 +1439,27 @@ internal static class Program
 
         var dark = ThemeService.BuildPalette(true, palette);
         Assert(dark["TextOnAccentBrush"] == System.Windows.Media.Colors.White, "深色强调色上应使用白字");
-        var darkBackground = System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20);
+        var darkBackground = System.Windows.Media.Color.FromRgb(0x1C, 0x1B, 0x19);
         Assert(ThemeService.ContrastRatio(dark["AccentTextBrush"], darkBackground) >= 4.5, "强调色文字对比度不足");
         var light = ThemeService.BuildPalette(false, AccentPalette.Default);
-        Assert(light["AccentBrush"] == AccentPalette.Default.Dark1 && light["TextOnAccentBrush"] == System.Windows.Media.Colors.White, "默认浅色强调色不正确");
+        Assert(light["AccentBrush"] == AccentPalette.Default.Base && light["TextOnAccentBrush"] == System.Windows.Media.Colors.White, "默认浅色强调色不正确");
+        var cobalt = ThemeService.BuildPalette(false, AccentPalette.FromColor(ThemeService.Cobalt));
+        Assert(cobalt["CardBackFillBrush"] == ThemeService.Cobalt && cobalt["TableTextBrush"] == System.Windows.Media.Colors.White, "钴蓝牌背或牌桌文字不正确");
+        var darkCobalt = ThemeService.BuildPalette(true, AccentPalette.FromColor(ThemeService.Cobalt));
+        Assert(ThemeService.ContrastRatio(darkCobalt["AccentTextBrush"], darkBackground) >= 4.5, "深色主题下钴蓝文字对比度不足");
         Assert(ThemeService.PrefersDarkText(System.Windows.Media.Color.FromRgb(0x99, 0xEB, 0xFF)), "浅色强调色上应使用黑字");
+    }
+
+    private static void TestFileSuits()
+    {
+        Assert(FileSuits.Of(@"C:\a\photo.JPG") == FileSuit.Image && FileSuits.Of(@"C:\a\report.pdf") == FileSuit.Document, "图片或文档的花色不正确");
+        Assert(FileSuits.Of(@"C:\a\Downloads") == FileSuit.Folder && FileSuits.Of(@"C:\a\Downloads\") == FileSuit.Folder, "没有扩展名的应按文件夹算");
+        Assert(FileSuits.Of(@"C:\a\setup.exe") == FileSuit.Other, "其他文件的花色不正确");
+        Assert(FileSuits.Dominant([FileSuit.Image, FileSuit.Document, FileSuit.Image]) == FileSuit.Image, "应取数量最多的花色");
+        Assert(FileSuits.Dominant([FileSuit.Image, FileSuit.Document]) == FileSuit.Document, "数量相同时应取最后放入的");
+        Assert(FileSuits.Dominant([]) == FileSuit.Other, "没有项目时应为其他");
+        var link = new ShelfItem { Id = "1", Kind = ShelfItemKind.Link, Value = "https://example.com" };
+        Assert(FileSuits.Of(link) == FileSuit.Other, "链接的花色不正确");
     }
 
     private static void TestTrayIconLoader()
