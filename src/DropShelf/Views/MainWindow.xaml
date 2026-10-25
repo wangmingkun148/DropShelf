@@ -194,7 +194,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="controls:PageTile">
                         <!-- 卡片就是点开后会翻过来的那张牌：底下露出一道牌背，悬停时卡片微微抬起，牌背多露出一点 -->
-                        <Grid>
+                        <controls:UnclippedGrid>
                             <Border CornerRadius="{StaticResource CardCornerRadius}" Background="{DynamicResource StackEdgeBrush}" Margin="3,3,-3,-3">
                                 <Border.RenderTransform>
                                     <TranslateTransform x:Name="BackShift" />
@@ -256,7 +256,7 @@
                                     </Grid>
                                 </Grid>
                             </Border>
-                        </Grid>
+                        </controls:UnclippedGrid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsTall" Value="True">
                                 <Trigger.EnterActions>

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace DropShelf.Views.Controls;
 
@@ -80,6 +81,16 @@ public sealed class PageTile : Button
 
     private void UpdateItems() => SetValue(ItemsPropertyKey,
         Summary?.Split([" · ", "、", ", "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? []);
+
+    // 卡片底下的牌背伸出卡片几像素。摘要被截断、内容刚好占满宽度时，像素取整会让测量结果比分到的宽度多出不到一像素，
+    // WPF 就按布局区域裁剪，牌背只剩圆角处露出一点。卡片内容已在模板里自行裁剪，这里不再按布局区域裁。
+    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => null;
+}
+
+/// <summary><see cref="PageTile"/> 模板的根：同样不按布局区域裁剪，伸出卡片的牌背和悬停时的位移始终完整显示。</summary>
+public sealed class UnclippedGrid : Grid
+{
+    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => null;
 }
 
 /// <summary>把数值在参数“起点,终点”之间线性映射到 0–1，用于随高度渐变的透明度；起点大于终点时反向。</summary>
