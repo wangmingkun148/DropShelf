@@ -7,9 +7,12 @@
         Width="580" SizeToContent="Height" ResizeMode="NoResize" ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="40" GlassFrameThickness="-1" ResizeBorderThickness="0" CornerRadius="0"
-                      UseAeroCaptionButtons="True" />
+                      UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
+    <Grid>
+    <Button Style="{StaticResource CloseCaptionButtonStyle}" Height="40" HorizontalAlignment="Right" VerticalAlignment="Top"
+            Click="OnCaptionCloseClick" ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
     <StackPanel Margin="28,44,28,28">
         <StackPanel Orientation="Horizontal">
             <Image Source="/DropShelf;component/Assets/DropShelf-256.png" Width="48" Height="48"
@@ -43,4 +46,5 @@
             <Button x:Name="UninstallButton" Content="{l:Loc Uninstall}" Command="{Binding UninstallCommand}" MinWidth="96" />
         </controls:SettingsCard>
     </StackPanel>
+    </Grid>
 </Window>

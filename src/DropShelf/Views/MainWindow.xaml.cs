@@ -80,6 +80,70 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         WindowEffects.SetDarkMode(this, ThemeService.IsDark);
+        // 在 WindowChrome 之后挂上，先于它处理命中测试。
+        System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(OnCaptionMessage);
+    }
+
+    // ───────────── 标题栏按钮 ─────────────
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => ToggleMaximize();
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+
+    private void ToggleMaximize()
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    /// <summary>
+    /// 最大化按钮是自己画的，命中测试时报告为系统的最大化按钮，Windows 11 悬停时照常弹出贴靠布局。
+    /// 这时鼠标在非客户区，WPF 收不到鼠标事件，悬停、按下的样子和点击都按非客户区消息处理。
+    /// </summary>
+    private IntPtr OnCaptionMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        var onButton = (int)wParam == NativeMethods.HTMAXBUTTON;
+        switch (message)
+        {
+            case NativeMethods.WM_NCHITTEST when IsOverMaximize(lParam):
+                handled = true;
+                if (MaximizeButton.Tag is null)
+                {
+                    MaximizeButton.Tag = "hover";
+                    var track = new TRACKMOUSEEVENT
+                    {
+                        Size = System.Runtime.InteropServices.Marshal.SizeOf<TRACKMOUSEEVENT>(),
+                        Flags = NativeMethods.TME_LEAVE | NativeMethods.TME_NONCLIENT, Window = hwnd
+                    };
+                    NativeMethods.TrackMouseEvent(ref track);
+                }
+                return NativeMethods.HTMAXBUTTON;
+            case NativeMethods.WM_NCLBUTTONDOWN when onButton:
+                handled = true;
+                MaximizeButton.Tag = "pressed";
+                return IntPtr.Zero;
+            case NativeMethods.WM_NCLBUTTONUP when onButton:
+                handled = true;
+                if (Equals(MaximizeButton.Tag, "pressed")) ToggleMaximize();
+                MaximizeButton.Tag = "hover";
+                return IntPtr.Zero;
+            case NativeMethods.WM_NCMOUSEMOVE when !onButton:
+            case NativeMethods.WM_NCMOUSELEAVE:
+            case NativeMethods.WM_MOUSEMOVE:
+                MaximizeButton.Tag = null;
+                break;
+        }
+        return IntPtr.Zero;
+    }
+
+    private bool IsOverMaximize(IntPtr lParam)
+    {
+        if (!MaximizeButton.IsVisible) return false;
+        var screen = new System.Windows.Point((short)((long)lParam & 0xFFFF), (short)(((long)lParam >> 16) & 0xFFFF));
+        var point = MaximizeButton.PointFromScreen(screen);
+        return point.X >= 0 && point.Y >= 0 && point.X < MaximizeButton.ActualWidth && point.Y < MaximizeButton.ActualHeight;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)

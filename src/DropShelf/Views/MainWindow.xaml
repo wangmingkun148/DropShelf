@@ -9,7 +9,7 @@
     <!-- 文字用灰度抗锯齿：翻牌时缓存成位图的页面和静止时看起来一样，落定时不会突然变锐 -->
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="48" GlassFrameThickness="-1" ResizeBorderThickness="6" CornerRadius="0"
-                      UseAeroCaptionButtons="True" />
+                      UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
@@ -498,17 +498,18 @@
                     </Border>
                     <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Margin="10,106,10,0" VerticalAlignment="Top"
                                TextAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Border Style="{StaticResource HotOnlyStyle}" Height="24" Margin="16,140,16,0" VerticalAlignment="Top" CornerRadius="12"
+                    <Border Style="{StaticResource HotOnlyStyle}" Height="24" Margin="16,132,16,0" VerticalAlignment="Top" CornerRadius="12"
                             Background="{DynamicResource AccentBrush}">
                         <TextBlock Text="{l:Loc ClickToRestore}" FontSize="11" Foreground="{DynamicResource TextOnAccentBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
+                    <!-- 倒置角标比左上角的小一号，抽出时露出的“点击恢复”下面留得开 -->
                     <StackPanel Margin="0,0,9,7" HorizontalAlignment="Right" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5">
                         <StackPanel.RenderTransform>
                             <RotateTransform Angle="180" />
                         </StackPanel.RenderTransform>
-                        <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" />
-                        <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Margin="0,3,0,0" />
+                        <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="18" LineHeight="18" />
+                        <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Width="6" Height="6" Margin="0,2,0,0" />
                     </StackPanel>
                     <Button Content="{StaticResource Glyph.Close}" FontSize="9" Width="24" Height="24" Margin="0,3,3,0"
                             HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip="{l:Loc RemoveHistoryTooltip}" Command="{Binding RemoveCommand}">
@@ -669,6 +670,26 @@
                 <TextBlock x:Name="StatusTitleText" Text="{Binding StatusTitle}" FontSize="12" VerticalAlignment="Center" Margin="0,0,0,1"
                            Foreground="{DynamicResource TextSecondaryBrush}" />
             </StackPanel>
+        </StackPanel>
+
+        <!-- 右上角的窗口按钮；最大化按钮的悬停由代码按非客户区消息切换，Windows 11 上照常弹出贴靠布局 -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Style="{StaticResource CaptionButtonStyle}" Content="&#xE921;" Click="OnMinimizeClick"
+                    ToolTip="{l:Loc CaptionMinimize}" AutomationProperties.Name="{l:Loc CaptionMinimize}" />
+            <Button x:Name="MaximizeButton" Click="OnMaximizeClick" AutomationProperties.Name="{l:Loc CaptionMaximize}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CaptionButtonStyle}">
+                        <Setter Property="Content" Value="&#xE922;" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                <Setter Property="Content" Value="&#xE923;" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Style="{StaticResource CloseCaptionButtonStyle}" Click="OnCaptionCloseClick"
+                    ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
         </StackPanel>
 
         <!-- 页面内容：概览页列出各项设置，点进去后可返回 -->

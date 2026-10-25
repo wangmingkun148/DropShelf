@@ -204,6 +204,9 @@ public static class Strings
     public static string AccentDescription => T("按钮、开关和选中状态的颜色", "Used for buttons, switches and selections");
     public static string AccentFollowSystem => T("跟随 Windows", "Match Windows");
     public static string AccentCobalt => T("钴蓝", "Cobalt");
+    public static string CaptionMinimize => T("最小化", "Minimize");
+    public static string CaptionMaximize => T("最大化", "Maximize");
+    public static string CaptionClose => T("关闭", "Close");
 
     public static string Version(string? version) => T($"版本 {version}", $"Version {version}");
     public static string AboutTagline => T("通过鼠标手势呼出的临时文件置物架", "A temporary file shelf you open with a mouse gesture");

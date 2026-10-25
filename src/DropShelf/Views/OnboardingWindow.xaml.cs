@@ -107,6 +107,8 @@ public partial class OnboardingWindow : Window
         }
     }
 
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+
     private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
 
     private void OnLanguageChanged(object? sender, EventArgs e)

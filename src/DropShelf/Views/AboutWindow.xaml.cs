@@ -14,4 +14,6 @@ public partial class AboutWindow : Window
         DataContext = viewModel;
         SourceInitialized += (_, _) => WindowEffects.SetDarkMode(this, ThemeService.IsDark);
     }
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
 }

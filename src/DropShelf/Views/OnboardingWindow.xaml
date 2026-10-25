@@ -6,7 +6,7 @@
         Width="600" Height="560" ResizeMode="NoResize" ShowInTaskbar="True" WindowStartupLocation="CenterOwner">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="40" GlassFrameThickness="-1" ResizeBorderThickness="0" CornerRadius="0"
-                      UseAeroCaptionButtons="True" />
+                      UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
@@ -243,6 +243,8 @@
         </Grid.RowDefinitions>
 
         <TextBlock Text="{l:Loc OnboardingWelcomeTitle}" Margin="18,0,0,0" FontSize="12" VerticalAlignment="Center" />
+        <Button Style="{StaticResource CloseCaptionButtonStyle}" HorizontalAlignment="Right" Click="OnCaptionCloseClick"
+                ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
 
         <!-- 动画演示 -->
         <Border Grid.Row="1" Margin="24,0" CornerRadius="8" Background="{DynamicResource CardBrush}"

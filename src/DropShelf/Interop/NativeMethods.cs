@@ -183,6 +183,15 @@ internal struct COPYDATASTRUCT
     public IntPtr Pointer;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct TRACKMOUSEEVENT
+{
+    public int Size;
+    public uint Flags;
+    public IntPtr Window;
+    public uint HoverTime;
+}
+
 internal static class NativeMethods
 {
     public const int WM_QUIT = 0x0012;
@@ -240,6 +249,14 @@ internal static class NativeMethods
     public const uint DWMWA_COLOR_NONE = 0xFFFFFFFE;
     public const int DWMWCP_DONOTROUND = 1;
     public const int WM_NCHITTEST = 0x0084;
+    public const int WM_NCMOUSEMOVE = 0x00A0;
+    public const int WM_NCLBUTTONDOWN = 0x00A1;
+    public const int WM_NCLBUTTONUP = 0x00A2;
+    public const int WM_NCMOUSELEAVE = 0x02A2;
+    public const int WM_MOUSEMOVE = 0x0200;
+    public const int HTMAXBUTTON = 9;
+    public const uint TME_LEAVE = 0x2;
+    public const uint TME_NONCLIENT = 0x10;
     public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int HTTRANSPARENT = -1;
 
@@ -437,6 +454,9 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DeleteObject(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    public static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT track);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
