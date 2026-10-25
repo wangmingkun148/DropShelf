@@ -174,16 +174,32 @@ public partial class ShelfWindow : Window
         }
     }
 
-    /// <summary>
-    /// 关闭置物架，消失动画由系统播放：DWM 在合成线程上把整个窗口连同亚克力背景、阴影和边框一起淡出缩小，不受界面线程忙碌影响。
-    /// 以前先用 WPF 淡出内容、逐帧移动窗口，但背景、阴影和边框不归 WPF 绘制，内容消失后还留着空框，
-    /// 关闭时再由系统淡出一次；逐帧移动窗口也和内容不在同一帧更新，看起来就是掉帧。
-    /// </summary>
     public void CloseAnimated()
     {
         if (_closing || _closed) return;
         _closing = true;
-        Close();
+        IsHitTestVisible = false;
+        if (!ShelfMotion.Enabled)
+        {
+            Close();
+            return;
+        }
+
+        var duration = ShelfMotion.CloseDuration;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        CacheSurface();
+        var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
+        fade.Completed += (_, _) => Close();
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
+        Surface.BeginAnimation(OpacityProperty, fade);
+
+        // 窗口本身也朝来时的方向退回一小段，避免内容消失后只剩空的背景。
+        if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
+        {
+            var (dx, dy) = ShelfMotion.CloseOffset(_entrance, DpiScale());
+            SlideWindow(rect.Left, rect.Top, rect.Left + dx, rect.Top + dy, duration, ease);
+        }
     }
 
     protected override void OnClosed(EventArgs e)

@@ -4,9 +4,12 @@ using DropShelf.Models;
 
 namespace DropShelf.Views;
 
-/// <summary>置物架弹出的动画参数，集中在这里便于统一调整。关闭时的动画由系统播放，见 ShelfWindow.CloseAnimated。</summary>
+/// <summary>置物架弹出和关闭的动画参数，集中在这里便于统一调整。</summary>
 internal static class ShelfMotion
 {
+    public static readonly TimeSpan CloseDuration = TimeSpan.FromMilliseconds(170);
+    public const double CloseScale = 0.94;
+
     /// <summary>用户在 Windows 中关闭了动画效果时直接显示和关闭。</summary>
     public static bool Enabled => SystemParameters.ClientAreaAnimation;
 
@@ -30,6 +33,11 @@ internal static class ShelfMotion
         ShelfEntranceKind.Shake => (0, Pixels(16, scale)),
         _ => (0, Pixels(12, scale))
     };
+
+    /// <summary>关闭时窗口退回的方向：边缘呼出的退回边缘，其余情况轻微下沉。</summary>
+    public static (int X, int Y) CloseOffset(ShelfEntrance entrance, double scale) => entrance.Kind == ShelfEntranceKind.Edge
+        ? Toward(entrance.Edge, 24, scale)
+        : (0, Pixels(10, scale));
 
     private static (int X, int Y) Toward(ScreenEdge edge, double distance, double scale) => edge switch
     {
