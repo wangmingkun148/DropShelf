@@ -63,11 +63,11 @@ public sealed class GestureService : IDisposable
     /// <summary>识别到手势后，按住的鼠标键被松开。</summary>
     public event EventHandler? DragReleased;
 
-    public GestureService(Dispatcher dispatcher, GestureSensitivity sensitivity)
+    public GestureService(Dispatcher dispatcher, int sensitivity)
     {
         _dispatcher = dispatcher;
-        _requestedSensitivity = (int)sensitivity;
-        _appliedSensitivity = (int)sensitivity;
+        _requestedSensitivity = sensitivity;
+        _appliedSensitivity = sensitivity;
         _detector = new MouseGestureDetector(sensitivity);
         _requestedDwell = AutoOpenTriggers.DwellMilliseconds(EdgeDwellTime.Medium);
         _edgeDetector = new EdgeDwellDetector(_requestedDwell);
@@ -75,7 +75,7 @@ public sealed class GestureService : IDisposable
 
     public bool IsRunning => _listening;
 
-    public void SetSensitivity(GestureSensitivity sensitivity) => _requestedSensitivity = (int)sensitivity;
+    public void SetSensitivity(int sensitivity) => _requestedSensitivity = sensitivity;
 
     /// <summary>选择用晃动、屏幕边缘停留或两者来呼出置物架。</summary>
     public void SetTrigger(AutoOpenTrigger trigger)
@@ -349,7 +349,7 @@ public sealed class GestureService : IDisposable
         var requested = _requestedSensitivity;
         if (requested == _appliedSensitivity) return;
         _appliedSensitivity = requested;
-        _detector.SetSensitivity((GestureSensitivity)requested);
+        _detector.SetSensitivity(requested);
     }
 
     private static bool IsNearOuterScreenEdge(POINT point)

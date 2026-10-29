@@ -88,7 +88,7 @@ public sealed class AppController : IDisposable
             Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false, _pendingEdge);
             if (_pendingEdge != ScreenEdge.None) _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
         };
-        _gestures = new GestureService(_dispatcher, _settings.MouseGestureSensitivity);
+        _gestures = new GestureService(_dispatcher, _settings.ShakeSensitivity);
         _gestures.SetTrigger(_settings.AutoOpenTrigger);
         _gestures.SetEdgeDwell(_settings.EdgeDwell);
         _gestures.ShakeDetected += OnShakeDetected;
@@ -283,7 +283,7 @@ public sealed class AppController : IDisposable
         }
         if (_gestures is not null)
         {
-            _gestures.SetSensitivity(current.MouseGestureSensitivity);
+            _gestures.SetSensitivity(current.ShakeSensitivity);
             _gestures.SetTrigger(current.AutoOpenTrigger);
             _gestures.SetEdgeDwell(current.EdgeDwell);
         }

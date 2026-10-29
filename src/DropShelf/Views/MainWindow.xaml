@@ -789,14 +789,20 @@
                                         </ListBox>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
-                                                           Description="{l:Loc SensitivityDescription}"
+                                                           Description="{Binding SensitivityDescription}"
                                                            Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
-                                        <ListBox x:Name="SensitivitySelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                                 SelectedValue="{Binding Sensitivity}">
-                                            <ListBoxItem Content="{l:Loc SensitivityResponsive}" Tag="{x:Static models:GestureSensitivity.Responsive}" />
-                                            <ListBoxItem Content="{l:Loc SensitivityBalanced}" Tag="{x:Static models:GestureSensitivity.Balanced}" />
-                                            <ListBoxItem Content="{l:Loc SensitivitySteady}" Tag="{x:Static models:GestureSensitivity.Steady}" />
-                                        </ListBox>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{l:Loc SensitivitySteady}" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
+                                            <Grid Width="184" Margin="10,0">
+                                                <!-- 中间的小圆点标出默认位置 -->
+                                                <Ellipse Width="4" Height="4" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1"
+                                                         Fill="{DynamicResource ControlStrongBorderBrush}" />
+                                                <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
+                                                        IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
+                                                        AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                            </Grid>
+                                            <TextBlock Text="{l:Loc SensitivityResponsive}" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
+                                        </StackPanel>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
                                                            Description="{l:Loc EdgeDwellDescription}"

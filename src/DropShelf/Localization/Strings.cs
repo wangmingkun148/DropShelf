@@ -133,10 +133,12 @@ public static class Strings
     public static string TriggerEdge => T("屏幕边缘", "Screen edge");
     public static string TriggerBoth => T("两种都用", "Both");
     public static string ShakeSensitivity => T("晃动灵敏度", "Shake sensitivity");
-    public static string SensitivityDescription => T("灵敏只需轻轻晃动，稳健不易误触", "Responsive opens with a small shake. Steady avoids accidental opens");
     public static string SensitivityResponsive => T("灵敏", "Responsive");
-    public static string SensitivityBalanced => T("均衡", "Balanced");
     public static string SensitivitySteady => T("稳健", "Steady");
+
+    public static string SensitivityDetail(int reversals, int distance) => T(
+        $"来回晃动约 {distance} 像素、掉头 {reversals} 次即可弹出",
+        $"Opens after shaking about {distance} px and turning back {reversals} times");
     public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
     public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘后，停留多久弹出置物架", "How long to pause at the left, right or top edge before a shelf opens");
     public static string DwellShort => T("0.3 秒", "0.3 s");

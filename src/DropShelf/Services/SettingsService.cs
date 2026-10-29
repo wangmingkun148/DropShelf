@@ -16,7 +16,12 @@ public sealed class AppSettings
     public double WindowHeight { get; set; } = 640;
 
     public AutoOpenTrigger AutoOpenTrigger { get; set; } = AutoOpenTrigger.Both;
-    public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
+    /// <summary>晃动灵敏度 0–100，见 <see cref="ShakeSensitivities"/>。</summary>
+    public int ShakeSensitivity { get; set; } = ShakeSensitivities.Balanced;
+
+    /// <summary>2.5 及以前的三档灵敏度，仅用于迁移旧设置。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GestureSensitivity? MouseGestureSensitivity { get; set; }
     public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
 
     /// <summary>这些程序（文件名，如 Photoshop.exe）在前台时不自动弹出置物架，也不响应快捷键。</summary>
@@ -122,8 +127,10 @@ public sealed class SettingsService
 
     public static AppSettings Normalize(AppSettings settings)
     {
-        if (!Enum.IsDefined(settings.MouseGestureSensitivity))
-            settings.MouseGestureSensitivity = GestureSensitivity.Balanced;
+        if (settings.MouseGestureSensitivity is { } legacySensitivity)
+            settings.ShakeSensitivity = ShakeSensitivities.FromLegacy(legacySensitivity);
+        settings.MouseGestureSensitivity = null;
+        settings.ShakeSensitivity = ShakeSensitivities.Clamp(settings.ShakeSensitivity);
         if (!Enum.IsDefined(settings.AutoOpenTrigger))
             settings.AutoOpenTrigger = AutoOpenTrigger.Both;
         if (!Enum.IsDefined(settings.EdgeDwell))
