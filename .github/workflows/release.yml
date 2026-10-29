@@ -1,14 +1,20 @@
-# 推送 v 开头的标签（或在 Releases 页面用新标签发布）时，编译安装包和便携版并附加到对应的 Release。
+# 推送 v 或 style 开头的标签（或在 Releases 页面用新标签发布）时，编译安装包和便携版并附加到对应的 Release。
+# 也可以手动运行，给已有的 Release 补上文件。
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'style*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要补上文件的 Release 标签
+        required: true
 
 permissions:
   contents: write
 
-concurrency: release-${{ github.ref_name }}
+concurrency: release-${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -17,6 +23,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -42,9 +50,11 @@ jobs:
 
       - name: 发布到 Release
         shell: pwsh
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $version = $tag.TrimStart('v')
+          $tag = $env:TAG
+          $version = $tag -replace '^\D+', ''
           $installer = "artifacts\installer\DropShelf-Setup-$version.exe"
           if (-not (Test-Path -LiteralPath $installer)) { throw "标签 $tag 与安装包版本号不一致，请先修改版本号。" }
           $portable = "artifacts\DropShelf-$version-portable.zip"
