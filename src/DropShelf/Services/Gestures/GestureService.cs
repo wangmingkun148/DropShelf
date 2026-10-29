@@ -39,6 +39,7 @@ public sealed class GestureService : IDisposable
     private volatile bool _listening;
     private volatile bool _shakeEnabled = true;
     private volatile bool _edgeEnabled;
+    private volatile bool _paused;
     private volatile int _requestedSensitivity;
     private volatile int _requestedDwell;
     private int _appliedSensitivity;
@@ -84,6 +85,9 @@ public sealed class GestureService : IDisposable
     }
 
     public void SetEdgeDwell(EdgeDwellTime dwell) => _requestedDwell = AutoOpenTriggers.DwellMilliseconds(dwell);
+
+    /// <summary>屏蔽的应用在前台时暂停识别晃动和边缘停留。</summary>
+    public void SetPaused(bool paused) => _paused = paused;
 
     public void Start()
     {
@@ -217,7 +221,7 @@ public sealed class GestureService : IDisposable
             }
         }
 
-        if (_triggered || !NativeMethods.GetCursorPos(out var point)) return;
+        if (_triggered || _paused || !NativeMethods.GetCursorPos(out var point)) return;
         if (_edgeEnabled && CheckEdge(point, now)) return;
         if (!_shakeEnabled) return;
         ApplySensitivityIfChanged();
@@ -243,7 +247,7 @@ public sealed class GestureService : IDisposable
 
     private void OnEdgeTimer()
     {
-        if (!_edgeEnabled || _triggered || (!_leftDown && !_rightDown))
+        if (!_edgeEnabled || _triggered || _paused || (!_leftDown && !_rightDown))
         {
             StopEdgeTimer();
             return;
@@ -325,7 +329,7 @@ public sealed class GestureService : IDisposable
         _edgeDetector.Reset();
         // 每次按下时重新读取显示器信息，显示器布局变化后也能正确判断边缘。
         _hasMonitor = false;
-        if (_edgeEnabled) StartEdgeTimer();
+        if (_edgeEnabled && !_paused) StartEdgeTimer();
     }
 
     private void EndPress()

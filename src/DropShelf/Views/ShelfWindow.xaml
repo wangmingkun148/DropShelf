@@ -44,7 +44,7 @@
         <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
             <Setter Property="Height" Value="26" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Padding" Value="7,0,9,1" />
+            <Setter Property="Padding" Value="6,0,8,1" />
             <Setter Property="Margin" Value="2,0,0,0" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -125,9 +125,9 @@
             </Grid.RowDefinitions>
 
             <!-- 标题栏：可拖动移动窗口 -->
-            <Grid x:Name="Header" Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown" Margin="5,4,5,0">
+            <Grid x:Name="Header" Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown" Margin="4,4,4,0">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                    <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}" Width="30" Height="30" FontSize="14"
+                    <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}" Width="28" Height="30" FontSize="14"
                                   IsChecked="{Binding IsPinned}" ToolTip="{l:Loc PinTooltip}">
                         <ToggleButton.Content>
                             <TextBlock>
@@ -158,9 +158,12 @@
                            MaxWidth="80" TextTrimming="CharacterEllipsis"
                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="14"
+                    <!-- 在文件堆和列表之间切换，只有一项时不需要列表 -->
+                    <Button x:Name="ViewToggleButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
+                            Click="OnViewToggleClick" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}" />
+                    <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
                             Content="{StaticResource Glyph.More}" ToolTip="{l:Loc MoreTooltip}" Click="OnMoreClick" />
-                    <Button x:Name="CloseButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="11"
+                    <Button x:Name="CloseButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="11"
                             Content="{StaticResource Glyph.Close}" ToolTip="{l:Loc CloseShelfTooltip}" Click="OnCloseClick" />
                 </StackPanel>
             </Grid>

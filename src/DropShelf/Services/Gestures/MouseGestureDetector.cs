@@ -196,8 +196,8 @@ public sealed class MouseGestureDetector
     {
         public static GestureProfile For(GestureSensitivity sensitivity) => sensitivity switch
         {
-            GestureSensitivity.Responsive => new GestureProfile(20, 94, 2, 120, 800),
-            GestureSensitivity.Steady => new GestureProfile(51, 238, 3, 220, 750),
+            GestureSensitivity.Responsive => new GestureProfile(15, 70, 2, 100, 850),
+            GestureSensitivity.Steady => new GestureProfile(60, 300, 4, 260, 1000),
             _ => new GestureProfile(34, 153, 3, 180, 800)
         };
     }

@@ -118,6 +118,28 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) editor.ProgramPath = dialog.FileName;
     }
 
+    /// <summary>从有窗口的程序中选择，或浏览选择程序文件。</summary>
+    private void OnAddBlockedAppClick(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = AddBlockedAppButton, Placement = PlacementMode.Bottom };
+        foreach (var app in ForegroundAppWatcher.GetWindowedApps().Except(ViewModel.BlockedApps, StringComparer.OrdinalIgnoreCase))
+        {
+            // 下划线在菜单里表示快捷键，需要写两个。
+            var item = new MenuItem { Header = app.Replace("_", "__") };
+            item.Click += (_, _) => ViewModel.AddBlockedApp(app);
+            menu.Items.Add(item);
+        }
+        if (menu.Items.Count > 0) menu.Items.Add(new Separator());
+        var browse = new MenuItem { Header = Strings.BrowseApp };
+        browse.Click += (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog { Title = Strings.ChooseProgram, Filter = Strings.AppFilter, DereferenceLinks = true };
+            if (dialog.ShowDialog(this) == true) ViewModel.AddBlockedApp(Path.GetFileName(dialog.FileName));
+        };
+        menu.Items.Add(browse);
+        menu.IsOpen = true;
+    }
+
     private void OnPageCardClick(object sender, RoutedEventArgs e)
     {
         if (sender is Controls.PageTile { Tag: string page } tile) OpenPage(page, tile);

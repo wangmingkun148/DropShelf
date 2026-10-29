@@ -10,6 +10,7 @@ public sealed class HotkeyService : IDisposable
     private const int HotkeyId = 0x4453;
     private readonly MessageWindow _window;
     private bool _registered;
+    private bool _paused;
 
     public HotkeyService(MessageWindow window)
     {
@@ -27,6 +28,7 @@ public sealed class HotkeyService : IDisposable
         Unregister();
         Current = gesture;
         if (gesture.IsEmpty || !gesture.IsValid) return gesture.IsEmpty;
+        if (_paused) return true;
 
         uint modifiers = NativeMethods.MOD_NOREPEAT;
         if (gesture.Modifiers.HasFlag(ModifierKeys.Alt)) modifiers |= NativeMethods.MOD_ALT;
@@ -37,6 +39,15 @@ public sealed class HotkeyService : IDisposable
         _registered = NativeMethods.RegisterHotKey(_window.Handle, HotkeyId, modifiers, virtualKey);
         if (!_registered) LogService.Info($"快捷键 {gesture} 注册失败，可能已被其他程序占用");
         return _registered;
+    }
+
+    /// <summary>暂停时注销快捷键，按键交给前台的程序；恢复时重新注册。</summary>
+    public void SetPaused(bool paused)
+    {
+        if (paused == _paused) return;
+        _paused = paused;
+        if (paused) Unregister();
+        else Register(Current);
     }
 
     public void Unregister()

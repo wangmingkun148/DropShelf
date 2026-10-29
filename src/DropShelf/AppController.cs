@@ -20,6 +20,7 @@ public sealed class AppController : IDisposable
     private TrayIconService? _tray;
     private HotkeyService? _hotkey;
     private GestureService? _gestures;
+    private ForegroundAppWatcher? _appWatcher;
     private ProbeWindow? _probe;
     private MainWindow? _mainWindow;
     private bool _showingMainWindow;
@@ -94,6 +95,15 @@ public sealed class AppController : IDisposable
         _gestures.EdgeDwellDetected += OnEdgeDwellDetected;
         _gestures.DragReleased += OnDragReleased;
         _gestures.Start();
+
+        var watcher = new ForegroundAppWatcher();
+        watcher.BlockedChanged += (_, _) =>
+        {
+            _gestures?.SetPaused(watcher.IsBlocked);
+            _hotkey?.SetPaused(watcher.IsBlocked);
+        };
+        watcher.SetBlockedApps(_settings.BlockedApps!);
+        _appWatcher = watcher;
 
         Shelves.Prewarm();
 
@@ -248,6 +258,7 @@ public sealed class AppController : IDisposable
         if (_exiting) return;
         _exiting = true;
         _settingsService.Save(_settings);
+        _appWatcher?.Dispose();
         _gestures?.Dispose();
         _probe?.Close();
         Shelves.CloseAll();
@@ -278,6 +289,8 @@ public sealed class AppController : IDisposable
         }
         if (previous.Hotkey != current.Hotkey && _hotkey is not null)
             IsHotkeyRegistered = _hotkey.Register(current.HotkeyGesture);
+        if (!previous.BlockedApps!.SequenceEqual(current.BlockedApps!, StringComparer.OrdinalIgnoreCase))
+            _appWatcher?.SetBlockedApps(current.BlockedApps!);
         if (ShelfAppearanceChanged(previous, current)) Shelves.ApplySettings(current);
     }
 

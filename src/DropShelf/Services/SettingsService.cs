@@ -19,6 +19,9 @@ public sealed class AppSettings
     public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
     public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
 
+    /// <summary>这些程序（文件名，如 Photoshop.exe）在前台时不自动弹出置物架，也不响应快捷键。</summary>
+    public List<string>? BlockedApps { get; set; }
+
     public AppTheme Theme { get; set; } = AppTheme.System;
 
     /// <summary>自选的强调色（#RRGGBB）；为空时跟随 Windows。</summary>
@@ -64,6 +67,7 @@ public sealed class AppSettings
         clone.QuickActions = QuickActions is null ? null : [.. QuickActions];
         clone.QuickActionSlots = QuickActionSlots is null ? null : [.. QuickActionSlots];
         clone.CustomActions = CustomActions?.Select(action => action.Clone()).ToList();
+        clone.BlockedApps = BlockedApps is null ? null : [.. BlockedApps];
         return clone;
     }
 }
@@ -137,6 +141,11 @@ public sealed class SettingsService
         if (!Enum.IsDefined(settings.QuickActionLayout))
             settings.QuickActionLayout = QuickActionLayout.Four;
 
+        settings.BlockedApps = (settings.BlockedApps ?? [])
+            .Select(name => Path.GetFileName(name?.Trim() ?? string.Empty))
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         settings.CustomActions = NormalizeCustomActions(settings.CustomActions);
         if (settings.QuickActionSlots is null) MigrateQuickActions(settings);
         settings.QuickActionSlots = Models.QuickActions.NormalizeSlots(settings.QuickActionSlots, settings.CustomActions);

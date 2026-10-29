@@ -152,6 +152,7 @@ public sealed class SettingsViewModel : ObservableObject
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
+        RemoveBlockedAppCommand = new RelayCommand(app => Update(settings => settings.BlockedApps!.Remove((string)app!)));
         RefreshActions();
         RefreshHistory();
     }
@@ -168,6 +169,7 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
     public ICommand ClearHistoryCommand { get; }
+    public ICommand RemoveBlockedAppCommand { get; }
 
     public string VersionNumber => typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? string.Empty;
     public string Version => Strings.Version(VersionNumber);
@@ -286,6 +288,11 @@ public sealed class SettingsViewModel : ObservableObject
         get => Settings.EdgeDwell;
         set => Update(settings => settings.EdgeDwell = value);
     }
+
+    /// <summary>前台时不弹出置物架的程序文件名。</summary>
+    public IReadOnlyList<string> BlockedApps => Settings.BlockedApps!;
+
+    public void AddBlockedApp(string name) => Update(settings => settings.BlockedApps!.Add(name));
 
     public QuickShelfSize ShelfSize
     {
@@ -517,7 +524,7 @@ public sealed class SettingsViewModel : ObservableObject
         foreach (var name in new[]
                  {
                      nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity),
-                     nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
+                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),

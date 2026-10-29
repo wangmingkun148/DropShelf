@@ -177,6 +177,7 @@ internal static class Program
         defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
+        defaults.BlockedApps = ["Photoshop.exe", "game.exe"];
         service.Save(defaults);
 
         var loaded = service.Load();
@@ -188,6 +189,7 @@ internal static class Program
         Assert(loaded.QuickShelfSize == QuickShelfSize.Large, "尺寸未恢复");
         Assert(loaded.QuickActionLayout == QuickActionLayout.Two, "按钮数量未恢复");
         Assert(loaded.QuickActionSlots!.SequenceEqual(["Reveal", custom.Id, "CopyFullPath", "MoveTo"]), "快速操作位置没有按原顺序恢复");
+        Assert(loaded.BlockedApps!.SequenceEqual(["Photoshop.exe", "game.exe"]), "屏蔽的应用未恢复");
         var restored = loaded.CustomActions!.Single(action => action.Id == custom.Id);
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
@@ -266,6 +268,7 @@ internal static class Program
                 new CustomQuickAction { Kind = (CustomActionKind)999 }
             ],
             Hotkey = "Shift+A",
+            BlockedApps = ["  game.exe ", "GAME.EXE", "", @"C:\Tools\paint.exe"],
             WindowWidth = 10,
             WindowHeight = double.NaN
         };
@@ -277,6 +280,7 @@ internal static class Program
         Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
         Assert(normalized.QuickActionLayout == QuickActionLayout.Four, "异常按钮数量没有恢复默认值");
+        Assert(normalized.BlockedApps!.SequenceEqual(["game.exe", "paint.exe"]), "屏蔽的应用没有去掉空白、路径和重复");
         Assert(normalized.QuickActionSlots!.SequenceEqual(["Properties", "CompressZip", "CopyFullPath", "MoveTo"]), "快速操作位置没有规范化");
         var image = normalized.CustomActions!.Single();
         Assert(image.Kind == CustomActionKind.CompressImage && image.ImageSizeKb == CustomQuickAction.MinimumImageSizeKb && image.Name is null,
@@ -457,7 +461,12 @@ internal static class Program
     {
         Assert(Shake(GestureSensitivity.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
         Assert(Shake(GestureSensitivity.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
-        Assert(Shake(GestureSensitivity.Steady, [100, 160, 100, 160, 100, 160], 70), "稳健档无法通过明确晃动触发");
+        Assert(Shake(GestureSensitivity.Steady, [100, 165, 100, 165, 100, 165, 100], 70), "稳健档无法通过明确晃动触发");
+
+        // 三档的差距：灵敏档轻晃即可，均衡档不行；均衡档的正常晃动在稳健档不够。
+        Assert(Shake(GestureSensitivity.Responsive, [100, 125, 100, 125], 70), "灵敏档无法通过轻晃触发");
+        Assert(!Shake(GestureSensitivity.Steady, [100, 150, 100, 150, 100, 150, 100], 70), "稳健档被中等幅度晃动触发");
+        Assert(!Shake(GestureSensitivity.Steady, [100, 165, 100, 165, 100], 70), "稳健档只来回两次就被触发");
 
         // 拖动时手部的小幅来回不应触发。
         Assert(!Shake(GestureSensitivity.Responsive, [100, 120, 100, 120], 70), "灵敏档被小幅来回误触发");
