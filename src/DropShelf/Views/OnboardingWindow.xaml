@@ -243,6 +243,8 @@
         </Grid.RowDefinitions>
 
         <TextBlock Text="{l:Loc OnboardingWelcomeTitle}" Margin="18,0,0,0" FontSize="12" VerticalAlignment="Center" />
+        <Button x:Name="CaptionButtons" Style="{StaticResource CloseCaptionButtonStyle}" HorizontalAlignment="Right" Visibility="Collapsed"
+                Click="OnCaptionCloseClick" ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
 
         <!-- 动画演示 -->
         <Border Grid.Row="1" Margin="24,0" CornerRadius="12" Background="{DynamicResource LayerBrush}"

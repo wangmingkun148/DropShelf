@@ -63,11 +63,11 @@ public static class ShellThumbnailService
                 out bitmapHandle);
             if (result < 0 || bitmapHandle == IntPtr.Zero) return null;
 
-            var image = Imaging.CreateBitmapSourceFromHBitmap(
+            var image = IgnoreEmptyAlpha(Imaging.CreateBitmapSourceFromHBitmap(
                 bitmapHandle,
                 IntPtr.Zero,
                 Int32Rect.Empty,
-                BitmapSizeOptions.FromEmptyOptions());
+                BitmapSizeOptions.FromEmptyOptions()));
             image.Freeze();
             return image;
         }
@@ -76,6 +76,21 @@ public static class ShellThumbnailService
             if (bitmapHandle != IntPtr.Zero) NativeMethods.DeleteObject(bitmapHandle);
             if (imageFactory is not null && Marshal.IsComObject(imageFactory)) Marshal.ReleaseComObject(imageFactory);
         }
+    }
+
+    /// <summary>
+    /// 照片这类不带透明度的缩略图，系统返回的位图透明度通道是无效的，可能全是 0；按透明度显示会完全看不见，
+    /// 置物架上只剩一张空白卡片。透明度全为 0 时当作不透明的图片。
+    /// </summary>
+    private static BitmapSource IgnoreEmptyAlpha(BitmapSource image)
+    {
+        if (image.Format.BitsPerPixel != 32) return image;
+        var stride = image.PixelWidth * 4;
+        var pixels = new byte[stride * image.PixelHeight];
+        image.CopyPixels(pixels, stride, 0);
+        for (var index = 3; index < pixels.Length; index += 4)
+            if (pixels[index] != 0) return image;
+        return BitmapSource.Create(image.PixelWidth, image.PixelHeight, image.DpiX, image.DpiY, PixelFormats.Bgr32, null, pixels, stride);
     }
 
     [ComImport]

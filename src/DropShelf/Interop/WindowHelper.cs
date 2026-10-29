@@ -31,6 +31,16 @@ internal static class WindowEffects
         return TryApplyBackdrop(window, backdrop);
     }
 
+    /// <summary>
+    /// 没有系统材质时窗口背景是不透明的纯色，会盖住系统画在标题栏里的按钮（Windows 10 上右上角什么都看不到），
+    /// 改为显示窗口自己画的按钮。
+    /// </summary>
+    public static void ShowOwnCaptionButtons(Window window, UIElement buttons)
+    {
+        if (System.Windows.Shell.WindowChrome.GetWindowChrome(window) is { } chrome) chrome.UseAeroCaptionButtons = false;
+        buttons.Visibility = Visibility.Visible;
+    }
+
     private static bool TryApplyBackdrop(Window window, SystemBackdrop backdrop)
     {
         if (!SupportsSystemBackdrop || backdrop == SystemBackdrop.None) return false;

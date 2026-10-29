@@ -80,7 +80,19 @@ public partial class MainWindow : Window
     {
         if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
             Background = System.Windows.Media.Brushes.Transparent;
+        else
+            WindowEffects.ShowOwnCaptionButtons(this, CaptionButtons);
     }
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {

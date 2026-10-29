@@ -16,6 +16,10 @@ public partial class AboutWindow : Window
         {
             if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
                 Background = System.Windows.Media.Brushes.Transparent;
+            else
+                WindowEffects.ShowOwnCaptionButtons(this, CaptionButtons);
         };
     }
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
 }

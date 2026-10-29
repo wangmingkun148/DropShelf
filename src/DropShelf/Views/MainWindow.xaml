@@ -599,6 +599,26 @@
             </StackPanel>
         </StackPanel>
 
+        <!-- 没有系统材质（Windows 10 等）时才显示的窗口按钮 -->
+        <StackPanel x:Name="CaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" Visibility="Collapsed">
+            <Button Style="{StaticResource CaptionButtonStyle}" Content="&#xE921;" Click="OnMinimizeClick"
+                    ToolTip="{l:Loc CaptionMinimize}" AutomationProperties.Name="{l:Loc CaptionMinimize}" />
+            <Button Click="OnMaximizeClick" AutomationProperties.Name="{l:Loc CaptionMaximize}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CaptionButtonStyle}">
+                        <Setter Property="Content" Value="&#xE922;" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                <Setter Property="Content" Value="&#xE923;" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Style="{StaticResource CloseCaptionButtonStyle}" Click="OnCaptionCloseClick"
+                    ToolTip="{l:Loc CaptionClose}" AutomationProperties.Name="{l:Loc CaptionClose}" />
+        </StackPanel>
+
         <!-- 页面内容：概览页列出各项设置，点进去后可返回 -->
         <Border x:Name="ContentLayer" Grid.Row="1" Background="{DynamicResource LayerBrush}"
                 BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" SizeChanged="OnContentLayerSizeChanged">
