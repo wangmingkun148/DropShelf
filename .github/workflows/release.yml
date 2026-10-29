@@ -16,9 +16,9 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
@@ -29,10 +29,10 @@ jobs:
           $iscc = Get-ChildItem "${env:ProgramFiles}\Inno Setup*\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
               Select-Object -First 1
           if (-not $iscc) { throw "未找到 Inno Setup 编译器。" }
-          # Inno Setup 6 不自带简体中文界面文件。
+          # Inno Setup 6 不自带简体中文界面文件。版本要和构建机上的 Inno Setup（目前是 6.7.1）一致，旧版本的文件缺少新增的提示，安装时会显示英文。
           $language = Join-Path $iscc.DirectoryName "Languages\ChineseSimplified.isl"
           if (-not (Test-Path -LiteralPath $language)) {
-              Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_4_3/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $language
+              Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_1/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $language
           }
           "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
 
