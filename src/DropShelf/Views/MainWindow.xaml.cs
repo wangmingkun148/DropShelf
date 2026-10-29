@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _controller = controller;
+        SetupSensitivityLabels();
         DataContext = new SettingsViewModel(controller);
         ApplySavedBounds(controller.Settings);
 
@@ -138,6 +139,52 @@ public partial class MainWindow : Window
         };
         menu.Items.Add(browse);
         menu.IsOpen = true;
+    }
+
+    // ───────────── 灵敏度滑块下的三个字 ─────────────
+
+    /// <summary>三个字按这个值放大缩小：拖动时紧跟滑钮，点击轨道或按方向键让滑钮跳过去时用一小段动画跟上。</summary>
+    private static readonly DependencyProperty SensitivityLabelValueProperty = DependencyProperty.Register(
+        "SensitivityLabelValue", typeof(double), typeof(MainWindow),
+        new PropertyMetadata(0.0, (owner, args) => ((MainWindow)owner).PoseSensitivityLabels((double)args.NewValue)));
+
+    private static readonly IEasingFunction LabelEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+    private readonly ScaleTransform _steadyScale = new(), _balancedScale = new(), _responsiveScale = new();
+
+    private void SetupSensitivityLabels()
+    {
+        SteadyLabel.RenderTransform = _steadyScale;
+        BalancedLabel.RenderTransform = _balancedScale;
+        ResponsiveLabel.RenderTransform = _responsiveScale;
+        PoseSensitivityLabels(SensitivitySlider.Value);
+        SensitivitySlider.ValueChanged += (_, e) =>
+        {
+            if (SensitivitySlider.IsMouseCaptureWithin || !SensitivitySlider.IsLoaded)
+            {
+                BeginAnimation(SensitivityLabelValueProperty, null);
+                SetValue(SensitivityLabelValueProperty, e.NewValue);
+            }
+            else
+                BeginAnimation(SensitivityLabelValueProperty, new DoubleAnimation(e.NewValue, TimeSpan.FromMilliseconds(220)) { EasingFunction = LabelEase });
+        };
+    }
+
+    /// <summary>
+    /// 像 macOS 程序坞：离滑钮 50 以内的字按余弦曲线放大、变清楚，相邻两个字此消彼长，合起来正好一份；
+    /// 更远的那个保持最小。只改缩放和透明度，不重新排版。
+    /// </summary>
+    private void PoseSensitivityLabels(double value)
+    {
+        Pose(SteadyLabel, _steadyScale, value - Models.ShakeSensitivities.Steady);
+        Pose(BalancedLabel, _balancedScale, value - Models.ShakeSensitivities.Balanced);
+        Pose(ResponsiveLabel, _responsiveScale, value - Models.ShakeSensitivities.Responsive);
+
+        static void Pose(UIElement label, ScaleTransform scale, double distance)
+        {
+            var weight = Math.Abs(distance) >= 50 ? 0 : 0.5 + 0.5 * Math.Cos(Math.PI * distance / 50);
+            scale.ScaleX = scale.ScaleY = 0.85 + 0.35 * weight;
+            label.Opacity = 0.5 + 0.5 * weight;
+        }
     }
 
     private void OnPageCardClick(object sender, RoutedEventArgs e)

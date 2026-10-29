@@ -135,6 +135,7 @@ public static class Strings
     public static string ShakeSensitivity => T("晃动灵敏度", "Shake sensitivity");
     public static string SensitivityResponsive => T("灵敏", "Responsive");
     public static string SensitivitySteady => T("稳健", "Steady");
+    public static string SensitivityBalanced => T("均衡", "Balanced");
 
     public static string SensitivityDetail(int reversals, int distance) => T(
         $"来回晃动约 {distance} 像素、掉头 {reversals} 次即可弹出",

@@ -1741,6 +1741,10 @@ internal static class Program
         ((System.Windows.Controls.Slider)window.FindName("SensitivitySlider")!).Value = 20;
         Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(4, 51), "拖动滑块时说明没有立即更新");
         Pump(400);
+        var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }
+            .Select(name => ((System.Windows.Media.ScaleTransform)((FrameworkElement)window.FindName(name)!).RenderTransform).ScaleX).ToArray();
+        Assert(labelScales[0] > labelScales[1] && labelScales[1] > labelScales[2] && Math.Abs(labelScales[2] - 0.85) < 0.001,
+            "滑块偏向稳健时，稳健应最大、均衡其次、灵敏保持最小");
         ((System.Windows.Controls.ListBox)window.FindName("TriggerSelector")!).SelectedValue = AutoOpenTrigger.Edge;
         Assert(!viewModel.UsesShake && viewModel.UsesEdge, "只用屏幕边缘时不应显示晃动灵敏度");
         ((System.Windows.Controls.ListBox)window.FindName("EdgeDwellSelector")!).SelectedValue = EdgeDwellTime.Long;

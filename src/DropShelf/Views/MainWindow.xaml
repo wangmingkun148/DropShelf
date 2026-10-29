@@ -791,17 +791,21 @@
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
                                                            Description="{Binding SensitivityDescription}"
                                                            Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{l:Loc SensitivitySteady}" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
-                                            <Grid Width="184" Margin="10,0">
-                                                <!-- 中间的小圆点标出默认位置 -->
-                                                <Ellipse Width="4" Height="4" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1"
-                                                         Fill="{DynamicResource ControlStrongBorderBrush}" />
-                                                <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
-                                                        IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
-                                                        AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                        <!-- 三个字对准 0、50、100：越靠近滑钮越大越清楚，像 macOS 程序坞；两端的字从外侧放大，不会超出滑块 -->
+                                        <StackPanel Width="200">
+                                            <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
+                                                    IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
+                                                    AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                            <Grid Height="20" Margin="0,-3,0,0" IsHitTestVisible="False">
+                                                <Grid.Resources>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionTextStyle}">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                    </Style>
+                                                </Grid.Resources>
+                                                <TextBlock x:Name="SteadyLabel" Text="{l:Loc SensitivitySteady}" HorizontalAlignment="Left" RenderTransformOrigin="0,0" />
+                                                <TextBlock x:Name="BalancedLabel" Text="{l:Loc SensitivityBalanced}" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0" />
+                                                <TextBlock x:Name="ResponsiveLabel" Text="{l:Loc SensitivityResponsive}" HorizontalAlignment="Right" RenderTransformOrigin="1,0" />
                                             </Grid>
-                                            <TextBlock Text="{l:Loc SensitivityResponsive}" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
