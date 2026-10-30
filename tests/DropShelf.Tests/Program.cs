@@ -689,6 +689,9 @@ internal static class Program
         Assert(first.Added == 100 && second.Duplicates == 100 && second.Message == "这些项目已在置物架中", "添加结果统计不正确");
         var missing = viewModel.AddFiles([Path.Combine(folder, "missing.txt")]);
         Assert(missing.Unavailable == 1 && viewModel.Items.Count == 100, "不存在的文件被添加");
+        countNotifications = 0;
+        viewModel.Remove(viewModel.Items.Take(60));
+        Assert(countNotifications == 1 && viewModel.Items.Count == 40 && viewModel.StackDetail.StartsWith(Strings.FileCount(40)), "批量移除时数量通知没有合并或汇总不正确");
     }
 
     private static void TestAddingLockedFileReadsNoContent()

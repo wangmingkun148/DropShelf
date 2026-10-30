@@ -292,7 +292,7 @@ public static class QuickActionService
         {
             var destinationDirectory = ResolveDestinationDirectory(sources[0], outputDirectory);
             var archiveName = sources.Length == 1 ? ResolveSourceName(sources[0]) : Strings.DefaultArchiveName;
-            var outputPath = GetAvailableFilePath(destinationDirectory, archiveName, ".zip");
+            var outputPath = FileOperationService.GetAvailablePath(destinationDirectory, archiveName, ".zip");
             temporaryPath = Path.Combine(destinationDirectory, $".dropshelf-{Guid.NewGuid():N}.tmp");
 
             using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
@@ -375,7 +375,7 @@ public static class QuickActionService
         try
         {
             var parent = ResolveDestinationDirectory(source, outputDirectory);
-            var destination = GetAvailableDirectoryPath(parent, Path.GetFileNameWithoutExtension(source));
+            var destination = FileOperationService.GetAvailablePath(parent, Path.GetFileNameWithoutExtension(source));
             temporaryDirectory = Path.Combine(parent, $".dropshelf-{Guid.NewGuid():N}");
             Directory.CreateDirectory(temporaryDirectory);
             ExtractZipSafely(source, temporaryDirectory);
@@ -409,7 +409,7 @@ public static class QuickActionService
                 return new QuickActionResult(false, Strings.SevenZipUnsupported);
 
             var parent = ResolveDestinationDirectory(source, outputDirectory);
-            var destination = GetAvailableDirectoryPath(parent, Path.GetFileNameWithoutExtension(source));
+            var destination = FileOperationService.GetAvailablePath(parent, Path.GetFileNameWithoutExtension(source));
             temporaryDirectory = Path.Combine(parent, $".dropshelf-{Guid.NewGuid():N}");
             Directory.CreateDirectory(temporaryDirectory);
 
@@ -681,22 +681,6 @@ public static class QuickActionService
     private static string ResolveSourceName(string source) => File.Exists(source)
         ? Path.GetFileNameWithoutExtension(source)
         : new DirectoryInfo(source).Name;
-
-    private static string GetAvailableFilePath(string directory, string baseName, string extension)
-    {
-        var candidate = Path.Combine(directory, baseName + extension);
-        for (var suffix = 2; File.Exists(candidate) || Directory.Exists(candidate); suffix++)
-            candidate = Path.Combine(directory, $"{baseName} ({suffix}){extension}");
-        return candidate;
-    }
-
-    private static string GetAvailableDirectoryPath(string directory, string baseName)
-    {
-        var candidate = Path.Combine(directory, baseName);
-        for (var suffix = 2; File.Exists(candidate) || Directory.Exists(candidate); suffix++)
-            candidate = Path.Combine(directory, $"{baseName} ({suffix})");
-        return candidate;
-    }
 
     private static string GetAvailableEntryName(string requestedName, HashSet<string> usedNames)
     {
