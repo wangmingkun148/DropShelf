@@ -1,5 +1,5 @@
 ﻿#define AppName "DropShelf"
-#define AppVersion "2.6.6"
+#define AppVersion "2.6.7"
 #define AppPublisher "DropShelf"
 #define AppExeName "DropShelf.exe"
 #define AppURL "https://github.com/wangmingkun148/dropshelf"
@@ -13,7 +13,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
 AppUpdatesURL={#AppURL}/releases/latest
-VersionInfoVersion=2.6.6.0
+VersionInfoVersion=2.6.7.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=DropShelf 安装程序
 VersionInfoProductName={#AppName}

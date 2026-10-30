@@ -129,6 +129,10 @@ public sealed class FileOperationService
         }
     }
 
+    /// <summary>路径非空且文件或文件夹存在。</summary>
+    internal static bool IsAvailablePath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path));
+
     /// <summary>目标文件夹里还没被占用的路径：重名时依次加上 (2)、(3)…；压缩包、解压和压缩图片的输出也用它。</summary>
     internal static string GetAvailablePath(string directory, string baseName, string extension = "")
     {

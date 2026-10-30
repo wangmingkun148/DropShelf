@@ -8,7 +8,7 @@ using DropShelf.Interop;
 namespace DropShelf.Views;
 
 /// <summary>卡牌的位置（中心点，屏幕像素）、缩放和角度。</summary>
-public readonly record struct CardPose(Point Center, double Scale, double Angle);
+public readonly record struct ScreenCardPose(Point Center, double Scale, double Angle);
 
 /// <summary>
 /// 从概览页拖出的卡牌：用一个不接收鼠标的透明小窗口显示卡牌截图，因此可以拖出主窗口。
@@ -35,9 +35,9 @@ public sealed class CardGhostWindow : Window
     private readonly TranslateTransform _offset = new();
     private readonly Stopwatch _clock = new();
     private readonly IntPtr _handle;
-    private Func<CardPose?> _target = () => null;
+    private Func<ScreenCardPose?> _target = () => null;
     private Action? _arrived;
-    private CardPose _pose;
+    private ScreenCardPose _pose;
     private double _sway;
     private double _lastFrame;
     private TimeSpan _lastRendering;
@@ -93,7 +93,7 @@ public sealed class CardGhostWindow : Window
     public Func<System.Windows.Controls.Panel?> Layer { get; set; } = () => null;
 
     /// <summary>从卡牌当前的样子开始跟随目标。</summary>
-    public void Begin(ImageSource image, Size size, CardPose start, Func<CardPose?> target)
+    public void Begin(ImageSource image, Size size, ScreenCardPose start, Func<ScreenCardPose?> target)
     {
         _image.Source = image;
         _image.Width = size.Width;
@@ -119,7 +119,7 @@ public sealed class CardGhostWindow : Window
     }
 
     /// <summary>飞向新的目标，到达后调用 arrived 并隐藏；目标不存在时淡出。</summary>
-    public void Settle(Func<CardPose?> target, Action arrived)
+    public void Settle(Func<ScreenCardPose?> target, Action arrived)
     {
         _target = target;
         _arrived = arrived;
@@ -129,7 +129,7 @@ public sealed class CardGhostWindow : Window
     /// <summary>缩小并淡出，同时移向指定位置（新置物架的中心）。</summary>
     public void Vanish(Point center)
     {
-        _target = () => new CardPose(center, 0.7, 0);
+        _target = () => new ScreenCardPose(center, 0.7, 0);
         _fading = true;
     }
 
@@ -161,7 +161,7 @@ public sealed class CardGhostWindow : Window
         _sway += (Math.Clamp(speed * SwayPerSpeed, -MaxSway, MaxSway) - _sway) * (1 - Math.Exp(-dt * TurnRate));
         var angle = _pose.Angle + (goal.Angle - _pose.Angle) * (1 - Math.Exp(-dt * TurnRate));
         var scale = _pose.Scale + (goal.Scale - _pose.Scale) * (1 - Math.Exp(-dt * ScaleRate));
-        _pose = new CardPose(center, scale, angle);
+        _pose = new ScreenCardPose(center, scale, angle);
         Apply();
 
         if (_fading)

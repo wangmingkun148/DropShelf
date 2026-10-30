@@ -250,7 +250,7 @@ public static class VirtualFileDropService
     {
         var paths = new List<string>();
         var budget = new WriteBudget(
-            QuickActionService.GetAvailableSpace(cacheDirectory) is { } available ? available - QuickActionService.FreeSpaceReserve : long.MaxValue,
+            DiskSpace.Available(cacheDirectory) is { } available ? available - DiskSpace.Reserve : long.MaxValue,
             cancellationToken);
         foreach (var prepared in preparedFiles)
         {
