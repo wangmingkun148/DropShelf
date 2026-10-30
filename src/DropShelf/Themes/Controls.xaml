@@ -482,8 +482,9 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
                         </Trigger>
+                        <!-- 选中时的底色由列表模板里的选中块画，切换时滑过去，见 SegmentedIndicator。 -->
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="Transparent" />
                             <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
@@ -516,7 +517,11 @@
                 <ControlTemplate TargetType="ListBox">
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5" Padding="{TemplateBinding Padding}">
-                        <ItemsPresenter />
+                        <Grid>
+                            <Border Width="0" HorizontalAlignment="Left" CornerRadius="3" Visibility="Hidden" Background="{DynamicResource AccentBrush}"
+                                    controls:SegmentedIndicator.Owner="{Binding RelativeSource={RelativeSource TemplatedParent}}" />
+                            <ItemsPresenter />
+                        </Grid>
                     </Border>
                 </ControlTemplate>
             </Setter.Value>
