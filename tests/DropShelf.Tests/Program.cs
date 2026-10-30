@@ -1603,7 +1603,8 @@ internal static class Program
         Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
         window.ViewModel.IsPinned = true;
         toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        Pump(100);
+        // 切换时牌飞到各行、窗口大小平滑过渡，等动画播完再检查。
+        Pump(700);
         Assert(window.ViewModel.IsExpanded, "点击切换按钮没有展开列表");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
@@ -1616,6 +1617,14 @@ internal static class Program
         Assert(((System.Windows.Controls.ListBox)window.FindName("ItemsList")!).Items.Count == 3 && window.Height > twoRowsHeight, "展开时放入项目后列表或高度没有更新");
         window.ViewModel.Remove([window.ViewModel.Items[^1]]);
         Pump(100);
+        toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Pump(700);
+        Assert(!window.ViewModel.IsExpanded &&
+               Math.Abs(window.Width - QuickShelfSizeOptions.ResolveWidth(controller.Settings.QuickShelfSize)) < 0.5 &&
+               ((FrameworkElement)window.FindName("StackView")!).Visibility == Visibility.Visible &&
+               ((FrameworkElement)window.FindName("ItemsList")!).Visibility == Visibility.Collapsed &&
+               ((FrameworkElement)window.FindName("Card0")!).Opacity == 1,
+            "收起列表的动画结束后应回到堆叠，窗口恢复收起时的宽度");
 
         // 压缩生成的压缩包放进旁边新开的置物架，不混进原来的项目。
         controller.Settings.QuickActionLayout = QuickActionLayout.Four;

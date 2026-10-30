@@ -47,7 +47,8 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ### The shelf
 - When collapsed, it shows a thumbnail stack, the item count and the total size. If it holds both files and text, only the files are dragged out.
-- The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
+- Dropped files fly from where you let go into the stack; when you drop several, up to 3 land one after another.
+- The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; each card flies to its own row and the window resizes smoothly. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
 - While dragging in, move to the bottom button bar to reveal quick actions and drop directly on one.
 - "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.

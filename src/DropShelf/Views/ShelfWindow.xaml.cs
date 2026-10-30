@@ -84,6 +84,9 @@ public partial class ShelfWindow : Window
     private QuickActionInfo? _hoveredAction;
     private bool _tilesExpanded;
     private bool _layoutPending;
+    private bool _countChanged;
+    private bool _shownExpanded;
+    private (WpfPoint Point, int Added)? _landing;
     private int _shownCount;
     private string? _lastDescription;
     private long _lastDragOverTick;
@@ -210,6 +213,8 @@ public partial class ShelfWindow : Window
         _closed = true;
         _lifetime.Cancel();
         StopSlide();
+        StopMotion();
+        StopResize();
         _toastTimer.Stop();
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
@@ -354,6 +359,7 @@ public partial class ShelfWindow : Window
             case nameof(ShelfViewModel.Count):
                 if (ViewModel.Count > _shownCount && _shownCount > 0) RollRank();
                 _shownCount = ViewModel.Count;
+                _countChanged = true;
                 goto case nameof(ShelfViewModel.IsExpanded);
             case nameof(ShelfViewModel.IsExpanded):
                 // 数量变化时项目集合还在通知列表的途中；此时改窗口大小会立即重新布局，
@@ -363,9 +369,7 @@ public partial class ShelfWindow : Window
                 Dispatcher.BeginInvoke(() =>
                 {
                     _layoutPending = false;
-                    if (IsClosing) return;
-                    UpdateViews();
-                    UpdateWindowSize();
+                    if (!IsClosing) RefreshViews();
                 });
                 break;
             case nameof(ShelfViewModel.Actions):
@@ -383,6 +387,42 @@ public partial class ShelfWindow : Window
         StackRankShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, RankRollDuration) { EasingFunction = ease });
         StackRank.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, RankRollDuration) { EasingFunction = ease });
     }
+
+    /// <summary>数量或视图变化后更新界面：只是切换了堆叠和列表时播放切换动画，刚拖入文件时播放落下的动画。</summary>
+    private void RefreshViews()
+    {
+        var switched = !_countChanged && _shownExpanded != ViewModel.IsExpanded;
+        var landing = _landing;
+        _countChanged = false;
+        _landing = null;
+        _shownExpanded = ViewModel.IsExpanded;
+        FinishMotion();
+        var animate = ShelfMotion.Enabled && IsVisible && ViewModel.HasItems;
+        if (switched && animate)
+        {
+            AnimateViewSwitch();
+            return;
+        }
+        UpdateViews();
+        UpdateWindowSize();
+        if (landing is { } drop && animate && !ViewModel.IsExpanded) PlayLanding(drop.Point, drop.Added);
+    }
+
+    /// <summary>最上面一张牌的角标；切换视图时和说明文字一起淡出淡入。</summary>
+    private UIElement StackMark => StackRankCorner;
+
+    /// <summary>落下动画期间最上面那张还没落下，先藏起角标。</summary>
+    private void BeginLandingMark(int count) => StackRankCorner.Opacity = 0;
+
+    /// <summary>最上面那张落下后角标出现，数字从下面滚上来。</summary>
+    private void CardLanded(int count, bool top)
+    {
+        if (!top) return;
+        StackRankCorner.Opacity = 1;
+        RollRank();
+    }
+
+    private void RestoreStackMark() => StackRankCorner.ClearValue(OpacityProperty);
 
     private void OnRowLoaded(object sender, RoutedEventArgs e)
     {
@@ -403,7 +443,34 @@ public partial class ShelfWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(ViewToggleButton, (string)ViewToggleButton.ToolTip);
     }
 
-    private void UpdateWindowSize()
+    /// <param name="animate">切换堆叠和列表时窗口大小平滑过渡，其余情况直接变到位。</param>
+    private void UpdateWindowSize(bool animate = false)
+    {
+        var (width, height) = TargetSize();
+        ActionBarHost.Visibility = ViewModel.HasActions ? Visibility.Visible : Visibility.Collapsed;
+        Body.Margin = new Thickness(10, 2, 10, ViewModel.HasActions ? 0 : 10);
+        if (animate)
+        {
+            ResizeWindow(width, height);
+            return;
+        }
+        StopResize();
+        ApplyWindowSize(width, height);
+    }
+
+    private void ApplyWindowSize(double width, double height)
+    {
+        Width = width;
+        Height = height;
+        if (IsVisible)
+            Dispatcher.BeginInvoke(() =>
+            {
+                // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
+                if (!IsSliding) WindowPlacement.KeepInWorkArea(this);
+            }, DispatcherPriority.Background);
+    }
+
+    private (double Width, double Height) TargetSize()
     {
         var width = ViewModel.IsExpanded
             ? QuickShelfSizeOptions.ResolveExpandedWidth(_size)
@@ -415,17 +482,7 @@ public partial class ShelfWindow : Window
         // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
         var tiles = ViewModel.HasActions ? ActionTileHeight + 14 : 8;
         body = Math.Max(body, 66 + tiles - actions);
-
-        ActionBarHost.Visibility = ViewModel.HasActions ? Visibility.Visible : Visibility.Collapsed;
-        Body.Margin = new Thickness(10, 2, 10, ViewModel.HasActions ? 0 : 10);
-        Width = width;
-        Height = HeaderHeight + body + actions;
-        if (IsVisible)
-            Dispatcher.BeginInvoke(() =>
-            {
-                // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
-                if (!IsSliding) WindowPlacement.KeepInWorkArea(this);
-            }, DispatcherPriority.Background);
+        return (width, HeaderHeight + body + actions);
     }
 
     private void BuildActions()
@@ -597,6 +654,7 @@ public partial class ShelfWindow : Window
     private async void OnDrop(object sender, WpfDragEventArgs e)
     {
         e.Handled = true;
+        var dropPoint = e.GetPosition(this);
         var action = _hoveredAction;
         var fromSelf = _dragFromSelf;
         var kind = _dragKind;
@@ -637,6 +695,7 @@ public partial class ShelfWindow : Window
                     return;
                 }
                 var summary = ViewModel.Add(read);
+                if (summary.Added > 0 && !ViewModel.IsExpanded) _landing = (dropPoint, summary.Added);
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
                 else if (summary.Duplicates > 0 || summary.Unavailable > 0 || read.FailedCount > 0)
                     ViewModel.Notify(read.FailedCount > 0 ? Strings.WithFailedAttachments(summary.Message, read.FailedCount) : summary.Message);
@@ -652,6 +711,7 @@ public partial class ShelfWindow : Window
 
     private void ShowDropOverlay(System.Windows.IDataObject data)
     {
+        FinishMotion();
         DropZoneText.Text = ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
         var incoming = IncomingCount(data);
         IncomingText.Text = $"+{incoming}";

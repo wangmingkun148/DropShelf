@@ -242,7 +242,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Viewbox Stretch="Uniform">
-                        <Canvas Width="160" Height="116">
+                        <Canvas x:Name="StackCanvas" Width="160" Height="116">
                             <ContentControl x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="16"
                                             DataContext="{Binding Stack2}" ContentTemplate="{StaticResource CardContentTemplate}"
                                             Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
@@ -266,7 +266,7 @@
                             <ContentControl x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="12"
                                             DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}" />
                             <!-- 最上面一张的角标：项目数和数量最多的文件类型，右下角倒过来再印一个 -->
-                            <Grid Canvas.Left="48" Canvas.Top="12" Width="64" Height="86" IsHitTestVisible="False" ClipToBounds="True">
+                            <Grid x:Name="StackRankCorner" Canvas.Left="48" Canvas.Top="12" Width="64" Height="86" IsHitTestVisible="False" ClipToBounds="True">
                                 <StackPanel Margin="5,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
                                     <TextBlock x:Name="StackRank" Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15">
                                         <TextBlock.RenderTransform>
@@ -285,7 +285,7 @@
                             </Grid>
                         </Canvas>
                     </Viewbox>
-                    <StackPanel Grid.Row="1" Margin="2,2,2,4">
+                    <StackPanel x:Name="StackCaptionPanel" Grid.Row="1" Margin="2,2,2,4">
                         <TextBlock Text="{Binding StackCaption}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding StackDetail}" FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"
@@ -308,7 +308,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Grid Width="32" Height="32" HorizontalAlignment="Left">
+                                <Grid x:Name="RowThumb" Width="32" Height="32" HorizontalAlignment="Left">
                                     <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                                     <TextBlock x:Name="RowGlyph" Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="20"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
