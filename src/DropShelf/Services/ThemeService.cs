@@ -103,7 +103,7 @@ public static class ThemeService
     public static IReadOnlyDictionary<string, WpfColor> BuildPalette(bool dark, AccentPalette accent)
     {
         var fill = dark ? accent.Light2 : accent.Dark1;
-        var background = dark ? WpfColor.FromRgb(0x20, 0x20, 0x20) : WpfColor.FromRgb(0xF7, 0xF3, 0xE8);
+        var background = dark ? WpfColor.FromRgb(0x20, 0x20, 0x20) : WpfColor.FromRgb(0xF9, 0xF7, 0xF1);
         var palette = new Dictionary<string, WpfColor>
         {
             ["AccentBrush"] = fill,
@@ -133,8 +133,8 @@ public static class ThemeService
         ("TextTertiaryBrush", "#72000000", "#87FFFFFF"),
         ("TextDisabledBrush", "#5C000000", "#5DFFFFFF"),
         ("TextOnAccentBrush", "#FFFFFFFF", "#E4000000"),
-        ("WindowBackgroundBrush", "#FFF7F3E8", "#FF202020"),
-        ("LayerBrush", "#CCFFFBF0", "#4C3A3A3A"),
+        ("WindowBackgroundBrush", "#FFF9F7F1", "#FF202020"),
+        ("LayerBrush", "#CCFFFDF8", "#4C3A3A3A"),
         ("CardBrush", "#B3FFFFFF", "#0DFFFFFF"),
         ("CardHoverBrush", "#E6FFFFFF", "#14FFFFFF"),
         ("CardBorderBrush", "#14000000", "#33000000"),
@@ -148,17 +148,17 @@ public static class ThemeService
         ("SubtlePressedBrush", "#06000000", "#0AFFFFFF"),
         ("SubtleSelectedBrush", "#0D000000", "#12FFFFFF"),
         ("DividerBrush", "#0F000000", "#15FFFFFF"),
-        ("FlyoutBrush", "#FFFDFAF3", "#FF2C2C2C"),
+        ("FlyoutBrush", "#FFFDFCF8", "#FF2C2C2C"),
         ("FlyoutBorderBrush", "#1A000000", "#26FFFFFF"),
-        ("ShelfSolidBrush", "#FFFAF6EB", "#FF2B2B2B"),
-        ("ShelfAcrylicTintBrush", "#B3FAF6EB", "#B32A2A2A"),
+        ("ShelfSolidBrush", "#FFFBF9F3", "#FF2B2B2B"),
+        ("ShelfAcrylicTintBrush", "#B3FBF9F3", "#B32A2A2A"),
         ("ShelfTileBrush", "#FFFFFFFF", "#FF4D4D4D"),
         ("ShelfTileBorderBrush", "#17000000", "#2EFFFFFF"),
         ("ScrollThumbBrush", "#72000000", "#8BFFFFFF"),
         ("SuccessBrush", "#FF0F7B0F", "#FF6CCB5F"),
         ("CautionBrush", "#FF9D5D00", "#FFFCE100"),
         ("CriticalBrush", "#FFC42B1C", "#FFFF99A4"),
-        ("SmokeBrush", "#CCFAF6EB", "#CC2B2B2B")
+        ("SmokeBrush", "#CCFBF9F3", "#CC2B2B2B")
     ];
 
     /// <param name="systemAccent">Windows 当前的强调色，用于设置页“跟随 Windows”色块的预览。</param>

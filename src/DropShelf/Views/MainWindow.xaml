@@ -956,7 +956,7 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <Border CornerRadius="7,0,0,7" Background="#F7F3E8" />
+                                                    <Border CornerRadius="7,0,0,7" Background="#F9F7F1" />
                                                     <Border Grid.Column="1" CornerRadius="0,7,7,0" Background="#202020" />
                                                     <Border Grid.ColumnSpan="2" Width="64" Height="64" CornerRadius="8" Background="#80808080">
                                                         <Border Width="30" Height="30" CornerRadius="5" Background="#FFFFFF" BorderBrush="#33000000" BorderThickness="1" />
@@ -967,9 +967,9 @@
                                         </ListBoxItem>
                                         <ListBoxItem Tag="{x:Static models:AppTheme.Light}">
                                             <StackPanel>
-                                                <Border Width="140" Height="92" CornerRadius="7" Background="#F7F3E8" BorderBrush="#14000000" BorderThickness="1">
+                                                <Border Width="140" Height="92" CornerRadius="7" Background="#F9F7F1" BorderBrush="#14000000" BorderThickness="1">
                                                     <Border Width="64" Height="64" CornerRadius="8" Background="#FFFFFF" BorderBrush="#1A000000" BorderThickness="1">
-                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#F7F3E8" BorderBrush="#26000000" BorderThickness="1" />
+                                                        <Border Width="30" Height="30" CornerRadius="5" Background="#F9F7F1" BorderBrush="#26000000" BorderThickness="1" />
                                                     </Border>
                                                 </Border>
                                                 <TextBlock Text="{l:Loc ThemeLight}" Margin="2,8,0,2" FontSize="13" />
