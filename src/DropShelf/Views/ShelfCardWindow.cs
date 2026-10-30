@@ -15,15 +15,10 @@ namespace DropShelf.Views;
 internal readonly record struct CardKey(double Ms, double X = 0, double Y = 0, double Scale = 1, double Angle = 0, double Turn = 0,
     double Opacity = 1, IEasingFunction? Ease = null);
 
-/// <summary>
-/// 一段牌的动画：按时间排好的关键帧。HorizontalAxis 为真时绕横轴上下翻，否则绕竖轴左右翻；开头 FadeInMs 毫秒内淡入，ShadowInMs 毫秒内阴影从无到有。
-/// </summary>
-internal sealed record CardMotion(IReadOnlyList<CardKey> Keys, bool HorizontalAxis = false, double FadeInMs = 0, double ShadowInMs = 0)
+/// <summary>一段牌的动画：按时间排好的关键帧。HorizontalAxis 为真时绕横轴上下翻，否则绕竖轴左右翻；开头 FadeInMs 毫秒内淡入。</summary>
+internal sealed record CardMotion(IReadOnlyList<CardKey> Keys, bool HorizontalAxis = false, double FadeInMs = 0)
 {
     public double Duration => Keys[^1].Ms;
-
-    /// <summary>ms 时刻阴影的浓淡，0 到 1。</summary>
-    public double ShadowAt(double ms) => ms < ShadowInMs ? Math.Max(0, ms) / ShadowInMs : 1;
 
     /// <summary>ms 时刻的姿态：在前后两帧之间按前一帧的缓动插值。</summary>
     public CardKey At(double ms)
@@ -50,7 +45,7 @@ internal sealed record CardMotion(IReadOnlyList<CardKey> Keys, bool HorizontalAx
 /// 置物架出场和离场时替它表演的那张牌。透明、置顶、不抢焦点的窗口里画一张牌：正面是置物架的截图，背面是牌背，按关键帧移动、转动和翻面。
 /// 透明和拖动中的卡牌一样靠 DWM 把玻璃区扩展到整个窗口，不用分层窗口。窗口只盖住牌经过的范围并限制在工作区内，
 /// 牌从屏幕外进来时，伸出工作区的部分自然被窗口裁掉。窗口不接收拖放：动画期间在牌上松手什么也不会发生，不会落进下面的程序。
-/// 正反两面和阴影各缓存一次位图，每帧只改变换、明暗、阴影浓淡和显示哪一面。翻面不做真正的透视：沿翻转方向按余弦压扁，另一方向略微放大，和设置页的翻牌一样。
+/// 正反两面和阴影各缓存一次位图，每帧只改变换、明暗和显示哪一面。翻面不做真正的透视：沿翻转方向按余弦压扁，另一方向略微放大，和设置页的翻牌一样。
 /// 播完先画一帧全透明的再隐藏，放回池里，下次直接复用，不必再创建窗口。
 /// </summary>
 internal sealed class ShelfCardWindow : Window
@@ -89,7 +84,10 @@ internal sealed class ShelfCardWindow : Window
     private enum Stage
     {
         Idle,
-        /// <summary>刚显示，等第一帧画到屏幕上。</summary>
+        /// <summary>
+        /// 刚显示，等第一帧画到屏幕上。离场时牌这时正盖在还没隐身的置物架上，置物架带着系统画的窗口阴影，
+        /// 牌先不画自己的阴影，置物架隐身的同一刻再换上：两层阴影不会叠在一起，中间也不会断开。
+        /// </summary>
         Showing,
         Playing,
         /// <summary>播完后再停留两帧，盖住置物架现身前的那一帧。</summary>
@@ -195,7 +193,8 @@ internal sealed class ShelfCardWindow : Window
         _front.CacheMode = new BitmapCache(cache);
         _back.CacheMode = new BitmapCache(cache);
         _shadow.CacheMode = new BitmapCache(cache);
-        Apply(0);
+        _shadow.Opacity = 0;
+        Apply(motion.At(0));
         _stage = Stage.Showing;
         _frames = 0;
         CompositionTarget.Rendering -= OnFrame;
@@ -221,12 +220,13 @@ internal sealed class ShelfCardWindow : Window
             case Stage.Showing:
                 if (++_frames < 2) return;
                 _stage = Stage.Playing;
+                _shadow.Opacity = 1;
                 _clock.Restart();
                 Take(ref _shown)?.Invoke();
                 break;
             case Stage.Playing:
                 var ms = _clock.Elapsed.TotalMilliseconds;
-                Apply(ms);
+                Apply(_motion.At(ms));
                 if (ms < _motion.Duration) return;
                 _stage = Stage.Lingering;
                 _frames = 0;
@@ -248,10 +248,9 @@ internal sealed class ShelfCardWindow : Window
         return taken;
     }
 
-    /// <summary>按 ms 时刻的姿态摆放：先绕中心压扁或放大、再转动，最后移到落点加偏移处；翻过侧面后换成另一面。</summary>
-    private void Apply(double ms)
+    /// <summary>按姿态摆放：先绕中心压扁或放大、再转动，最后移到落点加偏移处；翻过侧面后换成另一面。</summary>
+    private void Apply(CardKey pose)
     {
-        var pose = _motion.At(ms);
         var dpi = VisualTreeHelper.GetDpi(this);
         var x = (_target.Left - _bounds.Left + _target.Width / 2.0) / dpi.DpiScaleX + pose.X;
         var y = (_target.Top - _bounds.Top + _target.Height / 2.0) / dpi.DpiScaleY + pose.Y;
@@ -270,7 +269,6 @@ internal sealed class ShelfCardWindow : Window
         _back.Visibility = front ? Visibility.Hidden : Visibility.Visible;
         _shade.Opacity = MaxShade * Math.Abs(Math.Sin(turn));
         _card.Opacity = pose.Opacity;
-        _shadow.Opacity = _motion.ShadowAt(ms);
     }
 
     /// <summary>窗口的范围：盖住每一帧牌的外接矩形（按转角和翻面时最大的放大量估算），再留出阴影，限制在 area 内。</summary>

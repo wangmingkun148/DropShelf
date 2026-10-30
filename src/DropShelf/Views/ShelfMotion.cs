@@ -116,11 +116,6 @@ internal static class ShelfMotion
         new(270, Out: -5, Across: -1, Scale: 0.985, Angle: -1.5, Ease: EaseInOut),
         new(380)];
 
-    /// <summary>
-    /// 离场开头置物架还垫在牌底下，带着系统画的窗口阴影。牌先不画自己的阴影，等置物架隐身后才在这段时间内淡入，两层阴影不会叠在一起闪一下。
-    /// </summary>
-    private const double ExitShadowInMs = 80;
-
     /// <summary>关闭：从边缘呼出的先往里收一下再甩回那条边；其余的翻回背面、缩小淡出，翻的方向和出场时一致。</summary>
     public static CardMotion Exit(ShelfEntrance entrance, bool horizontalAxis, RECT target, RECT work, double dpiScale)
     {
@@ -130,7 +125,7 @@ internal static class ShelfMotion
         // 最后一帧的牌连同阴影要完全落到工作区外。
         var end = FlingBack(0)[^1];
         var d = Outside(edge, target, work, dpiScale, end.Angle * Math.Abs(tilt), end.Scale);
-        return new CardMotion(FlingBack(d).Select(step => Key(edge, tilt, step)).ToArray(), ShadowInMs: ExitShadowInMs);
+        return new CardMotion(FlingBack(d).Select(step => Key(edge, tilt, step)).ToArray());
     }
 
     /// <summary>甩回：先往里收一下，再甩回那条边。d 是最后牌中心离原位有多远（DIP）。</summary>
@@ -143,7 +138,7 @@ internal static class ShelfMotion
     private static CardMotion FlipAway(bool horizontalAxis) => new([
         new(0, Ease: new BezierEase(0.45, 0, 0.75, 0.45)),
         new(140, Y: 4, Scale: 0.93, Angle: 1.5, Turn: 90, Ease: new BezierEase(0.25, 0.5, 0.5, 1)),
-        new(280, Y: 16, Scale: 0.72, Angle: 4, Turn: 180, Opacity: 0)], horizontalAxis, ShadowInMs: ExitShadowInMs);
+        new(280, Y: 16, Scale: 0.72, Angle: 4, Turn: 180, Opacity: 0)], horizontalAxis);
 
     /// <summary>窗口滑入前的起始偏移（屏幕像素）：从下方升起。</summary>
     public static int RiseOffset(double dpiScale) => (int)Math.Round(RiseDistance * dpiScale);
