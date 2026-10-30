@@ -213,7 +213,6 @@ public partial class ShelfWindow : Window
         _lifetime.Cancel();
         StopSlide();
         StopMotion();
-        StopResize();
         _toastTimer.Stop();
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
@@ -404,7 +403,9 @@ public partial class ShelfWindow : Window
         }
         UpdateViews();
         UpdateWindowSize();
-        if (landing is { } drop && animate && !ViewModel.IsExpanded) PlayLanding(drop.Point, drop.Added);
+        if (landing is not { } drop || !animate) return;
+        if (ViewModel.IsExpanded) PlayListLanding(drop.Point, drop.Added);
+        else PlayLanding(drop.Point, drop.Added);
     }
 
     /// <summary>堆叠上的数量角标；切换视图时和说明文字一起淡出淡入。</summary>
@@ -445,23 +446,11 @@ public partial class ShelfWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(ViewToggleButton, (string)ViewToggleButton.ToolTip);
     }
 
-    /// <param name="animate">切换堆叠和列表时窗口大小平滑过渡，其余情况直接变到位。</param>
-    private void UpdateWindowSize(bool animate = false)
+    private void UpdateWindowSize()
     {
         var (width, height) = TargetSize();
         ActionBarHost.Visibility = ViewModel.HasActions ? Visibility.Visible : Visibility.Collapsed;
         Body.Margin = new Thickness(10, 2, 10, ViewModel.HasActions ? 0 : 10);
-        if (animate)
-        {
-            ResizeWindow(width, height);
-            return;
-        }
-        StopResize();
-        ApplyWindowSize(width, height);
-    }
-
-    private void ApplyWindowSize(double width, double height)
-    {
         Width = width;
         Height = height;
         if (IsVisible)
@@ -697,7 +686,7 @@ public partial class ShelfWindow : Window
                     return;
                 }
                 var summary = ViewModel.Add(read);
-                if (summary.Added > 0 && !ViewModel.IsExpanded) _landing = (dropPoint, summary.Added);
+                if (summary.Added > 0) _landing = (dropPoint, summary.Added);
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
                 else if (summary.Duplicates > 0 || summary.Unavailable > 0 || read.FailedCount > 0)
                     ViewModel.Notify(read.FailedCount > 0 ? Strings.WithFailedAttachments(summary.Message, read.FailedCount) : summary.Message);

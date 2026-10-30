@@ -261,7 +261,7 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
                                                Foreground="{DynamicResource TextSecondaryBrush}" />
                                 </Grid>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,4,0">
+                                <StackPanel x:Name="RowText" Grid.Column="1" VerticalAlignment="Center" Margin="6,0,4,0">
                                     <TextBlock Text="{Binding DisplayName}" FontSize="13" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding Detail}" FontSize="11" TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextSecondaryBrush}" />
