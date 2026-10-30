@@ -10,6 +10,7 @@ using DropShelf.Models;
 using DropShelf.Services;
 using DropShelf.ViewModels;
 using DropShelf.Views;
+using DropShelf.Views.Controls;
 using WpfApplication = System.Windows.Application;
 using WpfDataObject = System.Windows.DataObject;
 
@@ -83,13 +84,16 @@ internal static partial class Program
         Assert(window.ViewModel.IsExpanded, "点击切换按钮没有平铺开");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
-        // 平铺时继续放入项目：一行放四张，放到第五张时窗口变高；变高要等列表收到新增项目之后，否则布局会抛出异常。
+        // 平铺时继续放入项目：一行放满之后再放一张时窗口变高；变高要等列表收到新增项目之后，否则布局会抛出异常。
+        var columns = CardGridPanel.GridColumns(controller.Settings.QuickShelfSize);
+        var itemsList = (System.Windows.Controls.ListBox)window.FindName("ItemsList")!;
+        Assert(CardGridPanel.ColumnsFor(itemsList.ActualWidth - 2) == columns, "平铺一行放的牌数不对");
         var oneRowHeight = window.Height;
-        var extras = new[] { "b.txt", "c.txt", "d.txt" }.Select(name => Path.Combine(folder, name)).ToArray();
+        var extras = Enumerable.Range(0, columns - 1).Select(index => Path.Combine(folder, $"extra{index}.txt")).ToArray();
         foreach (var extra in extras) File.WriteAllText(extra, "y");
         window.ViewModel.AddFiles(extras);
         Pump(100);
-        Assert(((System.Windows.Controls.ListBox)window.FindName("ItemsList")!).Items.Count == 5 && window.Height > oneRowHeight, "平铺时放入项目后牌或高度没有更新");
+        Assert(itemsList.Items.Count == columns + 1 && window.Height > oneRowHeight, "平铺时放入项目后牌或高度没有更新");
         window.ViewModel.Remove(window.ViewModel.Items.Skip(2).ToArray());
         Pump(100);
         toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));

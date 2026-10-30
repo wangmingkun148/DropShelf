@@ -54,13 +54,6 @@ public partial class ShelfWindow
 
     private void OnStackMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ClickCount == 2 && ViewModel.Count == 1 && ViewModel.Stack0 is { } single)
-        {
-            _stackPressed = false;
-            ViewModel.Open(single);
-            e.Handled = true;
-            return;
-        }
         _stackPressed = true;
         _pressPoint = e.GetPosition(this);
     }
@@ -72,11 +65,15 @@ public partial class ShelfWindow
         BeginDragOut(ViewModel.Items.ToArray());
     }
 
+    /// <summary>点一下牌堆（没有拖动）就摊开成平铺。</summary>
     private void OnStackMouseUp(object sender, MouseButtonEventArgs e)
     {
         if (!_stackPressed) return;
         _stackPressed = false;
         ViewModel.HasInteracted = true;
+        // 这一下若是双击的第一下，第二下会落在刚摊开的牌桌上，不能再把它收回去。
+        _expandedByClick = true;
+        Expand();
     }
 
     private void OnStackRightClick(object sender, MouseButtonEventArgs e)
@@ -94,6 +91,7 @@ public partial class ShelfWindow
 
     private void OnListMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.ClickCount == 1) _expandedByClick = false;
         _listPressed = false;
         _deferSelection = false;
         var source = e.OriginalSource as DependencyObject;
@@ -138,7 +136,7 @@ public partial class ShelfWindow
     private void OnListDoubleClick(object sender, MouseButtonEventArgs e)
     {
         var source = e.OriginalSource as DependencyObject;
-        if (FindAncestor<ButtonBase>(source) is not null || FindAncestor<ScrollBar>(source) is not null) return;
+        if (FindAncestor<ButtonBase>(source) is not null || FindAncestor<ScrollBar>(source) is not null || _expandedByClick) return;
         if (FindAncestor<ListBoxItem>(source) is { DataContext: ShelfItem item })
         {
             ViewModel.Open(item);

@@ -26,7 +26,7 @@ internal static class ShelfMotion
     private static int _lastEdge = -1;
 
     /// <summary>
-    /// 晃动呼出：牌背从光标处冒出来，一边放大、一边飞向落点、一边翻面，最后略微超出原大再收回。cursor 是光标相对落点中心的位置（DIP）。
+    /// 晃动呼出：牌背从光标处冒出来，一边放大、一边飞向落点、一边翻面，最后略微超出原大再收回，全程约 350 毫秒。cursor 是光标相对落点中心的位置（DIP）。
     /// </summary>
     public static CardMotion ShakeIn(Vector cursor)
     {
@@ -43,34 +43,34 @@ internal static class ShelfMotion
     /// <summary>绕竖轴左右翻开。x、y 是起手时牌中心相对落点的位置（DIP）。</summary>
     private static CardMotion FlipSideways(double x, double y) => new([
         new(0, X: x, Y: y, Scale: 0.5, Angle: -8, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-        new(170, X: x * 0.5, Y: y * 0.5, Scale: 0.74, Angle: -5, Turn: 128),
-        new(290, X: x * 0.1, Y: y * 0.1, Scale: 0.97, Angle: -1, Turn: 30, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-        new(374, Scale: 1.025, Angle: 0.4, Turn: -4, Ease: EaseInOut),
-        new(442)], FadeInMs: 50);
+        new(135, X: x * 0.5, Y: y * 0.5, Scale: 0.74, Angle: -5, Turn: 128),
+        new(230, X: x * 0.1, Y: y * 0.1, Scale: 0.97, Angle: -1, Turn: 30, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(300, Scale: 1.025, Angle: 0.4, Turn: -4, Ease: EaseInOut),
+        new(355)], FadeInMs: 40);
 
     /// <summary>绕横轴从下往上翻起，落定前略微抬高。</summary>
     private static CardMotion FlipUpward(double x, double y) => new([
         new(0, X: x, Y: y, Scale: 0.5, Angle: 5, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-        new(160, X: x * 0.55, Y: y * 0.55 - 6, Scale: 0.76, Angle: 3, Turn: 125),
-        new(280, X: x * 0.12, Y: y * 0.12 - 2, Scale: 0.98, Angle: 0.5, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-        new(360, Y: -2, Scale: 1.02, Turn: -5, Ease: EaseInOut),
-        new(430)], HorizontalAxis: true, FadeInMs: 50);
+        new(130, X: x * 0.55, Y: y * 0.55 - 6, Scale: 0.76, Angle: 3, Turn: 125),
+        new(225, X: x * 0.12, Y: y * 0.12 - 2, Scale: 0.98, Angle: 0.5, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(290, Y: -2, Scale: 1.02, Turn: -5, Ease: EaseInOut),
+        new(345)], HorizontalAxis: true, FadeInMs: 40);
 
     /// <summary>转着翻开：起手倾角大，边翻边转正。</summary>
     private static CardMotion SpinOpen(double x, double y) => new([
         new(0, X: x, Y: y, Scale: 0.45, Angle: -24, Turn: 180, Ease: new BezierEase(0.2, 0.65, 0.35, 1)),
-        new(180, X: x * 0.45, Y: y * 0.45, Scale: 0.78, Angle: -10, Turn: 120),
-        new(300, X: x * 0.08, Y: y * 0.08, Scale: 0.99, Angle: 2, Turn: 24, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-        new(380, Scale: 1.02, Angle: -0.8, Turn: -3, Ease: EaseInOut),
-        new(450)], FadeInMs: 50);
+        new(145, X: x * 0.45, Y: y * 0.45, Scale: 0.78, Angle: -10, Turn: 120),
+        new(240, X: x * 0.08, Y: y * 0.08, Scale: 0.99, Angle: 2, Turn: 24, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(305, Scale: 1.02, Angle: -0.8, Turn: -3, Ease: EaseInOut),
+        new(360)], FadeInMs: 40);
 
     /// <summary>从光标上方落下来，划一道弧翻开，倾角朝另一边。</summary>
     private static CardMotion DropOpen(double x, double y) => new([
         new(0, X: x, Y: y - 36, Scale: 0.5, Angle: 9, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-        new(170, X: x * 0.5, Y: y * 0.5 - 22, Scale: 0.75, Angle: 5, Turn: 126),
-        new(290, X: x * 0.1, Y: y * 0.1 - 5, Scale: 0.97, Angle: 1, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-        new(374, Y: 1.5, Scale: 1.02, Angle: -0.4, Turn: -4, Ease: EaseInOut),
-        new(442)], FadeInMs: 50);
+        new(135, X: x * 0.5, Y: y * 0.5 - 22, Scale: 0.75, Angle: 5, Turn: 126),
+        new(230, X: x * 0.1, Y: y * 0.1 - 5, Scale: 0.97, Angle: 1, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(300, Y: 1.5, Scale: 1.02, Angle: -0.4, Turn: -4, Ease: EaseInOut),
+        new(355)], FadeInMs: 40);
 
     /// <summary>
     /// 从边缘呼出：牌带着倾角从屏幕外滑进来，边走边回正，冲过落点一点再停稳。target 是落定时的位置，work 是工作区，都是屏幕像素；

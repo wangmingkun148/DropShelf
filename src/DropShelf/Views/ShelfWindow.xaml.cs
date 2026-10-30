@@ -89,6 +89,8 @@ public partial class ShelfWindow : Window
     private long _lastDragOverTick;
     private WpfPoint _pressPoint;
     private bool _stackPressed;
+    /// <summary>刚由单击牌堆摊开，紧接着的双击第二下不算数。</summary>
+    private bool _expandedByClick;
     private bool _listPressed;
     private bool _deferSelection;
     private ShelfItem? _pressedItem;
@@ -324,12 +326,13 @@ public partial class ShelfWindow : Window
 
     private (double Width, double Height) TargetSize()
     {
+        // 平铺时窗口按一行的牌数定宽：内容区左右各留 10，列表默认模板四周还有 1，少算这 2 就会少放一列。
         var width = ViewModel.IsExpanded
-            ? QuickShelfSizeOptions.ResolveExpandedWidth(_size)
+            ? CardGridPanel.GridColumns(_size) * CardGridPanel.SlotWidth + 22
             : QuickShelfSizeOptions.ResolveWidth(_size);
-        // 平铺最多显示两行，再多就滚动；内容区左右各留 10。
+        // 平铺最多显示两行，再多就滚动。
         var body = ViewModel.IsExpanded
-            ? CardGridPanel.HeightFor(Math.Clamp(CardGridPanel.RowsFor(ViewModel.Count, width - 20), 1, 2))
+            ? CardGridPanel.HeightFor(Math.Clamp(CardGridPanel.RowsFor(ViewModel.Count, width - 22), 1, 2))
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
         // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。

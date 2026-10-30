@@ -34,7 +34,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 1. Install and run it. After you close the main window, DropShelf keeps running in the notification area.
 2. Start dragging files and quickly shake the mouse back and forth: a shelf appears at the cursor. You can also drag to the left, right or top edge of the screen and pause.
-3. Drop the files on the shelf. Later, drag the thumbnail stack to take all files at once, or click the list button at the top to open the list and drag out one or more items.
+3. Drop the files on the shelf. Later, drag the thumbnail stack to take all files at once, or click the stack or the list button at the top to open the list and drag out one or more items.
 4. Press `Ctrl+Shift+Space` at any time to open an empty shelf, then press `Ctrl+V` to paste files, images or text.
 
 ## Features
@@ -48,7 +48,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 ### The shelf
 - When collapsed, it shows a thumbnail stack, the item count and the total size. If it holds both files and text, only the files are dragged out.
 - Dropped files fly from where you let go into the stack, or to the start of their own row when the list is open; when you drop several, up to 3 land one after another.
-- The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more; double-click empty space to stack them back.
+- The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list, and clicking the stack opens it too. The list shows 4, 5 or 6 cards per row for the small, medium and large sizes; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more; double-click empty space to stack them back.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
 - While dragging in, move to the bottom button bar to reveal quick actions and drop directly on one.
 - "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.

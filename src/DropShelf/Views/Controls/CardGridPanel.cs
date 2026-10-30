@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using DropShelf.Models;
 
 namespace DropShelf.Views.Controls;
 
@@ -29,6 +30,9 @@ public sealed class CardGridPanel : VirtualizingPanel, IScrollInfo
     private int _columns = 1;
 
     public static int ColumnsFor(double width) => Math.Max(1, (int)(width / SlotWidth));
+
+    /// <summary>平铺时一行放几张：小、中、大三档分别为 4、5、6 张，窗口宽度由此算出。</summary>
+    public static int GridColumns(QuickShelfSize size) => size switch { QuickShelfSize.Small => 4, QuickShelfSize.Large => 6, _ => 5 };
 
     public static int RowsFor(int count, double width) => (count + ColumnsFor(width) - 1) / ColumnsFor(width);
 
