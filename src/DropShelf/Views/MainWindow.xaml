@@ -1308,6 +1308,10 @@
         <Canvas x:Name="DragLayer" Grid.RowSpan="2" IsHitTestVisible="False">
             <Border x:Name="DragGhost" Visibility="Collapsed" CornerRadius="8" Padding="12,8,16,9" Background="{DynamicResource FlyoutBrush}"
                     BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                <!-- 跟随光标和弹回都改这个平移，不改 Canvas.Left/Top，拖动时窗口不必每帧重新排版 -->
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="DragGhostShift" />
+                </Border.RenderTransform>
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.22" Color="Black" />
                 </Border.Effect>

@@ -323,11 +323,18 @@ public partial class ShelfWindow : Window
 
         MoveWindow(handle, fromX, fromY);
         var clock = Stopwatch.StartNew();
-        _slideFrame = (_, _) =>
+        var (x, y, frame) = (fromX, fromY, TimeSpan.Zero);
+        _slideFrame = (_, e) =>
         {
+            // 同一帧可能触发多次；取整后位置没变时也不必移动窗口。
+            var time = ((RenderingEventArgs)e).RenderingTime;
+            if (time == frame) return;
+            frame = time;
             var progress = Math.Min(1, clock.Elapsed.TotalMilliseconds / duration.TotalMilliseconds);
             var eased = ease.Ease(progress);
-            MoveWindow(handle, (int)Math.Round(fromX + (toX - fromX) * eased), (int)Math.Round(fromY + (toY - fromY) * eased));
+            var (nextX, nextY) = ((int)Math.Round(fromX + (toX - fromX) * eased), (int)Math.Round(fromY + (toY - fromY) * eased));
+            if (nextX != x || nextY != y) MoveWindow(handle, nextX, nextY);
+            (x, y) = (nextX, nextY);
             if (progress < 1) return;
             StopSlide();
             completed?.Invoke();

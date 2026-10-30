@@ -32,6 +32,7 @@ public sealed class CardGhostWindow : Window
     private readonly System.Windows.Controls.Grid _root = new();
     private readonly ScaleTransform _scale = new();
     private readonly RotateTransform _rotate = new();
+    private readonly TranslateTransform _offset = new();
     private readonly Stopwatch _clock = new();
     private readonly IntPtr _handle;
     private Func<CardPose?> _target = () => null;
@@ -39,6 +40,7 @@ public sealed class CardGhostWindow : Window
     private CardPose _pose;
     private double _sway;
     private double _lastFrame;
+    private TimeSpan _lastRendering;
     private double _settleStart;
     private bool _fading;
     private bool _running;
@@ -63,7 +65,7 @@ public sealed class CardGhostWindow : Window
         Left = -32000;
         Top = -32000;
         _card.RenderTransformOrigin = new Point(0.5, 0.5);
-        _card.RenderTransform = new TransformGroup { Children = { _scale, _rotate } };
+        _card.RenderTransform = new TransformGroup { Children = { _scale, _rotate, _offset } };
         _image.Effect = new DropShadowEffect { BlurRadius = 24, ShadowDepth = 6, Direction = 270, Opacity = 0.25, Color = Colors.Black };
         _card.Children.Add(_image);
         _root.Children.Add(_card);
@@ -133,8 +135,12 @@ public sealed class CardGhostWindow : Window
 
     private void OnFrame(object? sender, EventArgs e)
     {
+        // 同一帧可能触发多次，其间时钟仍在走，按这一帧的绘制时间去重。
+        var rendering = ((RenderingEventArgs)e).RenderingTime;
+        if (rendering == _lastRendering) return;
+        _lastRendering = rendering;
         var now = _clock.Elapsed.TotalSeconds;
-        // 同一帧可能触发多次；卡顿后也不让卡牌一下子跳过去。
+        // 卡顿后也不让卡牌一下子跳过去。
         var dt = Math.Min(now - _lastFrame, 0.05);
         if (dt <= 0) return;
         _lastFrame = now;
@@ -180,11 +186,13 @@ public sealed class CardGhostWindow : Window
         MoveTo(layer ?? _root);
         if (layer is not null)
         {
+            // 用平移摆放而不改 Canvas.Left/Top，每帧只需重新合成，不会让主窗口重新排版。
             var point = layer.PointFromScreen(_pose.Center);
-            System.Windows.Controls.Canvas.SetLeft(_card, point.X - _image.Width / 2);
-            System.Windows.Controls.Canvas.SetTop(_card, point.Y - _image.Height / 2);
+            _offset.X = point.X - _image.Width / 2;
+            _offset.Y = point.Y - _image.Height / 2;
             return;
         }
+        _offset.X = _offset.Y = 0;
         var dpi = VisualTreeHelper.GetDpi(this);
         NativeMethods.SetWindowPos(_handle, IntPtr.Zero, (int)Math.Round(_pose.Center.X - Width * dpi.DpiScaleX / 2),
             (int)Math.Round(_pose.Center.Y - Height * dpi.DpiScaleY / 2), 0, 0,
