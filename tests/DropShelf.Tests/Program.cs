@@ -1477,6 +1477,7 @@ internal static class Program
         var light = ThemeService.BuildPalette(false, AccentPalette.Default);
         Assert(light["AccentBrush"] == AccentPalette.Default.Dark1 && light["TextOnAccentBrush"] == System.Windows.Media.Colors.White, "默认浅色强调色不正确");
         Assert(ThemeService.PrefersDarkText(System.Windows.Media.Color.FromRgb(0x99, 0xEB, 0xFF)), "浅色强调色上应使用黑字");
+        Assert(light["WindowBackgroundBrush"].R > light["WindowBackgroundBrush"].B && light["ShelfSolidBrush"].R > light["ShelfSolidBrush"].B, "浅色背景应为象牙白");
     }
 
     private static void TestTrayIconLoader()

@@ -69,7 +69,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Created ZIP files and extracted folders go to a new shelf; existing files with the same name are never overwritten.
 
 ### Settings and appearance
-- Light, Dark or System theme; the accent color follows Windows or can be one of eight colors.
+- Light (ivory background), Dark or System theme; the accent color follows Windows or can be one of eight colors.
 - English and Simplified Chinese interface, following the system language by default.
 - Settings apply immediately and are saved automatically.
 - A tutorial is shown on first run and can be viewed again from General.
