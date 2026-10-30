@@ -199,7 +199,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Viewbox Stretch="Uniform">
-                        <Canvas Width="160" Height="116">
+                        <Canvas x:Name="StackCanvas" Width="160" Height="116">
                             <ContentControl x:Name="Card2" Style="{StaticResource StackCardStyle}" Canvas.Left="38" Canvas.Top="20"
                                             DataContext="{Binding Stack2}" ContentTemplate="{StaticResource CardContentTemplate}">
                                 <ContentControl.RenderTransform>
@@ -222,13 +222,17 @@
                                             DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}" />
                             <Border x:Name="CountBadge" Canvas.Left="106" Canvas.Top="6" MinWidth="24" Height="24" CornerRadius="12"
                                     Padding="6,0" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource ShelfTileBrush}"
-                                    BorderThickness="2" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                    BorderThickness="2" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="CountBadgeScale" />
+                                </Border.RenderTransform>
+                                <TextBlock x:Name="CountText" Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
                                            VerticalAlignment="Center" Foreground="{DynamicResource TextOnAccentBrush}" />
                             </Border>
                         </Canvas>
                     </Viewbox>
-                    <StackPanel Grid.Row="1" Margin="2,2,2,4">
+                    <StackPanel x:Name="StackCaptionPanel" Grid.Row="1" Margin="2,2,2,4">
                         <TextBlock Text="{Binding StackCaption}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding StackDetail}" FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"
@@ -251,7 +255,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Grid Width="32" Height="32" HorizontalAlignment="Left">
+                                <Grid x:Name="RowThumb" Width="32" Height="32" HorizontalAlignment="Left">
                                     <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                                     <TextBlock x:Name="RowGlyph" Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="20"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
