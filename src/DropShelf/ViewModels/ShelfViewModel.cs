@@ -622,14 +622,14 @@ public sealed class ShelfViewModel : ObservableObject
         UpdateThumbnails();
     }
 
-    /// <summary>列表里的行显示或移出时由窗口告知，只给显示出来的行加载缩略图。</summary>
+    /// <summary>平铺里的牌生成或回收时由窗口告知，只给生成出来的牌加载缩略图。</summary>
     public void SetRowVisible(ShelfItem item, bool visible)
     {
         if (visible ? _visibleRows.Add(item) : _visibleRows.Remove(item)) UpdateThumbnails();
     }
 
     /// <summary>
-    /// 只有堆叠顶部三张和列表里显示出来的行持有缩略图：其余的取消加载并释放，内存不随项目数量增长。
+    /// 只有堆叠顶部三张和平铺里生成出来的牌持有缩略图：其余的取消加载并释放，内存不随项目数量增长。
     /// 重新显示时多数能从缩略图服务的缓存里直接取到。
     /// </summary>
     private void UpdateThumbnails()

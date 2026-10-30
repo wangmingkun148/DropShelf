@@ -82,6 +82,19 @@ internal static class WindowEffects
         }
     }
 
+    /// <summary>隐身：窗口照常显示、排版和绘制，只是不画到屏幕上；取消隐身后立即以画好的样子出现。</summary>
+    public static void SetCloaked(Window window, bool cloaked)
+    {
+        try
+        {
+            var value = cloaked ? 1 : 0;
+            NativeMethods.DwmSetWindowAttribute(Handle(window), NativeMethods.DWMWA_CLOAK, ref value, sizeof(int));
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>不在任务栏和 Alt+Tab 中显示；可选不抢占当前程序的焦点。</summary>
     public static void SetToolWindow(Window window, bool noActivate)
     {

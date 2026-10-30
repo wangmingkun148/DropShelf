@@ -6,15 +6,16 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using DropShelf.Interop;
 using DropShelf.Models;
+using DropShelf.Views.Controls;
 using WpfPoint = System.Windows.Point;
 using WpfSize = System.Windows.Size;
 
 namespace DropShelf.Views;
 
 /// <summary>
-/// 置物架内容的动画：拖进来的文件从松手处飞进堆叠或列表；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来）。
+/// 置物架内容的动画：拖进来的文件从松手处飞进堆叠或平铺的格子；堆叠和平铺之间切换时，牌从堆叠里一张张发到各自的格子（或收回来）。
 /// 只改变换和透明度。窗口大小平滑过渡，但不和牌同时动：逐帧改窗口大小时界面线程要等每一帧画完，
-/// 和别的动画一起播会掉帧，所以展开时窗口先变大再飞牌，收起时牌飞回去之后窗口再变小。动画途中再有变化时直接跳到终点。
+/// 和别的动画一起播会掉帧，所以展开时窗口先变大再发牌，收起时牌收回去之后窗口再变小。动画途中再有变化时直接跳到终点。
 /// </summary>
 public partial class ShelfWindow
 {
@@ -22,10 +23,9 @@ public partial class ShelfWindow
     private static readonly TimeSpan LandStagger = TimeSpan.FromMilliseconds(80);
     private static readonly TimeSpan PushDelay = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan PushDuration = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(320);
-    private static readonly TimeSpan FlyStagger = TimeSpan.FromMilliseconds(30);
-    private static readonly TimeSpan RowFadeDelay = TimeSpan.FromMilliseconds(140);
-    private static readonly TimeSpan RowFadeDuration = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan DealStagger = TimeSpan.FromMilliseconds(40);
+    private static readonly TimeSpan NameFadeDuration = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(200);
     private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
@@ -137,10 +137,10 @@ public partial class ShelfWindow
     }
 
     /// <summary>
-    /// 列表状态下拖入：新文件的图标从松手处划一道弧飞到自己那一行的行首，快落下时这一行的文字从左边滑出。
-    /// 一次拖入多个时最多 3 个依次落下，最后一个最后落下；新项目在列表末尾，看不到时先滚过去。
+    /// 平铺状态下拖入：新文件的牌从松手处划一道弧落到自己的格子，快落下时名字淡入。
+    /// 一次拖入多个时最多 3 张依次落下，最后一张最后落下；新项目在末尾，看不到时先滚过去。
     /// </summary>
-    private void PlayListLanding(WpfPoint drop, int added)
+    private void PlayGridLanding(WpfPoint drop, int added)
     {
         FinishMotion();
         var items = ViewModel.Items;
@@ -150,185 +150,163 @@ public partial class ShelfWindow
         ItemsList.UpdateLayout();
         ItemsList.ScrollIntoView(items[^1]);
         ItemsList.UpdateLayout();
-        var rows = new List<(FrameworkElement Thumb, FrameworkElement Text)>();
+        var tiles = new List<ListBoxItem>();
         var end = TimeSpan.Zero;
         for (var i = 0; i < incoming; i++)
         {
-            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(items.Count - 1 - i) is not ListBoxItem row ||
-                FindNamed(row, "RowThumb") is not { } thumb || FindNamed(row, "RowText") is not { } text) continue;
-            // 位置用相对行首的平移表示：从松手处出发，略大于行首图标，落到原位。
-            var center = thumb.TranslatePoint(new WpfPoint(thumb.ActualWidth / 2, thumb.ActualHeight / 2), this);
-            var from = new CardPose(drop.X - center.X, drop.Y - center.Y, -8, 1.5, 0);
+            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(items.Count - 1 - i) is not ListBoxItem tile ||
+                FindNamed(tile, "TileName") is not { } name) continue;
+            // 位置用相对格子的平移表示：从松手处出发，从拖动图像大小放大，落到原位。
+            var center = tile.TranslatePoint(TileCardCenter, this);
+            var from = new CardPose(drop.X - center.X, drop.Y - center.Y, -8, 0.5, 0);
             var home = new CardPose(0, 0, 0);
             var control = new WpfPoint(from.X / 2, Math.Min(from.Y, 0) - 20);
-            var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(), new TranslateTransform());
-            var slide = new TranslateTransform();
-            thumb.RenderTransformOrigin = new WpfPoint(0.5, 0.5);
-            thumb.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
-            text.RenderTransform = slide;
-            rows.Add((thumb, text));
+            var pose = PoseTile(tile);
+            tiles.Add(tile);
 
             var delay = LandStagger * (incoming - 1 - i);
-            Tween(delay, LandDuration, t =>
-            {
-                var pose = Arc(from, home, control, t);
-                shift.X = pose.X;
-                shift.Y = pose.Y;
-                turn.Angle = pose.Angle;
-                scale.ScaleX = scale.ScaleY = pose.Scale;
-                thumb.Opacity = pose.Opacity;
-            });
-            var textDelay = delay + LandDuration / 2;
-            Tween(textDelay, RowFadeDuration, t =>
-            {
-                text.Opacity = t;
-                slide.X = -10 * (1 - t);
-            });
-            end = Max(end, textDelay + RowFadeDuration);
+            Tween(delay, LandDuration, t => pose(Arc(from, home, control, t)));
+            var nameDelay = delay + LandDuration / 2;
+            Tween(nameDelay, NameFadeDuration, t => name.Opacity = t);
+            end = Max(end, nameDelay + NameFadeDuration);
         }
 
         _motionCleanup = () =>
         {
-            foreach (var (thumb, text) in rows)
-            {
-                foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty })
-                    thumb.ClearValue(property);
-                text.ClearValue(RenderTransformProperty);
-                text.ClearValue(OpacityProperty);
-            }
+            foreach (var tile in tiles) ResetTile(tile);
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
     }
 
     /// <summary>
-    /// 堆叠和列表之间切换：堆叠保持收起时的大小留在左上角，牌飞到列表里自己那一行并缩成行首图标，各行随后从左边滑出；
-    /// 收起时各行淡出，图标飞回去叠成一摞。展开时窗口先平滑变大再开始，收起时等这些都结束了窗口再平滑变小。
+    /// 堆叠和平铺之间切换。展开时窗口先平滑变大，堆叠里的牌藏起来，平铺里看得见的牌从堆叠的位置出发，一张张发到各自的格子，落下时略微抬起再放平，名字随后淡入；
+    /// 最后几张占住堆叠顶上几张的位置，其余的从最下面那张出发、压在它们下面，起手时那一摞和堆叠一模一样。收起时名字先淡出，牌倒着一张张收回堆叠，之后窗口再平滑变小。
+    /// 只有看得见的牌参与，其余的直接出现或消失。
     /// </summary>
     private void AnimateViewSwitch()
     {
         FinishMotion();
         // 上一段动画刚跳到终点时窗口大小还没重新布局，先布局一次再量尺寸。
         UpdateLayout();
-        var toList = ViewModel.IsExpanded;
+        var toGrid = ViewModel.IsExpanded;
         var (width, height) = TargetSize();
         var bodySize = new WpfSize(Body.ActualWidth + width - ActualWidth, Body.ActualHeight + height - ActualHeight);
-        var stackSize = toList ? new WpfSize(StackView.ActualWidth, StackView.ActualHeight) : bodySize;
-        var listSize = toList ? bodySize : new WpfSize(ItemsList.ActualWidth, ItemsList.ActualHeight);
-        var listHeight = listSize.Height;
+        var stackSize = toGrid ? new WpfSize(StackView.ActualWidth, StackView.ActualHeight) : bodySize;
+        var gridSize = toGrid ? bodySize : new WpfSize(ItemsList.ActualWidth, ItemsList.ActualHeight);
 
         UpdateViews();
         StackView.Visibility = Visibility.Visible;
         ItemsList.Visibility = Visibility.Visible;
-        // 堆叠和列表都固定为各自显示时的大小，窗口比它们大或小时只是露出或裁掉一部分。
+        // 堆叠和平铺都固定为各自显示时的大小，窗口比它们大或小时只是露出或裁掉一部分；平铺压在堆叠上面，牌飞过堆叠时不会被挡住。
         Pin(StackView, stackSize);
-        Pin(ItemsList, listSize);
+        Pin(ItemsList, gridSize);
         StackView.IsHitTestVisible = false;
-        Panel.SetZIndex(StackView, 1);
+        ItemsList.IsHitTestVisible = false;
         Body.UpdateLayout();
 
         var cards = StackCards;
-        var thumbs = new List<UIElement>();
-        var rows = new List<ListBoxItem>();
-        var lead = toList ? ResizeDuration : TimeSpan.Zero;
-        var end = TimeSpan.Zero;
-        for (var index = 0; index < ViewModel.Items.Count; index++)
-            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem row) rows.Add(row);
-
-        for (var i = 0; i < cards.Length; i++)
+        var stackScale = StackCanvas.TransformToVisual(Body).TransformBounds(new Rect(0, 0, 1, 1)).Width;
+        CardPose InBody(StackCard card)
         {
-            var card = cards[i];
-            if (card.Card.DataContext is not ShelfItem item) continue;
-            var row = ItemsList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem;
-            var thumb = row is null ? null : FindNamed(row, "RowThumb");
-            CardPose target;
-            var landsOnRow = thumb is not null && thumb.TransformToVisual(ItemsList).TransformBounds(new Rect(thumb.RenderSize)) is var bounds &&
-                bounds.Top >= 0 && bounds.Bottom <= listHeight;
-            if (landsOnRow)
-            {
-                var box = thumb!.TransformToVisual(StackCanvas).TransformBounds(new Rect(thumb.RenderSize));
-                target = new CardPose(box.X + box.Width / 2, box.Y + box.Height / 2, 0, box.Height / Math.Max(card.Card.Width, card.Card.Height));
-                thumb.Opacity = 0;
-                thumbs.Add(thumb);
-            }
-            else
-            {
-                // 这一行在列表可见范围之外：牌朝列表底边飞去并淡出，或从那里淡入。
-                var edge = ItemsList.TranslatePoint(new WpfPoint(22, listHeight), StackCanvas);
-                target = new CardPose(edge.X, edge.Y, 0, 0.3, 0);
-            }
+            var center = StackCanvas.TranslatePoint(new WpfPoint(card.Home.X, card.Home.Y), Body);
+            return new CardPose(center.X, center.Y, card.Home.Angle, stackScale);
+        }
+        var starts = cards.Where(card => card.Card.DataContext is not null).Select(InBody).ToList();
+        if (starts.Count == 0) starts.Add(InBody(cards[0]));
+        foreach (var card in cards) card.Card.Opacity = 0;
 
-            var delay = lead + FlyStagger * (toList ? i : cards.Length - 1 - i);
-            var (from, to) = toList ? (card.Home, target) : (target, card.Home);
+        var tiles = new List<(ListBoxItem Tile, FrameworkElement Name)>();
+        for (var index = 0; index < ViewModel.Items.Count; index++)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem tile ||
+                FindNamed(tile, "TileName") is not { } name) continue;
+            var box = tile.TransformToVisual(ItemsList).TransformBounds(new Rect(tile.RenderSize));
+            if (box.Bottom > 0 && box.Top < gridSize.Height) tiles.Add((tile, name));
+        }
+
+        var lead = toGrid ? ResizeDuration : FadeOutDuration / 2;
+        var end = TimeSpan.Zero;
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var (tile, name) = tiles[i];
+            var center = tile.TranslatePoint(TileCardCenter, Body);
+            // 从后往前数：最后一张对着堆叠最上面那张，依次往下，其余的都从最下面那张出发。
+            var stack = starts[Math.Min(tiles.Count - 1 - i, starts.Count - 1)];
+            var away = stack with { X = stack.X - center.X, Y = stack.Y - center.Y };
+            var home = new CardPose(0, 0, 0);
+            var (from, to) = toGrid ? (away, home) : (home, away);
+            var pose = PoseTile(tile);
+            var delay = lead + DealStagger * (toGrid ? i : tiles.Count - 1 - i);
             Tween(delay, FlyDuration, t =>
             {
-                var pose = CardPose.Lerp(from, to, t);
-                // 飞到行首时和行里的图标交叉淡入淡出，两者大小不完全一样也看不出跳动。
-                if (toList && landsOnRow)
-                {
-                    pose = pose with { Opacity = Math.Clamp((1 - t) / 0.25, 0, 1) };
-                    thumb!.Opacity = 1 - pose.Opacity;
-                }
-                card.Pose(pose);
+                var current = CardPose.Lerp(from, to, t);
+                pose(current with { Scale = current.Scale + 0.04 * Math.Sin(Math.PI * t) });
             });
             end = Max(end, delay + FlyDuration);
-        }
-
-        for (var i = 0; i < rows.Count; i++)
-        {
-            var row = rows[i];
-            var shift = new TranslateTransform();
-            row.RenderTransform = shift;
-            var order = Math.Min(i, 6);
-            if (toList)
+            if (toGrid)
             {
-                var delay = lead + RowFadeDelay + FlyStagger * order;
-                Tween(delay, RowFadeDuration, t =>
-                {
-                    row.Opacity = t;
-                    shift.X = -10 * (1 - t);
-                });
-                end = Max(end, delay + RowFadeDuration);
+                var nameDelay = delay + FlyDuration * 0.6;
+                Tween(nameDelay, NameFadeDuration, t => name.Opacity = t);
+                end = Max(end, nameDelay + NameFadeDuration);
             }
             else
             {
-                Tween(TimeSpan.Zero, FadeOutDuration, t =>
-                {
-                    row.Opacity = 1 - t;
-                    shift.X = -10 * t;
-                });
+                Tween(TimeSpan.Zero, FadeOutDuration, t => name.Opacity = 1 - t);
             }
         }
 
-        var fadeDelay = toList ? lead : FlyDuration - FadeOutDuration;
-        Tween(fadeDelay, toList ? FadeOutDuration : RowFadeDuration, t =>
+        // 堆叠下方的说明和角标：展开时随牌发出淡出，收起时在最后一张收回前淡入。
+        var captionDelay = toGrid ? lead : Max(TimeSpan.Zero, end - NameFadeDuration);
+        var captionDuration = toGrid ? FadeOutDuration : NameFadeDuration;
+        Tween(captionDelay, captionDuration, t =>
         {
-            StackCaptionPanel.Opacity = StackMark.Opacity = toList ? 1 - t : t;
+            StackCaptionPanel.Opacity = StackMark.Opacity = toGrid ? 1 - t : t;
         });
-        end = Max(end, fadeDelay + RowFadeDuration);
+        end = Max(end, captionDelay + captionDuration);
 
-        // 展开时上面的动画都推迟到窗口变大之后；收起时牌是从列表里各行的位置飞回来的，等它们都回到堆叠里再把窗口变小。
-        TweenWindowSize(toList ? TimeSpan.Zero : end);
-        if (!toList) end += ResizeDuration;
+        // 展开时上面的动画都推迟到窗口变大之后；收起时牌是从各个格子飞回来的，等它们都回到堆叠里再把窗口变小。
+        TweenWindowSize(toGrid ? TimeSpan.Zero : end);
+        if (!toGrid) end += ResizeDuration;
 
         _motionCleanup = () =>
         {
             foreach (var card in cards) card.Pose(card.Home);
-            foreach (var thumb in thumbs) thumb.ClearValue(OpacityProperty);
-            foreach (var row in rows)
-            {
-                row.ClearValue(OpacityProperty);
-                row.ClearValue(RenderTransformProperty);
-            }
+            foreach (var (tile, _) in tiles) ResetTile(tile);
             StackCaptionPanel.ClearValue(OpacityProperty);
             RestoreStackMark();
             Unpin(StackView);
             Unpin(ItemsList);
             StackView.ClearValue(IsHitTestVisibleProperty);
-            StackView.ClearValue(Panel.ZIndexProperty);
+            ItemsList.ClearValue(IsHitTestVisibleProperty);
             UpdateViews();
             UpdateWindowSize();
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+    }
+
+    /// <summary>牌面 64×86 在格子顶部居中，这是它的中心。</summary>
+    private static readonly WpfPoint TileCardCenter = new(CardGridPanel.SlotWidth / 2, 43);
+
+    /// <summary>平铺里的一张牌：以牌面中心为原点缩放、转动，再平移；名字跟着一起动。</summary>
+    private static Action<CardPose> PoseTile(ListBoxItem tile)
+    {
+        var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(), new TranslateTransform());
+        tile.RenderTransformOrigin = new WpfPoint(TileCardCenter.X / CardGridPanel.SlotWidth, TileCardCenter.Y / CardGridPanel.SlotHeight);
+        tile.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
+        return pose =>
+        {
+            shift.X = pose.X;
+            shift.Y = pose.Y;
+            turn.Angle = pose.Angle;
+            scale.ScaleX = scale.ScaleY = pose.Scale;
+            tile.Opacity = pose.Opacity;
+        };
+    }
+
+    private static void ResetTile(ListBoxItem tile)
+    {
+        foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty }) tile.ClearValue(property);
+        if (FindNamed(tile, "TileName") is { } name) name.ClearValue(OpacityProperty);
     }
 
     /// <summary>逐帧调用 apply，参数是缓动后的进度 0–1；delay 之前停在起点。</summary>
@@ -356,7 +334,7 @@ public partial class ShelfWindow
             tween.Apply(MotionEase.Ease(progress));
             if (progress < 1) continue;
             _tweens.RemoveAt(i--);
-            // 收尾可能直接结束全部动画并清空列表，循环随之结束。
+            // 收尾可能直接结束全部动画并清空这个列表，循环随之结束。
             tween.Completed?.Invoke();
         }
         if (_tweens.Count == 0) StopMotion();
@@ -387,7 +365,7 @@ public partial class ShelfWindow
         }, UpdateWindowSize);
     }
 
-    /// <summary>立即结束进行中的动画：牌、列表和窗口都回到最终状态。</summary>
+    /// <summary>立即结束进行中的动画：牌、平铺和窗口都回到最终状态。</summary>
     private void FinishMotion()
     {
         StopMotion();

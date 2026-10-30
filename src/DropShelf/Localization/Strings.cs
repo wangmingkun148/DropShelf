@@ -109,8 +109,8 @@ public static class Strings
     public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
         "While dragging a file, shake the mouse or pause at the edge of the screen, and a shelf appears.");
     public static string TipStackTitle => T("整摞拖出", "Drag out the stack");
-    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；点顶部的列表按钮展开列表，也能单独或多选拖出。",
-        "Drag the thumbnail stack to take every file at once, or click the list button at the top to open the list and drag out one or more.");
+    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；点顶部的平铺按钮把牌摊开，也能单独或多选拖出。",
+        "Drag the thumbnail stack to take every file at once, or click the spread button at the top to lay the cards out and drag out one or more.");
     public static string TipActionsBody => T("把文件拖到置物架底部，在展开的操作上松开，就能直接压缩、复制路径或移动。",
         "Drag files to the bottom of a shelf and release them on an action to compress them, copy their paths or move them.");
     public static string RestoreShelf => T("恢复", "Reopen");
@@ -239,8 +239,8 @@ public static class Strings
     public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。",
         "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
-    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的列表按钮展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
-        "Release to hold the files. Drag the thumbnail stack to take everything at once, or click the list button at the top to open the list and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
+    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的平铺按钮把牌摊开后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
+        "Release to hold the files. Drag the thumbnail stack to take everything at once, or click the spread button at the top to lay the cards out and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null
@@ -328,8 +328,8 @@ public static class Strings
         $"{message}，{failed} 个附件接收失败",
         $"{message}; {Count(failed, "attachment", "attachments")} couldn't be received");
 
-    public static string MenuExpand => T("展开列表", "Show as list");
-    public static string MenuCollapse => T("收起列表", "Show as stack");
+    public static string MenuExpand => T("平铺开", "Spread out");
+    public static string MenuCollapse => T("叠起来", "Stack up");
     public static string MenuSelectAll => T("全选", "Select all");
     public static string MenuCopy => T("复制", "Copy");
     public static string MenuPaste => T("粘贴", "Paste");

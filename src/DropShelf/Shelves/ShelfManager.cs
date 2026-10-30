@@ -63,6 +63,8 @@ public sealed class ShelfManager : IShelfHost
         _prewarmTimer!.Stop();
         _spare = CreateWindow();
         WindowEffects.Handle(_spare);
+        // 替置物架出场的那张牌也先备好。
+        ShelfCardWindow.Prewarm();
     }
 
     /// <summary>

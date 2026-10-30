@@ -16,30 +16,6 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
-        <Style x:Key="ShelfRowStyle" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="6,5" />
-            <Setter Property="Margin" Value="0,1" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleHoverBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
         <!-- 标题栏中的“移动/复制”切换：描边的小标签 -->
         <Style x:Key="ModeChipStyle" TargetType="Button">
             <Setter Property="Height" Value="24" />
@@ -149,6 +125,122 @@
                 </TextBlock>
             </Grid>
         </DataTemplate>
+
+        <!-- 牌右上角的移除：墨色小圆里一个叉，悬停时变红 -->
+        <Style x:Key="TileRemoveButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="9" BorderThickness="1.5" Background="{DynamicResource TextPrimaryBrush}"
+                                BorderBrush="{DynamicResource ShelfSolidBrush}">
+                            <Path Data="M0,0 L6,6 M6,0 L0,6" Width="6" Height="6" Stroke="{DynamicResource ShelfSolidBrush}" StrokeThickness="1.4"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CriticalBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 平铺里的一张牌：竖版小牌印着缩略图，牌角印扩展名和花色，名字最多两行写在下面；悬停时抬起，选中时换成强调色描边 -->
+        <Style x:Key="ShelfTileStyle" TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Grid x:Name="Tile" Background="Transparent" Loaded="OnRowLoaded" Unloaded="OnRowUnloaded">
+                            <!-- 牌下只写得下名字，大小和类型放在悬停提示里 -->
+                            <Grid.ToolTip>
+                                <StackPanel MaxWidth="280">
+                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Detail}" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid.ToolTip>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="86" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <!-- 牌抬起时露出的桌面投影 -->
+                            <Border x:Name="TileShadow" Width="64" CornerRadius="5" Background="{DynamicResource ShelfUnderCardBorderBrush}" Opacity="0" />
+                            <Grid x:Name="TileCard" Width="64">
+                                <Grid.RenderTransform>
+                                    <TranslateTransform />
+                                </Grid.RenderTransform>
+                                <Border x:Name="TileFace" CornerRadius="5" BorderThickness="1.2" Background="{DynamicResource ShelfTileBrush}"
+                                        BorderBrush="{DynamicResource ShelfTileBorderBrush}" />
+                                <ContentPresenter ContentTemplate="{StaticResource CardContentTemplate}" />
+                                <StackPanel Margin="4,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False">
+                                    <TextBlock Text="{Binding CardMark}" Style="{StaticResource CardRankTextStyle}" FontSize="10" LineHeight="10" />
+                                    <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Width="5" Height="5" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,4,4" HorizontalAlignment="Right" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5"
+                                            IsHitTestVisible="False">
+                                    <StackPanel.RenderTransform>
+                                        <RotateTransform Angle="180" />
+                                    </StackPanel.RenderTransform>
+                                    <TextBlock Text="{Binding CardMark}" Style="{StaticResource CardRankTextStyle}" FontSize="10" LineHeight="10" />
+                                    <Path Style="{StaticResource SuitStyle}" Tag="{Binding Suit}" Width="5" Height="5" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button x:Name="RemoveButton" Style="{StaticResource TileRemoveButtonStyle}" HorizontalAlignment="Right"
+                                        VerticalAlignment="Top" Margin="0,-7,-7,0" ToolTip="{l:Loc RemoveItemTooltip}" Click="OnRemoveItemClick"
+                                        Visibility="Hidden" />
+                            </Grid>
+                            <Border x:Name="TileName" Grid.Row="1" Margin="0,5,0,0" Padding="3,0" CornerRadius="4" HorizontalAlignment="Center"
+                                    VerticalAlignment="Top" MaxWidth="70">
+                                <TextBlock Text="{Binding DisplayName}" FontSize="11" LineHeight="14" LineStackingStrategy="BlockLineHeight"
+                                           MaxHeight="28" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" TextAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RemoveButton" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="TileShadow" Property="Opacity" Value="0.18" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="TileCard" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             To="-4" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseOut" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="TileCard" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             To="0" Duration="0:0:0.15">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseOut" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TileFace" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="TileFace" Property="BorderThickness" Value="2" />
+                                <Setter TargetName="TileName" Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsAvailable}" Value="False">
+                                <Setter TargetName="Tile" Property="Opacity" Value="0.5" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border x:Name="Root" Background="{DynamicResource ShelfSolidBrush}">
@@ -293,49 +385,18 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- 展开列表 -->
+                <!-- 平铺：每个项目一张牌，只生成看得见的几行 -->
                 <ListBox x:Name="ItemsList" ItemsSource="{Binding Items}" SelectionMode="Extended" Background="Transparent"
-                         BorderThickness="0" Padding="0" Visibility="Collapsed" ItemContainerStyle="{StaticResource ShelfRowStyle}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.IsVirtualizing="True"
+                         BorderThickness="0" Padding="0" Visibility="Collapsed" ItemContainerStyle="{StaticResource ShelfTileStyle}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True"
                          PreviewMouseLeftButtonDown="OnListMouseDown" PreviewMouseMove="OnListMouseMove"
                          PreviewMouseLeftButtonUp="OnListMouseUp" MouseDoubleClick="OnListDoubleClick"
                          PreviewMouseRightButtonDown="OnListRightButtonDown" Foreground="{DynamicResource TextPrimaryBrush}">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid x:Name="Row" Background="Transparent" Loaded="OnRowLoaded" Unloaded="OnRowUnloaded">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="36" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Grid x:Name="RowThumb" Width="32" Height="32" HorizontalAlignment="Left">
-                                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
-                                    <TextBlock x:Name="RowGlyph" Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="20"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" />
-                                </Grid>
-                                <StackPanel x:Name="RowText" Grid.Column="1" VerticalAlignment="Center" Margin="6,0,4,0">
-                                    <TextBlock Text="{Binding DisplayName}" FontSize="13" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Detail}" FontSize="11" TextTrimming="CharacterEllipsis"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" />
-                                </StackPanel>
-                                <Button x:Name="RemoveButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Width="26" Height="26"
-                                        FontSize="10" Content="{StaticResource Glyph.Close}" ToolTip="{l:Loc RemoveItemTooltip}"
-                                        Click="OnRemoveItemClick" Visibility="Hidden" />
-                            </Grid>
-                            <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding HasThumbnail}" Value="False">
-                                    <Setter TargetName="RowGlyph" Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsAvailable}" Value="False">
-                                    <Setter TargetName="Row" Property="Opacity" Value="0.5" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                    <Setter TargetName="RemoveButton" Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </DataTemplate.Triggers>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <controls:CardGridPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
                 </ListBox>
             </Grid>
 

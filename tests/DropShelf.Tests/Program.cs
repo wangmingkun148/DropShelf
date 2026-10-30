@@ -14,6 +14,7 @@ using DropShelf.Services;
 using DropShelf.Services.Gestures;
 using DropShelf.ViewModels;
 using DropShelf.Views;
+using DropShelf.Views.Controls;
 using WpfApplication = System.Windows.Application;
 using WpfDataObject = System.Windows.DataObject;
 
@@ -124,6 +125,7 @@ internal static class Program
         Run("开机启动命令正确处理空格路径", TestStartupCommand);
         Run("主题解析与强调色对比度", TestThemeAndAccent);
         Run("牌角花色按文件类型", TestFileSuits);
+        Run("出场离场的牌落点、版本轮换和平铺行列", TestShelfMotion);
         Run("托盘图标可从图标资源创建", TestTrayIconLoader);
         Run("全局快捷键可注册和注销", TestHotkeyRegistration);
         Run("命令行文件可转交给运行中的实例", TestArgumentForwarding);
@@ -1499,6 +1501,43 @@ internal static class Program
         Assert(FileSuits.Dominant([]) == FileSuit.Other, "没有项目时应为其他");
         var link = new ShelfItem { Id = "1", Kind = ShelfItemKind.Link, Value = "https://example.com" };
         Assert(FileSuits.Of(link) == FileSuit.Other, "链接的花色不正确");
+        var photo = new ShelfItem { Id = "2", Kind = ShelfItemKind.File, Value = @"C:\a\photo.jpeg" };
+        var folder = new ShelfItem { Id = "3", Kind = ShelfItemKind.Folder, Value = @"C:\a\Downloads" };
+        var plain = new ShelfItem { Id = "4", Kind = ShelfItemKind.File, Value = @"C:\a\README" };
+        Assert(photo.CardMark == "JPEG" && photo.Suit == FileSuit.Image && link.CardMark == "URL", "牌角应印扩展名或链接");
+        Assert(folder.CardMark.Length == 0 && plain.CardMark.Length == 0 && folder.Suit == FileSuit.Folder, "文件夹和没有扩展名的文件牌角不印文字");
+    }
+
+    private static void TestShelfMotion()
+    {
+        var target = new RECT { Left = 1500, Top = 300, Right = 1720, Bottom = 573 };
+        var work = new RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1040 };
+        double? lastShake = null, lastEdge = null;
+        for (var i = 0; i < 20; i++)
+        {
+            var shake = ShelfMotion.ShakeIn(new Vector(30, 40));
+            var right = ShelfMotion.EdgeIn(ScreenEdge.Right, target, work, 1);
+            Assert(shake.Keys[0].Angle != lastShake && right.Keys[0].Angle != lastEdge, "相邻两次呼出不应用同一个版本");
+            (lastShake, lastEdge) = (shake.Keys[0].Angle, right.Keys[0].Angle);
+            Assert(shake.At(0).Turn == 180 && shake.At(0).Opacity == 0, "晃动呼出应从还看不见的牌背开始");
+            Assert(target.Left + target.Width / 2.0 + right.At(0).X - target.Width / 2.0 > work.Right, "从右边缘呼出时牌应从屏幕外开始");
+            foreach (var motion in new[] { shake, right })
+                Assert(motion.At(motion.Duration + 1) is { X: 0, Y: 0, Scale: 1, Angle: 0, Turn: 0, Opacity: 1 }, "出场的牌最后应正好落在置物架的位置");
+        }
+        for (var i = 0; i < 8; i++)
+            foreach (var motion in new[] { ShelfMotion.EdgeIn(ScreenEdge.Left, target, work, 1), ShelfMotion.EdgeIn(ScreenEdge.Top, target, work, 1) })
+                Assert(motion.At(motion.Duration + 1) is { X: 0, Y: 0, Scale: 1, Angle: 0, Opacity: 1 }, "从左边和顶边呼出的牌最后应正好落在置物架的位置");
+
+        var toss = ShelfMotion.Exit(ShelfEntrance.FromEdge(ScreenEdge.Left), false, target, work, 1);
+        var flip = ShelfMotion.Exit(ShelfEntrance.Shake, true, target, work, 1);
+        Assert(toss.At(0) is { X: 0, Scale: 1 } && toss.At(toss.Duration).X < -target.Left, "边缘呼出的置物架关闭时应甩回那条边");
+        Assert(flip.HorizontalAxis && flip.At(flip.Duration) is { Turn: 180, Opacity: 0 }, "其余的置物架关闭时应按出场的方向翻回背面淡出");
+
+        var line = new CardMotion([new CardKey(0), new CardKey(100, X: 10)], FadeInMs: 50);
+        Assert(Math.Abs(line.At(50).X - 5) < 1e-9 && Math.Abs(line.At(25).Opacity - 0.5) < 1e-9, "关键帧之间应按时间插值，开头按时间淡入");
+
+        Assert(CardGridPanel.ColumnsFor(280) == 4 && CardGridPanel.RowsFor(5, 280) == 2 && CardGridPanel.RowsFor(4, 280) == 1, "平铺应一行四张");
+        Assert(Math.Abs(CardGridPanel.HeightFor(2) - 266) < 1e-9 && CardGridPanel.HeightFor(0) == 0, "平铺的高度不正确");
     }
 
     private static void TestTrayIconLoader()
@@ -1606,28 +1645,28 @@ internal static class Program
         Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
         window.ViewModel.IsPinned = true;
         toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        // 切换时窗口大小平滑过渡、牌飞到各行，等动画播完再检查。
-        Pump(700);
-        Assert(window.ViewModel.IsExpanded, "点击切换按钮没有展开列表");
+        // 切换时窗口先平滑变大、牌再一张张发到格子，等动画播完再检查。
+        Pump(900);
+        Assert(window.ViewModel.IsExpanded, "点击切换按钮没有平铺开");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
-        // 展开时继续放入项目：窗口变高要等列表收到新增项目之后，否则布局会抛出异常。
-        var twoRowsHeight = window.Height;
-        var extra = Path.Combine(folder, "b.txt");
-        File.WriteAllText(extra, "y");
-        window.ViewModel.AddFiles([extra]);
+        // 平铺时继续放入项目：一行放四张，放到第五张时窗口变高；变高要等列表收到新增项目之后，否则布局会抛出异常。
+        var oneRowHeight = window.Height;
+        var extras = new[] { "b.txt", "c.txt", "d.txt" }.Select(name => Path.Combine(folder, name)).ToArray();
+        foreach (var extra in extras) File.WriteAllText(extra, "y");
+        window.ViewModel.AddFiles(extras);
         Pump(100);
-        Assert(((System.Windows.Controls.ListBox)window.FindName("ItemsList")!).Items.Count == 3 && window.Height > twoRowsHeight, "展开时放入项目后列表或高度没有更新");
-        window.ViewModel.Remove([window.ViewModel.Items[^1]]);
+        Assert(((System.Windows.Controls.ListBox)window.FindName("ItemsList")!).Items.Count == 5 && window.Height > oneRowHeight, "平铺时放入项目后牌或高度没有更新");
+        window.ViewModel.Remove(window.ViewModel.Items.Skip(2).ToArray());
         Pump(100);
         toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        Pump(700);
+        Pump(900);
         Assert(!window.ViewModel.IsExpanded &&
                Math.Abs(window.Width - QuickShelfSizeOptions.ResolveWidth(controller.Settings.QuickShelfSize)) < 0.5 &&
                ((FrameworkElement)window.FindName("StackView")!).Visibility == Visibility.Visible &&
                ((FrameworkElement)window.FindName("ItemsList")!).Visibility == Visibility.Collapsed &&
                ((FrameworkElement)window.FindName("Card0")!).Opacity == 1,
-            "收起列表的动画结束后应回到堆叠，窗口恢复收起时的宽度");
+            "叠起来的动画结束后应回到堆叠，窗口恢复收起时的宽度");
 
         // 压缩生成的压缩包放进旁边新开的置物架，不混进原来的项目。
         controller.Settings.QuickActionLayout = QuickActionLayout.Four;

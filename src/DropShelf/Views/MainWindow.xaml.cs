@@ -316,30 +316,6 @@ public partial class MainWindow : Window
     /// <summary>Sheet 是页面那张牌，内容在牌里的 Scroll 中滚动。</summary>
     private sealed record PageView(Grid Host, Border Sheet, ScrollViewer Scroll, FrameworkElement Content);
 
-    /// <summary>与 CSS 的 cubic-bezier 相同：从 (0,0) 到 (1,1)，两个控制点决定快慢。</summary>
-    private sealed class BezierEase(double x1, double y1, double x2, double y2) : IEasingFunction
-    {
-        public double Ease(double t) => Cubic(y1, y2, Solve(x1, x2, t));
-
-        /// <summary>反过来由 y 求 x。</summary>
-        public double Inverse(double y) => Cubic(x1, x2, Solve(y1, y2, y));
-
-        /// <summary>两个控制点的这一坐标在 0 到 1 之间时，坐标随参数单调增加：二分求出坐标等于 value 的参数。</summary>
-        private static double Solve(double p1, double p2, double value)
-        {
-            double low = 0, high = 1;
-            for (var i = 0; i < 30; i++)
-            {
-                var middle = (low + high) / 2;
-                if (Cubic(p1, p2, middle) < value) low = middle;
-                else high = middle;
-            }
-            return (low + high) / 2;
-        }
-
-        private static double Cubic(double p1, double p2, double s) => 3 * p1 * s * (1 - s) * (1 - s) + 3 * p2 * s * s * (1 - s) + s * s * s;
-    }
-
     private sealed class CurveEase(Func<double, double> curve) : IEasingFunction
     {
         public double Ease(double t) => curve(t);
@@ -1604,28 +1580,8 @@ public partial class MainWindow : Window
     private (System.Windows.Controls.Image Image, System.Windows.Point Position)? Snapshot(FrameworkElement element)
     {
         if (!element.IsVisible || element.ActualWidth < 1) return null;
-        var image = new System.Windows.Controls.Image { Source = Capture(element), Width = element.ActualWidth, Height = element.ActualHeight, RenderTransform = new TranslateTransform() };
+        var image = new System.Windows.Controls.Image { Source = VisualCapture.Of(element), Width = element.ActualWidth, Height = element.ActualHeight, RenderTransform = new TranslateTransform() };
         return (image, element.TranslatePoint(default, DragLayer));
-    }
-
-    /// <summary>按设备像素截下元素当前的样子。</summary>
-    private static BitmapSource Capture(FrameworkElement element)
-    {
-        var dpi = VisualTreeHelper.GetDpi(element);
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(element.ActualHeight * dpi.DpiScaleY),
-            dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        var visual = new DrawingVisual();
-        using (var context = visual.RenderOpen())
-        {
-            // 只截元素自身的范围：被裁掉的溢出部分不能算进画面，否则截图会被压扁。
-            // VisualBrush 的绝对 Viewbox 在元素外层的坐标里，带着元素的偏移和变换，要换算过去，否则居中的大页面截出来整体错开。
-            var bounds = new Rect(0, 0, element.ActualWidth, element.ActualHeight);
-            var viewbox = VisualTreeHelper.GetParent(element) is Visual parent ? element.TransformToAncestor(parent).TransformBounds(bounds) : bounds;
-            context.DrawRectangle(new VisualBrush(element) { Viewbox = viewbox, ViewboxUnits = BrushMappingMode.Absolute }, null, bounds);
-        }
-        bitmap.Render(visual);
-        bitmap.Freeze();
-        return bitmap;
     }
 
     private void FadeOutSnapshot((System.Windows.Controls.Image Image, System.Windows.Point Position) snapshot, double distance)

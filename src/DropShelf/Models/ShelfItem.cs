@@ -60,6 +60,20 @@ public sealed class ShelfItem : INotifyPropertyChanged
         }
     }
 
+    /// <summary>花色：按文件类型分，印在牌角。</summary>
+    public FileSuit Suit => FileSuits.Of(this);
+
+    /// <summary>牌角印的类型：文件的扩展名（最多四个字母），链接为 URL，文字为 TXT，文件夹不印。</summary>
+    public string CardMark => Kind switch
+    {
+        ShelfItemKind.File => Path.GetExtension(Value).TrimStart('.') is { Length: > 0 } extension
+            ? extension[..Math.Min(4, extension.Length)].ToUpperInvariant()
+            : string.Empty,
+        ShelfItemKind.Link => "URL",
+        ShelfItemKind.Text => "TXT",
+        _ => string.Empty
+    };
+
     public string Glyph => Kind switch
     {
         ShelfItemKind.Folder => "",

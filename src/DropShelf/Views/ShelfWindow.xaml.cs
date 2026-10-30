@@ -7,12 +7,14 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
 using DropShelf.ViewModels;
+using DropShelf.Views.Controls;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfDragEventArgs = System.Windows.DragEventArgs;
 using WpfPoint = System.Windows.Point;
@@ -57,7 +59,6 @@ public partial class ShelfWindow : Window
     private const double ActionTileHeight = 94;
     private static readonly TimeSpan RankRollDuration = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan DealDuration = TimeSpan.FromMilliseconds(180);
-    private const double RowHeight = 46;
     private const int WS_SYSMENU = 0x00080000;
     private const int WS_MINIMIZEBOX = 0x00020000;
     private const int WS_MAXIMIZEBOX = 0x00010000;
@@ -76,6 +77,10 @@ public partial class ShelfWindow : Window
     private TransferMode _dragOutMode;
     private ShelfEntrance _entrance = ShelfEntrance.Plain;
     private EventHandler? _slideFrame;
+    /// <summary>正在替置物架出场或离场的那张牌。</summary>
+    private ShelfCardWindow? _card;
+    /// <summary>出场时那张牌是上下翻开的，关闭时按同样的方向翻回去。</summary>
+    private bool _flippedOnHorizontalAxis;
     private bool _closing;
     private bool _closed;
     private bool _dragInside;
@@ -163,8 +168,15 @@ public partial class ShelfWindow : Window
     {
         ShowActivated = activate;
         var wasVisible = IsVisible;
-        // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
-        if (wasVisible) StopSlide();
+        // 复用正在出场的置物架时先让它落定，否则下一帧会把窗口拉回原来的位置。
+        if (wasVisible)
+        {
+            StopSlide();
+            FinishEntrance();
+        }
+        // 晃动和边缘呼出由一张牌替置物架出场：置物架先隐身，照常显示和绘制，牌落定时直接现身。
+        var dealt = !wasVisible && ShelfMotion.Enabled && entrance.Kind != ShelfEntranceKind.Plain;
+        if (dealt) WindowEffects.SetCloaked(this, true);
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
         WindowPlacement.CenterOn(this, center, Width, Height);
@@ -173,39 +185,36 @@ public partial class ShelfWindow : Window
             Activate();
             Focus();
         }
-        if (!wasVisible)
-        {
-            _entrance = entrance;
-            AnimateIn(center);
-        }
+        if (wasVisible) return;
+        _entrance = entrance;
+        if (dealt) DealIn(center);
+        else AnimateIn();
     }
 
+    /// <summary>关闭：一张牌先盖住置物架，置物架隐身后牌再离场，播完才真正关闭窗口。</summary>
     public void CloseAnimated()
     {
         if (_closing || _closed) return;
         _closing = true;
         IsHitTestVisible = false;
-        if (!ShelfMotion.Enabled)
+        FinishEntrance();
+        StopSlide();
+        if (!ShelfMotion.Enabled || !IsVisible || !NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect) ||
+            CaptureSurface() is not { } face)
         {
             Close();
             return;
         }
 
-        var duration = ShelfMotion.CloseDuration;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
-        CacheSurface();
-        var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
-        fade.Completed += (_, _) => Close();
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
-        Surface.BeginAnimation(OpacityProperty, fade);
-
-        // 窗口本身也朝来时的方向退回一小段，避免内容消失后只剩空的背景。
-        if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
-        {
-            var (dx, dy) = ShelfMotion.CloseOffset(_entrance, DpiScale());
-            SlideWindow(rect.Left, rect.Top, rect.Left + dx, rect.Top + dy, duration, ease);
-        }
+        var scale = DpiScale();
+        var work = WorkArea(rect);
+        var card = _card = ShelfCardWindow.Rent();
+        card.Play(rect, work, scale, face, ShelfMotion.Exit(_entrance, _flippedOnHorizontalAxis, rect, work, scale),
+            () => WindowEffects.SetCloaked(this, true), () =>
+            {
+                _card = null;
+                Close();
+            });
     }
 
     protected override void OnClosed(EventArgs e)
@@ -213,6 +222,8 @@ public partial class ShelfWindow : Window
         _closed = true;
         _lifetime.Cancel();
         StopSlide();
+        _card?.Cancel();
+        _card = null;
         StopMotion();
         _toastTimer.Stop();
         _leaveCheck.Stop();
@@ -268,11 +279,8 @@ public partial class ShelfWindow : Window
 
     // ───────────── 动画 ─────────────
 
-    /// <summary>
-    /// 弹出动画：窗口从来源方向滑入（亚克力背景随窗口一起移动），内容同时淡入并放大到原尺寸。
-    /// 晃动呼出时内容从光标处弹出，带一点回弹；从屏幕边缘呼出时从该边缘滑入。
-    /// </summary>
-    private void AnimateIn(POINT cursor)
+    /// <summary>主动打开时的弹出动画：窗口从下方升起一点（背景随窗口一起移动），内容同时淡入并放大到原尺寸。</summary>
+    private void AnimateIn()
     {
         StopSlide();
         if (!ShelfMotion.Enabled)
@@ -282,27 +290,65 @@ public partial class ShelfWindow : Window
             return;
         }
 
-        var handle = new WindowInteropHelper(this).Handle;
-        var motion = ShelfMotion.For(_entrance);
-        if (NativeMethods.GetWindowRect(handle, out var rect))
-        {
-            // 内容从光标所在的位置展开。
-            Surface.RenderTransformOrigin = _entrance.Kind == ShelfEntranceKind.Shake && rect.Width > 0 && rect.Height > 0
-                ? new WpfPoint(Math.Clamp((cursor.X - rect.Left) / (double)rect.Width, 0.15, 0.85),
-                    Math.Clamp((cursor.Y - rect.Top) / (double)rect.Height, 0.15, 0.85))
-                : new WpfPoint(0.5, 0.4);
-            var (dx, dy) = ShelfMotion.OpenOffset(_entrance, DpiScale());
-            SlideWindow(rect.Left + dx, rect.Top + dy, rect.Left, rect.Top, motion.Duration, new QuinticEase { EasingMode = EasingMode.EaseOut },
-                () => WindowPlacement.KeepInWorkArea(this));
-        }
+        if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
+            SlideWindow(rect.Left, rect.Top + ShelfMotion.RiseOffset(DpiScale()), rect.Left, rect.Top, ShelfMotion.RiseDuration,
+                new QuinticEase { EasingMode = EasingMode.EaseOut }, () => WindowPlacement.KeepInWorkArea(this));
 
         CacheSurface();
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
-        var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
+        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, ShelfMotion.RiseFadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        var scale = new DoubleAnimation(ShelfMotion.RiseStartScale, 1, ShelfMotion.RiseDuration) { EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut } };
         scale.Completed += (_, _) => Surface.CacheMode = null;
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
     }
+
+    /// <summary>
+    /// 晃动或从边缘呼出时的出场：截下置物架作为牌面，置物架隐身期间由牌表演，落定时置物架现身。
+    /// 晃动时牌从光标处翻开，光标离置物架中心太远时按靠近中心的位置算，牌不会从老远飞过来。
+    /// </summary>
+    private void DealIn(POINT cursor)
+    {
+        Surface.BeginAnimation(OpacityProperty, null);
+        Surface.Opacity = 1;
+        if (!NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect) || CaptureSurface() is not { } face)
+        {
+            WindowEffects.SetCloaked(this, false);
+            return;
+        }
+
+        var scale = DpiScale();
+        var work = WorkArea(rect);
+        var offset = new Vector(
+            Math.Clamp(cursor.X - (rect.Left + rect.Width / 2.0), -0.35 * rect.Width, 0.35 * rect.Width) / scale,
+            Math.Clamp(cursor.Y - (rect.Top + rect.Height / 2.0), -0.35 * rect.Height, 0.35 * rect.Height) / scale);
+        var motion = _entrance.Kind == ShelfEntranceKind.Shake ? ShelfMotion.ShakeIn(offset) : ShelfMotion.EdgeIn(_entrance.Edge, rect, work, scale);
+        _flippedOnHorizontalAxis = motion.HorizontalAxis;
+        var card = _card = ShelfCardWindow.Rent();
+        card.Play(rect, work, scale, face, motion, null, () =>
+        {
+            _card = null;
+            WindowEffects.SetCloaked(this, false);
+        });
+    }
+
+    /// <summary>出场的牌还没落定时直接让置物架现身，例如途中又被复用或要关闭。</summary>
+    private void FinishEntrance()
+    {
+        if (_card is not { } card) return;
+        _card = null;
+        WindowEffects.SetCloaked(this, false);
+        card.Cancel();
+    }
+
+    /// <summary>按设备像素截下置物架现在的样子，作为出场和离场那张牌的正面。</summary>
+    private BitmapSource? CaptureSurface()
+    {
+        UpdateLayout();
+        return Root.ActualWidth < 1 || Root.ActualHeight < 1 ? null : VisualCapture.Of(Root);
+    }
+
+    private static RECT WorkArea(RECT rect) =>
+        WindowPlacement.GetMonitor(new POINT(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2)).WorkArea;
 
     /// <summary>
     /// 缩放和淡入淡出期间把内容缓存为位图，每帧只需合成，不必重新绘制虚线边框、阴影和文字。
@@ -342,8 +388,8 @@ public partial class ShelfWindow : Window
         _slideFrame = null;
     }
 
-    /// <summary>窗口正在滑入或退出。</summary>
-    public bool IsSliding => _slideFrame is not null;
+    /// <summary>窗口正在滑入，或者有牌在替它出场、离场。</summary>
+    public bool IsSliding => _slideFrame is not null || _card is not null;
 
     private static void MoveWindow(IntPtr handle, int x, int y) =>
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, x, y, 0, 0,
@@ -361,8 +407,8 @@ public partial class ShelfWindow : Window
                 _countChanged = true;
                 goto case nameof(ShelfViewModel.IsExpanded);
             case nameof(ShelfViewModel.IsExpanded):
-                // 数量变化时项目集合还在通知列表的途中；此时改窗口大小会立即重新布局，
-                // 列表与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
+                // 数量变化时项目集合还在通知列表控件的途中；此时改窗口大小会立即重新布局，
+                // 平铺与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
                 if (_layoutPending) break;
                 _layoutPending = true;
                 Dispatcher.BeginInvoke(() =>
@@ -387,7 +433,7 @@ public partial class ShelfWindow : Window
         StackRank.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, RankRollDuration) { EasingFunction = ease });
     }
 
-    /// <summary>数量或视图变化后更新界面：只是切换了堆叠和列表时播放切换动画，刚拖入文件时播放落下的动画。</summary>
+    /// <summary>数量或视图变化后更新界面：只是切换了堆叠和平铺时播放切换动画，刚拖入文件时播放落下的动画。</summary>
     private void RefreshViews()
     {
         var switched = !_countChanged && _shownExpanded != ViewModel.IsExpanded;
@@ -405,7 +451,7 @@ public partial class ShelfWindow : Window
         UpdateViews();
         UpdateWindowSize();
         if (landing is not { } drop || !animate) return;
-        if (ViewModel.IsExpanded) PlayListLanding(drop.Point, drop.Added);
+        if (ViewModel.IsExpanded) PlayGridLanding(drop.Point, drop.Added);
         else PlayLanding(drop.Point, drop.Added);
     }
 
@@ -439,7 +485,7 @@ public partial class ShelfWindow : Window
     {
         StackView.Visibility = ViewModel.HasItems && !ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
         ItemsList.Visibility = ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
-        ViewToggleButton.Content = ViewModel.IsExpanded ? "\uE81E" : "\uE8FD";
+        ViewToggleButton.Content = ViewModel.IsExpanded ? "\uE81E" : "\uF0E2";
         ViewToggleButton.ToolTip = ViewModel.IsExpanded ? Strings.MenuCollapse : Strings.MenuExpand;
         System.Windows.Automation.AutomationProperties.SetName(ViewToggleButton, (string)ViewToggleButton.ToolTip);
     }
@@ -464,8 +510,9 @@ public partial class ShelfWindow : Window
         var width = ViewModel.IsExpanded
             ? QuickShelfSizeOptions.ResolveExpandedWidth(_size)
             : QuickShelfSizeOptions.ResolveWidth(_size);
+        // 平铺最多显示两行，再多就滚动；内容区左右各留 10。
         var body = ViewModel.IsExpanded
-            ? Math.Min(Math.Max(ViewModel.Count, 2), 6) * RowHeight + 6
+            ? CardGridPanel.HeightFor(Math.Clamp(CardGridPanel.RowsFor(ViewModel.Count, width - 20), 1, 2))
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
         // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
@@ -1039,7 +1086,7 @@ public partial class ShelfWindow : Window
         if (ViewModel.IsExpanded)
             menu.Items.Add(CreateMenuItem(Strings.MenuCollapse, "\uE81E", () => ViewModel.IsExpanded = false, "Esc"));
         else if (hasItems)
-            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "\uE8FD", Expand));
+            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "\uF0E2", Expand));
         menu.Items.Add(CreateMenuItem(Strings.MenuSelectAll, "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));

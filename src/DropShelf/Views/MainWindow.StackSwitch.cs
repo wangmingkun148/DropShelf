@@ -68,14 +68,14 @@ public partial class MainWindow
 
         // 先把两张卡面准备好，再隐藏真实页面，不会在截图准备时露出空白。
         var capturing = Stopwatch.GetTimestamp();
-        var oldFace = new Image { Source = Capture(from.Sheet), Stretch = Stretch.Fill, Width = fromArea.Width, Height = fromArea.Height };
+        var oldFace = new Image { Source = VisualCapture.Of(from.Sheet), Stretch = Stretch.Fill, Width = fromArea.Width, Height = fromArea.Height };
         var border = to.Sheet.ReadLocalValue(Border.BorderBrushProperty);
         Image newFace;
         try
         {
             // 新卡展开时下沿会变，单独画外框，避免截图里的边框重叠。
             to.Sheet.BorderBrush = Brushes.Transparent;
-            newFace = new Image { Source = Capture(to.Sheet), Stretch = Stretch.Fill, Width = toArea.Width, Height = toArea.Height };
+            newFace = new Image { Source = VisualCapture.Of(to.Sheet), Stretch = Stretch.Fill, Width = toArea.Width, Height = toArea.Height };
         }
         finally
         {

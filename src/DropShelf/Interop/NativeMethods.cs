@@ -258,6 +258,7 @@ internal static class NativeMethods
     public const uint TME_LEAVE = 0x2;
     public const uint TME_NONCLIENT = 0x10;
     public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+    public const int DWMWA_CLOAK = 13;
     public const int HTTRANSPARENT = -1;
 
     public const uint NIM_ADD = 0;
