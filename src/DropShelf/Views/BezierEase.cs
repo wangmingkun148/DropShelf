@@ -13,6 +13,9 @@ internal sealed class BezierEase(double x1, double y1, double x2, double y2) : I
     /// <summary>两个控制点的这一坐标在 0 到 1 之间时，坐标随参数单调增加：二分求出坐标等于 value 的参数。</summary>
     private static double Solve(double p1, double p2, double value)
     {
+        // 两端直接给出，二分只会逼近，动画的起点和终点要正好落在关键帧上。
+        if (value <= 0) return 0;
+        if (value >= 1) return 1;
         double low = 0, high = 1;
         for (var i = 0; i < 30; i++)
         {

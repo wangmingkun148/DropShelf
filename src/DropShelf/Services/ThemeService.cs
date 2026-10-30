@@ -131,7 +131,7 @@ public static class ThemeService
         foreach (var (key, light, darkValue) in NeutralPalette)
             palette[key] = Parse(dark ? darkValue : light);
 
-        // 强调色由用户自选，可能很暗也可能很亮：按实际亮度选择对比度更高的黑字或白字。
+        // 强调色由用户自选，可能很暗也可能很亮：白字够清楚就用白字，和 Windows 一样，太亮的强调色上换成黑字。
         palette["TextOnAccentBrush"] = PrefersDarkText(fill) ? Parse(NeutralInk) : Colors.White;
         palette["TableTextBrush"] = PrefersDarkText(table) ? Parse(NeutralInk) : dark ? palette["TextPrimaryBrush"] : Colors.White;
         return palette;
@@ -263,8 +263,8 @@ public static class ThemeService
         return a > b ? a / b : b / a;
     }
 
-    public static bool PrefersDarkText(WpfColor fill) =>
-        ContrastRatio(fill, Colors.Black) > ContrastRatio(fill, Colors.White);
+    /// <summary>白字的对比度不到 4.5 时改用黑字。Windows 默认的蓝色上黑字的对比度略高一点，但白字也够清楚，按惯例用白字。</summary>
+    public static bool PrefersDarkText(WpfColor fill) => ContrastRatio(fill, Colors.White) < 4.5;
 
     /// <summary>把颜色逐步向白色（深色主题）或黑色（浅色主题）调整，直到与背景达到所需对比度。</summary>
     public static WpfColor EnsureContrast(WpfColor color, WpfColor background, double ratio, bool lighten)
