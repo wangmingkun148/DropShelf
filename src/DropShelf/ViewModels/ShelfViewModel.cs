@@ -159,11 +159,18 @@ public sealed class ShelfViewModel : ObservableObject
 
     private ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries, IReadOnlyDictionary<string, FileFacts?>? facts)
     {
-        // 一次放入很多项目时，数量、标题和汇总等派生属性在全部放入后只通知一次。
+        var summary = new ShelfAddSummary(0, 0, 0);
+        Batch(() => summary = AddEntriesCore(entries, facts));
+        return summary;
+    }
+
+    /// <summary>一次放入或移除很多项目时，数量、标题和汇总等派生属性在全部完成后只通知一次。</summary>
+    private void Batch(Action change)
+    {
         _batchDepth++;
         try
         {
-            return AddEntriesCore(entries, facts);
+            change();
         }
         finally
         {
@@ -254,7 +261,11 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Remove(IEnumerable<ShelfItem> items)
     {
-        foreach (var item in items.ToArray()) Items.Remove(item);
+        var removing = items.ToArray();
+        Batch(() =>
+        {
+            foreach (var item in removing) Items.Remove(item);
+        });
     }
 
     public void Clear() => Items.Clear();
@@ -277,12 +288,8 @@ public sealed class ShelfViewModel : ObservableObject
         switch (result)
         {
             case DragOutResult.Moved:
-                var pending = new List<ShelfItem>();
-                foreach (var item in dragged)
-                {
-                    if (!item.IsFileSystem || !item.RefreshAvailability()) Items.Remove(item);
-                    else pending.Add(item);
-                }
+                var pending = dragged.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
+                Remove(dragged.Except(pending));
                 // 资源管理器可能在后台继续移动大文件，稍后再确认一次。
                 if (pending.Count > 0) _ = RemoveWhenGoneAsync(pending);
                 return pending.Count < dragged.Count;
@@ -539,10 +546,7 @@ public sealed class ShelfViewModel : ObservableObject
     private async Task RemoveWhenGoneAsync(IReadOnlyList<ShelfItem> items)
     {
         await Task.Delay(TimeSpan.FromSeconds(2.5));
-        foreach (var item in items)
-        {
-            if (Items.Contains(item) && !item.RefreshAvailability()) Items.Remove(item);
-        }
+        Remove(items.Where(item => Items.Contains(item) && !item.RefreshAvailability()));
     }
 
     private int IndexOfPath(string path)

@@ -55,7 +55,7 @@ public static class ImageCompressor
                 ? Path.GetDirectoryName(source) ?? throw new IOException("无法确定输出文件保存位置")
                 : outputDirectory;
             Directory.CreateDirectory(directory);
-            var output = GetAvailablePath(directory, $"{Path.GetFileNameWithoutExtension(source)}-{FormatLimit(maximumBytes)}", ".jpg");
+            var output = FileOperationService.GetAvailablePath(directory, $"{Path.GetFileNameWithoutExtension(source)}-{FormatLimit(maximumBytes)}", ".jpg");
             temporaryPath = Path.Combine(directory, $".dropshelf-{Guid.NewGuid():N}.tmp");
             File.WriteAllBytes(temporaryPath, bytes);
             File.Move(temporaryPath, output);
@@ -265,13 +265,5 @@ public static class ImageCompressor
     {
         var kilobytes = maximumBytes / 1024;
         return kilobytes >= 1024 && kilobytes % 1024 == 0 ? $"{kilobytes / 1024}MB" : $"{kilobytes}KB";
-    }
-
-    private static string GetAvailablePath(string directory, string baseName, string extension)
-    {
-        var candidate = Path.Combine(directory, baseName + extension);
-        for (var suffix = 2; File.Exists(candidate) || Directory.Exists(candidate); suffix++)
-            candidate = Path.Combine(directory, $"{baseName} ({suffix}){extension}");
-        return candidate;
     }
 }

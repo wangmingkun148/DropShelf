@@ -49,7 +49,10 @@ public sealed class FileOperationService
                 {
                     EnsureExists(source);
                     EnsureDestinationIsNotInsideSource(source, destination);
-                    target = GetAvailablePath(destination, GetSourceName(source), Directory.Exists(source));
+                    var name = GetSourceName(source);
+                    target = Directory.Exists(source)
+                        ? GetAvailablePath(destination, name)
+                        : GetAvailablePath(destination, Path.GetFileNameWithoutExtension(name), Path.GetExtension(name));
                     operation(source, target);
                     results.Add(new FileOperationResult(source, target, true));
                     LogService.Info($"{verb}完成：{source} -> {target}");
@@ -126,19 +129,16 @@ public sealed class FileOperationService
         }
     }
 
-    private static string GetAvailablePath(string destination, string name, bool isDirectory)
+    /// <summary>目标文件夹里还没被占用的路径：重名时依次加上 (2)、(3)…；压缩包、解压和压缩图片的输出也用它。</summary>
+    internal static string GetAvailablePath(string directory, string baseName, string extension = "")
     {
-        var candidate = Path.Combine(destination, name);
-        if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
-
-        var baseName = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
-        var extension = isDirectory ? string.Empty : Path.GetExtension(name);
-        for (var index = 2; index < 10_000; index++)
+        var candidate = Path.Combine(directory, baseName + extension);
+        for (var index = 2; File.Exists(candidate) || Directory.Exists(candidate); index++)
         {
-            candidate = Path.Combine(destination, $"{baseName} ({index}){extension}");
-            if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+            if (index >= 10_000) throw new IOException("目标文件夹中重名项目过多，无法生成新名称。");
+            candidate = Path.Combine(directory, $"{baseName} ({index}){extension}");
         }
-        throw new IOException("目标文件夹中重名项目过多，无法生成新名称。");
+        return candidate;
     }
 
     private static void ValidateDestination(string destination)

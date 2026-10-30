@@ -30,9 +30,14 @@ public partial class ShelfWindow
     private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(200);
     private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
 
-    private readonly List<EventHandler> _motionFrames = [];
+    private readonly List<MotionTween> _tweens = [];
+    private bool _motionHooked;
+    private TimeSpan _motionFrameTime;
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
+
+    /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
+    private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
 
     /// <summary>牌在堆叠画布里的姿态：中心位置、角度、缩放和透明度。</summary>
     private readonly record struct CardPose(double X, double Y, double Angle, double Scale = 1, double Opacity = 1)
@@ -330,19 +335,31 @@ public partial class ShelfWindow
     private void Tween(TimeSpan delay, TimeSpan duration, Action<double> apply, Action? completed = null)
     {
         apply(0);
-        var clock = Stopwatch.StartNew();
-        EventHandler? frame = null;
-        frame = (_, _) =>
+        _tweens.Add(new MotionTween(Stopwatch.GetTimestamp(), delay, duration, apply, completed));
+        if (_motionHooked) return;
+        _motionHooked = true;
+        CompositionTarget.Rendering += OnMotionFrame;
+    }
+
+    /// <summary>所有动画共用一个逐帧回调：同一帧重复触发时跳过，还在等待的动画停在起点不更新。</summary>
+    private void OnMotionFrame(object? sender, EventArgs e)
+    {
+        var time = ((RenderingEventArgs)e).RenderingTime;
+        if (time == _motionFrameTime) return;
+        _motionFrameTime = time;
+        for (var i = 0; i < _tweens.Count; i++)
         {
-            var progress = duration <= TimeSpan.Zero ? 1 : Math.Clamp((clock.Elapsed - delay) / duration, 0, 1);
-            apply(MotionEase.Ease(progress));
-            if (progress < 1) return;
-            CompositionTarget.Rendering -= frame;
-            _motionFrames.Remove(frame!);
-            completed?.Invoke();
-        };
-        _motionFrames.Add(frame);
-        CompositionTarget.Rendering += frame;
+            var tween = _tweens[i];
+            var elapsed = Stopwatch.GetElapsedTime(tween.Start) - tween.Delay;
+            if (elapsed < TimeSpan.Zero) continue;
+            var progress = tween.Duration <= TimeSpan.Zero ? 1 : Math.Min(elapsed / tween.Duration, 1);
+            tween.Apply(MotionEase.Ease(progress));
+            if (progress < 1) continue;
+            _tweens.RemoveAt(i--);
+            // 收尾可能直接结束全部动画并清空列表，循环随之结束。
+            tween.Completed?.Invoke();
+        }
+        if (_tweens.Count == 0) StopMotion();
     }
 
     /// <summary>窗口大小逐帧过渡到目标大小，左上角不动；只改大小不改位置，和滑入动画互不影响。跳到终点时由收尾的 UpdateWindowSize 变到位。</summary>
@@ -381,8 +398,10 @@ public partial class ShelfWindow
 
     private void StopMotion()
     {
-        foreach (var frame in _motionFrames) CompositionTarget.Rendering -= frame;
-        _motionFrames.Clear();
+        _tweens.Clear();
+        if (!_motionHooked) return;
+        _motionHooked = false;
+        CompositionTarget.Rendering -= OnMotionFrame;
     }
 
     private static void Pin(FrameworkElement element, WpfSize size)
