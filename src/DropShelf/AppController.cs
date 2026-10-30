@@ -79,7 +79,10 @@ public sealed class AppController : IDisposable
             () => new TrayMenuState(_settings.HotkeyGesture.ToString(), History.Entries),
             ShowMainWindow, () => Shelves.OpenAtCursor(activate: true), entry => Shelves.Restore(entry), History.Clear, Exit);
         _hotkey = new HotkeyService(_messageWindow);
-        _hotkey.Pressed += (_, _) => Shelves.OpenAtCursor(activate: true);
+        _hotkey.Pressed += (_, _) =>
+        {
+            if (_appWatcher?.CheckForeground() != true) Shelves.OpenAtCursor(activate: true);
+        };
         IsHotkeyRegistered = _hotkey.Register(_settings.HotkeyGesture);
 
         _probe = new ProbeWindow();
@@ -304,7 +307,7 @@ public sealed class AppController : IDisposable
 
     private void OnShakeDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting) return;
+        if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"识别到晃动 ({e.X}, {e.Y})，显示探针窗口");
         _pendingEdge = ScreenEdge.None;
         _probe?.ShowAt(new POINT(e.X, e.Y));
@@ -312,11 +315,18 @@ public sealed class AppController : IDisposable
 
     private void OnEdgeDwellDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting) return;
+        if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"在屏幕边缘停留 ({e.X}, {e.Y}, {e.Edge})，显示探针窗口");
         _pendingEdge = e.Edge;
         _probe?.ShowAt(new POINT(e.X, e.Y));
         _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
+    }
+
+    private bool IsBlockedAt(GestureTriggeredEventArgs e)
+    {
+        if (_appWatcher?.IsBlockedAt(new POINT(e.X, e.Y)) != true) return false;
+        LogService.Trace($"识别到手势 ({e.X}, {e.Y})，但前台或光标下是屏蔽的应用，不弹出置物架");
+        return true;
     }
 
     private void OnDragReleased(object? sender, EventArgs e)

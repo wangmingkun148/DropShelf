@@ -15,7 +15,8 @@ public sealed class ForegroundAppWatcher : IDisposable
     private IntPtr _hook;
 
     // 系统通过这个委托回调，必须一直持有，否则被回收后会崩溃。
-    public ForegroundAppWatcher() => _callback = (_, _, window, _, _, _, _) => Update(window);
+    // 通知可能晚到、一次切换也可能连续收到几条，每次都以当前真正的前台窗口为准。
+    public ForegroundAppWatcher() => _callback = (_, _, _, _, _, _, _) => Update(NativeMethods.GetForegroundWindow());
 
     public bool IsBlocked { get; private set; }
 
@@ -32,6 +33,20 @@ public sealed class ForegroundAppWatcher : IDisposable
     }
 
     public void Dispose() => Unhook();
+
+    /// <summary>按快捷键时再确认一次前台程序，并校正暂停状态。</summary>
+    public bool CheckForeground()
+    {
+        Update(NativeMethods.GetForegroundWindow());
+        return IsBlocked;
+    }
+
+    /// <summary>
+    /// 识别到手势时再确认一次：前台窗口或光标下的窗口属于屏蔽的程序。
+    /// 光标下的也算：从别的程序把文件拖到屏蔽的程序上方时，前台仍是来源程序。
+    /// </summary>
+    public bool IsBlockedAt(POINT point) => CheckForeground() ||
+        _blocked.Count > 0 && IsBlockedWindow(NativeMethods.GetAncestor(NativeMethods.WindowFromPoint(point), NativeMethods.GA_ROOT));
 
     /// <summary>当前有可见窗口的程序文件名，按名称排序，不含本程序。</summary>
     public static IReadOnlyList<string> GetWindowedApps()
@@ -54,14 +69,16 @@ public sealed class ForegroundAppWatcher : IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    private bool IsBlockedWindow(IntPtr window)
+    {
+        if (window == IntPtr.Zero) return false;
+        NativeMethods.GetWindowThreadProcessId(window, out var process);
+        return GetProcessFileName(process) is { } name && _blocked.Contains(name);
+    }
+
     private void Update(IntPtr window)
     {
-        var blocked = false;
-        if (_blocked.Count > 0 && window != IntPtr.Zero)
-        {
-            NativeMethods.GetWindowThreadProcessId(window, out var process);
-            blocked = GetProcessFileName(process) is { } name && _blocked.Contains(name);
-        }
+        var blocked = _blocked.Count > 0 && IsBlockedWindow(window);
         if (blocked == IsBlocked) return;
         IsBlocked = blocked;
         LogService.Trace(blocked ? "屏蔽的应用切到前台，暂停弹出置物架" : "屏蔽的应用离开前台，恢复弹出置物架");
@@ -72,7 +89,7 @@ public sealed class ForegroundAppWatcher : IDisposable
     private static string? GetProcessFileName(uint processId)
     {
         var process = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
-        if (process == IntPtr.Zero) return null;
+        if (process == IntPtr.Zero) return GetProtectedProcessFileName(processId);
         try
         {
             var path = new StringBuilder(1024);
@@ -82,6 +99,21 @@ public sealed class ForegroundAppWatcher : IDisposable
         finally
         {
             NativeMethods.CloseHandle(process);
+        }
+    }
+
+    /// <summary>带反作弊等保护的进程不允许打开，改从系统的进程列表读取名称。</summary>
+    private static string? GetProtectedProcessFileName(uint processId)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById((int)processId);
+            return process.ProcessName + ".exe";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // 进程已经退出。
+            return null;
         }
     }
 

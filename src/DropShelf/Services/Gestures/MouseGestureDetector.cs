@@ -198,7 +198,7 @@ public sealed class MouseGestureDetector
         int MinimumDurationMilliseconds,
         int MaximumDurationMilliseconds)
     {
-        private static readonly GestureProfile Steady = new(60, 300, 4, 260, 1000);
+        private static readonly GestureProfile Steady = new(70, 480, 5, 320, 1200);
         private static readonly GestureProfile Balanced = new(34, 153, 3, 180, 800);
         private static readonly GestureProfile Responsive = new(15, 70, 2, 100, 850);
 

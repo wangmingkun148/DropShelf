@@ -158,9 +158,9 @@
                            MaxWidth="80" TextTrimming="CharacterEllipsis"
                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <!-- 在文件堆和列表之间切换，只有一项时不需要列表 -->
+                    <!-- 在文件堆和列表之间切换，有项目时就显示 -->
                     <Button x:Name="ViewToggleButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
-                            Click="OnViewToggleClick" Visibility="{Binding HasMultiple, Converter={StaticResource BoolToVisibility}}" />
+                            Click="OnViewToggleClick" Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}" />
                     <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
                             Content="{StaticResource Glyph.More}" ToolTip="{l:Loc MoreTooltip}" Click="OnMoreClick" />
                     <Button x:Name="CloseButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="11"

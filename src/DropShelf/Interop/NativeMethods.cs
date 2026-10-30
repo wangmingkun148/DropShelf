@@ -506,6 +506,7 @@ internal static class NativeMethods
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     public const uint GW_OWNER = 4;
+    public const uint GA_ROOT = 2;
     public const int DWMWA_CLOAKED = 14;
     public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
@@ -523,6 +524,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);

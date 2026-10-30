@@ -610,7 +610,7 @@ public sealed class ShelfViewModel : ObservableObject
         OnPropertyChanged(nameof(Stack2));
         OnPropertyChanged(nameof(StackCaption));
         OnPropertyChanged(nameof(StackDetail));
-        if (Items.Count <= 1 && IsExpanded) IsExpanded = false;
+        if (Items.Count == 0 && IsExpanded) IsExpanded = false;
         UpdateThumbnails();
     }
 

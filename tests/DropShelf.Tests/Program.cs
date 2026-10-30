@@ -464,7 +464,8 @@ internal static class Program
     {
         Assert(Shake(ShakeSensitivities.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
         Assert(Shake(ShakeSensitivities.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
-        Assert(Shake(ShakeSensitivities.Steady, [100, 165, 100, 165, 100, 165, 100], 70), "稳健档无法通过明确晃动触发");
+        Assert(Shake(ShakeSensitivities.Steady, [100, 185, 100, 185, 100, 185, 100, 185], 100), "稳健档无法通过明确晃动触发");
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 165, 100, 165, 100, 165, 100], 70), "最稳健时被 2.5.7 的稳健档晃动触发");
 
         // 三档的差距：灵敏档轻晃即可，均衡档不行；均衡档的正常晃动在稳健档不够。
         Assert(Shake(ShakeSensitivities.Responsive, [100, 125, 100, 125], 70), "灵敏档无法通过轻晃触发");
@@ -491,7 +492,7 @@ internal static class Program
 
         // 设置页的说明：两端和中间与原来的三档一致，拖向灵敏时幅度和次数只减不增，且照说明晃动一定能触发。
         var descriptions = Enumerable.Range(0, 101).Select(MouseGestureDetector.Describe).ToArray();
-        Assert(descriptions[0] == (4, 60) && descriptions[50] == (3, 38) && descriptions[100] == (2, 23), "灵敏度说明与原来的三档不一致");
+        Assert(descriptions[0] == (5, 80) && descriptions[50] == (3, 38) && descriptions[100] == (2, 23), "灵敏度两端和中间的说明不正确");
         Assert(descriptions.Zip(descriptions.Skip(1)).All(pair => pair.Second.Distance <= pair.First.Distance && pair.Second.Reversals <= pair.First.Reversals),
             "灵敏度说明没有随滑块单调变化");
         Assert(descriptions.Select((description, level) => (description, level)).All(item =>
@@ -1570,15 +1571,21 @@ internal static class Program
         var folder = CreateFolder("shelf-window");
         var file = Path.Combine(folder, "a.txt");
         File.WriteAllText(file, "x");
-        window.ViewModel.AddFiles([file, folder]);
+        var toggle = (System.Windows.Controls.Button)window.FindName("ViewToggleButton")!;
+        Assert(toggle.Visibility == Visibility.Collapsed, "空置物架不应显示文件堆/列表切换按钮");
+        window.ViewModel.AddFiles([file]);
+        Pump(100);
+        Assert(toggle.Visibility == Visibility.Visible, "只有一项时也应显示文件堆/列表切换按钮");
+        window.ViewModel.AddFiles([folder]);
         Pump(100);
         Assert(!window.IsReusable, "有内容的置物架不应被复用");
         Assert(window.ViewModel.IsPinned && window.Topmost, "置物架默认应置顶");
         window.ViewModel.IsPinned = false;
         Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
         window.ViewModel.IsPinned = true;
-        window.ViewModel.IsExpanded = true;
+        toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(100);
+        Assert(window.ViewModel.IsExpanded, "点击切换按钮没有展开列表");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
         // 展开时继续放入项目：窗口变高要等列表收到新增项目之后，否则布局会抛出异常。
@@ -1739,7 +1746,7 @@ internal static class Program
 
         var viewModel = (SettingsViewModel)window.DataContext;
         ((System.Windows.Controls.Slider)window.FindName("SensitivitySlider")!).Value = 20;
-        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(4, 51), "拖动滑块时说明没有立即更新");
+        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 63), "拖动滑块时说明没有立即更新");
         Pump(400);
         var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }
             .Select(name => ((System.Windows.Media.ScaleTransform)((FrameworkElement)window.FindName(name)!).RenderTransform).ScaleX).ToArray();

@@ -8,7 +8,7 @@ public enum GestureSensitivity
     Steady
 }
 
-/// <summary>晃动灵敏度 0–100：0 最稳健，100 最灵敏，50 为默认。两端和中间分别对应旧版的稳健、灵敏和均衡档。</summary>
+/// <summary>晃动灵敏度 0–100：0 最稳健，100 最灵敏，50 为默认（与旧版的均衡档相同）。</summary>
 public static class ShakeSensitivities
 {
     public const int Steady = 0;
@@ -20,7 +20,8 @@ public static class ShakeSensitivities
     public static int FromLegacy(GestureSensitivity legacy) => legacy switch
     {
         GestureSensitivity.Responsive => Responsive,
-        GestureSensitivity.Steady => Steady,
+        // 旧版的稳健档比现在的最稳健容易，约等于 20。
+        GestureSensitivity.Steady => 20,
         _ => Balanced
     };
 }

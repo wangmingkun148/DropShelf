@@ -84,7 +84,7 @@
     <sys:String x:Key="Glyph.Mouse">&#xE962;</sys:String>
     <sys:String x:Key="Glyph.Move">&#xE7C2;</sys:String>
     <sys:String x:Key="Glyph.ViewAll">&#xE8A9;</sys:String>
-    <sys:String x:Key="Glyph.List">&#xEA37;</sys:String>
+    <sys:String x:Key="Glyph.List">&#xE8FD;</sys:String>
     <sys:String x:Key="Glyph.Check">&#xE73E;</sys:String>
     <sys:String x:Key="Glyph.Error">&#xE783;</sys:String>
     <sys:String x:Key="Glyph.Add">&#xE710;</sys:String>

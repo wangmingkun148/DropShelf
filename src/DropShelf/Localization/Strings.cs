@@ -146,7 +146,7 @@ public static class Strings
     public static string DwellMedium => T("0.6 秒", "0.6 s");
     public static string DwellLong => T("1 秒", "1 s");
     public static string BlockedAppsHeader => T("屏蔽的应用", "Excluded apps");
-    public static string BlockedAppsDescription => T("这些应用在前台时不弹出置物架，快捷键也交给应用自己使用", "While these apps are in front, no shelf opens and the hotkey goes to the app");
+    public static string BlockedAppsDescription => T("这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", "No shelf opens while these apps are in front or you drag over their windows, and the hotkey goes to the app");
     public static string AddApp => T("添加应用", "Add app");
     public static string BrowseApp => T("浏览…", "Browse…");
     public static string AppFilter => T("程序|*.exe", "Programs|*.exe");

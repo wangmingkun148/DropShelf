@@ -384,7 +384,7 @@ public partial class ShelfWindow : Window
     {
         StackView.Visibility = ViewModel.HasItems && !ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
         ItemsList.Visibility = ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
-        ViewToggleButton.Content = ViewModel.IsExpanded ? "\uE81E" : "\uEA37";
+        ViewToggleButton.Content = ViewModel.IsExpanded ? "\uE81E" : "\uE8FD";
         ViewToggleButton.ToolTip = ViewModel.IsExpanded ? Strings.MenuCollapse : Strings.MenuExpand;
         System.Windows.Automation.AutomationProperties.SetName(ViewToggleButton, (string)ViewToggleButton.ToolTip);
     }
@@ -933,6 +933,10 @@ public partial class ShelfWindow : Window
         var targets = GetTargets();
         var hasItems = ViewModel.HasItems;
         var menu = new ContextMenu();
+        if (ViewModel.IsExpanded)
+            menu.Items.Add(CreateMenuItem(Strings.MenuCollapse, "\uE81E", () => ViewModel.IsExpanded = false, "Esc"));
+        else if (hasItems)
+            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "\uE8FD", Expand));
         menu.Items.Add(CreateMenuItem(Strings.MenuSelectAll, "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));
