@@ -7,7 +7,7 @@ DropShelf is a temporary shelf for files on Windows. While dragging files, shake
 **Highlights**
 
 - Appears only while you drag, without slowing the mouse or popping up by mistake.
-- Takes files, folders, images, text, links, and attachments from browsers, mail and chat apps.
+- Takes files, folders, images, text, links and attachments from browsers, mail and chat apps.
 - Built-in quick actions such as compress, extract and move to, plus your own custom actions.
 - Shelves closed by mistake can be reopened.
 - Smooth animations: cards and pages follow your mouse as you drag.
@@ -34,7 +34,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 1. Install and run it. After you close the main window, DropShelf keeps running in the notification area.
 2. Start dragging files and quickly shake the mouse back and forth: a shelf appears at the cursor. You can also drag to the left, right or top edge of the screen and pause.
-3. Drop the files on the shelf. Later, drag the thumbnail stack to take all files at once, or open the list with the list button at the top to drag out single or multiple items.
+3. Drop the files on the shelf. Later, drag the thumbnail stack to take all files at once, or click the list button at the top to open the list and drag out one or more items.
 4. Press `Ctrl+Shift+Space` at any time to open an empty shelf, then press `Ctrl+V` to paste files, images or text.
 
 ## Features
@@ -42,7 +42,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 ### Opening a shelf
 - Open shelves by Shake, Screen edge or Both.
 - Shakes can be horizontal, vertical or diagonal. A slider sets the sensitivity anywhere from Steady to Responsive, and settings show how far and how many times you need to shake.
-- Add excluded apps: while one of them is in front or you drag over its windows, no shelf opens and the hotkey goes to the app. Handy for games and drawing apps.
+- Add excluded apps: while one of them is in the foreground or you drag over its windows, no shelf opens and the keyboard shortcut is left to the app. Handy for games and drawing apps.
 - Left, right and top screen edges are supported, with a pause of 0.3, 0.6 or 1 s; edges with the taskbar and edges shared between monitors don't trigger.
 
 ### The shelf
@@ -68,7 +68,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Created ZIP files and extracted folders go to a new shelf; existing files with the same name are never overwritten.
 
 ### Settings and appearance
-- Light, Dark or System theme; the accent color is cobalt by default, and can follow Windows or be one of seven other colors.
+- Light, Dark or System theme; the accent color is cobalt by default and can follow Windows or be one of seven other colors.
 - English and Simplified Chinese interface, following the system language by default.
 - Settings apply immediately and are saved automatically.
 - A tutorial is shown on first run and can be viewed again from General.
