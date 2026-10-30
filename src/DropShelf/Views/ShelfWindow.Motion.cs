@@ -39,22 +39,22 @@ public partial class ShelfWindow
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
     private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
 
-    /// <summary>牌在堆叠画布里的姿态：中心位置、角度、缩放和透明度。</summary>
-    private readonly record struct CardPose(double X, double Y, double Angle, double Scale = 1, double Opacity = 1)
+    /// <summary>牌在置物架里的姿态（DIP，相对所在的画布，平铺的牌相对自己的格子）：中心位置、角度、缩放和透明度。与拖动历史卡片用的 ScreenCardPose 不同。</summary>
+    private readonly record struct LocalCardPose(double X, double Y, double Angle, double Scale = 1, double Opacity = 1)
     {
-        public static CardPose Lerp(CardPose from, CardPose to, double t) => new(
+        public static LocalCardPose Lerp(LocalCardPose from, LocalCardPose to, double t) => new(
             from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t, from.Angle + (to.Angle - from.Angle) * t,
             from.Scale + (to.Scale - from.Scale) * t, from.Opacity + (to.Opacity - from.Opacity) * t);
     }
 
     /// <summary>堆叠里的一张牌和它在 XAML 中的原位。</summary>
-    private sealed class StackCard(ContentControl card, ScaleTransform scale, RotateTransform turn, TranslateTransform shift, CardPose home)
+    private sealed class StackCard(ContentControl card, ScaleTransform scale, RotateTransform turn, TranslateTransform shift, LocalCardPose home)
     {
         public ContentControl Card { get; } = card;
-        public CardPose Home { get; } = home;
+        public LocalCardPose Home { get; } = home;
 
         /// <summary>按中心摆放：牌在画布上的位置不变，平移量把中心移到目标点，旋转和缩放都绕中心。</summary>
-        public void Pose(CardPose pose)
+        public void Pose(LocalCardPose pose)
         {
             shift.X = pose.X - (Canvas.GetLeft(Card) + Card.Width / 2);
             shift.Y = pose.Y - (Canvas.GetTop(Card) + Card.Height / 2);
@@ -70,7 +70,7 @@ public partial class ShelfWindow
             var offset = group?.Children.OfType<TranslateTransform>().FirstOrDefault();
             var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(angle), new TranslateTransform(offset?.X ?? 0, offset?.Y ?? 0));
             card.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
-            var home = new CardPose(Canvas.GetLeft(card) + card.Width / 2 + shift.X, Canvas.GetTop(card) + card.Height / 2 + shift.Y, angle);
+            var home = new LocalCardPose(Canvas.GetLeft(card) + card.Width / 2 + shift.X, Canvas.GetTop(card) + card.Height / 2 + shift.Y, angle);
             return new StackCard(card, scale, turn, shift, home);
         }
     }
@@ -101,7 +101,7 @@ public partial class ShelfWindow
             if (i < incoming)
             {
                 var delay = LandStagger * (incoming - 1 - i);
-                var from = new CardPose(start.X, start.Y, -8, 0.5, 0);
+                var from = new LocalCardPose(start.X, start.Y, -8, 0.5, 0);
                 var control = new WpfPoint((from.X + card.Home.X) / 2, Math.Min(from.Y, card.Home.Y) - 20);
                 var landed = count - i;
                 var top = i == 0;
@@ -111,7 +111,7 @@ public partial class ShelfWindow
             else
             {
                 var from = cards[i - incoming].Home;
-                Tween(PushDelay, PushDuration, t => card.Pose(CardPose.Lerp(from, card.Home, t)));
+                Tween(PushDelay, PushDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
                 end = Max(end, PushDelay + PushDuration);
             }
         }
@@ -125,10 +125,10 @@ public partial class ShelfWindow
     }
 
     /// <summary>落下的路径：位置沿二次贝塞尔曲线划一道弧，缩放途中略微超过原大小，开头很快变得不透明。</summary>
-    private static CardPose Arc(CardPose from, CardPose to, WpfPoint control, double t)
+    private static LocalCardPose Arc(LocalCardPose from, LocalCardPose to, WpfPoint control, double t)
     {
         var u = 1 - t;
-        return new CardPose(
+        return new LocalCardPose(
             u * u * from.X + 2 * u * t * control.X + t * t * to.X,
             u * u * from.Y + 2 * u * t * control.Y + t * t * to.Y,
             from.Angle + (to.Angle - from.Angle) * t,
@@ -158,8 +158,8 @@ public partial class ShelfWindow
                 FindNamed(tile, "TileName") is not { } name) continue;
             // 位置用相对格子的平移表示：从松手处出发，从拖动图像大小放大，落到原位。
             var center = tile.TranslatePoint(TileCardCenter, this);
-            var from = new CardPose(drop.X - center.X, drop.Y - center.Y, -8, 0.5, 0);
-            var home = new CardPose(0, 0, 0);
+            var from = new LocalCardPose(drop.X - center.X, drop.Y - center.Y, -8, 0.5, 0);
+            var home = new LocalCardPose(0, 0, 0);
             var control = new WpfPoint(from.X / 2, Math.Min(from.Y, 0) - 20);
             var pose = PoseTile(tile);
             tiles.Add(tile);
@@ -206,10 +206,10 @@ public partial class ShelfWindow
 
         var cards = StackCards;
         var stackScale = StackCanvas.TransformToVisual(Body).TransformBounds(new Rect(0, 0, 1, 1)).Width;
-        CardPose InBody(StackCard card)
+        LocalCardPose InBody(StackCard card)
         {
             var center = StackCanvas.TranslatePoint(new WpfPoint(card.Home.X, card.Home.Y), Body);
-            return new CardPose(center.X, center.Y, card.Home.Angle, stackScale);
+            return new LocalCardPose(center.X, center.Y, card.Home.Angle, stackScale);
         }
         var starts = cards.Where(card => card.Card.DataContext is not null).Select(InBody).ToList();
         if (starts.Count == 0) starts.Add(InBody(cards[0]));
@@ -233,13 +233,13 @@ public partial class ShelfWindow
             // 从后往前数：最后一张对着堆叠最上面那张，依次往下，其余的都从最下面那张出发。
             var stack = starts[Math.Min(tiles.Count - 1 - i, starts.Count - 1)];
             var away = stack with { X = stack.X - center.X, Y = stack.Y - center.Y };
-            var home = new CardPose(0, 0, 0);
+            var home = new LocalCardPose(0, 0, 0);
             var (from, to) = toGrid ? (away, home) : (home, away);
             var pose = PoseTile(tile);
             var delay = lead + DealStagger * (toGrid ? i : tiles.Count - 1 - i);
             Tween(delay, FlyDuration, t =>
             {
-                var current = CardPose.Lerp(from, to, t);
+                var current = LocalCardPose.Lerp(from, to, t);
                 pose(current with { Scale = current.Scale + 0.04 * Math.Sin(Math.PI * t) });
             });
             end = Max(end, delay + FlyDuration);
@@ -284,11 +284,11 @@ public partial class ShelfWindow
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
     }
 
-    /// <summary>牌面 64×86 在格子顶部居中，这是它的中心。</summary>
-    private static readonly WpfPoint TileCardCenter = new(CardGridPanel.SlotWidth / 2, 43);
+    /// <summary>牌面在格子顶部居中，这是它的中心。</summary>
+    private static readonly WpfPoint TileCardCenter = new(CardGridPanel.SlotWidth / 2, CardGridPanel.CardHeight / 2);
 
     /// <summary>平铺里的一张牌：以牌面中心为原点缩放、转动，再平移；名字跟着一起动。</summary>
-    private static Action<CardPose> PoseTile(ListBoxItem tile)
+    private static Action<LocalCardPose> PoseTile(ListBoxItem tile)
     {
         var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(), new TranslateTransform());
         tile.RenderTransformOrigin = new WpfPoint(TileCardCenter.X / CardGridPanel.SlotWidth, TileCardCenter.Y / CardGridPanel.SlotHeight);

@@ -70,8 +70,8 @@
 
         <!-- 堆叠里的一张竖版小牌，缩略图印在牌面上；最上面一张的角标另外画在堆叠上面 -->
         <Style x:Key="StackCardStyle" TargetType="ContentControl">
-            <Setter Property="Width" Value="64" />
-            <Setter Property="Height" Value="86" />
+            <Setter Property="Width" Value="{x:Static controls:CardGridPanel.CardWidth}" />
+            <Setter Property="Height" Value="{x:Static controls:CardGridPanel.CardHeight}" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
             <Setter Property="Content" Value="{Binding}" />
@@ -96,8 +96,8 @@
 
         <!-- 拖入时发到桌上的虚线牌 -->
         <Style x:Key="GhostCardStyle" TargetType="Rectangle">
-            <Setter Property="Width" Value="64" />
-            <Setter Property="Height" Value="86" />
+            <Setter Property="Width" Value="{x:Static controls:CardGridPanel.CardWidth}" />
+            <Setter Property="Height" Value="{x:Static controls:CardGridPanel.CardHeight}" />
             <Setter Property="RadiusX" Value="5" />
             <Setter Property="RadiusY" Value="5" />
             <Setter Property="StrokeThickness" Value="1.5" />
@@ -165,12 +165,12 @@
                                 </StackPanel>
                             </Grid.ToolTip>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="86" />
+                                <RowDefinition Height="{x:Static controls:CardGridPanel.CardRowHeight}" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <!-- 牌抬起时露出的桌面投影 -->
-                            <Border x:Name="TileShadow" Width="64" CornerRadius="5" Background="{DynamicResource ShelfUnderCardBorderBrush}" Opacity="0" />
-                            <Grid x:Name="TileCard" Width="64">
+                            <Border x:Name="TileShadow" Width="{x:Static controls:CardGridPanel.CardWidth}" CornerRadius="5" Background="{DynamicResource ShelfUnderCardBorderBrush}" Opacity="0" />
+                            <Grid x:Name="TileCard" Width="{x:Static controls:CardGridPanel.CardWidth}">
                                 <Grid.RenderTransform>
                                     <TranslateTransform />
                                 </Grid.RenderTransform>
@@ -358,7 +358,7 @@
                             <ContentControl x:Name="Card0" Style="{StaticResource StackCardStyle}" Canvas.Left="48" Canvas.Top="12"
                                             DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}" />
                             <!-- 最上面一张的角标：项目数和数量最多的文件类型，右下角倒过来再印一个 -->
-                            <Grid x:Name="StackRankCorner" Canvas.Left="48" Canvas.Top="12" Width="64" Height="86" IsHitTestVisible="False" ClipToBounds="True">
+                            <Grid x:Name="StackRankCorner" Canvas.Left="48" Canvas.Top="12" Width="{x:Static controls:CardGridPanel.CardWidth}" Height="{x:Static controls:CardGridPanel.CardHeight}" IsHitTestVisible="False" ClipToBounds="True">
                                 <StackPanel Margin="5,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
                                     <TextBlock x:Name="StackRank" Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15">
                                         <TextBlock.RenderTransform>
@@ -419,7 +419,7 @@
                     <!-- 拖进来的东西先发两张虚线牌到桌上，夹着原来那一摞；拖到快速操作上时整组变淡 -->
                     <Viewbox x:Name="ShelfDropFrame" Stretch="Uniform" MaxHeight="104">
                         <Canvas Width="176" Height="108">
-                            <Border x:Name="DropStackCard" Canvas.Left="56" Canvas.Top="10" Width="64" Height="86" CornerRadius="5" BorderThickness="1.2"
+                            <Border x:Name="DropStackCard" Canvas.Left="56" Canvas.Top="10" Width="{x:Static controls:CardGridPanel.CardWidth}" Height="{x:Static controls:CardGridPanel.CardHeight}" CornerRadius="5" BorderThickness="1.2"
                                     Background="{DynamicResource ShelfTileBrush}" BorderBrush="{DynamicResource ShelfTileBorderBrush}"
                                     Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15"

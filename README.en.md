@@ -130,8 +130,8 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 - `src/DropShelf/Services/Gestures`: shake detection and screen edge dwell.
 - `src/DropShelf/Views/ProbeWindow.cs`: probe window that confirms what is being dragged.
 - `src/DropShelf/Shelves/ShelfManager.cs`: creating, reusing and closing shelves.
-- `src/DropShelf/Views`: shelf, settings, tutorial and other windows.
-- `src/DropShelf/Services`: drag in and out, quick actions, history, clipboard, theme, tray, hotkeys and more.
+- `src/DropShelf/Views`: shelf, settings, tutorial and other windows. The main window and shelf code is split by feature into `MainWindow.*.cs` and `ShelfWindow.*.cs`, such as flipping, the side panel, dropping in and dragging out.
+- `src/DropShelf/Services`: drag in and out, quick actions, archives, history, clipboard, theme, tray, hotkeys and more.
 - `src/DropShelf/Localization`: English and Chinese UI text.
 - `src/DropShelf/Themes`: colors, icons and control styles.
 - `src/DropShelf/Interop`: Win32, DWM and Shell interfaces.

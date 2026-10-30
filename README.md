@@ -135,8 +135,8 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 - `src/DropShelf/Services/Gestures`：晃动识别与屏幕边缘停留。
 - `src/DropShelf/Views/ProbeWindow.cs`：确认拖动内容的探针窗口。
 - `src/DropShelf/Shelves/ShelfManager.cs`：置物架的创建、复用与关闭。
-- `src/DropShelf/Views`：置物架、设置、教程等窗口。
-- `src/DropShelf/Services`：拖入拖出、快速操作、历史记录、剪贴板、主题、托盘、快捷键等。
+- `src/DropShelf/Views`：置物架、设置、教程等窗口。主窗口和置物架的代码按功能分在 `MainWindow.*.cs`、`ShelfWindow.*.cs` 里，如翻牌、状态栏、拖入、拖出。
+- `src/DropShelf/Services`：拖入拖出、快速操作、压缩解压、历史记录、剪贴板、主题、托盘、快捷键等。
 - `src/DropShelf/Localization`：中英文界面文字。
 - `src/DropShelf/Themes`：颜色、图标与控件样式。
 - `src/DropShelf/Interop`：Win32、DWM 与 Shell 接口。

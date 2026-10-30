@@ -13,6 +13,10 @@ namespace DropShelf.Views.Controls;
 /// </summary>
 public sealed class CardGridPanel : VirtualizingPanel, IScrollInfo
 {
+    /// <summary>牌面的大小。平铺时在格子顶部居中，堆叠里的牌和拖入时的虚线牌也是这么大，界面和动画都从这里取。</summary>
+    public const double CardWidth = 64;
+    public const double CardHeight = 86;
+    public static GridLength CardRowHeight { get; } = new(CardHeight);
     public const double SlotWidth = 70;
     public const double SlotHeight = 120;
     public const double RowGap = 10;

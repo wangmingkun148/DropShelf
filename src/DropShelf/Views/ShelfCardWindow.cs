@@ -148,16 +148,16 @@ internal sealed class ShelfCardWindow : Window
     }
 
     /// <summary>
-    /// 播放一段动画。target 是牌落定（关键帧各项为零）时在屏幕上的位置，area 是窗口能占用的范围，都是屏幕像素；scale 是那里的缩放比例。
+    /// 播放一段动画。target 是牌落定（关键帧各项取默认值）时在屏幕上的位置，area 是窗口能占用的范围，都是屏幕像素；dpiScale 是那里的显示缩放比例。
     /// 窗口的第一帧画到屏幕上之后调用 shown，然后才开始计时；播完调用 finished，之后还停留两帧才隐藏。
     /// </summary>
-    public void Play(RECT target, RECT area, double scale, ImageSource face, CardMotion motion, Action? shown, Action? finished)
+    public void Play(RECT target, RECT area, double dpiScale, ImageSource face, CardMotion motion, Action? shown, Action? finished)
     {
         _motion = motion;
         _target = target;
         _shown = shown;
         _finished = finished;
-        var size = new Size(target.Width / scale, target.Height / scale);
+        var size = new Size(target.Width / dpiScale, target.Height / dpiScale);
         _card.Width = size.Width;
         _card.Height = size.Height;
         // Windows 11 上置物架窗口是圆角的，牌也画成同样的圆角，现身时轮廓不变。
@@ -166,7 +166,7 @@ internal sealed class ShelfCardWindow : Window
         _face.Clip = new RectangleGeometry(new Rect(size), radius, radius);
         _faceEdge.CornerRadius = _backFace.CornerRadius = _shade.CornerRadius = new CornerRadius(radius);
         _backLine.CornerRadius = new CornerRadius(Math.Max(2, radius - 4));
-        _bounds = Bounds(target, area, scale, motion);
+        _bounds = Bounds(target, area, dpiScale, motion);
         Place();
         if (!IsVisible) Show();
         // 第一次显示时窗口会回到构造时设定的位置，跨越缩放不同的显示器时大小也可能被系统改掉，再放一次。
@@ -248,7 +248,7 @@ internal sealed class ShelfCardWindow : Window
     }
 
     /// <summary>窗口的范围：盖住每一帧牌的外接矩形（按转角和翻面时最大的放大量估算），再留出阴影，限制在 area 内。</summary>
-    private static RECT Bounds(RECT target, RECT area, double scale, CardMotion motion)
+    private static RECT Bounds(RECT target, RECT area, double dpiScale, CardMotion motion)
     {
         var (centerX, centerY) = (target.Left + target.Width / 2.0, target.Top + target.Height / 2.0);
         var (halfWidth, halfHeight) = (target.Width / 2.0, target.Height / 2.0);
@@ -259,13 +259,13 @@ internal sealed class ShelfCardWindow : Window
             var grow = key.Scale * Lift;
             var extentX = (Math.Cos(angle) * halfWidth + Math.Sin(angle) * halfHeight) * grow;
             var extentY = (Math.Sin(angle) * halfWidth + Math.Cos(angle) * halfHeight) * grow;
-            var (x, y) = (centerX + key.X * scale, centerY + key.Y * scale);
+            var (x, y) = (centerX + key.X * dpiScale, centerY + key.Y * dpiScale);
             left = Math.Min(left, x - extentX);
             right = Math.Max(right, x + extentX);
             top = Math.Min(top, y - extentY);
             bottom = Math.Max(bottom, y + extentY);
         }
-        var room = ShadowRoom * scale;
+        var room = ShadowRoom * dpiScale;
         var bounds = new RECT
         {
             Left = (int)Math.Max(area.Left, Math.Floor(left - room)),

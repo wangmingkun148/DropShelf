@@ -33,103 +33,118 @@ internal static class ShelfMotion
         var (x, y) = (cursor.X * 0.9, cursor.Y * 0.9);
         return Pick(4, ref _lastShake) switch
         {
-            // 绕竖轴左右翻开。
-            0 => new CardMotion([
-                new(0, x, y, 0.5, -8, 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-                new(170, x * 0.5, y * 0.5, 0.74, -5, 128),
-                new(290, x * 0.1, y * 0.1, 0.97, -1, 30, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-                new(374, 0, 0, 1.025, 0.4, -4, Ease: EaseInOut),
-                new(442)], FadeInMs: 50),
-            // 绕横轴从下往上翻起，落定前略微抬高。
-            1 => new CardMotion([
-                new(0, x, y, 0.5, 5, 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-                new(160, x * 0.55, y * 0.55 - 6, 0.76, 3, 125),
-                new(280, x * 0.12, y * 0.12 - 2, 0.98, 0.5, 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-                new(360, 0, -2, 1.02, 0, -5, Ease: EaseInOut),
-                new(430)], HorizontalAxis: true, FadeInMs: 50),
-            // 转着翻开：起手倾角大，边翻边转正。
-            2 => new CardMotion([
-                new(0, x, y, 0.45, -24, 180, Ease: new BezierEase(0.2, 0.65, 0.35, 1)),
-                new(180, x * 0.45, y * 0.45, 0.78, -10, 120),
-                new(300, x * 0.08, y * 0.08, 0.99, 2, 24, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-                new(380, 0, 0, 1.02, -0.8, -3, Ease: EaseInOut),
-                new(450)], FadeInMs: 50),
-            // 从光标上方落下来，划一道弧翻开，倾角朝另一边。
-            _ => new CardMotion([
-                new(0, x, y - 36, 0.5, 9, 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
-                new(170, x * 0.5, y * 0.5 - 22, 0.75, 5, 126),
-                new(290, x * 0.1, y * 0.1 - 5, 0.97, 1, 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
-                new(374, 0, 1.5, 1.02, -0.4, -4, Ease: EaseInOut),
-                new(442)], FadeInMs: 50)
+            0 => FlipSideways(x, y),
+            1 => FlipUpward(x, y),
+            2 => SpinOpen(x, y),
+            _ => DropOpen(x, y)
         };
     }
+
+    /// <summary>绕竖轴左右翻开。x、y 是起手时牌中心相对落点的位置（DIP）。</summary>
+    private static CardMotion FlipSideways(double x, double y) => new([
+        new(0, X: x, Y: y, Scale: 0.5, Angle: -8, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
+        new(170, X: x * 0.5, Y: y * 0.5, Scale: 0.74, Angle: -5, Turn: 128),
+        new(290, X: x * 0.1, Y: y * 0.1, Scale: 0.97, Angle: -1, Turn: 30, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(374, Scale: 1.025, Angle: 0.4, Turn: -4, Ease: EaseInOut),
+        new(442)], FadeInMs: 50);
+
+    /// <summary>绕横轴从下往上翻起，落定前略微抬高。</summary>
+    private static CardMotion FlipUpward(double x, double y) => new([
+        new(0, X: x, Y: y, Scale: 0.5, Angle: 5, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
+        new(160, X: x * 0.55, Y: y * 0.55 - 6, Scale: 0.76, Angle: 3, Turn: 125),
+        new(280, X: x * 0.12, Y: y * 0.12 - 2, Scale: 0.98, Angle: 0.5, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(360, Y: -2, Scale: 1.02, Turn: -5, Ease: EaseInOut),
+        new(430)], HorizontalAxis: true, FadeInMs: 50);
+
+    /// <summary>转着翻开：起手倾角大，边翻边转正。</summary>
+    private static CardMotion SpinOpen(double x, double y) => new([
+        new(0, X: x, Y: y, Scale: 0.45, Angle: -24, Turn: 180, Ease: new BezierEase(0.2, 0.65, 0.35, 1)),
+        new(180, X: x * 0.45, Y: y * 0.45, Scale: 0.78, Angle: -10, Turn: 120),
+        new(300, X: x * 0.08, Y: y * 0.08, Scale: 0.99, Angle: 2, Turn: 24, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(380, Scale: 1.02, Angle: -0.8, Turn: -3, Ease: EaseInOut),
+        new(450)], FadeInMs: 50);
+
+    /// <summary>从光标上方落下来，划一道弧翻开，倾角朝另一边。</summary>
+    private static CardMotion DropOpen(double x, double y) => new([
+        new(0, X: x, Y: y - 36, Scale: 0.5, Angle: 9, Turn: 180, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
+        new(170, X: x * 0.5, Y: y * 0.5 - 22, Scale: 0.75, Angle: 5, Turn: 126),
+        new(290, X: x * 0.1, Y: y * 0.1 - 5, Scale: 0.97, Angle: 1, Turn: 28, Ease: new BezierEase(0.3, 0.7, 0.4, 1)),
+        new(374, Y: 1.5, Scale: 1.02, Angle: -0.4, Turn: -4, Ease: EaseInOut),
+        new(442)], FadeInMs: 50);
 
     /// <summary>
-    /// 从边缘呼出：牌带着倾角从屏幕外滑进来，边走边回正，冲过落点一点再停稳。target 是落定时的位置，work 是工作区，都是屏幕像素。
-    /// 左右两边的倾角互为镜像，顶边的倾角减半。
+    /// 从边缘呼出：牌带着倾角从屏幕外滑进来，边走边回正，冲过落点一点再停稳。target 是落定时的位置，work 是工作区，都是屏幕像素；
+    /// dpiScale 是那里的显示缩放比例。左右两边的倾角互为镜像，顶边的倾角减半。
     /// </summary>
-    public static CardMotion EdgeIn(ScreenEdge edge, RECT target, RECT work, double scale)
+    public static CardMotion EdgeIn(ScreenEdge edge, RECT target, RECT work, double dpiScale)
     {
-        var variant = Pick(4, ref _lastEdge);
+        Func<double, Step[]> steps = Pick(4, ref _lastEdge) switch { 0 => Fling, 1 => SpinIn, 2 => SlideStop, _ => TossDown };
         var tilt = Tilt(edge);
-        var (startAngle, startScale) = variant switch { 0 => (16.0, 1.0), 1 => (28.0, 1.0), 2 => (6.0, 1.0), _ => (18.0, 1.04) };
-        var d = Outside(edge, target, work, scale, startAngle * Math.Abs(tilt), startScale);
-        Step[] steps = variant switch
-        {
-            // 甩出：一路回正，冲过落点几像素，反向偏一点再停稳。
-            0 => [
-                new(0, d, 14, 1, 16, new BezierEase(0.2, 0.5, 0.45, 1)),
-                new(112, d * 0.44, 6, 1, 8, new BezierEase(0.25, 0.6, 0.4, 1)),
-                new(252, -9, -1, 1.02, -2, EaseInOut),
-                new(378, 0, 0, 1, 0)],
-            // 旋入：转得更多，从略偏上的地方划进来。
-            1 => [
-                new(0, d, -40, 1, 28, new BezierEase(0.2, 0.55, 0.4, 1)),
-                new(130, d * 0.4, -14, 1, 12, new BezierEase(0.25, 0.6, 0.4, 1)),
-                new(260, -6, 2, 1.015, -3, EaseInOut),
-                new(330, 2, 0, 1, 1, EaseInOut),
-                new(400, 0, 0, 1, 0)],
-            // 滑停：几乎不转，沿直线滑进来，像被桌面摩擦着来回晃两下停住。
-            2 => [
-                new(0, d, 0, 1, 6, new BezierEase(0.15, 0.55, 0.3, 1)),
-                new(200, -12, 0, 1, -2.5, EaseInOut),
-                new(290, 4, 0, 1, 1.2, EaseInOut),
-                new(360, -1.5, 0, 1, -0.4, EaseInOut),
-                new(420, 0, 0, 1, 0)],
-            // 抛起落下：飞行中略微放大像离开了桌面，落下时轻轻一压。
-            _ => [
-                new(0, d, 20, 1.04, 18, new BezierEase(0.2, 0.5, 0.45, 1)),
-                new(140, d * 0.38, 8, 1.06, 7, new BezierEase(0.3, 0.6, 0.4, 1)),
-                new(270, -5, -1, 0.985, -1.5, EaseInOut),
-                new(380, 0, 0, 1, 0)]
-        };
-        return new CardMotion(steps.Select(step => Key(edge, tilt, step)).ToArray());
+        // 起手那一帧的转角和缩放决定牌要退到多远才完全在工作区外，它们和距离无关，先按距离为零取出来。
+        var start = steps(0)[0];
+        var d = Outside(edge, target, work, dpiScale, start.Angle * Math.Abs(tilt), start.Scale);
+        return new CardMotion(steps(d).Select(step => Key(edge, tilt, step)).ToArray());
     }
+
+    /// <summary>甩出：一路回正，冲过落点几像素，反向偏一点再停稳。d 是起手时牌中心离落点有多远（DIP）。</summary>
+    private static Step[] Fling(double d) => [
+        new(0, Out: d, Across: 14, Angle: 16, Ease: new BezierEase(0.2, 0.5, 0.45, 1)),
+        new(112, Out: d * 0.44, Across: 6, Angle: 8, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
+        new(252, Out: -9, Across: -1, Scale: 1.02, Angle: -2, Ease: EaseInOut),
+        new(378)];
+
+    /// <summary>旋入：转得更多，从略偏上的地方划进来。</summary>
+    private static Step[] SpinIn(double d) => [
+        new(0, Out: d, Across: -40, Angle: 28, Ease: new BezierEase(0.2, 0.55, 0.4, 1)),
+        new(130, Out: d * 0.4, Across: -14, Angle: 12, Ease: new BezierEase(0.25, 0.6, 0.4, 1)),
+        new(260, Out: -6, Across: 2, Scale: 1.015, Angle: -3, Ease: EaseInOut),
+        new(330, Out: 2, Angle: 1, Ease: EaseInOut),
+        new(400)];
+
+    /// <summary>滑停：几乎不转，沿直线滑进来，像被桌面摩擦着来回晃两下停住。</summary>
+    private static Step[] SlideStop(double d) => [
+        new(0, Out: d, Angle: 6, Ease: new BezierEase(0.15, 0.55, 0.3, 1)),
+        new(200, Out: -12, Angle: -2.5, Ease: EaseInOut),
+        new(290, Out: 4, Angle: 1.2, Ease: EaseInOut),
+        new(360, Out: -1.5, Angle: -0.4, Ease: EaseInOut),
+        new(420)];
+
+    /// <summary>抛起落下：飞行中略微放大像离开了桌面，落下时轻轻一压。</summary>
+    private static Step[] TossDown(double d) => [
+        new(0, Out: d, Across: 20, Scale: 1.04, Angle: 18, Ease: new BezierEase(0.2, 0.5, 0.45, 1)),
+        new(140, Out: d * 0.38, Across: 8, Scale: 1.06, Angle: 7, Ease: new BezierEase(0.3, 0.6, 0.4, 1)),
+        new(270, Out: -5, Across: -1, Scale: 0.985, Angle: -1.5, Ease: EaseInOut),
+        new(380)];
 
     /// <summary>关闭：从边缘呼出的先往里收一下再甩回那条边；其余的翻回背面、缩小淡出，翻的方向和出场时一致。</summary>
-    public static CardMotion Exit(ShelfEntrance entrance, bool horizontalAxis, RECT target, RECT work, double scale)
+    public static CardMotion Exit(ShelfEntrance entrance, bool horizontalAxis, RECT target, RECT work, double dpiScale)
     {
-        if (entrance.Kind == ShelfEntranceKind.Edge)
-        {
-            var edge = entrance.Edge;
-            var tilt = Tilt(edge);
-            var d = Outside(edge, target, work, scale, 16 * Math.Abs(tilt), 1);
-            return new CardMotion([
-                Key(edge, tilt, new(0, 0, 0, 1, 0, new BezierEase(0.3, 0, 0.5, 1))),
-                Key(edge, tilt, new(70, -5, 0, 1.01, -1, new BezierEase(0.55, 0, 0.85, 0.35))),
-                Key(edge, tilt, new(270, d, 12, 1, 16))]);
-        }
-        return new CardMotion([
-            new(0, Ease: new BezierEase(0.45, 0, 0.75, 0.45)),
-            new(140, 0, 4, 0.93, 1.5, 90, Ease: new BezierEase(0.25, 0.5, 0.5, 1)),
-            new(280, 0, 16, 0.72, 4, 180, 0)], horizontalAxis);
+        if (entrance.Kind != ShelfEntranceKind.Edge) return FlipAway(horizontalAxis);
+        var edge = entrance.Edge;
+        var tilt = Tilt(edge);
+        // 最后一帧的牌连同阴影要完全落到工作区外。
+        var end = FlingBack(0)[^1];
+        var d = Outside(edge, target, work, dpiScale, end.Angle * Math.Abs(tilt), end.Scale);
+        return new CardMotion(FlingBack(d).Select(step => Key(edge, tilt, step)).ToArray());
     }
 
+    /// <summary>甩回：先往里收一下，再甩回那条边。d 是最后牌中心离原位有多远（DIP）。</summary>
+    private static Step[] FlingBack(double d) => [
+        new(0, Ease: new BezierEase(0.3, 0, 0.5, 1)),
+        new(70, Out: -5, Scale: 1.01, Angle: -1, Ease: new BezierEase(0.55, 0, 0.85, 0.35)),
+        new(270, Out: d, Across: 12, Angle: 16)];
+
+    /// <summary>翻回背面，缩小淡出。</summary>
+    private static CardMotion FlipAway(bool horizontalAxis) => new([
+        new(0, Ease: new BezierEase(0.45, 0, 0.75, 0.45)),
+        new(140, Y: 4, Scale: 0.93, Angle: 1.5, Turn: 90, Ease: new BezierEase(0.25, 0.5, 0.5, 1)),
+        new(280, Y: 16, Scale: 0.72, Angle: 4, Turn: 180, Opacity: 0)], horizontalAxis);
+
     /// <summary>窗口滑入前的起始偏移（屏幕像素）：从下方升起。</summary>
-    public static int RiseOffset(double scale) => (int)Math.Round(RiseDistance * scale);
+    public static int RiseOffset(double dpiScale) => (int)Math.Round(RiseDistance * dpiScale);
 
     /// <summary>边缘方向上的一帧：Out 是沿离开那条边的方向走了多远，Across 是沿着这条边偏了多少（DIP）。</summary>
-    private readonly record struct Step(double Ms, double Out, double Across, double Scale, double Angle, IEasingFunction? Ease = null);
+    private readonly record struct Step(double Ms, double Out = 0, double Across = 0, double Scale = 1, double Angle = 0, IEasingFunction? Ease = null);
 
     private static CardKey Key(ScreenEdge edge, double tilt, Step step)
     {
@@ -143,18 +158,18 @@ internal static class ShelfMotion
     private static double Tilt(ScreenEdge edge) => edge switch { ScreenEdge.Left => -1, ScreenEdge.Top => 0.5, _ => 1 };
 
     /// <summary>牌中心要沿离开那条边的方向走多远（DIP），转过 angle、放大 grow 倍的牌连同阴影才完全落到工作区外。</summary>
-    private static double Outside(ScreenEdge edge, RECT target, RECT work, double scale, double angle, double grow)
+    private static double Outside(ScreenEdge edge, RECT target, RECT work, double dpiScale, double angle, double grow)
     {
         var radians = angle * Math.PI / 180;
-        var (halfWidth, halfHeight) = (target.Width / 2.0 / scale, target.Height / 2.0 / scale);
+        var (halfWidth, halfHeight) = (target.Width / 2.0 / dpiScale, target.Height / 2.0 / dpiScale);
         var (centerX, centerY) = (target.Left + target.Width / 2.0, target.Top + target.Height / 2.0);
         var across = Math.Cos(radians) * halfWidth + Math.Sin(radians) * halfHeight;
         var down = Math.Sin(radians) * halfWidth + Math.Cos(radians) * halfHeight;
         var (gap, extent) = edge switch
         {
-            ScreenEdge.Left => ((centerX - work.Left) / scale, across),
-            ScreenEdge.Top => ((centerY - work.Top) / scale, down),
-            _ => ((work.Right - centerX) / scale, across)
+            ScreenEdge.Left => ((centerX - work.Left) / dpiScale, across),
+            ScreenEdge.Top => ((centerY - work.Top) / dpiScale, down),
+            _ => ((work.Right - centerX) / dpiScale, across)
         };
         return gap + extent * grow + 24;
     }
