@@ -26,11 +26,13 @@ public partial class ShelfWindow
     /// <summary>松手时摊开的牌，在新牌开始落下这么久之后合拢。</summary>
     private static readonly TimeSpan FanCloseDelay = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan FanCloseDuration = TimeSpan.FromMilliseconds(260);
-    private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan DealStagger = TimeSpan.FromMilliseconds(40);
-    private static readonly TimeSpan NameFadeDuration = TimeSpan.FromMilliseconds(220);
-    private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(120);
-    private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(260);
+    private static readonly TimeSpan DealStagger = TimeSpan.FromMilliseconds(34);
+    private static readonly TimeSpan NameFadeDuration = TimeSpan.FromMilliseconds(190);
+    private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(170);
+    private static readonly TimeSpan RemoveDuration = TimeSpan.FromMilliseconds(160);
+    private static readonly TimeSpan CloseUpDuration = TimeSpan.FromMilliseconds(220);
     private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
 
     private readonly List<MotionTween> _tweens = [];
@@ -229,6 +231,78 @@ public partial class ShelfWindow
             foreach (var tile in tiles) ResetTile(tile);
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+    }
+
+    /// <summary>
+    /// 平铺时移除牌：要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除；剩下的牌从原来的格子滑到新的格子补上空位，新露出来的牌淡入。
+    /// 动画途中被打断（再次移除、拖入、切换视图等）时立即移除，补位直接到位。不在平铺或关闭了动画效果时直接移除。
+    /// </summary>
+    private void RemoveWithMotion(IReadOnlyList<ShelfItem> items, Action remove)
+    {
+        FinishMotion();
+        if (!ShelfMotion.Enabled || !IsVisible || !ViewModel.IsExpanded)
+        {
+            remove();
+            return;
+        }
+
+        ItemsList.UpdateLayout();
+        var leaving = items.Select(item => ItemsList.ItemContainerGenerator.ContainerFromItem(item)).OfType<ListBoxItem>().ToList();
+        // 剩下的牌移除前的位置，移除后按它补位。
+        var before = new Dictionary<ShelfItem, WpfPoint>();
+        foreach (var item in ViewModel.Items.Except(items))
+            if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem tile)
+                before[item] = tile.TranslatePoint(default, ItemsList);
+
+        _motionCleanup = () =>
+        {
+            foreach (var tile in leaving)
+            {
+                ResetTile(tile);
+                tile.ClearValue(IsHitTestVisibleProperty);
+            }
+            remove();
+            // 数量变化后的刷新（RefreshViews）已经排在前面，等它按新的数量排好格子再补位。
+            Dispatcher.BeginInvoke(() => CloseUpTiles(before));
+        };
+        for (var i = 0; i < leaving.Count; i++)
+        {
+            var (pose, side) = (PoseTile(leaving[i]), i % 2 == 0 ? -1 : 1);
+            leaving[i].IsHitTestVisible = false;
+            Tween(TimeSpan.Zero, RemoveDuration, t => pose(new LocalCardPose(0, 10 * t, side * 6 * t, 1 - 0.3 * t, 1 - t)));
+        }
+        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+    }
+
+    /// <summary>移除之后补位：每张牌从移除前的格子滑到现在的格子，之前没有生成的牌从下面一点淡入。</summary>
+    private void CloseUpTiles(Dictionary<ShelfItem, WpfPoint> before)
+    {
+        if (IsClosing || !ViewModel.IsExpanded || !IsVisible) return;
+        FinishMotion();
+        ItemsList.UpdateLayout();
+        var moved = new List<ListBoxItem>();
+        var home = new LocalCardPose(0, 0, 0);
+        foreach (var item in ViewModel.Items)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem tile) continue;
+            LocalCardPose from;
+            if (before.TryGetValue(item, out var then))
+            {
+                var offset = then - tile.TranslatePoint(default, ItemsList);
+                if (offset.Length < 0.5) continue;
+                from = new LocalCardPose(offset.X, offset.Y, 0);
+            }
+            else from = new LocalCardPose(0, 8, 0, 0.92, 0);
+            var pose = PoseTile(tile);
+            moved.Add(tile);
+            Tween(TimeSpan.Zero, CloseUpDuration, t => pose(LocalCardPose.Lerp(from, home, t)));
+        }
+        if (moved.Count == 0) return;
+        _motionCleanup = () =>
+        {
+            foreach (var tile in moved) ResetTile(tile);
+        };
+        Tween(TimeSpan.Zero, CloseUpDuration, _ => { }, FinishMotion);
     }
 
     /// <summary>

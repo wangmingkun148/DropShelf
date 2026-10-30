@@ -168,9 +168,12 @@ public partial class ShelfWindow
     private void RemoveItems(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return;
-        ViewModel.Remove(items);
         ViewModel.HasInteracted = true;
-        if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty) CloseAnimated();
+        RemoveWithMotion(items, () =>
+        {
+            ViewModel.Remove(items);
+            if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty) CloseAnimated();
+        });
     }
 
     private IReadOnlyList<ShelfItem> GetSelectedItems() =>
