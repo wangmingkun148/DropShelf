@@ -45,8 +45,8 @@ internal sealed record CardMotion(IReadOnlyList<CardKey> Keys, bool HorizontalAx
 /// 置物架出场和离场时替它表演的那张牌。透明、置顶、不抢焦点的窗口里画一张牌：正面是置物架的截图，背面是牌背，按关键帧移动、转动和翻面。
 /// 透明和拖动中的卡牌一样靠 DWM 把玻璃区扩展到整个窗口，不用分层窗口。窗口只盖住牌经过的范围并限制在工作区内，
 /// 牌从屏幕外进来时，伸出工作区的部分自然被窗口裁掉。窗口不接收拖放：动画期间在牌上松手什么也不会发生，不会落进下面的程序。
-/// 正反两面和阴影各缓存一次位图，每帧只改变换、明暗和显示哪一面。翻面不做真正的透视：沿翻转方向按余弦压扁，另一方向略微放大，和设置页的翻牌一样。
-/// 播完先画一帧全透明的再隐藏，放回池里，下次直接复用，不必再创建窗口。
+/// 正反两面连同阴影各缓存一次位图，每帧只改变换、明暗和显示哪一面。翻面不做真正的透视：沿翻转方向按余弦压扁，另一方向略微放大，和设置页的翻牌一样。
+/// 播完隐藏后放回池里，下次直接复用，不必再创建窗口。
 /// </summary>
 internal sealed class ShelfCardWindow : Window
 {
@@ -54,7 +54,6 @@ internal sealed class ShelfCardWindow : Window
     private const double MaxShade = 0.3;
     private const double ShadowRoom = 44;
     private static readonly List<ShelfCardWindow> Idle = [];
-    private static bool _warming;
 
     private readonly IntPtr _handle;
     private readonly Grid _card = new();
@@ -69,8 +68,6 @@ internal sealed class ShelfCardWindow : Window
         Margin = new Thickness(9), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, 0xFB, 0xFA, 0xF6))
     };
     private readonly Border _shade = new() { Background = Brushes.Black };
-    private readonly Grid _shadow = new();
-    private readonly Border _shadowShape = new() { Margin = new Thickness(1), Background = Brushes.Black };
     private readonly Stopwatch _clock = new();
     private CardMotion _motion = new([new CardKey(0)]);
     private RECT _target;
@@ -85,17 +82,13 @@ internal sealed class ShelfCardWindow : Window
     {
         Idle,
         /// <summary>
-        /// 刚显示，等第一帧画到屏幕上。离场时牌这时正盖在还没隐身的置物架上，置物架带着系统画的窗口阴影，
-        /// 牌先不画自己的阴影，置物架隐身的同一刻再换上：两层阴影不会叠在一起，中间也不会断开。
+        /// 刚显示，先隐着身等第一帧画好，再以画好的样子现身：上次隐藏前留下的旧画面、改了大小后还没画的部分都不会闪出来。
+        /// 离场时置物架在牌现身的同一刻隐身，DWM 一起换上，中间不会空一帧，两层阴影也不会叠在一起。
         /// </summary>
         Showing,
         Playing,
         /// <summary>播完后再停留两帧，盖住置物架现身前的那一帧。</summary>
-        Lingering,
-        /// <summary>
-        /// 隐藏前先画一帧全透明的：窗口隐藏后屏幕上还留着它最后画的那一帧，下次显示时会先闪出这张旧牌，新的一帧才盖上去。
-        /// </summary>
-        Clearing
+        Lingering
     }
 
     private ShelfCardWindow()
@@ -122,14 +115,12 @@ internal sealed class ShelfCardWindow : Window
         _backFace.SetResourceReference(Border.BackgroundProperty, "SheetBorderBrush");
         _backFace.SetResourceReference(Border.BorderBrushProperty, "CardBackLineBrush");
         _backFace.Child = _backLine;
-        // 阴影单独一层垫在牌下，两面共用，可以单独调浓淡；比牌小一圈，完全被牌盖住。
         // 阴影加在里层、外层缓存为位图：阴影只模糊一次，之后每帧只变换这张图。
-        _shadowShape.Effect = new DropShadowEffect { BlurRadius = 30, ShadowDepth = 8, Direction = 270, Opacity = 0.3, Color = Colors.Black };
-        _shadow.Children.Add(_shadowShape);
-        _front.Children.Add(_face);
-        _front.Children.Add(_faceEdge);
+        var shadow = new DropShadowEffect { BlurRadius = 30, ShadowDepth = 8, Direction = 270, Opacity = 0.3, Color = Colors.Black };
+        shadow.Freeze();
+        _front.Children.Add(new Grid { Effect = shadow, Children = { _face, _faceEdge } });
+        _backFace.Effect = shadow;
         _back.Children.Add(_backFace);
-        _card.Children.Add(_shadow);
         _card.Children.Add(_front);
         _card.Children.Add(_back);
         _card.Children.Add(_shade);
@@ -153,20 +144,15 @@ internal sealed class ShelfCardWindow : Window
         return window;
     }
 
-    /// <summary>空闲时先备好一个窗口：在屏幕外透明地显示一次再收起，第一次用时也没有没画过的画面。</summary>
+    /// <summary>空闲时先备好一个窗口。</summary>
     public static void Prewarm()
     {
-        if (Idle.Count > 0 || _warming) return;
-        _warming = true;
-        var window = new ShelfCardWindow();
-        window._card.Opacity = 0;
-        window.Show();
-        window.Release();
+        if (Idle.Count == 0) Idle.Add(new ShelfCardWindow());
     }
 
     /// <summary>
     /// 播放一段动画。target 是牌落定（关键帧各项取默认值）时在屏幕上的位置，area 是窗口能占用的范围，都是屏幕像素；dpiScale 是那里的显示缩放比例。
-    /// 窗口的第一帧画到屏幕上之后调用 shown，然后才开始计时；播完调用 finished，之后还停留两帧才隐藏。
+    /// 窗口隐身画好第一帧后现身，同时调用 shown，然后才开始计时；播完调用 finished，之后还停留两帧才隐藏。
     /// </summary>
     public void Play(RECT target, RECT area, double dpiScale, ImageSource face, CardMotion motion, Action? shown, Action? finished)
     {
@@ -183,17 +169,15 @@ internal sealed class ShelfCardWindow : Window
         _face.Clip = new RectangleGeometry(new Rect(size), radius, radius);
         _faceEdge.CornerRadius = _backFace.CornerRadius = _shade.CornerRadius = new CornerRadius(radius);
         _backLine.CornerRadius = new CornerRadius(Math.Max(2, radius - 4));
-        _shadowShape.CornerRadius = new CornerRadius(Math.Max(0, radius - 1));
         _bounds = Bounds(target, area, dpiScale, motion);
         Place();
+        WindowEffects.SetCloaked(this, true);
         if (!IsVisible) Show();
         // 第一次显示时窗口会回到构造时设定的位置，跨越缩放不同的显示器时大小也可能被系统改掉，再放一次。
         Place();
         var cache = CacheScale.For(this);
         _front.CacheMode = new BitmapCache(cache);
         _back.CacheMode = new BitmapCache(cache);
-        _shadow.CacheMode = new BitmapCache(cache);
-        _shadow.Opacity = 0;
         Apply(motion.At(0));
         _stage = Stage.Showing;
         _frames = 0;
@@ -201,12 +185,12 @@ internal sealed class ShelfCardWindow : Window
         CompositionTarget.Rendering += OnFrame;
     }
 
-    /// <summary>立即停下并撤下，不再调用 shown 和 finished。</summary>
+    /// <summary>立即停下并隐藏，不再调用 shown 和 finished。</summary>
     public void Cancel()
     {
         _shown = null;
         _finished = null;
-        if (_stage is Stage.Showing or Stage.Playing or Stage.Lingering) Release();
+        if (_stage != Stage.Idle) Release();
     }
 
     private void OnFrame(object? sender, EventArgs e)
@@ -220,8 +204,8 @@ internal sealed class ShelfCardWindow : Window
             case Stage.Showing:
                 if (++_frames < 2) return;
                 _stage = Stage.Playing;
-                _shadow.Opacity = 1;
                 _clock.Restart();
+                WindowEffects.SetCloaked(this, false);
                 Take(ref _shown)?.Invoke();
                 break;
             case Stage.Playing:
@@ -234,9 +218,6 @@ internal sealed class ShelfCardWindow : Window
                 break;
             case Stage.Lingering:
                 if (++_frames >= 2) Release();
-                break;
-            case Stage.Clearing:
-                if (++_frames >= 2) Park();
                 break;
         }
     }
@@ -304,29 +285,16 @@ internal sealed class ShelfCardWindow : Window
     private void Place() => NativeMethods.SetWindowPos(_handle, IntPtr.Zero, _bounds.Left, _bounds.Top, _bounds.Width, _bounds.Height,
         NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
 
-    /// <summary>撤下：牌先变成全透明，等这一帧画到屏幕上再隐藏，见 Stage.Clearing。</summary>
     private void Release()
     {
+        CompositionTarget.Rendering -= OnFrame;
         _clock.Stop();
-        _stage = Stage.Clearing;
-        _frames = 0;
-        _card.Opacity = 0;
+        _stage = Stage.Idle;
+        Hide();
         // 不再引用置物架的截图，缓存的位图也一起释放。
         _face.Source = null;
         _front.CacheMode = null;
         _back.CacheMode = null;
-        _shadow.CacheMode = null;
-        CompositionTarget.Rendering -= OnFrame;
-        CompositionTarget.Rendering += OnFrame;
-    }
-
-    /// <summary>隐藏并放回池里。</summary>
-    private void Park()
-    {
-        CompositionTarget.Rendering -= OnFrame;
-        _stage = Stage.Idle;
-        _warming = false;
-        Hide();
         Idle.Add(this);
     }
 
