@@ -46,7 +46,7 @@ internal sealed record CardMotion(IReadOnlyList<CardKey> Keys, bool HorizontalAx
 /// 透明和拖动中的卡牌一样靠 DWM 把玻璃区扩展到整个窗口，不用分层窗口。窗口只盖住牌经过的范围并限制在工作区内，
 /// 牌从屏幕外进来时，伸出工作区的部分自然被窗口裁掉。窗口不接收拖放：动画期间在牌上松手什么也不会发生，不会落进下面的程序。
 /// 正反两面连同阴影各缓存一次位图，每帧只改变换、明暗和显示哪一面。翻面不做真正的透视：沿翻转方向按余弦压扁，另一方向略微放大，和设置页的翻牌一样。
-/// 播完隐藏后放回池里，下次直接复用，不必再创建窗口。
+/// 播完先画一帧全透明的再隐藏，放回池里，下次直接复用，不必再创建窗口。
 /// </summary>
 internal sealed class ShelfCardWindow : Window
 {
@@ -54,6 +54,7 @@ internal sealed class ShelfCardWindow : Window
     private const double MaxShade = 0.3;
     private const double ShadowRoom = 44;
     private static readonly List<ShelfCardWindow> Idle = [];
+    private static bool _warming;
 
     private readonly IntPtr _handle;
     private readonly Grid _card = new();
@@ -85,7 +86,11 @@ internal sealed class ShelfCardWindow : Window
         Showing,
         Playing,
         /// <summary>播完后再停留两帧，盖住置物架现身前的那一帧。</summary>
-        Lingering
+        Lingering,
+        /// <summary>
+        /// 隐藏前先画一帧全透明的：窗口隐藏后屏幕上还留着它最后画的那一帧，下次显示时会先闪出这张旧牌，新的一帧才盖上去。
+        /// </summary>
+        Clearing
     }
 
     private ShelfCardWindow()
@@ -141,10 +146,15 @@ internal sealed class ShelfCardWindow : Window
         return window;
     }
 
-    /// <summary>空闲时先备好一个窗口。</summary>
+    /// <summary>空闲时先备好一个窗口：在屏幕外透明地显示一次再收起，第一次用时也没有没画过的画面。</summary>
     public static void Prewarm()
     {
-        if (Idle.Count == 0) Idle.Add(new ShelfCardWindow());
+        if (Idle.Count > 0 || _warming) return;
+        _warming = true;
+        var window = new ShelfCardWindow();
+        window._card.Opacity = 0;
+        window.Show();
+        window.Release();
     }
 
     /// <summary>
@@ -181,12 +191,12 @@ internal sealed class ShelfCardWindow : Window
         CompositionTarget.Rendering += OnFrame;
     }
 
-    /// <summary>立即停下并隐藏，不再调用 shown 和 finished。</summary>
+    /// <summary>立即停下并撤下，不再调用 shown 和 finished。</summary>
     public void Cancel()
     {
         _shown = null;
         _finished = null;
-        if (_stage != Stage.Idle) Release();
+        if (_stage is Stage.Showing or Stage.Playing or Stage.Lingering) Release();
     }
 
     private void OnFrame(object? sender, EventArgs e)
@@ -213,6 +223,9 @@ internal sealed class ShelfCardWindow : Window
                 break;
             case Stage.Lingering:
                 if (++_frames >= 2) Release();
+                break;
+            case Stage.Clearing:
+                if (++_frames >= 2) Park();
                 break;
         }
     }
@@ -280,16 +293,28 @@ internal sealed class ShelfCardWindow : Window
     private void Place() => NativeMethods.SetWindowPos(_handle, IntPtr.Zero, _bounds.Left, _bounds.Top, _bounds.Width, _bounds.Height,
         NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
 
+    /// <summary>撤下：牌先变成全透明，等这一帧画到屏幕上再隐藏，见 Stage.Clearing。</summary>
     private void Release()
     {
-        CompositionTarget.Rendering -= OnFrame;
         _clock.Stop();
-        _stage = Stage.Idle;
-        Hide();
+        _stage = Stage.Clearing;
+        _frames = 0;
+        _card.Opacity = 0;
         // 不再引用置物架的截图，缓存的位图也一起释放。
         _face.Source = null;
         _front.CacheMode = null;
         _back.CacheMode = null;
+        CompositionTarget.Rendering -= OnFrame;
+        CompositionTarget.Rendering += OnFrame;
+    }
+
+    /// <summary>隐藏并放回池里。</summary>
+    private void Park()
+    {
+        CompositionTarget.Rendering -= OnFrame;
+        _stage = Stage.Idle;
+        _warming = false;
+        Hide();
         Idle.Add(this);
     }
 
