@@ -28,6 +28,8 @@ public partial class ShelfWindow
     private static readonly TimeSpan FanCloseDuration = TimeSpan.FromMilliseconds(260);
     private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(260);
     private static readonly TimeSpan DealStagger = TimeSpan.FromMilliseconds(34);
+    /// <summary>整批发牌最多错开这么多个 DealStagger，正好是小尺寸平铺 8 张牌的间隔数。</summary>
+    private const double MaxDealGaps = 7;
     private static readonly TimeSpan NameFadeDuration = TimeSpan.FromMilliseconds(190);
     private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(170);
@@ -352,6 +354,8 @@ public partial class ShelfWindow
         }
 
         var lead = toGrid ? ResizeDuration : FadeOutDuration / 2;
+        // 牌多时间隔缩短：大尺寸的平铺不比小尺寸的发得久。
+        var stagger = DealStagger * Math.Min(1, MaxDealGaps / Math.Max(1, tiles.Count - 1));
         var end = TimeSpan.Zero;
         for (var i = 0; i < tiles.Count; i++)
         {
@@ -363,7 +367,7 @@ public partial class ShelfWindow
             var home = new LocalCardPose(0, 0, 0);
             var (from, to) = toGrid ? (away, home) : (home, away);
             var pose = PoseTile(tile);
-            var delay = lead + DealStagger * (toGrid ? i : tiles.Count - 1 - i);
+            var delay = lead + stagger * (toGrid ? i : tiles.Count - 1 - i);
             Tween(delay, FlyDuration, t =>
             {
                 var current = LocalCardPose.Lerp(from, to, t);

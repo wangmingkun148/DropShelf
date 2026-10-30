@@ -163,7 +163,8 @@ public partial class ShelfWindow : Window
         _lifetime.Cancel();
         StopSlide();
         CancelCard();
-        StopMotion();
+        // 没播完的动画在这里收尾：待移除的项目先移除，不会记进最近关闭。
+        FinishMotion();
         _toastTimer.Stop();
         _leaveCheck.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;

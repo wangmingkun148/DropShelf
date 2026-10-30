@@ -66,6 +66,8 @@ public partial class ShelfWindow
         IsHitTestVisible = false;
         FinishEntrance();
         StopSlide();
+        // 发牌、移除、补位和窗口大小的动画停在这一帧：截下的牌面和屏幕上一样，置物架隐身后也不再逐帧白做。没做完的收尾（比如待移除的项目）在窗口关闭时补上。
+        StopMotion();
         if (!ShelfMotion.Enabled || !IsVisible || !NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect) ||
             CaptureSurface() is not { } face)
         {
