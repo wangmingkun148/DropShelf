@@ -13,7 +13,7 @@ namespace DropShelf.Views;
 
 /// <summary>
 /// 置物架内容的动画：拖进来的文件从松手处飞进堆叠；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来），
-/// 窗口大小同时平滑过渡。只改牌的变换和透明度，窗口每帧调整一次大小；动画途中再有变化时直接跳到终点。
+/// 窗口大小同时平滑过渡。只改牌的变换和透明度，窗口每帧调整一次大小，期间内容保持固定大小不重新布局；动画途中再有变化时直接跳到终点。
 /// </summary>
 public partial class ShelfWindow
 {
@@ -145,15 +145,15 @@ public partial class ShelfWindow
         var (width, height) = TargetSize();
         var bodySize = new WpfSize(Body.ActualWidth + width - ActualWidth, Body.ActualHeight + height - ActualHeight);
         var stackSize = toList ? new WpfSize(StackView.ActualWidth, StackView.ActualHeight) : bodySize;
-        var listHeight = toList ? bodySize.Height : ItemsList.ActualHeight;
+        var listSize = toList ? bodySize : new WpfSize(ItemsList.ActualWidth, ItemsList.ActualHeight);
+        var listHeight = listSize.Height;
 
         UpdateViews();
         StackView.Visibility = Visibility.Visible;
         ItemsList.Visibility = Visibility.Visible;
-        StackView.Width = stackSize.Width;
-        StackView.Height = stackSize.Height;
-        StackView.HorizontalAlignment = HorizontalAlignment.Left;
-        StackView.VerticalAlignment = VerticalAlignment.Top;
+        // 堆叠和列表都固定为各自显示时的大小：窗口逐帧变化时只裁掉超出的部分，列表不用每帧重新布局、加载新露出的行。
+        Pin(StackView, stackSize);
+        Pin(ItemsList, listSize);
         StackView.IsHitTestVisible = false;
         Panel.SetZIndex(StackView, 1);
         UpdateWindowSize(animate: true);
@@ -249,8 +249,10 @@ public partial class ShelfWindow
             }
             StackCaptionPanel.ClearValue(OpacityProperty);
             RestoreStackMark();
-            foreach (var property in new[] { WidthProperty, HeightProperty, HorizontalAlignmentProperty, VerticalAlignmentProperty, IsHitTestVisibleProperty, Panel.ZIndexProperty })
-                StackView.ClearValue(property);
+            Unpin(StackView);
+            Unpin(ItemsList);
+            StackView.ClearValue(IsHitTestVisibleProperty);
+            StackView.ClearValue(Panel.ZIndexProperty);
             UpdateViews();
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
@@ -331,6 +333,20 @@ public partial class ShelfWindow
         if (_resizeFrame is null) return;
         CompositionTarget.Rendering -= _resizeFrame;
         _resizeFrame = null;
+    }
+
+    private static void Pin(FrameworkElement element, WpfSize size)
+    {
+        element.Width = size.Width;
+        element.Height = size.Height;
+        element.HorizontalAlignment = HorizontalAlignment.Left;
+        element.VerticalAlignment = VerticalAlignment.Top;
+    }
+
+    private static void Unpin(FrameworkElement element)
+    {
+        foreach (var property in new[] { WidthProperty, HeightProperty, HorizontalAlignmentProperty, VerticalAlignmentProperty })
+            element.ClearValue(property);
     }
 
     private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
