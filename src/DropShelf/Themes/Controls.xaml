@@ -462,7 +462,7 @@
         </Setter>
     </Style>
 
-    <!-- 滑块：细轨道左侧为强调色；圆形滑钮的中心圆点悬停时放大、按住时缩小 -->
+    <!-- 切牌滑块：轨道是一排小牌（见 DeckSlider），两侧的按钮透明，只负责点击 -->
     <Style x:Key="SliderTrackButtonStyle" TargetType="RepeatButton">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="Focusable" Value="False" />
@@ -470,34 +470,30 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RepeatButton">
-                    <Border Background="Transparent">
-                        <Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
-                    </Border>
+                    <Border Background="Transparent" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
 
-    <Style x:Key="SliderThumbStyle" TargetType="Thumb">
+    <!-- 滑钮是一张强调色的切牌卡，外面一圈卡片底色把它和后面的小牌隔开；悬停或拖动时抽高一点 -->
+    <Style x:Key="CutCardThumbStyle" TargetType="Thumb">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Grid Width="20" Height="20" Background="Transparent">
-                        <Ellipse Fill="{DynamicResource FlyoutBrush}" Stroke="{DynamicResource ControlBorderBrush}" StrokeThickness="1" />
-                        <Ellipse x:Name="Core" Width="12" Height="12" Fill="{DynamicResource AccentBrush}" />
+                    <Grid Width="14" Height="32" Background="Transparent">
+                        <Border x:Name="Cut" Width="7" Height="27" CornerRadius="3.5" Background="{DynamicResource SettingRowBrush}">
+                            <Border Width="4" Margin="0,1.5" CornerRadius="2" Background="{DynamicResource AccentBrush}" />
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Core" Property="Width" Value="14" />
-                            <Setter TargetName="Core" Property="Height" Value="14" />
-                            <Setter TargetName="Core" Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
+                            <Setter TargetName="Cut" Property="Height" Value="31" />
                         </Trigger>
                         <Trigger Property="IsDragging" Value="True">
-                            <Setter TargetName="Core" Property="Width" Value="10" />
-                            <Setter TargetName="Core" Property="Height" Value="10" />
-                            <Setter TargetName="Core" Property="Fill" Value="{DynamicResource AccentPressedBrush}" />
+                            <Setter TargetName="Cut" Property="Height" Value="31" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -505,25 +501,25 @@
         </Setter>
     </Style>
 
-    <Style TargetType="Slider">
+    <Style TargetType="controls:DeckSlider">
         <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
         <Setter Property="IsMoveToPointEnabled" Value="True" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="Slider">
+                <ControlTemplate TargetType="controls:DeckSlider">
                     <Grid Height="32" Background="Transparent">
+                        <!-- 两侧各让出半个滑钮，牌的间距和滑钮走过的距离一致 -->
+                        <UniformGrid x:Name="PART_Cards" Rows="1" Margin="7,0" IsHitTestVisible="False" />
                         <Track x:Name="PART_Track">
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Background="{DynamicResource AccentBrush}"
-                                              Command="Slider.DecreaseLarge" />
+                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Command="Slider.DecreaseLarge" />
                             </Track.DecreaseRepeatButton>
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Background="{DynamicResource ControlStrongBorderBrush}"
-                                              Command="Slider.IncreaseLarge" />
+                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Command="Slider.IncreaseLarge" />
                             </Track.IncreaseRepeatButton>
                             <Track.Thumb>
-                                <Thumb Style="{StaticResource SliderThumbStyle}" />
+                                <Thumb Style="{StaticResource CutCardThumbStyle}" />
                             </Track.Thumb>
                         </Track>
                     </Grid>

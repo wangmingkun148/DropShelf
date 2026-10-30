@@ -998,11 +998,11 @@
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
                                                            Description="{Binding SensitivityDescription}"
                                                            Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
-                                        <!-- 三个字对准 0、50、100：越靠近滑钮越大越清楚，像 macOS 程序坞；两端的字从外侧放大，不会超出滑块 -->
+                                        <!-- 切牌滑块，下面三个字对准 0、50、100：越靠近滑钮越大越清楚，像 macOS 程序坞；两端的字从外侧放大，不会超出滑块 -->
                                         <StackPanel Width="200">
-                                            <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
-                                                    IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
-                                                    AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                            <controls:DeckSlider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
+                                                                 IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
+                                                                 AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
                                             <Grid Height="20" Margin="0,-3,0,0" IsHitTestVisible="False">
                                                 <Grid.Resources>
                                                     <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionTextStyle}">

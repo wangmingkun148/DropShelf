@@ -1764,8 +1764,10 @@ internal static class Program
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Collapsed, "没有记录时不应显示最近关闭");
 
         var viewModel = (SettingsViewModel)window.DataContext;
-        ((System.Windows.Controls.Slider)window.FindName("SensitivitySlider")!).Value = 20;
+        var sensitivitySlider = (DropShelf.Views.Controls.DeckSlider)window.FindName("SensitivitySlider")!;
+        sensitivitySlider.Value = 20;
         Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 63), "拖动滑块时说明没有立即更新");
+        Assert(sensitivitySlider.FaceDownCount == 2, "切牌卡越过前两张牌的中线，应正好翻过两张");
         Pump(400);
         var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }
             .Select(name => ((System.Windows.Media.ScaleTransform)((FrameworkElement)window.FindName(name)!).RenderTransform).ScaleX).ToArray();
