@@ -16,8 +16,16 @@ public sealed class AppSettings
     public double WindowHeight { get; set; } = 640;
 
     public AutoOpenTrigger AutoOpenTrigger { get; set; } = AutoOpenTrigger.Both;
-    public GestureSensitivity MouseGestureSensitivity { get; set; } = GestureSensitivity.Balanced;
+    /// <summary>晃动灵敏度 0–100，见 <see cref="ShakeSensitivities"/>。</summary>
+    public int ShakeSensitivity { get; set; } = ShakeSensitivities.Balanced;
+
+    /// <summary>2.5 及以前的三档灵敏度，仅用于迁移旧设置。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GestureSensitivity? MouseGestureSensitivity { get; set; }
     public EdgeDwellTime EdgeDwell { get; set; } = EdgeDwellTime.Medium;
+
+    /// <summary>这些程序（文件名，如 Photoshop.exe）在前台时不自动弹出置物架，也不响应快捷键。</summary>
+    public List<string>? BlockedApps { get; set; }
 
     public AppTheme Theme { get; set; } = AppTheme.System;
 
@@ -64,6 +72,7 @@ public sealed class AppSettings
         clone.QuickActions = QuickActions is null ? null : [.. QuickActions];
         clone.QuickActionSlots = QuickActionSlots is null ? null : [.. QuickActionSlots];
         clone.CustomActions = CustomActions?.Select(action => action.Clone()).ToList();
+        clone.BlockedApps = BlockedApps is null ? null : [.. BlockedApps];
         return clone;
     }
 }
@@ -118,8 +127,10 @@ public sealed class SettingsService
 
     public static AppSettings Normalize(AppSettings settings)
     {
-        if (!Enum.IsDefined(settings.MouseGestureSensitivity))
-            settings.MouseGestureSensitivity = GestureSensitivity.Balanced;
+        if (settings.MouseGestureSensitivity is { } legacySensitivity)
+            settings.ShakeSensitivity = ShakeSensitivities.FromLegacy(legacySensitivity);
+        settings.MouseGestureSensitivity = null;
+        settings.ShakeSensitivity = ShakeSensitivities.Clamp(settings.ShakeSensitivity);
         if (!Enum.IsDefined(settings.AutoOpenTrigger))
             settings.AutoOpenTrigger = AutoOpenTrigger.Both;
         if (!Enum.IsDefined(settings.EdgeDwell))
@@ -137,6 +148,11 @@ public sealed class SettingsService
         if (!Enum.IsDefined(settings.QuickActionLayout))
             settings.QuickActionLayout = QuickActionLayout.Four;
 
+        settings.BlockedApps = (settings.BlockedApps ?? [])
+            .Select(name => Path.GetFileName(name?.Trim() ?? string.Empty))
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         settings.CustomActions = NormalizeCustomActions(settings.CustomActions);
         if (settings.QuickActionSlots is null) MigrateQuickActions(settings);
         settings.QuickActionSlots = Models.QuickActions.NormalizeSlots(settings.QuickActionSlots, settings.CustomActions);

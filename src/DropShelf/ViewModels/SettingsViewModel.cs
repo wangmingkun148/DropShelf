@@ -7,6 +7,7 @@ using DropShelf.Infrastructure;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
+using DropShelf.Services.Gestures;
 
 namespace DropShelf.ViewModels;
 
@@ -150,11 +151,14 @@ public sealed class SettingsViewModel : ObservableObject
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
     private ObservableCollection<HistoryEntryViewModel> _historyEntries = [];
+    private readonly System.Windows.Threading.DispatcherTimer _sensitivitySave = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private int? _pendingSensitivity;
 
     public SettingsViewModel(AppController controller)
     {
         _controller = controller;
         controller.SettingsChanged += OnSettingsChanged;
+        _sensitivitySave.Tick += (_, _) => SaveSensitivity();
         controller.History.Changed += OnHistoryChanged;
         LanguageService.LanguageChanged += OnLanguageChanged;
 
@@ -168,6 +172,7 @@ public sealed class SettingsViewModel : ObservableObject
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
+        RemoveBlockedAppCommand = new RelayCommand(app => Update(settings => settings.BlockedApps!.Remove((string)app!)));
         RefreshActions();
         RefreshHistory();
     }
@@ -184,6 +189,7 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
     public ICommand ClearHistoryCommand { get; }
+    public ICommand RemoveBlockedAppCommand { get; }
 
     public string VersionNumber => typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? string.Empty;
     public string Version => Strings.Version(VersionNumber);
@@ -294,10 +300,28 @@ public sealed class SettingsViewModel : ObservableObject
     public bool UsesShake => AutoOpenTriggers.UsesShake(Settings.AutoOpenTrigger);
     public bool UsesEdge => AutoOpenTriggers.UsesEdge(Settings.AutoOpenTrigger);
 
-    public GestureSensitivity Sensitivity
+    /// <summary>拖动滑块时说明文字立即更新；停下 0.25 秒后才保存，不会每移动一格就写一次设置文件。</summary>
+    public double Sensitivity
     {
-        get => Settings.MouseGestureSensitivity;
-        set => Update(settings => settings.MouseGestureSensitivity = value);
+        get => _pendingSensitivity ?? Settings.ShakeSensitivity;
+        set
+        {
+            var level = ShakeSensitivities.Clamp((int)Math.Round(value));
+            if (level == (int)Sensitivity) return;
+            _pendingSensitivity = level;
+            OnPropertyChanged(nameof(SensitivityDescription));
+            _sensitivitySave.Stop();
+            _sensitivitySave.Start();
+        }
+    }
+
+    public string SensitivityDescription
+    {
+        get
+        {
+            var (reversals, distance) = MouseGestureDetector.Describe((int)Sensitivity);
+            return Strings.SensitivityDetail(reversals, distance);
+        }
     }
 
     public EdgeDwellTime EdgeDwell
@@ -305,6 +329,11 @@ public sealed class SettingsViewModel : ObservableObject
         get => Settings.EdgeDwell;
         set => Update(settings => settings.EdgeDwell = value);
     }
+
+    /// <summary>前台时不弹出置物架的程序文件名。</summary>
+    public IReadOnlyList<string> BlockedApps => Settings.BlockedApps!;
+
+    public void AddBlockedApp(string name) => Update(settings => settings.BlockedApps!.Add(name));
 
     public QuickShelfSize ShelfSize
     {
@@ -516,12 +545,21 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>窗口关闭后停止接收通知，让界面和缩略图可以被回收。</summary>
     public void Detach()
     {
+        SaveSensitivity();
         _controller.SettingsChanged -= OnSettingsChanged;
         _controller.History.Changed -= OnHistoryChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e) => RefreshAll();
+
+    private void SaveSensitivity()
+    {
+        _sensitivitySave.Stop();
+        if (_pendingSensitivity is not { } level) return;
+        _pendingSensitivity = null;
+        Update(settings => settings.ShakeSensitivity = level);
+    }
 
     private void OnHistoryChanged(object? sender, EventArgs e) => RefreshHistory(reuse: true);
 
@@ -536,8 +574,8 @@ public sealed class SettingsViewModel : ObservableObject
     {
         foreach (var name in new[]
                  {
-                     nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity),
-                     nameof(EdgeDwell), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
+                     nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity), nameof(SensitivityDescription),
+                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),

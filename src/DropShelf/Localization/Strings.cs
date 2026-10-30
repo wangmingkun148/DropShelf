@@ -109,8 +109,8 @@ public static class Strings
     public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
         "While dragging a file, shake the mouse or pause at the edge of the screen, and a shelf appears.");
     public static string TipStackTitle => T("整摞拖出", "Drag out the stack");
-    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；在“⋯”菜单中展开列表，也能单独或多选拖出。",
-        "Drag the thumbnail stack to take every file at once, or expand the list from the ⋯ menu to drag out one or several.");
+    public static string TipStackBody => T("拖动缩略图堆叠一次带走全部文件；点顶部的列表按钮展开列表，也能单独或多选拖出。",
+        "Drag the thumbnail stack to take every file at once, or open the list with the list button at the top to drag out one or several.");
     public static string TipActionsBody => T("把文件拖到置物架底部，在展开的操作上松开，就能直接压缩、复制路径或移动。",
         "Drag files to the bottom of a shelf and release them on an action to compress them, copy their paths or move them.");
     public static string RestoreShelf => T("恢复", "Reopen");
@@ -138,15 +138,24 @@ public static class Strings
     public static string TriggerEdge => T("屏幕边缘", "Screen edge");
     public static string TriggerBoth => T("两种都用", "Both");
     public static string ShakeSensitivity => T("晃动灵敏度", "Shake sensitivity");
-    public static string SensitivityDescription => T("灵敏只需轻轻晃动，稳健不易误触", "Responsive opens with a small shake. Steady avoids accidental opens");
     public static string SensitivityResponsive => T("灵敏", "Responsive");
-    public static string SensitivityBalanced => T("均衡", "Balanced");
     public static string SensitivitySteady => T("稳健", "Steady");
+    public static string SensitivityBalanced => T("均衡", "Balanced");
+
+    public static string SensitivityDetail(int reversals, int distance) => T(
+        $"来回晃动约 {distance} 像素、掉头 {reversals} 次即可弹出",
+        $"Opens after shaking about {distance} px and turning back {reversals} times");
     public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
     public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘后，停留多久弹出置物架", "How long to pause at the left, right or top edge before a shelf opens");
     public static string DwellShort => T("0.3 秒", "0.3 s");
     public static string DwellMedium => T("0.6 秒", "0.6 s");
     public static string DwellLong => T("1 秒", "1 s");
+    public static string BlockedAppsHeader => T("屏蔽的应用", "Excluded apps");
+    public static string BlockedAppsDescription => T("这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", "No shelf opens while these apps are in front or you drag over their windows, and the hotkey goes to the app");
+    public static string AddApp => T("添加应用", "Add app");
+    public static string BrowseApp => T("浏览…", "Browse…");
+    public static string AppFilter => T("程序|*.exe", "Programs|*.exe");
+    public static string RemoveBlockedApp => T("移除", "Remove");
     public static string Size => T("尺寸", "Size");
     public static string SizeDescription => T("置物架窗口的大小", "How large shelves appear");
     public static string SizeSmall => T("小", "Small");
@@ -230,8 +239,8 @@ public static class Strings
     public static string OnboardingShakeBody => T("在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。",
         "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
-    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；在“⋯”菜单中展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
-        "Release to hold the files. Drag the thumbnail stack to take everything at once, or expand the list from the ⋯ menu to pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
+    public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的列表按钮展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
+        "Release to hold the files. Drag the thumbnail stack to take everything at once, or open the list with the list button at the top to pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null

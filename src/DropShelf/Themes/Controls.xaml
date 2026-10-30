@@ -462,6 +462,76 @@
         </Setter>
     </Style>
 
+    <!-- 滑块：细轨道左侧为强调色；圆形滑钮的中心圆点悬停时放大、按住时缩小 -->
+    <Style x:Key="SliderTrackButtonStyle" TargetType="RepeatButton">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent">
+                        <Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SliderThumbStyle" TargetType="Thumb">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Width="20" Height="20" Background="Transparent">
+                        <Ellipse Fill="{DynamicResource FlyoutBrush}" Stroke="{DynamicResource ControlBorderBrush}" StrokeThickness="1" />
+                        <Ellipse x:Name="Core" Width="12" Height="12" Fill="{DynamicResource AccentBrush}" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Core" Property="Width" Value="14" />
+                            <Setter TargetName="Core" Property="Height" Value="14" />
+                            <Setter TargetName="Core" Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Core" Property="Width" Value="10" />
+                            <Setter TargetName="Core" Property="Height" Value="10" />
+                            <Setter TargetName="Core" Property="Fill" Value="{DynamicResource AccentPressedBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="Slider">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}" />
+        <Setter Property="IsMoveToPointEnabled" Value="True" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid Height="32" Background="Transparent">
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Background="{DynamicResource AccentBrush}"
+                                              Command="Slider.DecreaseLarge" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource SliderTrackButtonStyle}" Background="{DynamicResource ControlStrongBorderBrush}"
+                                              Command="Slider.IncreaseLarge" />
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource SliderThumbStyle}" />
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- 分段选择 -->
     <Style x:Key="SegmentedItemStyle" TargetType="ListBoxItem">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />

@@ -996,14 +996,24 @@
                                         </ListBox>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc ShakeSensitivity}"
-                                                           Description="{l:Loc SensitivityDescription}"
+                                                           Description="{Binding SensitivityDescription}"
                                                            Visibility="{Binding UsesShake, Converter={StaticResource BoolToVisibility}}">
-                                        <ListBox x:Name="SensitivitySelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
-                                                 SelectedValue="{Binding Sensitivity}">
-                                            <ListBoxItem Content="{l:Loc SensitivityResponsive}" Tag="{x:Static models:GestureSensitivity.Responsive}" />
-                                            <ListBoxItem Content="{l:Loc SensitivityBalanced}" Tag="{x:Static models:GestureSensitivity.Balanced}" />
-                                            <ListBoxItem Content="{l:Loc SensitivitySteady}" Tag="{x:Static models:GestureSensitivity.Steady}" />
-                                        </ListBox>
+                                        <!-- 三个字对准 0、50、100：越靠近滑钮越大越清楚，像 macOS 程序坞；两端的字从外侧放大，不会超出滑块 -->
+                                        <StackPanel Width="200">
+                                            <Slider x:Name="SensitivitySlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10"
+                                                    IsSnapToTickEnabled="True" TickFrequency="1" Value="{Binding Sensitivity}"
+                                                    AutomationProperties.Name="{l:Loc ShakeSensitivity}" />
+                                            <Grid Height="20" Margin="0,-3,0,0" IsHitTestVisible="False">
+                                                <Grid.Resources>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionTextStyle}">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                    </Style>
+                                                </Grid.Resources>
+                                                <TextBlock x:Name="SteadyLabel" Text="{l:Loc SensitivitySteady}" HorizontalAlignment="Left" RenderTransformOrigin="0,0" />
+                                                <TextBlock x:Name="BalancedLabel" Text="{l:Loc SensitivityBalanced}" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0" />
+                                                <TextBlock x:Name="ResponsiveLabel" Text="{l:Loc SensitivityResponsive}" HorizontalAlignment="Right" RenderTransformOrigin="1,0" />
+                                            </Grid>
+                                        </StackPanel>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
                                                            Description="{l:Loc EdgeDwellDescription}"
@@ -1015,6 +1025,21 @@
                                             <ListBoxItem Content="{l:Loc DwellLong}" Tag="{x:Static models:EdgeDwellTime.Long}" />
                                         </ListBox>
                                     </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Shield}" Header="{l:Loc BlockedAppsHeader}"
+                                                           Description="{l:Loc BlockedAppsDescription}">
+                                        <Button x:Name="AddBlockedAppButton" Content="{l:Loc AddApp}" MinWidth="96" Click="OnAddBlockedAppClick" />
+                                    </controls:SettingsCard>
+                                    <ItemsControl x:Name="BlockedAppList" ItemsSource="{Binding BlockedApps}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <controls:SettingsCard Header="{Binding}" MinHeight="44" Padding="60,4,10,4">
+                                                    <Button Style="{StaticResource IconButtonStyle}" FontSize="14" Content="{StaticResource Glyph.Delete}"
+                                                            ToolTip="{l:Loc RemoveBlockedApp}" CommandParameter="{Binding}"
+                                                            Command="{Binding DataContext.RemoveBlockedAppCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" />
+                                                </controls:SettingsCard>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
 
                                     <TextBlock Text="{l:Loc Shelf}" Style="{StaticResource SectionHeaderTextStyle}" />
                                     <controls:SettingsCard Icon="{StaticResource Glyph.ViewAll}" Header="{l:Loc Size}" Description="{l:Loc SizeDescription}">

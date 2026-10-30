@@ -240,6 +240,7 @@ public partial class ShelfWindow : Window
     {
         ViewModel.RefreshText();
         UpdateTransferMode();
+        UpdateViews();
         // 按钮提示和拖入时的操作名称是代码生成的，需要重新创建；正在拖入时等下一次再更新。
         if (!_dragInside) BuildActions();
     }
@@ -397,6 +398,9 @@ public partial class ShelfWindow : Window
     {
         StackView.Visibility = ViewModel.HasItems && !ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
         ItemsList.Visibility = ViewModel.IsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        ViewToggleButton.Content = ViewModel.IsExpanded ? "\uE81E" : "\uE8FD";
+        ViewToggleButton.ToolTip = ViewModel.IsExpanded ? Strings.MenuCollapse : Strings.MenuExpand;
+        System.Windows.Automation.AutomationProperties.SetName(ViewToggleButton, (string)ViewToggleButton.ToolTip);
     }
 
     private void UpdateWindowSize()
@@ -955,6 +959,13 @@ public partial class ShelfWindow : Window
 
     private void OnMoreClick(object sender, RoutedEventArgs e) => OpenMenu(BuildShelfMenu(), MoreButton);
 
+    private void OnViewToggleClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.HasInteracted = true;
+        if (ViewModel.IsExpanded) ViewModel.IsExpanded = false;
+        else Expand();
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => CloseAnimated();
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -977,9 +988,9 @@ public partial class ShelfWindow : Window
         var hasItems = ViewModel.HasItems;
         var menu = new ContextMenu();
         if (ViewModel.IsExpanded)
-            menu.Items.Add(CreateMenuItem(Strings.MenuCollapse, "", () => ViewModel.IsExpanded = false, "Esc"));
-        else if (ViewModel.HasMultiple)
-            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "", Expand));
+            menu.Items.Add(CreateMenuItem(Strings.MenuCollapse, "\uE81E", () => ViewModel.IsExpanded = false, "Esc"));
+        else if (hasItems)
+            menu.Items.Add(CreateMenuItem(Strings.MenuExpand, "\uE8FD", Expand));
         menu.Items.Add(CreateMenuItem(Strings.MenuSelectAll, "", SelectAll, "Ctrl+A", ViewModel.HasMultiple));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(targets), "Ctrl+C", hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));

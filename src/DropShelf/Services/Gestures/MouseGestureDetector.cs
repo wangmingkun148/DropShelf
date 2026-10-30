@@ -21,13 +21,17 @@ public sealed class MouseGestureDetector
     private int _rawY;
     private long _rawTime;
 
-    public MouseGestureDetector(GestureSensitivity sensitivity) => _profile = GestureProfile.For(sensitivity);
+    /// <param name="sensitivity">0–100，见 <see cref="ShakeSensitivities"/>。</param>
+    public MouseGestureDetector(int sensitivity) => _profile = GestureProfile.For(sensitivity);
 
-    public void SetSensitivity(GestureSensitivity sensitivity)
+    public void SetSensitivity(int sensitivity)
     {
         _profile = GestureProfile.For(sensitivity);
         Reset();
     }
+
+    /// <summary>用于设置页的说明：每段晃这么远（像素）、掉头这么多次一定能触发。</summary>
+    public static (int Reversals, int Distance) Describe(int sensitivity) => GestureProfile.Describe(sensitivity);
 
     /// <summary>
     /// 接收原始鼠标事件（可能高达 1000 次/秒），按位移或时间重新取样后再判断，
@@ -194,11 +198,45 @@ public sealed class MouseGestureDetector
         int MinimumDurationMilliseconds,
         int MaximumDurationMilliseconds)
     {
-        public static GestureProfile For(GestureSensitivity sensitivity) => sensitivity switch
+        private static readonly GestureProfile Steady = new(70, 480, 5, 320, 1200);
+        private static readonly GestureProfile Balanced = new(34, 153, 3, 180, 800);
+        private static readonly GestureProfile Responsive = new(15, 70, 2, 100, 850);
+
+        /// <summary>正好晃 RequiredReversals + 1 段时，每段平均要多远。</summary>
+        private double Amplitude => MinimumTotalTravel / (RequiredReversals + 1);
+
+        /// <summary>正好晃这么多段时，每段最多可以用多久。</summary>
+        private double SegmentTime => MaximumDurationMilliseconds / (RequiredReversals + 1.0);
+
+        /// <summary>
+        /// 0–50 在稳健与均衡之间、50–100 在均衡与灵敏之间按比例取值，掉头次数和每段幅度都连续变化。
+        /// 掉头次数不是整数时，取整后少掉的部分换成总距离：例如 3.5 次，要么掉头 4 次，要么掉头 3 次但每段晃得更远。
+        /// </summary>
+        public static GestureProfile For(int sensitivity)
         {
-            GestureSensitivity.Responsive => new GestureProfile(20, 94, 2, 120, 800),
-            GestureSensitivity.Steady => new GestureProfile(51, 238, 3, 220, 750),
-            _ => new GestureProfile(34, 153, 3, 180, 800)
-        };
+            var (from, to, t) = Range(sensitivity);
+            var reversals = Mix(from.RequiredReversals, to.RequiredReversals, t);
+            return new GestureProfile(
+                Mix(from.MinimumSegmentDistance, to.MinimumSegmentDistance, t),
+                (reversals + 1) * Mix(from.Amplitude, to.Amplitude, t),
+                (int)Math.Floor(reversals + 1e-6),
+                (int)Math.Round(Mix(from.MinimumDurationMilliseconds, to.MinimumDurationMilliseconds, t)),
+                (int)Math.Round((reversals + 1) * Mix(from.SegmentTime, to.SegmentTime, t)));
+        }
+
+        public static (int Reversals, int Distance) Describe(int sensitivity)
+        {
+            var (from, to, t) = Range(sensitivity);
+            return ((int)Math.Ceiling(Mix(from.RequiredReversals, to.RequiredReversals, t) - 1e-6),
+                (int)Math.Round(Mix(from.Amplitude, to.Amplitude, t)));
+        }
+
+        private static (GestureProfile From, GestureProfile To, double T) Range(int sensitivity)
+        {
+            var position = ShakeSensitivities.Clamp(sensitivity) / 100.0;
+            return position <= 0.5 ? (Steady, Balanced, position * 2) : (Balanced, Responsive, position * 2 - 1);
+        }
+
+        private static double Mix(double from, double to, double t) => from + (to - from) * t;
     }
 }

@@ -162,7 +162,7 @@ internal static class Program
         Assert(defaults.Language == AppLanguage.System, "默认语言应跟随系统");
 
         var folder = CreateFolder("settings-custom");
-        defaults.MouseGestureSensitivity = GestureSensitivity.Steady;
+        defaults.ShakeSensitivity = 20;
         defaults.AutoOpenTrigger = AutoOpenTrigger.Edge;
         defaults.EdgeDwell = EdgeDwellTime.Long;
         defaults.DragOutMode = TransferMode.Copy;
@@ -178,10 +178,11 @@ internal static class Program
         defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
+        defaults.BlockedApps = ["Photoshop.exe", "game.exe"];
         service.Save(defaults);
 
         var loaded = service.Load();
-        Assert(loaded.MouseGestureSensitivity == GestureSensitivity.Steady, "灵敏度未恢复");
+        Assert(loaded.ShakeSensitivity == 20 && loaded.MouseGestureSensitivity is null, "灵敏度未恢复");
         Assert(loaded.AutoOpenTrigger == AutoOpenTrigger.Edge && loaded.EdgeDwell == EdgeDwellTime.Long, "呼出方式未恢复");
         Assert(loaded.DragOutMode == TransferMode.Copy, "拖出方式未恢复");
         Assert(loaded.Theme == AppTheme.Dark, "主题未恢复");
@@ -189,6 +190,7 @@ internal static class Program
         Assert(loaded.QuickShelfSize == QuickShelfSize.Large, "尺寸未恢复");
         Assert(loaded.QuickActionLayout == QuickActionLayout.Two, "按钮数量未恢复");
         Assert(loaded.QuickActionSlots!.SequenceEqual(["Reveal", custom.Id, "CopyFullPath", "MoveTo"]), "快速操作位置没有按原顺序恢复");
+        Assert(loaded.BlockedApps!.SequenceEqual(["Photoshop.exe", "game.exe"]), "屏蔽的应用未恢复");
         var restored = loaded.CustomActions!.Single(action => action.Id == custom.Id);
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
@@ -223,7 +225,8 @@ internal static class Program
             """);
         var migrated = service.Load();
         Assert(migrated.Version == AppSettings.CurrentVersion, "版本号没有更新");
-        Assert(migrated.MouseGestureSensitivity == GestureSensitivity.Responsive && migrated.QuickShelfSize == QuickShelfSize.Small,
+        Assert(migrated.ShakeSensitivity == ShakeSensitivities.Responsive && migrated.MouseGestureSensitivity is null &&
+               migrated.QuickShelfSize == QuickShelfSize.Small,
             "旧设置没有保留");
         Assert(migrated.QuickActionLayout == QuickActionLayout.Four &&
                migrated.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "旧的单个快速操作没有迁移为默认组合");
@@ -267,11 +270,14 @@ internal static class Program
                 new CustomQuickAction { Kind = (CustomActionKind)999 }
             ],
             Hotkey = "Shift+A",
+            BlockedApps = ["  game.exe ", "GAME.EXE", "", @"C:\Tools\paint.exe"],
             WindowWidth = 10,
             WindowHeight = double.NaN
         };
         var normalized = SettingsService.Normalize(invalid.Clone());
-        Assert(normalized.MouseGestureSensitivity == GestureSensitivity.Balanced, "异常灵敏度没有恢复默认值");
+        Assert(normalized.ShakeSensitivity == ShakeSensitivities.Balanced, "异常灵敏度没有恢复默认值");
+        Assert(SettingsService.Normalize(new AppSettings { ShakeSensitivity = 250 }).ShakeSensitivity == ShakeSensitivities.Responsive &&
+               SettingsService.Normalize(new AppSettings { ShakeSensitivity = -5 }).ShakeSensitivity == ShakeSensitivities.Steady, "超出范围的灵敏度没有限制在 0–100");
         Assert(normalized.AutoOpenTrigger == AutoOpenTrigger.Both && normalized.EdgeDwell == EdgeDwellTime.Medium, "异常呼出方式没有恢复默认值");
         Assert(normalized.DragOutMode == TransferMode.Move, "异常拖出方式没有恢复默认值");
         Assert(normalized.Theme == AppTheme.System && normalized.AccentColor is null, "异常主题或强调色没有恢复默认值");
@@ -280,6 +286,7 @@ internal static class Program
         Assert(normalized.Language == AppLanguage.System, "异常语言没有恢复默认值");
         Assert(normalized.QuickShelfSize == QuickShelfSize.Medium, "异常尺寸没有恢复默认值");
         Assert(normalized.QuickActionLayout == QuickActionLayout.Four, "异常按钮数量没有恢复默认值");
+        Assert(normalized.BlockedApps!.SequenceEqual(["game.exe", "paint.exe"]), "屏蔽的应用没有去掉空白、路径和重复");
         Assert(normalized.QuickActionSlots!.SequenceEqual(["Properties", "CompressZip", "CopyFullPath", "MoveTo"]), "快速操作位置没有规范化");
         var image = normalized.CustomActions!.Single();
         Assert(image.Kind == CustomActionKind.CompressImage && image.ImageSizeKb == CustomQuickAction.MinimumImageSizeKb && image.Name is null,
@@ -451,23 +458,52 @@ internal static class Program
 
     private static void TestBalancedGestureTriggers()
     {
-        var detector = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var detector = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var samples = new[] { (100, 100, 0L), (150, 101, 60L), (95, 100, 120L), (155, 101, 180L), (90, 100, 240L) };
         Assert(samples.Any(sample => detector.AddSample(sample.Item1, sample.Item2, sample.Item3, false)), "快速左右晃动未被识别");
     }
 
     private static void TestSensitivityProfilesTrigger()
     {
-        Assert(Shake(GestureSensitivity.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
-        Assert(Shake(GestureSensitivity.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
-        Assert(Shake(GestureSensitivity.Steady, [100, 160, 100, 160, 100, 160], 70), "稳健档无法通过明确晃动触发");
+        Assert(Shake(ShakeSensitivities.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
+        Assert(Shake(ShakeSensitivities.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
+        Assert(Shake(ShakeSensitivities.Steady, [100, 185, 100, 185, 100, 185, 100, 185], 100), "稳健档无法通过明确晃动触发");
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 165, 100, 165, 100, 165, 100], 70), "最稳健时被 2.5.7 的稳健档晃动触发");
+
+        // 三档的差距：灵敏档轻晃即可，均衡档不行；均衡档的正常晃动在稳健档不够。
+        Assert(Shake(ShakeSensitivities.Responsive, [100, 125, 100, 125], 70), "灵敏档无法通过轻晃触发");
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 150, 100, 150, 100, 150, 100], 70), "稳健档被中等幅度晃动触发");
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 165, 100, 165, 100], 70), "稳健档只来回两次就被触发");
 
         // 拖动时手部的小幅来回不应触发。
-        Assert(!Shake(GestureSensitivity.Responsive, [100, 120, 100, 120], 70), "灵敏档被小幅来回误触发");
-        Assert(!Shake(GestureSensitivity.Balanced, [100, 125, 100, 125, 100], 70), "均衡档被小幅晃动误触发");
-        Assert(!Shake(GestureSensitivity.Steady, [100, 135, 100, 135, 100, 135], 70), "稳健档被小幅晃动误触发");
+        Assert(!Shake(ShakeSensitivities.Responsive, [100, 120, 100, 120], 70), "灵敏档被小幅来回误触发");
+        Assert(!Shake(ShakeSensitivities.Balanced, [100, 125, 100, 125, 100], 70), "均衡档被小幅晃动误触发");
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 135, 100, 135, 100, 135], 70), "稳健档被小幅晃动误触发");
 
-        static bool Shake(GestureSensitivity sensitivity, int[] xs, long interval)
+        // 无级调节：同样的晃动，灵敏度越高只会越容易触发，中途不会突然变难。
+        for (var amplitude = 10; amplitude <= 80; amplitude += 2)
+        {
+            var xs = Enumerable.Range(0, 8).Select(index => index % 2 == 0 ? 100 : 100 + amplitude).ToArray();
+            var previous = false;
+            for (var level = ShakeSensitivities.Steady; level <= ShakeSensitivities.Responsive; level++)
+            {
+                var triggered = Shake(level, xs, 70);
+                Assert(triggered || !previous, $"灵敏度 {level} 反而比 {level - 1} 更难触发（幅度 {amplitude}）");
+                previous = triggered;
+            }
+        }
+
+        // 设置页的说明：两端和中间与原来的三档一致，拖向灵敏时幅度和次数只减不增，且照说明晃动一定能触发。
+        var descriptions = Enumerable.Range(0, 101).Select(MouseGestureDetector.Describe).ToArray();
+        Assert(descriptions[0] == (5, 80) && descriptions[50] == (3, 38) && descriptions[100] == (2, 23), "灵敏度两端和中间的说明不正确");
+        Assert(descriptions.Zip(descriptions.Skip(1)).All(pair => pair.Second.Distance <= pair.First.Distance && pair.Second.Reversals <= pair.First.Reversals),
+            "灵敏度说明没有随滑块单调变化");
+        Assert(descriptions.Select((description, level) => (description, level)).All(item =>
+                Shake(item.level, Enumerable.Range(0, item.description.Reversals + 2)
+                    .Select(index => index % 2 == 0 ? 100 : 101 + item.description.Distance).ToArray(), 70)),
+            "按设置页说明的幅度和次数晃动没有触发");
+
+        static bool Shake(int sensitivity, int[] xs, long interval)
         {
             var detector = new MouseGestureDetector(sensitivity);
             return xs.Select((x, index) => (x, index)).Any(sample => detector.AddSample(sample.x, 100, sample.index * interval, false));
@@ -476,23 +512,23 @@ internal static class Program
 
     private static void TestGestureDurationBounds()
     {
-        var tooFast = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var tooFast = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var fastSamples = new[] { (100, 0L), (143, 30L), (100, 60L), (143, 90L), (100, 120L), (143, 150L) };
         Assert(!fastSamples.Any(sample => tooFast.AddSample(sample.Item1, 100, sample.Item2, false)), "瞬间抖动被错误识别为晃动手势");
 
-        var tooSlow = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var tooSlow = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var slowSamples = new[] { (100, 0L), (143, 300L), (100, 600L), (143, 900L), (100, 1200L), (143, 1500L) };
         Assert(!slowSamples.Any(sample => tooSlow.AddSample(sample.Item1, 100, sample.Item2, false)), "缓慢来回移动被错误识别为晃动手势");
     }
 
     private static void TestGestureToleratesIrregularSamples()
     {
-        var delayed = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var delayed = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var delayedSamples = new[] { (100, 100, 0L), (143, 103, 60L), (100, 99, 380L), (144, 105, 445L), (99, 98, 510L) };
         Assert(delayedSamples.Any(sample => delayed.AddSample(sample.Item1, sample.Item2, sample.Item3, false)),
             "系统短暂忙碌导致采样间隔变长后未能识别手势");
 
-        var compact = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var compact = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var compactSamples = new[] { 100, 138, 100, 138, 100, 138 };
         Assert(compactSamples.Select((x, index) => (x, index))
                 .Any(sample => compact.AddSample(sample.x, 100 + sample.index % 2 * 2, sample.index * 55L, false)),
@@ -501,12 +537,12 @@ internal static class Program
 
     private static void TestOtherDirectionGesturesTrigger()
     {
-        var vertical = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var vertical = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var verticalSamples = new[] { (100, 100), (101, 150), (100, 95), (101, 155), (100, 90) };
         Assert(verticalSamples.Select((point, index) => (point, index))
             .Any(sample => vertical.AddSample(sample.point.Item1, sample.point.Item2, sample.index * 65L, false)), "快速上下晃动未被识别");
 
-        var diagonal = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var diagonal = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var diagonalSamples = new[] { (100, 100), (140, 140), (90, 90), (145, 145), (85, 85) };
         Assert(diagonalSamples.Select((point, index) => (point, index))
             .Any(sample => diagonal.AddSample(sample.point.Item1, sample.point.Item2, sample.index * 65L, false)), "快速斜向晃动未被识别");
@@ -514,10 +550,10 @@ internal static class Program
 
     private static void TestNormalMovementDoesNotTrigger()
     {
-        var straight = new MouseGestureDetector(GestureSensitivity.Responsive);
+        var straight = new MouseGestureDetector(ShakeSensitivities.Responsive);
         Assert(!Enumerable.Range(0, 12).Any(index => straight.AddSample(100 + index * 12, 100 + index, index * 40L, false)), "普通直线移动被误识别");
 
-        var turning = new MouseGestureDetector(GestureSensitivity.Responsive);
+        var turning = new MouseGestureDetector(ShakeSensitivities.Responsive);
         var turningSamples = new[] { (100, 100), (140, 100), (140, 140), (100, 140), (100, 100), (140, 100) };
         Assert(!turningSamples.Select((point, index) => (point, index))
             .Any(sample => turning.AddSample(sample.point.Item1, sample.point.Item2, sample.index * 45L, false)), "普通转弯移动被误识别");
@@ -525,14 +561,14 @@ internal static class Program
 
     private static void TestScreenEdgeDoesNotTrigger()
     {
-        var detector = new MouseGestureDetector(GestureSensitivity.Responsive);
+        var detector = new MouseGestureDetector(ShakeSensitivities.Responsive);
         var samples = new[] { (100, 0L), (150, 50L), (95, 100L), (155, 150L), (90, 200L) };
         Assert(!samples.Any(sample => detector.AddSample(sample.Item1, 4, sample.Item2, true)), "屏幕边缘移动被误识别");
     }
 
     private static void TestHighRateShakeTriggers()
     {
-        foreach (var sensitivity in Enum.GetValues<GestureSensitivity>())
+        foreach (var sensitivity in new[] { ShakeSensitivities.Steady, 25, ShakeSensitivities.Balanced, 75, ShakeSensitivities.Responsive })
         {
             var detector = new MouseGestureDetector(sensitivity);
             var random = new Random(7);
@@ -551,7 +587,7 @@ internal static class Program
     private static void TestCoarseTimerShakeTriggers()
     {
         // 复现：系统计时每 15.6 毫秒才跳一次，1000 Hz 鼠标的多次采样时间完全相同。
-        foreach (var sensitivity in Enum.GetValues<GestureSensitivity>())
+        foreach (var sensitivity in new[] { ShakeSensitivities.Steady, 25, ShakeSensitivities.Balanced, 75, ShakeSensitivities.Responsive })
         {
             var detector = new MouseGestureDetector(sensitivity);
             var triggered = false;
@@ -567,11 +603,11 @@ internal static class Program
 
     private static void TestHighRateNormalMovement()
     {
-        var straight = new MouseGestureDetector(GestureSensitivity.Responsive);
+        var straight = new MouseGestureDetector(ShakeSensitivities.Responsive);
         var straightTriggered = Enumerable.Range(0, 1500).Any(ms => straight.AddRawSample(100 + ms, 300 + ms / 10, ms, false));
         Assert(!straightTriggered, "高回报率的直线拖动被误识别");
 
-        var circle = new MouseGestureDetector(GestureSensitivity.Responsive);
+        var circle = new MouseGestureDetector(ShakeSensitivities.Responsive);
         var circleTriggered = Enumerable.Range(0, 2000).Any(ms =>
             circle.AddRawSample(500 + (int)(80 * Math.Cos(ms / 300.0)), 400 + (int)(80 * Math.Sin(ms / 300.0)), ms, false));
         Assert(!circleTriggered, "绕圈拖动被误识别");
@@ -592,11 +628,11 @@ internal static class Program
             }
             samples.Add((x + direction, 105));
         }
-        var detector = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var detector = new MouseGestureDetector(ShakeSensitivities.Balanced);
         Assert(samples.Select((point, index) => (point, index))
             .Any(sample => detector.AddSample(sample.point.X, sample.point.Y, sample.index * 14L, false)), "掉头时的侧向位移打断了手势");
 
-        var sideways = new MouseGestureDetector(GestureSensitivity.Balanced);
+        var sideways = new MouseGestureDetector(ShakeSensitivities.Balanced);
         var zigzag = new[] { (100, 100), (130, 100), (131, 106), (131, 112), (131, 118), (101, 118), (100, 124), (100, 130) };
         Assert(!zigzag.Select((point, index) => (point, index))
             .Any(sample => sideways.AddSample(sample.point.Item1, sample.point.Item2, sample.index * 40L, false)), "连续侧向移动被误识别");
@@ -604,10 +640,10 @@ internal static class Program
 
     private static void TestGestureServiceLifecycle()
     {
-        var service = new GestureService(Dispatcher.CurrentDispatcher, GestureSensitivity.Balanced);
+        var service = new GestureService(Dispatcher.CurrentDispatcher, ShakeSensitivities.Balanced);
         service.Start();
         Assert(service.IsRunning, "鼠标原始输入没有注册");
-        service.SetSensitivity(GestureSensitivity.Steady);
+        service.SetSensitivity(ShakeSensitivities.Steady);
         service.SetTrigger(AutoOpenTrigger.Edge);
         service.SetEdgeDwell(EdgeDwellTime.Short);
         service.Dispose();
@@ -1554,15 +1590,21 @@ internal static class Program
         var folder = CreateFolder("shelf-window");
         var file = Path.Combine(folder, "a.txt");
         File.WriteAllText(file, "x");
-        window.ViewModel.AddFiles([file, folder]);
+        var toggle = (System.Windows.Controls.Button)window.FindName("ViewToggleButton")!;
+        Assert(toggle.Visibility == Visibility.Collapsed, "空置物架不应显示文件堆/列表切换按钮");
+        window.ViewModel.AddFiles([file]);
+        Pump(100);
+        Assert(toggle.Visibility == Visibility.Visible, "只有一项时也应显示文件堆/列表切换按钮");
+        window.ViewModel.AddFiles([folder]);
         Pump(100);
         Assert(!window.IsReusable, "有内容的置物架不应被复用");
         Assert(window.ViewModel.IsPinned && window.Topmost, "置物架默认应置顶");
         window.ViewModel.IsPinned = false;
         Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
         window.ViewModel.IsPinned = true;
-        window.ViewModel.IsExpanded = true;
+        toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(100);
+        Assert(window.ViewModel.IsExpanded, "点击切换按钮没有展开列表");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");
 
         // 展开时继续放入项目：窗口变高要等列表收到新增项目之后，否则布局会抛出异常。
@@ -1609,7 +1651,7 @@ internal static class Program
         Pump(200);
 
         foreach (var name in new[] { "PageCards", "VersionButton", "StatusIndicator", "GettingStartedSection", "HistorySection", "HistoryList",
-                     "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "TriggerSelector", "SensitivitySelector", "EdgeDwellSelector",
+                     "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "TriggerSelector", "SensitivitySlider", "EdgeDwellSelector",
                      "ShelfSizeSelector", "DragOutModeSelector", "CloseWhenEmptyBox", "ClearHistoryButton", "ThemeSelector",
                      "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
@@ -1722,7 +1764,13 @@ internal static class Program
         Assert(((FrameworkElement)window.FindName("HistorySection")!).Visibility == Visibility.Collapsed, "没有记录时不应显示最近关闭");
 
         var viewModel = (SettingsViewModel)window.DataContext;
-        ((System.Windows.Controls.ListBox)window.FindName("SensitivitySelector")!).SelectedValue = GestureSensitivity.Steady;
+        ((System.Windows.Controls.Slider)window.FindName("SensitivitySlider")!).Value = 20;
+        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 63), "拖动滑块时说明没有立即更新");
+        Pump(400);
+        var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }
+            .Select(name => ((System.Windows.Media.ScaleTransform)((FrameworkElement)window.FindName(name)!).RenderTransform).ScaleX).ToArray();
+        Assert(labelScales[0] > labelScales[1] && labelScales[1] > labelScales[2] && Math.Abs(labelScales[2] - 0.85) < 0.001,
+            "滑块偏向稳健时，稳健应最大、均衡其次、灵敏保持最小");
         ((System.Windows.Controls.ListBox)window.FindName("TriggerSelector")!).SelectedValue = AutoOpenTrigger.Edge;
         Assert(!viewModel.UsesShake && viewModel.UsesEdge, "只用屏幕边缘时不应显示晃动灵敏度");
         ((System.Windows.Controls.ListBox)window.FindName("EdgeDwellSelector")!).SelectedValue = EdgeDwellTime.Long;
@@ -1906,7 +1954,7 @@ internal static class Program
         Assert(editor.NamePlaceholder == "≤ 200 KB" && editor.TrySave() && !viewModel.IsEditorOpen, "自定义操作没有保存");
 
         var saved = service.Load();
-        Assert(saved.MouseGestureSensitivity == GestureSensitivity.Steady, "灵敏度没有立即保存");
+        Assert(saved.ShakeSensitivity == 20, "灵敏度没有在停下后保存");
         Assert(saved.AutoOpenTrigger == AutoOpenTrigger.Edge && saved.EdgeDwell == EdgeDwellTime.Long, "呼出方式没有保存");
         Assert(saved.DragOutMode == TransferMode.Copy, "拖出方式没有保存");
         Assert(saved.QuickShelfSize == QuickShelfSize.Small, "尺寸没有立即保存");

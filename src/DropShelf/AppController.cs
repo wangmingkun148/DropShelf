@@ -20,6 +20,7 @@ public sealed class AppController : IDisposable
     private TrayIconService? _tray;
     private HotkeyService? _hotkey;
     private GestureService? _gestures;
+    private ForegroundAppWatcher? _appWatcher;
     private ProbeWindow? _probe;
     private MainWindow? _mainWindow;
     private bool _showingMainWindow;
@@ -78,7 +79,10 @@ public sealed class AppController : IDisposable
             () => new TrayMenuState(_settings.HotkeyGesture.ToString(), History.Entries),
             ShowMainWindow, () => Shelves.OpenAtCursor(activate: true), entry => Shelves.Restore(entry), History.Clear, Exit);
         _hotkey = new HotkeyService(_messageWindow);
-        _hotkey.Pressed += (_, _) => Shelves.OpenAtCursor(activate: true);
+        _hotkey.Pressed += (_, _) =>
+        {
+            if (_appWatcher?.CheckForeground() != true) Shelves.OpenAtCursor(activate: true);
+        };
         IsHotkeyRegistered = _hotkey.Register(_settings.HotkeyGesture);
 
         _probe = new ProbeWindow();
@@ -87,13 +91,22 @@ public sealed class AppController : IDisposable
             Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false, _pendingEdge);
             if (_pendingEdge != ScreenEdge.None) _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
         };
-        _gestures = new GestureService(_dispatcher, _settings.MouseGestureSensitivity);
+        _gestures = new GestureService(_dispatcher, _settings.ShakeSensitivity);
         _gestures.SetTrigger(_settings.AutoOpenTrigger);
         _gestures.SetEdgeDwell(_settings.EdgeDwell);
         _gestures.ShakeDetected += OnShakeDetected;
         _gestures.EdgeDwellDetected += OnEdgeDwellDetected;
         _gestures.DragReleased += OnDragReleased;
         _gestures.Start();
+
+        var watcher = new ForegroundAppWatcher();
+        watcher.BlockedChanged += (_, _) =>
+        {
+            _gestures?.SetPaused(watcher.IsBlocked);
+            _hotkey?.SetPaused(watcher.IsBlocked);
+        };
+        watcher.SetBlockedApps(_settings.BlockedApps!);
+        _appWatcher = watcher;
 
         Shelves.Prewarm();
 
@@ -248,6 +261,7 @@ public sealed class AppController : IDisposable
         if (_exiting) return;
         _exiting = true;
         _settingsService.Save(_settings);
+        _appWatcher?.Dispose();
         _gestures?.Dispose();
         _probe?.Close();
         Shelves.CloseAll();
@@ -272,12 +286,14 @@ public sealed class AppController : IDisposable
         }
         if (_gestures is not null)
         {
-            _gestures.SetSensitivity(current.MouseGestureSensitivity);
+            _gestures.SetSensitivity(current.ShakeSensitivity);
             _gestures.SetTrigger(current.AutoOpenTrigger);
             _gestures.SetEdgeDwell(current.EdgeDwell);
         }
         if (previous.Hotkey != current.Hotkey && _hotkey is not null)
             IsHotkeyRegistered = _hotkey.Register(current.HotkeyGesture);
+        if (!previous.BlockedApps!.SequenceEqual(current.BlockedApps!, StringComparer.OrdinalIgnoreCase))
+            _appWatcher?.SetBlockedApps(current.BlockedApps!);
         if (ShelfAppearanceChanged(previous, current)) Shelves.ApplySettings(current);
     }
 
@@ -291,7 +307,7 @@ public sealed class AppController : IDisposable
 
     private void OnShakeDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting) return;
+        if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"识别到晃动 ({e.X}, {e.Y})，显示探针窗口");
         _pendingEdge = ScreenEdge.None;
         _probe?.ShowAt(new POINT(e.X, e.Y));
@@ -299,11 +315,18 @@ public sealed class AppController : IDisposable
 
     private void OnEdgeDwellDetected(object? sender, GestureTriggeredEventArgs e)
     {
-        if (_exiting) return;
+        if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"在屏幕边缘停留 ({e.X}, {e.Y}, {e.Edge})，显示探针窗口");
         _pendingEdge = e.Edge;
         _probe?.ShowAt(new POINT(e.X, e.Y));
         _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
+    }
+
+    private bool IsBlockedAt(GestureTriggeredEventArgs e)
+    {
+        if (_appWatcher?.IsBlockedAt(new POINT(e.X, e.Y)) != true) return false;
+        LogService.Trace($"识别到手势 ({e.X}, {e.Y})，但前台或光标下是屏蔽的应用，不弹出置物架");
+        return true;
     }
 
     private void OnDragReleased(object? sender, EventArgs e)

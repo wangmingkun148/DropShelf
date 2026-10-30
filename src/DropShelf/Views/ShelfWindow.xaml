@@ -166,9 +166,14 @@
             </Grid.RowDefinitions>
 
             <!-- 标题栏：可拖动移动窗口 -->
-            <Grid x:Name="Header" Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown" Margin="5,4,5,0">
+            <Grid x:Name="Header" Background="Transparent" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown" Margin="4,4,4,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                    <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}" Width="30" Height="30" FontSize="14"
+                    <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}" Width="28" Height="30" FontSize="14"
                                   IsChecked="{Binding IsPinned}" ToolTip="{l:Loc PinTooltip}">
                         <ToggleButton.Content>
                             <TextBlock>
@@ -193,15 +198,18 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
-                <!-- 收起时堆叠下方已显示名称和数量，标题只在展开列表时显示 -->
-                <TextBlock x:Name="TitleText" Text="{Binding Title}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                <!-- 收起时堆叠下方已显示名称和数量，标题只在展开列表时显示；放在两组按钮之间，英文较长时截断而不是盖住按钮 -->
+                <TextBlock x:Name="TitleText" Grid.Column="1" Text="{Binding Title}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False"
-                           MaxWidth="80" TextTrimming="CharacterEllipsis"
+                           Margin="4,0" TextTrimming="CharacterEllipsis"
                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="14"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <!-- 在文件堆和列表之间切换，有项目时就显示 -->
+                    <Button x:Name="ViewToggleButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
+                            Click="OnViewToggleClick" Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}" />
+                    <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="14"
                             Content="{StaticResource Glyph.More}" ToolTip="{l:Loc MoreTooltip}" Click="OnMoreClick" />
-                    <Button x:Name="CloseButton" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" FontSize="11"
+                    <Button x:Name="CloseButton" Style="{StaticResource IconButtonStyle}" Width="28" Height="30" FontSize="11"
                             Content="{StaticResource Glyph.Close}" ToolTip="{l:Loc CloseShelfTooltip}" Click="OnCloseClick" />
                 </StackPanel>
             </Grid>
