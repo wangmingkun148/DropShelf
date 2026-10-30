@@ -23,6 +23,9 @@ public partial class ShelfWindow
     private static readonly TimeSpan LandStagger = TimeSpan.FromMilliseconds(80);
     private static readonly TimeSpan PushDelay = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan PushDuration = TimeSpan.FromMilliseconds(300);
+    /// <summary>松手时摊开的牌，在新牌开始落下这么久之后合拢。</summary>
+    private static readonly TimeSpan FanCloseDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan FanCloseDuration = TimeSpan.FromMilliseconds(260);
     private static readonly TimeSpan FlyDuration = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan DealStagger = TimeSpan.FromMilliseconds(40);
     private static readonly TimeSpan NameFadeDuration = TimeSpan.FromMilliseconds(220);
@@ -35,6 +38,8 @@ public partial class ShelfWindow
     private TimeSpan _motionFrameTime;
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
+    /// <summary>松手后堆叠接着拖入时摊开的样子，等新牌落进中间再合拢；只在松手到落下动画开始之间有值。</summary>
+    private LocalCardPose?[]? _heldFan;
 
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
     private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
@@ -79,10 +84,55 @@ public partial class ShelfWindow
     private StackCard[] StackCards => _stackCards ??= [StackCard.From(Card0), StackCard.From(Card1), StackCard.From(Card2)];
 
     /// <summary>
+    /// 松手后、读完拖入的内容之前，堆叠停在拖入时摊开的样子：最上面两张分在左右，第三张先藏起来，角标也藏起来，中间空着等新牌。
+    /// fan 是摊开的两张在 StackCanvas 里的姿态。
+    /// </summary>
+    private void HoldFan(LocalCardPose?[] fan)
+    {
+        if (!ShelfMotion.Enabled || fan[0] is null) return;
+        FinishMotion();
+        var cards = StackCards;
+        for (var i = 0; i < cards.Length; i++) cards[i].Pose(FanStart(cards, fan, i));
+        StackRankCorner.Opacity = 0;
+        _heldFan = fan;
+        _motionCleanup = () =>
+        {
+            _heldFan = null;
+            foreach (var card in cards) card.Pose(card.Home);
+            RestoreStackMark();
+        };
+    }
+
+    /// <summary>摊开时第 index 张牌的姿态；没有摊开的那张停在原位但看不见。</summary>
+    private static LocalCardPose FanStart(StackCard[] cards, LocalCardPose?[] fan, int index) =>
+        index < fan.Length && fan[index] is { } pose ? pose : cards[index].Home with { Opacity = 0 };
+
+    /// <summary>松手后没有放进新项目（都已在置物架里或读取失败）：摊开的牌直接合拢。</summary>
+    private void CloseFan()
+    {
+        if (_heldFan is not { } fan) return;
+        StopMotion();
+        _heldFan = null;
+        var cards = StackCards;
+        for (var i = 0; i < cards.Length; i++)
+        {
+            var (card, from) = (cards[i], FanStart(cards, fan, i));
+            Tween(TimeSpan.Zero, FanCloseDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
+        }
+        _motionCleanup = () =>
+        {
+            foreach (var card in cards) card.Pose(card.Home);
+            RestoreStackMark();
+        };
+        Tween(TimeSpan.Zero, FanCloseDuration, _ => { }, FinishMotion);
+    }
+
+    /// <summary>
     /// 松手后，拖进来的文件从松手处飞进堆叠：从拖动图像大小放大，划一道弧落到自己的位置，原来的牌往下退一层。
     /// 一次拖入多个时最多 3 张依次落下，最上面那张最后落下，数量随每张落下增加。
+    /// 拖入时摊开过（fan 不为 null）的，新牌落进中间的空位，快落定时原来的牌从左右合拢到下面。
     /// </summary>
-    private void PlayLanding(WpfPoint drop, int added)
+    private void PlayLanding(WpfPoint drop, int added, LocalCardPose?[]? fan = null)
     {
         FinishMotion();
         var cards = StackCards;
@@ -110,9 +160,12 @@ public partial class ShelfWindow
             }
             else
             {
-                var from = cards[i - incoming].Home;
-                Tween(PushDelay, PushDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
-                end = Max(end, PushDelay + PushDuration);
+                // 退一层的牌原来在上面第 i - incoming 张的位置，摊开过就从摊开的样子合拢。
+                var above = i - incoming;
+                var from = fan?[above] ?? cards[above].Home;
+                var (delay, duration) = fan is null ? (PushDelay, PushDuration) : (LandStagger * (incoming - 1) + FanCloseDelay, FanCloseDuration);
+                Tween(delay, duration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
+                end = Max(end, delay + duration);
             }
         }
 

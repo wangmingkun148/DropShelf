@@ -13,6 +13,7 @@ using DropShelf.Services;
 using DropShelf.Views.Controls;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfDragEventArgs = System.Windows.DragEventArgs;
+using WpfPoint = System.Windows.Point;
 
 namespace DropShelf.Views;
 
@@ -106,6 +107,7 @@ public partial class ShelfWindow
         var action = _hoveredAction;
         var fromSelf = _dragFromSelf;
         var kind = _dragKind;
+        var fan = action is null && !fromSelf && !ViewModel.IsExpanded ? FanPoses() : null;
         EndDrag();
 
         if (fromSelf || kind == DropContentKind.None || ViewModel.IsBusy ||
@@ -120,6 +122,7 @@ public partial class ShelfWindow
         e.Effects = PreferredEffect(e.AllowedEffects);
         _dropHelper.Drop(e.Data, e.Effects);
         ViewModel.HasInteracted = true;
+        if (fan is not null) HoldFan(fan);
 
         try
         {
@@ -144,6 +147,7 @@ public partial class ShelfWindow
                 }
                 var summary = ViewModel.Add(read);
                 if (summary.Added > 0) _landing = (dropPoint, summary.Added);
+                else CloseFan();
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
                 else if (summary.Duplicates > 0 || summary.Unavailable > 0 || read.FailedCount > 0)
                     ViewModel.Notify(read.FailedCount > 0 ? Strings.WithFailedAttachments(summary.Message, read.FailedCount) : summary.Message);
@@ -154,6 +158,7 @@ public partial class ShelfWindow
         {
             LogService.Error("处理拖入内容失败", exception);
             ViewModel.Notify(Strings.DropFailed, false);
+            CloseFan();
         }
     }
 
@@ -164,7 +169,7 @@ public partial class ShelfWindow
         var incoming = IncomingCount(data);
         IncomingText.Text = $"+{incoming}";
         IncomingBadge.Visibility = incoming > 0 ? Visibility.Visible : Visibility.Collapsed;
-        DealGhostCards();
+        FanOutStack();
         Body.Visibility = Visibility.Hidden;
         ResetTiles();
         DropOverlay.Visibility = Visibility.Visible;
@@ -188,25 +193,37 @@ public partial class ShelfWindow
         }
     }
 
-    /// <summary>发牌：两张虚线牌从两侧斜着滑进来，转正一些后停住，等松手。</summary>
-    private void DealGhostCards()
+    /// <summary>
+    /// 摊牌：原来那一摞最上面两张从叠着的样子向左右各转开一点，中间的虚线空位浮起来，等松手。
+    /// 牌面和堆叠里一样；只有一项时只摊开一张，空置物架只显示空位。停住的样子就是 XAML 中的静止角度和位移。
+    /// </summary>
+    private void FanOutStack()
     {
-        // 每张牌：牌、转角、位移、从哪一侧滑入、停住时的角度（与 XAML 中的静止角度一致）。
-        var cards = new[] { (GhostLeft, GhostLeftTurn, GhostLeftShift, -1.0, -14.0), (GhostRight, GhostRightTurn, GhostRightShift, 1.0, 13.0) };
-        foreach (var (card, turn, shift, side, angle) in cards)
+        // 每张牌的转角和位移从叠着时的样子（见 StackCanvas 里的 Card0、Card1）动到摊开的样子。
+        var moves = new (Animatable Target, DependencyProperty Property, double From, double To)[]
         {
-            if (!ShelfMotion.Enabled)
-            {
-                card.BeginAnimation(OpacityProperty, null);
-                turn.BeginAnimation(RotateTransform.AngleProperty, null);
-                shift.BeginAnimation(TranslateTransform.XProperty, null);
-                continue;
-            }
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            card.BeginAnimation(OpacityProperty, new DoubleAnimation(0.4, 1, DealDuration) { EasingFunction = ease });
-            turn.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(angle + side * 9, angle, DealDuration) { EasingFunction = ease });
-            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(side * 22, 0, DealDuration) { EasingFunction = ease });
-        }
+            (FanLeftTurn, RotateTransform.AngleProperty, 0, -13), (FanLeftShift, TranslateTransform.XProperty, 0, -34),
+            (FanLeftShift, TranslateTransform.YProperty, 0, 4), (FanRightTurn, RotateTransform.AngleProperty, 7, 12),
+            (FanRightShift, TranslateTransform.XProperty, 11, 34), (FanRightShift, TranslateTransform.YProperty, 2, 4),
+            (FanSlotScale, ScaleTransform.ScaleXProperty, 0.9, 1), (FanSlotScale, ScaleTransform.ScaleYProperty, 0.9, 1),
+            (FanSlotShift, TranslateTransform.YProperty, 6, -3)
+        };
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        foreach (var (target, property, from, to) in moves)
+            target.BeginAnimation(property, ShelfMotion.Enabled ? new DoubleAnimation(from, to, FanDuration) { EasingFunction = ease } : null);
+        FanSlot.BeginAnimation(OpacityProperty, ShelfMotion.Enabled ? new DoubleAnimation(0, 1, FanDuration) { EasingFunction = ease } : null);
+    }
+
+    /// <summary>摊开的两张牌在 StackCanvas 里的姿态：松手后堆叠里的牌从这里合拢，看起来是同一摞牌。没有摊开的牌时为 null。</summary>
+    private LocalCardPose?[] FanPoses() => [PoseIn(FanLeft, StackCanvas), PoseIn(FanRight, StackCanvas)];
+
+    private static LocalCardPose? PoseIn(FrameworkElement card, Visual target)
+    {
+        if (card.Visibility != Visibility.Visible || PresentationSource.FromVisual(card) is null) return null;
+        var transform = card.TransformToVisual(target);
+        var center = transform.Transform(new WpfPoint(card.Width / 2, card.Height / 2));
+        var edge = transform.Transform(new WpfPoint(card.Width, card.Height / 2)) - center;
+        return new LocalCardPose(center.X, center.Y, Math.Atan2(edge.Y, edge.X) * 180 / Math.PI, edge.Length / (card.Width / 2));
     }
 
     private void EndDrag()

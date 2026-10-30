@@ -416,28 +416,33 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <!-- 拖进来的东西先发两张虚线牌到桌上，夹着原来那一摞；拖到快速操作上时整组变淡 -->
+                    <!-- 拖进来时原来那一摞最上面两张摊成小扇形，中间露出一个虚线空位；拖到快速操作上时整组变淡。静止角度和位移即摊开后的样子，没有那一项的牌由样式藏起 -->
                     <Viewbox x:Name="ShelfDropFrame" Stretch="Uniform" MaxHeight="104">
                         <Canvas Width="176" Height="108">
-                            <Border x:Name="DropStackCard" Canvas.Left="56" Canvas.Top="10" Width="{x:Static controls:CardGridPanel.CardWidth}" Height="{x:Static controls:CardGridPanel.CardHeight}" CornerRadius="5" BorderThickness="1.2"
-                                    Background="{DynamicResource ShelfTileBrush}" BorderBrush="{DynamicResource ShelfTileBorderBrush}"
-                                    Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="{Binding Count}" Style="{StaticResource CardRankTextStyle}" FontSize="15" LineHeight="15"
-                                           Margin="5,4,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" />
-                            </Border>
-                            <Rectangle x:Name="GhostLeft" Style="{StaticResource GhostCardStyle}" Canvas.Left="12" Canvas.Top="16">
-                                <Rectangle.RenderTransform>
+                            <ContentControl x:Name="FanRight" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
+                                            DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}"
+                                            Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
+                                <ContentControl.RenderTransform>
                                     <TransformGroup>
-                                        <RotateTransform x:Name="GhostLeftTurn" Angle="-14" />
-                                        <TranslateTransform x:Name="GhostLeftShift" />
+                                        <RotateTransform x:Name="FanRightTurn" Angle="12" />
+                                        <TranslateTransform x:Name="FanRightShift" X="34" Y="4" />
                                     </TransformGroup>
-                                </Rectangle.RenderTransform>
-                            </Rectangle>
-                            <Rectangle x:Name="GhostRight" Style="{StaticResource GhostCardStyle}" Canvas.Left="100" Canvas.Top="16">
+                                </ContentControl.RenderTransform>
+                            </ContentControl>
+                            <ContentControl x:Name="FanLeft" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
+                                            DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}">
+                                <ContentControl.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform x:Name="FanLeftTurn" Angle="-13" />
+                                        <TranslateTransform x:Name="FanLeftShift" X="-34" Y="4" />
+                                    </TransformGroup>
+                                </ContentControl.RenderTransform>
+                            </ContentControl>
+                            <Rectangle x:Name="FanSlot" Style="{StaticResource GhostCardStyle}" Canvas.Left="56" Canvas.Top="10">
                                 <Rectangle.RenderTransform>
                                     <TransformGroup>
-                                        <RotateTransform x:Name="GhostRightTurn" Angle="13" />
-                                        <TranslateTransform x:Name="GhostRightShift" />
+                                        <ScaleTransform x:Name="FanSlotScale" />
+                                        <TranslateTransform x:Name="FanSlotShift" Y="-3" />
                                     </TransformGroup>
                                 </Rectangle.RenderTransform>
                             </Rectangle>

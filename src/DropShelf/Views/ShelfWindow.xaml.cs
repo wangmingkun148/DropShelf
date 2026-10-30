@@ -54,7 +54,7 @@ public partial class ShelfWindow : Window
     private const double ActionBarHeight = 50;
     private const double ActionTileHeight = 94;
     private static readonly TimeSpan RankRollDuration = TimeSpan.FromMilliseconds(220);
-    private static readonly TimeSpan DealDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan FanDuration = TimeSpan.FromMilliseconds(200);
     private const int WS_SYSMENU = 0x00080000;
     private const int WS_MINIMIZEBOX = 0x00020000;
     private const int WS_MAXIMIZEBOX = 0x00010000;
@@ -257,6 +257,8 @@ public partial class ShelfWindow : Window
     {
         var switched = !_countChanged && _shownExpanded != ViewModel.IsExpanded;
         var landing = _landing;
+        // 松手时摊开的牌，先取出来：下面 FinishMotion 会把它清掉。
+        var fan = _heldFan;
         _countChanged = false;
         _landing = null;
         _shownExpanded = ViewModel.IsExpanded;
@@ -271,7 +273,7 @@ public partial class ShelfWindow : Window
         UpdateWindowSize();
         if (landing is not { } drop || !animate) return;
         if (ViewModel.IsExpanded) PlayGridLanding(drop.Point, drop.Added);
-        else PlayLanding(drop.Point, drop.Added);
+        else PlayLanding(drop.Point, drop.Added, fan);
     }
 
     /// <summary>最上面一张牌的角标；切换视图时和说明文字一起淡出淡入。</summary>
