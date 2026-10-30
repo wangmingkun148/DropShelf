@@ -1689,8 +1689,8 @@ public partial class MainWindow : Window
         var y = card.IsCustom || position.Y <= zoneTop
             ? position.Y
             : zoneTop + LockedSink * (1 - Math.Exp(-(position.Y - zoneTop) / LockedSink));
-        Canvas.SetLeft(DragGhost, position.X + 12);
-        Canvas.SetTop(DragGhost, y + 8);
+        DragGhostShift.X = position.X + 12;
+        DragGhostShift.Y = y + 8;
         SetOverDeleteZone(position.Y >= zoneTop);
         SetDropTarget(_overDeleteZone ? null : HitTestSlot(e.GetPosition(ActionSlotsList)), card);
     }
@@ -1713,7 +1713,7 @@ public partial class MainWindow : Window
     {
         DragGhost.Visibility = Visibility.Visible;
         var top = DragLayer.ActualHeight - DeleteZone.ActualHeight - DragGhost.ActualHeight;
-        DragGhost.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(Math.Min(Canvas.GetTop(DragGhost), top), TimeSpan.FromMilliseconds(320))
+        DragGhostShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(Math.Min(DragGhostShift.Y, top), TimeSpan.FromMilliseconds(320))
         {
             EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }
         });
@@ -1729,7 +1729,7 @@ public partial class MainWindow : Window
 
     private void ClearGhostAnimations()
     {
-        DragGhost.BeginAnimation(Canvas.TopProperty, null);
+        DragGhostShift.BeginAnimation(TranslateTransform.YProperty, null);
         DragGhost.BeginAnimation(OpacityProperty, null);
     }
 
