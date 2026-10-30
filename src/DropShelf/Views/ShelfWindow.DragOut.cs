@@ -134,11 +134,19 @@ public partial class ShelfWindow
         _deferSelection = false;
     }
 
+    /// <summary>双击牌打开它，双击牌之间的空白处收回堆叠。</summary>
     private void OnListDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (FindAncestor<ButtonBase>(e.OriginalSource as DependencyObject) is not null) return;
-        if (FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is { DataContext: ShelfItem item })
+        var source = e.OriginalSource as DependencyObject;
+        if (FindAncestor<ButtonBase>(source) is not null || FindAncestor<ScrollBar>(source) is not null) return;
+        if (FindAncestor<ListBoxItem>(source) is { DataContext: ShelfItem item })
+        {
             ViewModel.Open(item);
+            return;
+        }
+        ViewModel.HasInteracted = true;
+        ViewModel.IsExpanded = false;
+        e.Handled = true;
     }
 
     private void OnListRightButtonDown(object sender, MouseButtonEventArgs e)
