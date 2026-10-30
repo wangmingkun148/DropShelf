@@ -1603,7 +1603,7 @@ internal static class Program
         Assert(!window.Topmost, "取消钉子后置物架不应再置顶");
         window.ViewModel.IsPinned = true;
         toggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        // 切换时牌飞到各行、窗口大小平滑过渡，等动画播完再检查。
+        // 切换时牌飞到各行，等动画播完再检查。
         Pump(700);
         Assert(window.ViewModel.IsExpanded, "点击切换按钮没有展开列表");
         Assert(window.Width >= QuickShelfSizeOptions.ResolveExpandedWidth(controller.Settings.QuickShelfSize), "展开后宽度没有变化");

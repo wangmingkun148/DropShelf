@@ -1,10 +1,8 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using DropShelf.Interop;
 using DropShelf.Models;
 using WpfPoint = System.Windows.Point;
 using WpfSize = System.Windows.Size;
@@ -12,8 +10,9 @@ using WpfSize = System.Windows.Size;
 namespace DropShelf.Views;
 
 /// <summary>
-/// 置物架内容的动画：拖进来的文件从松手处飞进堆叠；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来），
-/// 窗口大小同时平滑过渡。只改牌的变换和透明度，窗口每帧调整一次大小，期间内容保持固定大小不重新布局；动画途中再有变化时直接跳到终点。
+/// 置物架内容的动画：拖进来的文件从松手处飞进堆叠或列表；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来）。
+/// 只改变换和透明度。逐帧改窗口大小会让动画明显掉帧，所以窗口一次变到位：展开时先变大再飞牌，收起时牌飞回去之后再变小。
+/// 动画途中再有变化时直接跳到终点。
 /// </summary>
 public partial class ShelfWindow
 {
@@ -26,14 +25,11 @@ public partial class ShelfWindow
     private static readonly TimeSpan RowFadeDelay = TimeSpan.FromMilliseconds(140);
     private static readonly TimeSpan RowFadeDuration = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(120);
-    private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(260);
     private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
 
     private readonly List<EventHandler> _motionFrames = [];
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
-    private EventHandler? _resizeFrame;
-    private (double Width, double Height) _resizeTarget;
 
     /// <summary>牌在堆叠画布里的姿态：中心位置、角度、缩放和透明度。</summary>
     private readonly record struct CardPose(double X, double Y, double Angle, double Scale = 1, double Opacity = 1)
@@ -133,8 +129,72 @@ public partial class ShelfWindow
     }
 
     /// <summary>
+    /// 列表状态下拖入：新文件的图标从松手处划一道弧飞到自己那一行的行首，快落下时这一行的文字从左边滑出。
+    /// 一次拖入多个时最多 3 个依次落下，最后一个最后落下；新项目在列表末尾，看不到时先滚过去。
+    /// </summary>
+    private void PlayListLanding(WpfPoint drop, int added)
+    {
+        FinishMotion();
+        var items = ViewModel.Items;
+        var incoming = Math.Min(Math.Min(added, items.Count), 3);
+        if (incoming == 0) return;
+
+        ItemsList.UpdateLayout();
+        ItemsList.ScrollIntoView(items[^1]);
+        ItemsList.UpdateLayout();
+        var rows = new List<(FrameworkElement Thumb, FrameworkElement Text)>();
+        var end = TimeSpan.Zero;
+        for (var i = 0; i < incoming; i++)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(items.Count - 1 - i) is not ListBoxItem row ||
+                FindNamed(row, "RowThumb") is not { } thumb || FindNamed(row, "RowText") is not { } text) continue;
+            // 位置用相对行首的平移表示：从松手处出发，略大于行首图标，落到原位。
+            var center = thumb.TranslatePoint(new WpfPoint(thumb.ActualWidth / 2, thumb.ActualHeight / 2), this);
+            var from = new CardPose(drop.X - center.X, drop.Y - center.Y, -8, 1.5, 0);
+            var home = new CardPose(0, 0, 0);
+            var control = new WpfPoint(from.X / 2, Math.Min(from.Y, 0) - 20);
+            var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(), new TranslateTransform());
+            var slide = new TranslateTransform();
+            thumb.RenderTransformOrigin = new WpfPoint(0.5, 0.5);
+            thumb.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
+            text.RenderTransform = slide;
+            rows.Add((thumb, text));
+
+            var delay = LandStagger * (incoming - 1 - i);
+            Tween(delay, LandDuration, t =>
+            {
+                var pose = Arc(from, home, control, t);
+                shift.X = pose.X;
+                shift.Y = pose.Y;
+                turn.Angle = pose.Angle;
+                scale.ScaleX = scale.ScaleY = pose.Scale;
+                thumb.Opacity = pose.Opacity;
+            });
+            var textDelay = delay + LandDuration / 2;
+            Tween(textDelay, RowFadeDuration, t =>
+            {
+                text.Opacity = t;
+                slide.X = -10 * (1 - t);
+            });
+            end = Max(end, textDelay + RowFadeDuration);
+        }
+
+        _motionCleanup = () =>
+        {
+            foreach (var (thumb, text) in rows)
+            {
+                foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty })
+                    thumb.ClearValue(property);
+                text.ClearValue(RenderTransformProperty);
+                text.ClearValue(OpacityProperty);
+            }
+        };
+        Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+    }
+
+    /// <summary>
     /// 堆叠和列表之间切换：堆叠保持收起时的大小留在左上角，牌飞到列表里自己那一行并缩成行首图标，各行随后从左边滑出；
-    /// 收起时各行淡出，图标飞回去叠成一摞。窗口大小同时过渡到新的大小。
+    /// 收起时各行淡出，图标飞回去叠成一摞。窗口展开时先一次变到新大小，收起时等牌飞回去再变小。
     /// </summary>
     private void AnimateViewSwitch()
     {
@@ -151,18 +211,19 @@ public partial class ShelfWindow
         UpdateViews();
         StackView.Visibility = Visibility.Visible;
         ItemsList.Visibility = Visibility.Visible;
-        // 堆叠和列表都固定为各自显示时的大小：窗口逐帧变化时只裁掉超出的部分，列表不用每帧重新布局、加载新露出的行。
+        // 堆叠和列表都固定为各自显示时的大小，窗口比它们大或小时只是露出或裁掉一部分。
         Pin(StackView, stackSize);
         Pin(ItemsList, listSize);
         StackView.IsHitTestVisible = false;
         Panel.SetZIndex(StackView, 1);
-        UpdateWindowSize(animate: true);
+        if (toList) UpdateWindowSize();
         Body.UpdateLayout();
 
         var cards = StackCards;
         var thumbs = new List<UIElement>();
         var rows = new List<ListBoxItem>();
         var end = TimeSpan.Zero;
+        var cardsEnd = TimeSpan.Zero;
         for (var index = 0; index < ViewModel.Items.Count; index++)
             if (ItemsList.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem row) rows.Add(row);
 
@@ -202,8 +263,11 @@ public partial class ShelfWindow
                 }
                 card.Pose(pose);
             });
-            end = Max(end, delay + FlyDuration);
+            cardsEnd = Max(cardsEnd, delay + FlyDuration);
         }
+        end = cardsEnd;
+        // 收起时牌是从列表里各行的位置飞回来的，等它们都回到堆叠里再把窗口变小。
+        if (!toList) Tween(TimeSpan.Zero, cardsEnd, _ => { }, () => UpdateWindowSize());
 
         for (var i = 0; i < rows.Count; i++)
         {
@@ -254,6 +318,7 @@ public partial class ShelfWindow
             StackView.ClearValue(IsHitTestVisibleProperty);
             StackView.ClearValue(Panel.ZIndexProperty);
             UpdateViews();
+            UpdateWindowSize();
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
     }
@@ -284,55 +349,12 @@ public partial class ShelfWindow
         var cleanup = _motionCleanup;
         _motionCleanup = null;
         cleanup?.Invoke();
-        FinishResize();
     }
 
     private void StopMotion()
     {
         foreach (var frame in _motionFrames) CompositionTarget.Rendering -= frame;
         _motionFrames.Clear();
-    }
-
-    /// <summary>窗口大小逐帧过渡到目标大小，左上角不动；只改大小不改位置，和滑入动画互不影响。</summary>
-    private void ResizeWindow(double width, double height)
-    {
-        StopResize();
-        var handle = new WindowInteropHelper(this).Handle;
-        if (!ShelfMotion.Enabled || !IsVisible || handle == IntPtr.Zero || !NativeMethods.GetWindowRect(handle, out var rect))
-        {
-            ApplyWindowSize(width, height);
-            return;
-        }
-
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var (toWidth, toHeight) = ((int)Math.Round(width * dpi.DpiScaleX), (int)Math.Round(height * dpi.DpiScaleY));
-        var (fromWidth, fromHeight) = (rect.Width, rect.Height);
-        var clock = Stopwatch.StartNew();
-        _resizeTarget = (width, height);
-        _resizeFrame = (_, _) =>
-        {
-            var progress = Math.Min(1, clock.Elapsed / ResizeDuration);
-            var eased = MotionEase.Ease(progress);
-            NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0,
-                (int)Math.Round(fromWidth + (toWidth - fromWidth) * eased), (int)Math.Round(fromHeight + (toHeight - fromHeight) * eased),
-                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
-            if (progress >= 1) FinishResize();
-        };
-        CompositionTarget.Rendering += _resizeFrame;
-    }
-
-    private void FinishResize()
-    {
-        if (_resizeFrame is null) return;
-        StopResize();
-        ApplyWindowSize(_resizeTarget.Width, _resizeTarget.Height);
-    }
-
-    private void StopResize()
-    {
-        if (_resizeFrame is null) return;
-        CompositionTarget.Rendering -= _resizeFrame;
-        _resizeFrame = null;
     }
 
     private static void Pin(FrameworkElement element, WpfSize size)
