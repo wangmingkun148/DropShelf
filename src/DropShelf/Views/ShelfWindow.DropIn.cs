@@ -108,7 +108,7 @@ public partial class ShelfWindow
         var fromSelf = _dragFromSelf;
         var kind = _dragKind;
         var fan = action is null && !fromSelf && !ViewModel.IsExpanded ? FanPoses() : null;
-        EndDrag();
+        EndDrag(instant: fan is not null);
 
         if (fromSelf || kind == DropContentKind.None || ViewModel.IsBusy ||
             (action is not null && !DropDataReader.CanProvideFiles(kind)))
@@ -170,11 +170,15 @@ public partial class ShelfWindow
         IncomingText.Text = $"+{incoming}";
         IncomingBadge.Visibility = incoming > 0 ? Visibility.Visible : Visibility.Collapsed;
         FanOutStack();
-        Body.Visibility = Visibility.Hidden;
         ResetTiles();
+        DropOverlay.IsHitTestVisible = true;
+        if (DropOverlay.Visibility != Visibility.Visible) DropOverlay.Opacity = 0;
         DropOverlay.Visibility = Visibility.Visible;
         // 立即完成布局，紧接着判断光标是否在按钮区域时才能拿到正确的位置。
         DropOverlay.UpdateLayout();
+        // 内容区淡出，摊开的牌和放置区域淡入；只改透明度，不重新排版。
+        Fade(DropOverlay, 1, OverlayFadeIn);
+        Fade(Body, 0, OverlayFadeOut, () => Body.Visibility = Visibility.Hidden);
         WindowEffects.SetBorderColor(this, ThemeService.AccentFill);
     }
 
@@ -226,16 +230,54 @@ public partial class ShelfWindow
         return new LocalCardPose(center.X, center.Y, Math.Atan2(edge.Y, edge.X) * 180 / Math.PI, edge.Length / (card.Width / 2));
     }
 
-    private void EndDrag()
+    private static readonly TimeSpan OverlayFadeIn = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan OverlayFadeOut = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// 拖动离开或松手：放置区域淡出、内容区淡入。instant 时直接换回：松手后堆叠要从摊开的样子接着落牌（见 HoldFan），两边的牌正好重合，交叉淡化反而会让牌变淡一下。
+    /// </summary>
+    private void EndDrag(bool instant = false)
     {
         _leaveCheck.Stop();
         _dragInside = false;
         SetHoveredAction(null);
-        DropOverlay.Visibility = Visibility.Collapsed;
         Body.Visibility = Visibility.Visible;
+        // 淡出期间放置区域不再挡住下面的内容。
+        DropOverlay.IsHitTestVisible = false;
+        Fade(Body, 1, instant ? TimeSpan.Zero : OverlayFadeIn);
+        Fade(DropOverlay, 0, instant ? TimeSpan.Zero : OverlayFadeOut, () => DropOverlay.Visibility = Visibility.Collapsed);
         ResetTiles();
         WindowEffects.SetBorderColor(this, null);
     }
+
+    private readonly Dictionary<UIElement, AnimationTimeline> _fades = [];
+
+    /// <summary>
+    /// 淡入淡出到 to，结束时调用 done；中途又换了方向时旧的 done 不再调用。关闭了动画效果时直接到位。
+    /// 透明度直接设为终点，动画只在播放期间盖在上面，结束后自然露出终点的值。
+    /// </summary>
+    private void Fade(UIElement element, double to, TimeSpan duration, Action? done = null)
+    {
+        var from = element.Opacity;
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = to;
+        _fades.Remove(element);
+        if (!ShelfMotion.Enabled || from == to || duration <= TimeSpan.Zero)
+        {
+            done?.Invoke();
+            return;
+        }
+        var fade = new DoubleAnimation(from, to, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop };
+        _fades[element] = fade;
+        fade.Completed += (_, _) =>
+        {
+            if (!_fades.TryGetValue(element, out var current) || current != fade) return;
+            _fades.Remove(element);
+            done?.Invoke();
+        };
+        element.BeginAnimation(OpacityProperty, fade);
+    }
+
 
     /// <summary>快速操作收起为底部按钮栏的高度：按钮栏保持可见，提示可以拖到这里。</summary>
     private void ResetTiles()
@@ -278,7 +320,7 @@ public partial class ShelfWindow
     private QuickActionInfo? HitTestTiles(WpfDragEventArgs e)
     {
         if (!_tilesExpanded) return null;
-        foreach (var (tile, _, _, info) in _tiles)
+        foreach (var (tile, _, _, _, _, info) in _tiles)
         {
             if (tile.ActualWidth <= 0) continue;
             var point = e.GetPosition(tile);

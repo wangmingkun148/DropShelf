@@ -581,7 +581,7 @@
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
                         <Grid>
-                            <Border Width="0" HorizontalAlignment="Left" CornerRadius="4" Visibility="Hidden" Background="{DynamicResource AccentBrush}"
+                            <Border CornerRadius="4" Visibility="Hidden" Background="{DynamicResource AccentBrush}"
                                     controls:SegmentedIndicator.Owner="{Binding RelativeSource={RelativeSource TemplatedParent}}" />
                             <ItemsPresenter />
                         </Grid>

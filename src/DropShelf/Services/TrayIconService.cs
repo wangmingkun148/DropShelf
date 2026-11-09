@@ -13,8 +13,6 @@ namespace DropShelf.Services;
 /// <summary>隐藏的顶层消息窗口：接收托盘图标回调、全局快捷键和资源管理器重启通知。</summary>
 public sealed class MessageWindow : IDisposable
 {
-    private const int CopyDataMarker = 0x44534831;
-    private const char ArgumentSeparator = '\n';
     private readonly HwndSource _source;
 
     public MessageWindow(string title)
@@ -38,32 +36,14 @@ public sealed class MessageWindow : IDisposable
     public event Action<string[]>? ArgumentsReceived;
 
     /// <summary>把参数交给已经运行的实例；找不到或对方没有响应时返回 false。</summary>
-    public static bool SendArguments(string title, IReadOnlyList<string> arguments)
-    {
-        var window = NativeMethods.FindWindow(null, title);
-        if (window == IntPtr.Zero) return false;
-        var text = string.Join(ArgumentSeparator, arguments);
-        var pointer = Marshal.StringToHGlobalUni(text);
-        try
-        {
-            var data = new COPYDATASTRUCT { Data = new IntPtr(CopyDataMarker), Size = (text.Length + 1) * 2, Pointer = pointer };
-            return NativeMethods.SendMessageTimeout(window, NativeMethods.WM_COPYDATA, IntPtr.Zero, ref data, 0x0002, 3000, out _) != IntPtr.Zero;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(pointer);
-        }
-    }
+    public static bool SendArguments(string title, IReadOnlyList<string> arguments) => SingleInstance.SendArguments(title, arguments);
 
     private IntPtr OnMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message == NativeMethods.WM_COPYDATA)
         {
-            var data = Marshal.PtrToStructure<COPYDATASTRUCT>(lParam);
-            if (data.Data.ToInt64() == CopyDataMarker && data.Pointer != IntPtr.Zero && data.Size > 0)
+            if (SingleInstance.ReadArguments(Marshal.PtrToStructure<COPYDATASTRUCT>(lParam)) is { } arguments)
             {
-                var text = Marshal.PtrToStringUni(data.Pointer, data.Size / 2).TrimEnd(char.MinValue);
-                var arguments = text.Split(ArgumentSeparator, StringSplitOptions.RemoveEmptyEntries);
                 Dispatcher.CurrentDispatcher.BeginInvoke(() => ArgumentsReceived?.Invoke(arguments));
                 handled = true;
                 return new IntPtr(1);

@@ -26,6 +26,8 @@ public sealed class GestureService : IDisposable
     /// <summary>光标停着不动时没有鼠标输入，按住期间用计时器定期检查是否停在边缘。</summary>
     private const uint EdgePollMilliseconds = 40;
     private const int EdgeTolerance = 1;
+    /// <summary>没按住鼠标时，处理完手上的输入后休息这么久再处理下一批。</summary>
+    private const int IdleBatchMilliseconds = 8;
 
     private static readonly uint RawInputSize = (uint)Marshal.SizeOf<RAWINPUTMOUSE>();
     private static readonly uint RawHeaderSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
@@ -123,10 +125,22 @@ public sealed class GestureService : IDisposable
             if (message.Message == NativeMethods.WM_INPUT) OnInput(message.LParam);
             NativeMethods.TranslateMessage(ref message);
             NativeMethods.DispatchMessage(ref message);
+            if (message.Message == NativeMethods.WM_INPUT && !_leftDown && !_rightDown) RestWhileIdle();
         }
 
         StopEdgeTimer();
         StopListening();
+    }
+
+    /// <summary>
+    /// 没按住鼠标时只需要知道有没有按下。高回报率的鼠标每秒有上千条输入，逐条唤醒线程不划算：
+    /// 队列里暂时没有新的输入时休息一小会儿，这期间到达的输入攒在队列里，醒来后按顺序一口气处理完。
+    /// 按下最多晚一次休息的时间（系统计时精度下约 16 毫秒）才被注意到，晃动至少要一百多毫秒，不受影响；按住期间不休息。
+    /// </summary>
+    private static void RestWhileIdle()
+    {
+        if (((NativeMethods.GetQueueStatus(NativeMethods.QS_RAWINPUT) >> 16) & NativeMethods.QS_RAWINPUT) == 0)
+            Thread.Sleep(IdleBatchMilliseconds);
     }
 
     /// <summary>创建只接收消息的隐藏窗口，并登记为程序在后台时也接收鼠标原始输入。</summary>

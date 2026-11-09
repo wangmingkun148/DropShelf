@@ -197,6 +197,8 @@ internal static partial class Program
                 Dispatcher.PushFrame(frame);
             }
             task.GetAwaiter().GetResult();
+            // 设置在后台保存，等写完再进行下一项，免得晚到的写入覆盖下一项测试准备的设置文件。
+            SettingsService.Flush();
             _passed++;
             Console.WriteLine($"通过  {name}");
         }

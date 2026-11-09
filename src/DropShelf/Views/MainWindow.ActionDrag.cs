@@ -71,11 +71,11 @@ public partial class MainWindow
     {
         DragGhost.Visibility = Visibility.Visible;
         var top = DragLayer.ActualHeight - DeleteZone.ActualHeight - DragGhost.ActualHeight;
-        DragGhostShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(Math.Min(DragGhostShift.Y, top), TimeSpan.FromMilliseconds(320))
+        DragGhostShift.BeginAnimation(TranslateTransform.YProperty, ShelfMotion.Gate(new DoubleAnimation(Math.Min(DragGhostShift.Y, top), TimeSpan.FromMilliseconds(320))
         {
             EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }
-        });
-        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)) { BeginTime = TimeSpan.FromMilliseconds(160) };
+        }));
+        var fade = ShelfMotion.Gate(new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)) { BeginTime = TimeSpan.FromMilliseconds(160) });
         fade.Completed += (_, _) =>
         {
             if (_draggingCard) return;
@@ -100,7 +100,7 @@ public partial class MainWindow
         _pendingDelete = card;
         ConfirmMessage.Text = Strings.ConfirmDeleteAction(card.Title);
         ConfirmOverlay.Visibility = Visibility.Visible;
-        ConfirmOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)));
+        ConfirmOverlay.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150))));
         ConfirmDialogScale.BeginAnimation(ScaleTransform.ScaleXProperty, Motion(0.96, 1));
         ConfirmDialogScale.BeginAnimation(ScaleTransform.ScaleYProperty, Motion(0.96, 1));
         ConfirmCancelButton.Focus();
@@ -118,7 +118,7 @@ public partial class MainWindow
     {
         if (_pendingDelete is null) return;
         _pendingDelete = null;
-        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(120));
+        var fade = ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(120)));
         fade.Completed += (_, _) =>
         {
             if (_pendingDelete is null) ConfirmOverlay.Visibility = Visibility.Collapsed;
@@ -174,7 +174,7 @@ public partial class MainWindow
     }
 
     private static void Fade(UIElement element, double to) =>
-        element.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(150)));
+        element.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(to, TimeSpan.FromMilliseconds(150))));
 
     /// <summary>悬停的位置显示“交换”（从另一个位置拖来）或“替换”（从更多操作拖来）。</summary>
     private void SetDropTarget(ActionSlotViewModel? target, ActionCardViewModel? card)

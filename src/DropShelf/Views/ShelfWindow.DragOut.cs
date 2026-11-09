@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
@@ -21,28 +22,79 @@ public partial class ShelfWindow
 {
     // ───────────── 拖出 ─────────────
 
-    private void BeginDragOut(IReadOnlyList<ShelfItem> items)
+    /// <summary>
+    /// 拖出：文件很多时先在后台准备（检查是否还在、解析路径），准备期间松开了鼠标就不再拖。
+    /// 拖动期间被拖的牌或行变淡，取消或留在置物架上时恢复，移走的由移除动画接着淡出。
+    /// </summary>
+    private async void BeginDragOut(IReadOnlyList<ShelfItem> items)
     {
-        if (items.Count == 0 || ViewModel.IsBusy) return;
+        if (items.Count == 0 || ViewModel.IsBusy || IsDraggingOut) return;
         IsDraggingOut = true;
         DragOutResult result;
         IReadOnlyList<ShelfItem> dragged;
+        DragOutPayload? payload = null;
         try
         {
-            result = ShelfDragService.DoDragDrop(this, items, ViewModel.Id, out dragged, _dragOutMode);
+            // 准备期间列表不再跟着鼠标改变选中的项目。
+            Mouse.Capture(null);
+            payload = await ShelfDragService.PrepareAsync(items);
+            if (IsClosing || !NativeMethods.IsButtonPhysicallyDown()) return;
+            DimDragged(items);
+            result = ShelfDragService.DoDragDrop(this, payload, ViewModel.Id, out dragged, _dragOutMode);
         }
         finally
         {
+            payload?.Dispose();
             IsDraggingOut = false;
         }
 
         ViewModel.HasInteracted = true;
-        if (result == DragOutResult.Cancelled) return;
-        // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
-        if (dragged.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
-        var closeWhenEmpty = _host.Settings.CloseWhenEmpty;
-        ViewModel.ApplyDragOut(dragged, result, removeCopied: closeWhenEmpty);
-        if (ViewModel.IsEmpty && closeWhenEmpty) CloseAnimated();
+        if (result != DragOutResult.Cancelled)
+        {
+            // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
+            if (dragged.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
+            // 要移走的项目交给 RemoveItems：先播放移除动画，全部移走且设置为自动关闭时直接关闭置物架。
+            ViewModel.ApplyDragOut(dragged, result, removeCopied: _host.Settings.CloseWhenEmpty);
+        }
+        RestoreDimmed();
+    }
+
+    /// <summary>拖出期间被拖的牌或行的透明度。</summary>
+    private const double DragOutDim = 0.4;
+    private static readonly TimeSpan DimDuration = TimeSpan.FromMilliseconds(150);
+    private readonly List<UIElement> _dimmed = [];
+
+    private void DimDragged(IReadOnlyList<ShelfItem> items)
+    {
+        if (!ShelfMotion.Enabled) return;
+        var elements = ViewModel.IsExpanded
+            ? items.Select(item => ItemsList.ItemContainerGenerator.ContainerFromItem(item)).OfType<UIElement>()
+            : StackCards.Where(card => card.Card.DataContext is ShelfItem item && items.Contains(item)).Select(card => (UIElement)card.Card);
+        foreach (var element in elements)
+        {
+            element.BeginAnimation(OpacityProperty, new DoubleAnimation(DragOutDim, DimDuration) { EasingFunction = MotionEase });
+            _dimmed.Add(element);
+        }
+    }
+
+    /// <summary>拖出结束，还留在置物架上的恢复原来的透明度；要移除的已经由移除动画接手，见 TakeDimmed。</summary>
+    private void RestoreDimmed()
+    {
+        foreach (var element in _dimmed)
+            element.BeginAnimation(OpacityProperty, new DoubleAnimation(element.Opacity, 1, DimDuration)
+            {
+                EasingFunction = MotionEase, FillBehavior = FillBehavior.Stop
+            });
+        _dimmed.Clear();
+    }
+
+    /// <summary>移除动画从变淡后的样子接着淡出：停下变淡的动画，透明度留在当前的值。</summary>
+    private void TakeDimmed(UIElement element)
+    {
+        if (!_dimmed.Remove(element)) return;
+        var now = element.Opacity;
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = now;
     }
 
     private bool PassedDragThreshold(System.Windows.Input.MouseEventArgs e)
@@ -165,15 +217,17 @@ public partial class ShelfWindow
         RemoveItems([item]);
     }
 
+    /// <summary>移除项目并播放移除动画；全部移走且设置为自动关闭时不播放，直接关闭置物架。</summary>
     private void RemoveItems(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return;
         ViewModel.HasInteracted = true;
+        var closes = _host.Settings.CloseWhenEmpty && ViewModel.Items.All(items.Contains);
         RemoveWithMotion(items, () =>
         {
             ViewModel.Remove(items);
             if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty) CloseAnimated();
-        });
+        }, animate: !closes);
     }
 
     private IReadOnlyList<ShelfItem> GetSelectedItems() =>

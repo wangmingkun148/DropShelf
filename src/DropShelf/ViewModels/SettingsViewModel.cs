@@ -342,7 +342,7 @@ public sealed class SettingsViewModel : ObservableObject
 
     /// <summary>操作的布局、位置和自定义操作内容，用来判断设置变化后是否需要重建操作卡片。</summary>
     private string ActionsKey() =>
-        $"{Settings.QuickActionLayout}|{string.Join(',', Settings.QuickActionSlots ?? [])}|{System.Text.Json.JsonSerializer.Serialize(Settings.CustomActions)}";
+        $"{Settings.QuickActionLayout}|{string.Join(',', Settings.QuickActionSlots ?? [])}|{string.Join('\u001E', (Settings.CustomActions ?? []).Select(action => action.Key))}";
 
     private void RefreshActions()
     {
@@ -419,7 +419,23 @@ public sealed class SettingsViewModel : ObservableObject
         LanguageService.LanguageChanged -= OnLanguageChanged;
     }
 
-    private void OnSettingsChanged(object? sender, EventArgs e) => RefreshAll();
+    private bool _refreshQueued;
+
+    /// <summary>
+    /// 设置变化后，操作卡片立即重建（之后的代码可能马上用到）；其余三十多项说明文字和状态的通知稍后合并发出一次，
+    /// 让刚切换的开关、选项先画出这一帧，连续拖动滑块时也不会每次都全部刷新。属性本身随时读到的都是最新的设置。
+    /// </summary>
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        if (ActionsKey() != _actionsKey) RefreshActions();
+        if (_refreshQueued) return;
+        _refreshQueued = true;
+        System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(() =>
+        {
+            _refreshQueued = false;
+            RefreshAll();
+        }, System.Windows.Threading.DispatcherPriority.Background);
+    }
 
     private void SaveSensitivity()
     {

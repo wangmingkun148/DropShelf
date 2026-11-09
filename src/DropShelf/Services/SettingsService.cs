@@ -96,6 +96,7 @@ public sealed class SettingsService
 
     public AppSettings Load()
     {
+        Flush();
         try
         {
             if (!File.Exists(SettingsPath)) return Normalize(new AppSettings());
@@ -109,15 +110,53 @@ public sealed class SettingsService
         }
     }
 
+    // 整个程序共用一条保存队列：重新读取设置前可以先等还没写完的保存。
+    private static readonly object SaveLock = new();
+    private static Task _saving = Task.CompletedTask;
+    private static int _version;
+
+    /// <summary>保存并等写完；退出时用。平时用 <see cref="SaveInBackground"/>。</summary>
     public void Save(AppSettings settings)
+    {
+        SaveInBackground(settings);
+        Flush();
+    }
+
+    /// <summary>
+    /// 在后台按顺序保存，点开关、切换选项时界面不用等文件写完（杀毒软件检查写入时可能要几十毫秒）。
+    /// 保存的是此刻设置的副本；连续修改时排在后面的已经到来就跳过这一次，只写最新的内容。
+    /// </summary>
+    public void SaveInBackground(AppSettings settings)
+    {
+        var snapshot = Normalize(settings.Clone());
+        lock (SaveLock)
+        {
+            var version = ++_version;
+            var path = SettingsPath;
+            _saving = _saving.ContinueWith(_ =>
+            {
+                if (version == Volatile.Read(ref _version)) Write(path, snapshot);
+            }, TaskScheduler.Default);
+        }
+    }
+
+    /// <summary>等后台的保存写完。</summary>
+    public static void Flush()
+    {
+        Task saving;
+        lock (SaveLock) saving = _saving;
+        saving.Wait();
+    }
+
+    private static void Write(string path, AppSettings snapshot)
     {
         try
         {
-            var directory = Path.GetDirectoryName(SettingsPath);
+            var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-            var tempPath = SettingsPath + ".tmp";
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(Normalize(settings.Clone()), JsonOptions));
-            File.Move(tempPath, SettingsPath, true);
+            var tempPath = path + ".tmp";
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(snapshot, JsonOptions));
+            File.Move(tempPath, path, true);
         }
         catch (Exception exception)
         {

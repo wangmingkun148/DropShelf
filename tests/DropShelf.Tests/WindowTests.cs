@@ -126,6 +126,7 @@ internal static partial class Program
         Assert(reopened.ViewModel.Items.Count == 2 && controller.History.Entries.All(entry => entry != latest), "最近关闭的置物架没有恢复");
         reopened.Close();
         controller.History.Clear();
+        SettingsService.Flush();
         File.Delete(new SettingsService().SettingsPath);
     }
 
@@ -484,6 +485,7 @@ internal static partial class Program
 
         ThemeService.SetMode(AppTheme.Light);
         window.Close();
+        SettingsService.Flush();
         File.Delete(service.SettingsPath);
     }
 

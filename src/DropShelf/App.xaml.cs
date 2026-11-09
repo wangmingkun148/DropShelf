@@ -1,7 +1,6 @@
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
-using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Services;
 
@@ -9,8 +8,6 @@ namespace DropShelf;
 
 public partial class App : System.Windows.Application
 {
-    private Mutex? _singleInstanceMutex;
-    private bool _ownsSingleInstanceMutex;
     private EventWaitHandle? _showWindowEvent;
     private CancellationTokenSource? _listenerCancellation;
     private Task? _listenerTask;
@@ -21,24 +18,9 @@ public partial class App : System.Windows.Application
     private static string? _lastError;
     private static long _lastErrorTick;
 
-    private static string MutexName => @"Local\DropShelf.SingleInstance.v1" + AppController.InstanceSuffix;
-    private static string ShowWindowEventName => @"Local\DropShelf.ShowMainWindow.v1" + AppController.InstanceSuffix;
-
     protected override void OnStartup(StartupEventArgs e)
     {
-        _singleInstanceMutex = new Mutex(true, MutexName, out _ownsSingleInstanceMutex);
-        if (!_ownsSingleInstanceMutex)
-        {
-            // 已在运行：“发送到”或拖到图标上的文件交给现有实例，否则唤醒主窗口。
-            // 先允许现有实例切到前台，否则它的窗口可能打开在其他窗口后面，看起来像没有反应。
-            NativeMethods.AllowSetForegroundWindow(-1);
-            var forwarded = AppController.IsShelfRequest(e.Args) &&
-                            MessageWindow.SendArguments(AppController.MessageWindowTitle, e.Args);
-            if (!forwarded) SignalExistingInstance();
-            Shutdown();
-            return;
-        }
-
+        // 单实例由 Program.Main 在启动 WPF 之前判断，走到这里的就是第一个实例。
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += (_, args) =>
@@ -60,7 +42,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            _showWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
+            _showWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, SingleInstance.ShowWindowEventName);
             _listenerCancellation = new CancellationTokenSource();
             var cancellationToken = _listenerCancellation.Token;
             var eventHandle = _showWindowEvent;
@@ -89,28 +71,6 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             LogService.Error("重复启动唤醒功能初始化失败", exception);
-        }
-    }
-
-    private static void SignalExistingInstance()
-    {
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            try
-            {
-                using var showEvent = EventWaitHandle.OpenExisting(ShowWindowEventName);
-                showEvent.Set();
-                return;
-            }
-            catch (WaitHandleCannotBeOpenedException)
-            {
-                Thread.Sleep(80);
-            }
-            catch (Exception exception)
-            {
-                LogService.Error("无法唤醒已经运行的 DropShelf", exception);
-                return;
-            }
         }
     }
 
@@ -163,10 +123,6 @@ public partial class App : System.Windows.Application
         _listenerCancellation?.Dispose();
         _listenerTask = null;
         ThemeService.Dispose();
-
-        if (_ownsSingleInstanceMutex)
-            _singleInstanceMutex?.ReleaseMutex();
-        _singleInstanceMutex?.Dispose();
         base.OnExit(e);
     }
 }

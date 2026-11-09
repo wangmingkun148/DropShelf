@@ -332,6 +332,7 @@ public sealed class FanPanel : Panel
     /// <summary>选出一张牌时只有几张牌的位置会变：目标没变的属性不重新开始动画，正在播放的照常播完。</summary>
     private static void Set(Animatable target, DependencyProperty property, double value, IEasingFunction ease, bool animate)
     {
+        animate &= ShelfMotion.Enabled;
         var goals = Goals.GetOrCreateValue(target);
         if (animate && goals.TryGetValue(property, out var goal) && goal == value) return;
         goals[property] = value;

@@ -212,7 +212,7 @@ public partial class MainWindow
         };
         AttachFlip(view, plain);
         PoseBack(from, from, Math.PI);
-        var cover = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120));
+        var cover = ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
         cover.Completed += (_, _) =>
         {
             if (session == _flipSession && BeginBack(view, tile, from, plain, drag: false) is { } flip) Run(flip, 1);
@@ -275,6 +275,15 @@ public partial class MainWindow
     private void Run(Flip flip, double target, double? rate = null)
     {
         flip.Dragging = false;
+        if (!ShelfMotion.Enabled)
+        {
+            // 关闭了动画效果：直接摆到终点（或退回起点），不播放翻牌。
+            flip.Progress = target;
+            flip.RunTo = target;
+            Pose(flip);
+            Land(flip, forward: target >= 1, jump: true);
+            return;
+        }
         var natural = 1 / flip.Total;
         var distance = Math.Abs(target - flip.Progress);
         var speed = Math.Max(0, (rate ?? natural) * Math.Sign(target - flip.Progress));
@@ -581,7 +590,7 @@ public partial class MainWindow
         if (pageShown && flip.Plain && !jump)
         {
             RevealPlainPage(view, flip.Session);
-            StackLayer.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase });
+            StackLayer.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase }));
         }
         else
         {
@@ -615,8 +624,8 @@ public partial class MainWindow
     {
         view.Sheet.Opacity = 1;
         ScrollBarOf(view.Scroll)?.ClearValue(VisibilityProperty);
-        view.Scroll.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase });
-        var reveal = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = GlideEase };
+        view.Scroll.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase }));
+        var reveal = ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = GlideEase });
         reveal.Completed += (_, _) =>
         {
             if (session != _flipSession) return;
@@ -627,7 +636,7 @@ public partial class MainWindow
     }
 
     private static void FadeInScrollBar(ScrollViewer scroll) =>
-        ScrollBarOf(scroll)?.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)) { EasingFunction = MotionEase });
+        ScrollBarOf(scroll)?.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)) { EasingFunction = MotionEase }));
 
     private static ScrollBar? ScrollBarOf(ScrollViewer scroll) => scroll.Template?.FindName("PART_VerticalScrollBar", scroll) as ScrollBar;
 
@@ -789,8 +798,8 @@ public partial class MainWindow
         if (page.RenderTransform is not TranslateTransform shift) page.RenderTransform = shift = new TranslateTransform();
         CacheWhileFading(page);
         var duration = TimeSpan.FromMilliseconds(milliseconds);
-        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase });
-        var fade = new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase };
+        shift.BeginAnimation(TranslateTransform.YProperty, ShelfMotion.Gate(new DoubleAnimation(14, 0, duration) { EasingFunction = MotionEase }));
+        var fade = ShelfMotion.Gate(new DoubleAnimation(0, 1, duration) { EasingFunction = MotionEase });
         fade.Completed += (_, _) => page.CacheMode = null;
         page.BeginAnimation(OpacityProperty, fade);
     }

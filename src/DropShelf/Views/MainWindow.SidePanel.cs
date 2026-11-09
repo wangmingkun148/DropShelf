@@ -102,7 +102,7 @@ public partial class MainWindow
     private static AnimationTimeline Header(double from, double to, IEasingFunction ease, double milliseconds = 0, double delay = 0)
     {
         var duration = milliseconds > 0 ? milliseconds : HeaderDuration.TotalMilliseconds;
-        return new DoubleAnimationUsingKeyFrames
+        return ShelfMotion.Gate(new DoubleAnimationUsingKeyFrames
         {
             KeyFrames =
             {
@@ -110,7 +110,7 @@ public partial class MainWindow
                 new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(delay))),
                 new EasingDoubleKeyFrame(to, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(delay + duration)), ease)
             }
-        };
+        });
     }
 
     // ───────────── 左侧状态栏 ─────────────
@@ -257,7 +257,7 @@ public partial class MainWindow
     private System.Windows.Point PositionOf(UIElement element) => element.TranslatePoint(default, ContentLayer);
 
     private static DoubleAnimation Motion(double from, double to) =>
-        new(from, to, MotionDuration) { EasingFunction = MotionEase };
+        ShelfMotion.Gate(new DoubleAnimation(from, to, MotionDuration) { EasingFunction = MotionEase });
 
     /// <summary>动画结束后去掉位图缓存；收起的状态栏不再参与排版。</summary>
     private void OnSidePanelSettled()
@@ -282,7 +282,7 @@ public partial class MainWindow
         Canvas.SetTop(image, position.Y);
         DragLayer.Children.Add(image);
         image.RenderTransform.BeginAnimation(TranslateTransform.XProperty, Motion(0, distance));
-        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180));
+        var fade = ShelfMotion.Gate(new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)));
         fade.Completed += (_, _) => DragLayer.Children.Remove(image);
         image.BeginAnimation(OpacityProperty, fade);
     }

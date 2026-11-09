@@ -462,8 +462,8 @@
             </Grid>
 
             <!-- 正在处理 -->
-            <Grid x:Name="BusyOverlay" Grid.RowSpan="3" Background="{DynamicResource SmokeBrush}"
-                  Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+            <!-- 处理得很快时不显示，免得一闪而过；显示后至少停留一会儿，见 UpdateBusyOverlay -->
+            <Grid x:Name="BusyOverlay" Grid.RowSpan="3" Background="{DynamicResource SmokeBrush}" Visibility="Collapsed">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                     <controls:ProgressRing Width="30" Height="30" />
                     <TextBlock Text="{Binding BusyText}" Margin="0,12,0,0" FontSize="12" HorizontalAlignment="Center"

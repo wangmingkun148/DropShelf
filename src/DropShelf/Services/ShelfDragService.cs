@@ -23,6 +23,21 @@ public enum DragOutResult
 /// 用 Windows 资源管理器同款的数据对象把项目拖出：目标程序得到完整的文件信息，
 /// 并显示带缩略图和数量的拖动图像。
 /// </summary>
+/// <summary>拖出前准备好的内容；解析好的路径（若有）在释放时归还。</summary>
+public sealed class DragOutPayload(IReadOnlyList<ShelfItem> files, IReadOnlyList<ShelfItem> others, List<IntPtr>? pidls) : IDisposable
+{
+    public IReadOnlyList<ShelfItem> Files { get; } = files;
+    public IReadOnlyList<ShelfItem> Others { get; } = others;
+    public IReadOnlyList<IntPtr>? Pidls => pidls;
+
+    public void Dispose()
+    {
+        if (pidls is null) return;
+        ShellInterop.FreePidls(pidls);
+        pidls = null;
+    }
+}
+
 public static class ShelfDragService
 {
     private const int EffectNone = 0;
@@ -31,21 +46,54 @@ public static class ShelfDragService
     private const int EffectLink = 4;
     private const int InvalidArgument = unchecked((int)0x80070057);
 
+    /// <summary>超过这么多个文件时，检查文件是否还在和解析路径放到后台做，起拖时界面不会顿住。</summary>
+    private const int BackgroundPreparation = 16;
+
+    /// <summary>
+    /// 拖出前的准备：哪些文件还在、解析好的路径。文件少时当场做完；文件多时在后台做，
+    /// 做完后由调用方确认鼠标仍按着再开始拖动。用完要释放。
+    /// </summary>
+    public static async Task<DragOutPayload> PrepareAsync(IReadOnlyList<ShelfItem> items)
+    {
+        var candidates = items.Where(item => item.IsFileSystem).ToArray();
+        var others = items.Where(item => !item.IsFileSystem).ToList();
+        if (candidates.Length <= BackgroundPreparation)
+        {
+            var files = candidates.Where(item => item.RefreshAvailability()).ToList();
+            return new DragOutPayload(files, others, null);
+        }
+
+        var (present, pidls) = await Task.Run(() =>
+        {
+            var exists = candidates.Select(item => item.ExistsOnDisk()).ToArray();
+            return (exists, ShellInterop.ParsePaths(candidates.Where((_, index) => exists[index]).Select(item => item.Value).ToArray()));
+        });
+        for (var index = 0; index < candidates.Length; index++) candidates[index].IsAvailable = present[index];
+        var available = candidates.Where((_, index) => present[index]).ToList();
+        // 个别路径解析失败时数量对不上，交给 DoDragDrop 重新解析或退回文件列表。
+        if (pidls.Count != available.Count)
+        {
+            ShellInterop.FreePidls(pidls);
+            return new DragOutPayload(available, others, null);
+        }
+        return new DragOutPayload(available, others, pidls);
+    }
+
     /// <summary>
     /// 有文件时只拖出文件，否则拖出文字和链接；<paramref name="dragged"/> 是实际交给目标程序的项目，
     /// 只有它们该按拖出结果移除。
     /// </summary>
-    public static DragOutResult DoDragDrop(Window owner, IReadOnlyList<ShelfItem> items, string shelfId,
+    public static DragOutResult DoDragDrop(Window owner, DragOutPayload payload, string shelfId,
         out IReadOnlyList<ShelfItem> dragged, TransferMode mode = TransferMode.Move, int button = NativeMethods.MK_LBUTTON)
     {
-        var files = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
-        var others = items.Where(item => !item.IsFileSystem).ToList();
+        var files = payload.Files;
+        var others = payload.Others;
         ComDataObject? data;
         int allowedEffects;
 
         if (files.Count > 0)
         {
-            data = ShellInterop.CreateFileDataObject(files.Select(item => item.Value).ToArray());
+            data = ShellInterop.CreateFileDataObject(files.Select(item => item.Value).ToArray(), payload.Pidls);
             allowedEffects = GetAllowedEffects(mode, files.Any(item => item.IsTemporaryAttachment));
             // 告诉资源管理器默认移动还是复制（跨磁盘时也一样）；按住 Ctrl 或 Shift 仍可临时切换。
             if (data is not null) ShellInterop.TrySetInt32(data, "Preferred DropEffect", mode == TransferMode.Move ? EffectMove : EffectCopy);

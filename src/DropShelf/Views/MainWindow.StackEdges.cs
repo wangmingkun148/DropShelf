@@ -224,7 +224,7 @@ public partial class MainWindow
         }
     }
 
-    private static DoubleAnimation Reveal(double to) => new(to, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase };
+    private static DoubleAnimation Reveal(double to) => ShelfMotion.Gate(new DoubleAnimation(to, TimeSpan.FromMilliseconds(180)) { EasingFunction = MotionEase });
 
     private void ResetEdgeReveal()
     {

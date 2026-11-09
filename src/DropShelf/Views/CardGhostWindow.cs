@@ -124,6 +124,10 @@ public sealed class CardGhostWindow : Window
         _target = target;
         _arrived = arrived;
         _settleStart = _clock.Elapsed.TotalSeconds;
+        // 关闭了动画效果：不飞回去，直接放下。
+        if (ShelfMotion.Enabled) return;
+        arrived();
+        Stop();
     }
 
     /// <summary>缩小并淡出，同时移向指定位置（新置物架的中心）。</summary>
@@ -131,6 +135,7 @@ public sealed class CardGhostWindow : Window
     {
         _target = () => new ScreenCardPose(center, 0.7, 0);
         _fading = true;
+        if (!ShelfMotion.Enabled) Stop();
     }
 
     private void OnFrame(object? sender, EventArgs e)

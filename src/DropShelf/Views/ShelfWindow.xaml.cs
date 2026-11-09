@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -66,9 +67,12 @@ public partial class ShelfWindow : Window
     private readonly DropTargetHelper _dropHelper = new();
     private readonly DispatcherTimer _toastTimer;
     private readonly DispatcherTimer _leaveCheck;
+    private readonly DispatcherTimer _busyTimer;
+    private bool _busyShown;
+    private long _busyShownAt;
     /// <summary>窗口关闭时取消还在接收的附件。</summary>
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly List<(Border Tile, TextBlock Glyph, TextBlock Label, QuickActionInfo Info)> _tiles = [];
+    private readonly List<ActionTile> _tiles = [];
     private QuickShelfSize _size;
     private TransferMode _dragOutMode;
     private ShelfEntrance _entrance = ShelfEntrance.Plain;
@@ -105,11 +109,14 @@ public partial class ShelfWindow : Window
         _shownCount = viewModel.Count;
         viewModel.ToastRequested += (_, toast) => ShowToast(toast);
         viewModel.NewItemsProduced += (_, paths) => _host.OpenBeside(this, paths);
+        viewModel.RemoveVisibly = RemoveItems;
 
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
         _toastTimer.Tick += (_, _) => HideToast();
         _leaveCheck = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _leaveCheck.Tick += OnLeaveCheck;
+        _busyTimer = new DispatcherTimer();
+        _busyTimer.Tick += (_, _) => UpdateBusyOverlay(waited: true);
 
         SourceInitialized += OnSourceInitialized;
         ThemeService.ThemeChanged += OnThemeChanged;
@@ -119,7 +126,7 @@ public partial class ShelfWindow : Window
         DragLeave += OnDragLeave;
         Drop += OnDrop;
         PreviewKeyDown += OnPreviewKeyDown;
-        Activated += (_, _) => ViewModel.RefreshAvailability();
+        Activated += (_, _) => ViewModel.RefreshAvailabilityInBackground();
 
         Surface.Opacity = 0;
         ApplySettings(host.Settings);
@@ -165,8 +172,10 @@ public partial class ShelfWindow : Window
         CancelCard();
         // 没播完的动画在这里收尾：待移除的项目先移除，不会记进最近关闭。
         FinishMotion();
+        ViewModel.RemoveVisibly = null;
         _toastTimer.Stop();
         _leaveCheck.Stop();
+        _busyTimer.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
@@ -236,6 +245,9 @@ public partial class ShelfWindow : Window
                     _layoutPending = false;
                     if (!IsClosing) RefreshViews();
                 });
+                break;
+            case nameof(ShelfViewModel.IsBusy):
+                UpdateBusyOverlay(waited: false);
                 break;
             case nameof(ShelfViewModel.Actions):
                 BuildActions();
@@ -399,34 +411,138 @@ public partial class ShelfWindow : Window
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
+            // 选中时强调色的底色是盖在卡片上的一层，淡入淡出即可，不用在两种画刷之间过渡；连边框一起盖住。
+            var highlight = new Border { Margin = new Thickness(-1), CornerRadius = new CornerRadius(6), Opacity = 0 };
+            highlight.SetResourceReference(Border.BackgroundProperty, "AccentBrush");
+            var scale = new ScaleTransform();
             var tile = new Border
             {
                 Height = ActionTileHeight,
                 Margin = new Thickness(2, 3, 2, 3),
-                Padding = new Thickness(large ? 6 : 2, 0, large ? 6 : 2, 0),
                 CornerRadius = new CornerRadius(6),
                 BorderThickness = new Thickness(1),
-                Child = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { glyph, label } }
+                RenderTransformOrigin = new WpfPoint(0.5, 0.5),
+                RenderTransform = scale,
+                Child = new Grid
+                {
+                    Children =
+                    {
+                        highlight,
+                        new StackPanel
+                        {
+                            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(large ? 6 : 2, 0, large ? 6 : 2, 0),
+                            Children = { glyph, label }
+                        }
+                    }
+                }
             };
-            _tiles.Add((tile, glyph, label, info));
+            tile.SetResourceReference(Border.BackgroundProperty, "CardBrush");
+            tile.SetResourceReference(Border.BorderBrushProperty, "ShelfUnderCardBorderBrush");
+            _tiles.Add(new ActionTile(tile, highlight, scale, glyph, label, info));
             ActionTiles.Children.Add(tile);
         }
         SetHoveredAction(null, force: true);
     }
 
+    /// <summary>拖入时展开的一张快速操作卡片：底色、强调色的一层、放大用的变换和两行文字。</summary>
+    private sealed record ActionTile(Border Tile, Border Highlight, ScaleTransform Scale, TextBlock Glyph, TextBlock Label, QuickActionInfo Info);
+
+    private static readonly TimeSpan HoverDuration = TimeSpan.FromMilliseconds(140);
+    private const double HoverScale = 1.04;
+
+    /// <summary>
+    /// 拖到快速操作卡片上时这张卡片铺上强调色、略微放大，文字颜色跟着过渡；放置区域变淡。
+    /// force 时（重新生成卡片）直接到位，不播放动画。
+    /// </summary>
     private void SetHoveredAction(QuickActionInfo? action, bool force = false)
     {
         if (!force && ReferenceEquals(action, _hoveredAction)) return;
         _hoveredAction = action;
-        foreach (var (tile, glyph, label, info) in _tiles)
+        var animate = !force && ShelfMotion.Enabled;
+        foreach (var tile in _tiles)
         {
-            var active = ReferenceEquals(info, action);
-            tile.SetResourceReference(Border.BackgroundProperty, active ? "AccentBrush" : "CardBrush");
-            tile.SetResourceReference(Border.BorderBrushProperty, active ? "AccentBrush" : "ShelfUnderCardBorderBrush");
-            glyph.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextOnAccentBrush" : "TextPrimaryBrush");
-            label.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextOnAccentBrush" : "TextPrimaryBrush");
+            var active = ReferenceEquals(tile.Info, action);
+            Ease(tile.Highlight, OpacityProperty, active ? 1 : 0, animate);
+            Ease(tile.Scale, ScaleTransform.ScaleXProperty, active ? HoverScale : 1, animate);
+            Ease(tile.Scale, ScaleTransform.ScaleYProperty, active ? HoverScale : 1, animate);
+            var text = active ? "TextOnAccentBrush" : "TextPrimaryBrush";
+            FadeForeground(tile.Glyph, text, animate);
+            FadeForeground(tile.Label, text, animate);
         }
-        ShelfDropFrame.Opacity = action is null ? 1 : 0.45;
+        Ease(ShelfDropFrame, OpacityProperty, action is null ? 1 : 0.45, animate);
+    }
+
+    /// <summary>过渡到 to；不播放动画时直接设为 to。</summary>
+    private static void Ease(DependencyObject target, DependencyProperty property, double to, bool animate)
+    {
+        var animatable = (IAnimatable)target;
+        if (animate)
+        {
+            animatable.BeginAnimation(property, new DoubleAnimation(to, HoverDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            return;
+        }
+        animatable.BeginAnimation(property, null);
+        target.SetValue(property, to);
+    }
+
+    /// <summary>文字颜色换成另一个主题颜色：过渡期间用一支单独的画刷，过渡完交还给主题，切换主题时照常更新。</summary>
+    private static void FadeForeground(TextBlock text, string key, bool animate)
+    {
+        var from = (text.Foreground as SolidColorBrush)?.Color;
+        text.SetResourceReference(TextBlock.ForegroundProperty, key);
+        if (!animate || from is not { } start || text.Foreground is not SolidColorBrush { Color: var target } || start == target) return;
+        var brush = new SolidColorBrush(start);
+        text.Foreground = brush;
+        var fade = new ColorAnimation(target, HoverDuration);
+        fade.Completed += (_, _) =>
+        {
+            if (ReferenceEquals(text.Foreground, brush)) text.SetResourceReference(TextBlock.ForegroundProperty, key);
+        };
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, fade);
+    }
+
+    // ───────────── 正在处理 ─────────────
+
+    /// <summary>开始处理后过这么久还没完成才显示遮罩；显示后至少停留 BusyMinimum。</summary>
+    private static readonly TimeSpan BusyDelay = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan BusyMinimum = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan BusyFade = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>
+    /// 处理中的遮罩：很快就完成的操作不显示，免得一闪而过；显示出来以后至少停留一会儿再淡出。
+    /// 遮罩显示之前的这一小段时间里，拖入和快速操作照常因为 IsBusy 而不接收。
+    /// </summary>
+    private void UpdateBusyOverlay(bool waited)
+    {
+        _busyTimer.Stop();
+        var busy = ViewModel.IsBusy;
+        if (busy == _busyShown || IsClosing) return;
+        var wait = busy ? BusyDelay : BusyMinimum - Stopwatch.GetElapsedTime(_busyShownAt);
+        if (!waited && wait > TimeSpan.Zero)
+        {
+            _busyTimer.Interval = wait;
+            _busyTimer.Start();
+            return;
+        }
+        _busyShown = busy;
+        if (busy)
+        {
+            _busyShownAt = Stopwatch.GetTimestamp();
+            BusyOverlay.Visibility = Visibility.Visible;
+            BusyOverlay.BeginAnimation(OpacityProperty, ShelfMotion.Enabled ? new DoubleAnimation(0, 1, BusyFade) : null);
+            return;
+        }
+        if (!ShelfMotion.Enabled)
+        {
+            BusyOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var fade = new DoubleAnimation(0, BusyFade);
+        fade.Completed += (_, _) =>
+        {
+            if (!_busyShown) BusyOverlay.Visibility = Visibility.Collapsed;
+        };
+        BusyOverlay.BeginAnimation(OpacityProperty, fade);
     }
 
     // ───────────── 提示 ─────────────
@@ -438,8 +554,8 @@ public partial class ShelfWindow : Window
         ToastGlyph.Text = toast.Success ? "" : "";
         ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(140)));
-        ToastOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+        Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(1, TimeSpan.FromMilliseconds(140))));
+        ToastOffset.BeginAnimation(TranslateTransform.YProperty, ShelfMotion.Gate(new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease }));
         _toastTimer.Stop();
         _toastTimer.Start();
     }
@@ -447,7 +563,7 @@ public partial class ShelfWindow : Window
     private void HideToast()
     {
         _toastTimer.Stop();
-        Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(180)));
+        Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))));
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

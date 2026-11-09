@@ -236,15 +236,22 @@ public partial class ShelfWindow
     }
 
     /// <summary>
-    /// 平铺时移除牌：要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除；剩下的牌从原来的格子滑到新的格子补上空位，新露出来的牌淡入。
-    /// 动画途中被打断（再次移除、拖入、切换视图等）时立即移除，补位直接到位。不在平铺或关闭了动画效果时直接移除。
+    /// 移除牌：要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除。平铺时剩下的牌从原来的格子滑到新的格子补上空位，新露出来的牌淡入；
+    /// 堆叠时下面的牌升上来补位，新露出来的从最下面淡入。拖出后移除时从拖动期间变淡的样子接着淡出。
+    /// 动画途中被打断（再次移除、拖入、切换视图、关闭等）时立即移除，补位直接到位。关闭了动画效果、看不见或 animate 为 false 时直接移除。
     /// </summary>
-    private void RemoveWithMotion(IReadOnlyList<ShelfItem> items, Action remove)
+    private void RemoveWithMotion(IReadOnlyList<ShelfItem> items, Action remove, bool animate = true)
     {
         FinishMotion();
-        if (!ShelfMotion.Enabled || !IsVisible || !ViewModel.IsExpanded)
+        var going = items.Where(ViewModel.Items.Contains).ToHashSet();
+        if (!animate || !ShelfMotion.Enabled || !IsVisible || going.Count == 0)
         {
             remove();
+            return;
+        }
+        if (!ViewModel.IsExpanded)
+        {
+            RemoveFromStack(going, remove, going.Count < ViewModel.Count);
             return;
         }
 
@@ -269,11 +276,66 @@ public partial class ShelfWindow
         };
         for (var i = 0; i < leaving.Count; i++)
         {
-            var (pose, side) = (PoseTile(leaving[i]), i % 2 == 0 ? -1 : 1);
+            TakeDimmed(leaving[i]);
+            var (pose, side, start) = (PoseTile(leaving[i]), i % 2 == 0 ? -1 : 1, leaving[i].Opacity);
             leaving[i].IsHitTestVisible = false;
-            Tween(TimeSpan.Zero, RemoveDuration, t => pose(new LocalCardPose(0, 10 * t, side * 6 * t, 1 - 0.3 * t, 1 - t)));
+            Tween(TimeSpan.Zero, RemoveDuration, t => pose(new LocalCardPose(0, 10 * t, side * 6 * t, 1 - 0.3 * t, start * (1 - t))));
         }
         Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+    }
+
+    private void RemoveFromStack(HashSet<ShelfItem> leaving, Action remove, bool remains)
+    {
+        var cards = StackCards;
+        var shown = cards.Select(card => card.Card.DataContext as ShelfItem).ToArray();
+        var going = cards.Where(card => card.Card.DataContext is ShelfItem item && leaving.Contains(item)).ToList();
+        if (going.Count == 0)
+        {
+            // 移除的都不在最上面三张里，堆叠看起来不变。
+            remove();
+            return;
+        }
+
+        _motionCleanup = () =>
+        {
+            foreach (var card in cards) card.Pose(card.Home);
+            remove();
+            if (remains) Dispatcher.BeginInvoke(() => RiseStack(shown));
+        };
+        for (var i = 0; i < going.Count; i++)
+        {
+            var card = going[i];
+            TakeDimmed(card.Card);
+            var (start, side, home) = (card.Card.Opacity, i % 2 == 0 ? -1 : 1, card.Home);
+            Tween(TimeSpan.Zero, RemoveDuration, t =>
+                card.Pose(new LocalCardPose(home.X, home.Y + 10 * t, home.Angle + side * 6 * t, 1 - 0.3 * t, start * (1 - t))));
+        }
+        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+    }
+
+    /// <summary>堆叠移除之后补位：每张牌从它原来所在的那一层升到现在这一层，新露出来的从最下面一层淡入。</summary>
+    private void RiseStack(ShelfItem?[] shown)
+    {
+        if (IsClosing || !IsVisible || ViewModel.IsExpanded) return;
+        FinishMotion();
+        var cards = StackCards;
+        var moved = false;
+        for (var i = 0; i < cards.Length; i++)
+        {
+            var card = cards[i];
+            if (card.Card.DataContext is not ShelfItem item) continue;
+            var then = Array.IndexOf(shown, item);
+            if (then == i) continue;
+            var from = then > i ? cards[then].Home : cards[^1].Home with { Y = cards[^1].Home.Y + 6, Scale = 0.94, Opacity = 0 };
+            Tween(TimeSpan.Zero, CloseUpDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
+            moved = true;
+        }
+        if (!moved) return;
+        _motionCleanup = () =>
+        {
+            foreach (var card in cards) card.Pose(card.Home);
+        };
+        Tween(TimeSpan.Zero, CloseUpDuration, _ => { }, FinishMotion);
     }
 
     /// <summary>移除之后补位：每张牌从移除前的格子滑到现在的格子，之前没有生成的牌从下面一点淡入。</summary>

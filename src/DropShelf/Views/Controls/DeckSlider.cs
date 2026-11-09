@@ -95,7 +95,7 @@ public sealed class DeckSlider : Slider
             if (down == card.Down) continue;
             card.Down = down;
 
-            if (!animate)
+            if (!animate || !ShelfMotion.Enabled)
             {
                 card.Scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
                 card.Back.BeginAnimation(OpacityProperty, null);

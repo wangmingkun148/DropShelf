@@ -120,7 +120,7 @@ public partial class MainWindow
         StackBackLayer.Visibility = StackFrontLayer.Visibility = Visibility.Visible;
         SetPanelHeader(page, animate: true);
         PoseStackSwitch(0);
-        var animation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(StackSwitchMs));
+        var animation = ShelfMotion.Gate(new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(StackSwitchMs)));
         animation.Completed += (_, _) =>
         {
             if (session == _flipSession) FinishStackSwitch(slide);

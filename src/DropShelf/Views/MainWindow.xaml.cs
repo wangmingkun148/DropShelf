@@ -214,7 +214,7 @@ public partial class MainWindow : Window
                 SetValue(SensitivityLabelValueProperty, e.NewValue);
             }
             else
-                BeginAnimation(SensitivityLabelValueProperty, new DoubleAnimation(e.NewValue, TimeSpan.FromMilliseconds(220)) { EasingFunction = LabelEase });
+                BeginAnimation(SensitivityLabelValueProperty, ShelfMotion.Gate(new DoubleAnimation(e.NewValue, TimeSpan.FromMilliseconds(220)) { EasingFunction = LabelEase }));
         };
     }
 

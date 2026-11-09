@@ -77,6 +77,7 @@ internal static partial class Program
         clone.QuickActionSlots!.Clear();
         clone.CustomActions![0].Name = "changed";
         Assert(loaded.QuickActionSlots!.Count == 4 && loaded.CustomActions![0].Name != "changed", "复制设置时共享了快速操作");
+        SettingsService.Flush();
         File.Delete(service.SettingsPath);
     }
 
@@ -119,6 +120,7 @@ internal static partial class Program
             "2.0 版的快速操作没有正确迁移");
         File.WriteAllText(service.SettingsPath, """{ "Version": 2, "QuickActions": [] }""");
         Assert(service.Load().QuickActionLayout == QuickActionLayout.Off, "2.0 版关闭的快速操作没有保持关闭");
+        SettingsService.Flush();
         File.Delete(service.SettingsPath);
     }
 
@@ -215,6 +217,7 @@ internal static partial class Program
         Assert(viewModel.VisibleSlots.Count == 2 && viewModel.VisibleSlots[1].Action.Id == "CopyFullPath", "两个按钮时显示的位置不正确");
         viewModel.ActionLayout = QuickActionLayout.Off;
         Assert(viewModel.VisibleSlots.Count == 0 && !viewModel.HasActionSlots, "关闭后仍显示按钮位置");
+        SettingsService.Flush();
         File.Delete(new SettingsService().SettingsPath);
     }
 
