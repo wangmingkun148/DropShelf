@@ -28,6 +28,8 @@ public partial class ShelfWindow
     private static readonly TimeSpan RowFadeDuration = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ResizeDuration = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan RemoveDuration = TimeSpan.FromMilliseconds(160);
+    private static readonly TimeSpan CloseUpDuration = TimeSpan.FromMilliseconds(220);
     private static readonly IEasingFunction MotionEase = new CubicEase { EasingMode = EasingMode.EaseOut };
 
     private readonly List<MotionTween> _tweens = [];
@@ -35,6 +37,8 @@ public partial class ShelfWindow
     private TimeSpan _motionFrameTime;
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
+    /// <summary>列表里移除之后、下面的行补位之前，数量变化引起的刷新不改窗口大小；补位后窗口再平滑变小。</summary>
+    private bool _holdSize;
 
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
     private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
@@ -198,6 +202,154 @@ public partial class ShelfWindow
             }
         };
         Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+    }
+
+    /// <summary>
+    /// 移除项目：列表里要移除的行向左滑出并淡出，堆叠里要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除。
+    /// 之后列表里下面的行滑上来补位，窗口再平滑变小；堆叠里下面的牌升上来补位，新露出来的从最下面淡入。
+    /// 动画途中被打断（再次移除、拖入、切换视图、关闭等）时立即移除。关闭了动画效果、看不见或 animate 为 false 时直接移除。
+    /// </summary>
+    private void RemoveWithMotion(IReadOnlyList<ShelfItem> items, Action remove, bool animate = true)
+    {
+        FinishMotion();
+        var leaving = items.Where(ViewModel.Items.Contains).ToHashSet();
+        if (!animate || !ShelfMotion.Enabled || !IsVisible || leaving.Count == 0)
+        {
+            remove();
+            return;
+        }
+        var remains = leaving.Count < ViewModel.Count;
+        if (ViewModel.IsExpanded) RemoveRows(leaving, remove, remains);
+        else RemoveFromStack(leaving, remove, remains);
+    }
+
+    private void RemoveRows(HashSet<ShelfItem> leaving, Action remove, bool remains)
+    {
+        ItemsList.UpdateLayout();
+        var rows = leaving.Select(item => ItemsList.ItemContainerGenerator.ContainerFromItem(item)).OfType<ListBoxItem>().ToList();
+        // 剩下的行移除前的位置，移除后按它补位。
+        var before = new Dictionary<ShelfItem, double>();
+        foreach (var item in ViewModel.Items)
+            if (!leaving.Contains(item) && ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem row)
+                before[item] = row.TranslatePoint(default, ItemsList).Y;
+
+        _motionCleanup = () =>
+        {
+            foreach (var row in rows)
+                foreach (var property in new[] { OpacityProperty, RenderTransformProperty, IsHitTestVisibleProperty }) row.ClearValue(property);
+            _holdSize = remains;
+            remove();
+            // 数量变化后的刷新（RefreshViews）已经排在前面，等它按新的数量排好列表再补位。
+            if (remains) Dispatcher.BeginInvoke(() => CloseUpRows(before));
+        };
+        foreach (var row in rows)
+        {
+            TakeDimmed(row);
+            var (start, shift) = (row.Opacity, new TranslateTransform());
+            row.RenderTransform = shift;
+            row.IsHitTestVisible = false;
+            Tween(TimeSpan.Zero, RemoveDuration, t =>
+            {
+                row.Opacity = start * (1 - t);
+                shift.X = -12 * t;
+            });
+        }
+        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+    }
+
+    /// <summary>列表移除之后补位：每一行从移除前的位置滑到现在的位置，之前没有生成的行从下面一点淡入；补完窗口再平滑变小。</summary>
+    private void CloseUpRows(Dictionary<ShelfItem, double> before)
+    {
+        _holdSize = false;
+        if (IsClosing || !IsVisible || !ViewModel.IsExpanded)
+        {
+            if (!IsClosing) UpdateWindowSize();
+            return;
+        }
+        FinishMotion();
+        ItemsList.UpdateLayout();
+        var moved = new List<ListBoxItem>();
+        foreach (var item in ViewModel.Items)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem row) continue;
+            var appears = !before.TryGetValue(item, out var then);
+            var from = appears ? 8 : then - row.TranslatePoint(default, ItemsList).Y;
+            if (Math.Abs(from) < 0.5) continue;
+            var shift = new TranslateTransform(0, from);
+            row.RenderTransform = shift;
+            moved.Add(row);
+            Tween(TimeSpan.Zero, CloseUpDuration, t =>
+            {
+                shift.Y = from * (1 - t);
+                if (appears) row.Opacity = t;
+            });
+        }
+        var lead = moved.Count > 0 ? CloseUpDuration : TimeSpan.Zero;
+        TweenWindowSize(lead);
+        _motionCleanup = () =>
+        {
+            foreach (var row in moved)
+            {
+                row.ClearValue(RenderTransformProperty);
+                row.ClearValue(OpacityProperty);
+            }
+            UpdateWindowSize();
+        };
+        Tween(TimeSpan.Zero, lead + ResizeDuration, _ => { }, FinishMotion);
+    }
+
+    private void RemoveFromStack(HashSet<ShelfItem> leaving, Action remove, bool remains)
+    {
+        var cards = StackCards;
+        var shown = cards.Select(card => card.Card.DataContext as ShelfItem).ToArray();
+        var going = cards.Where(card => card.Card.DataContext is ShelfItem item && leaving.Contains(item)).ToList();
+        if (going.Count == 0)
+        {
+            // 移除的都不在最上面三张里，堆叠看起来不变。
+            remove();
+            return;
+        }
+
+        _motionCleanup = () =>
+        {
+            foreach (var card in cards) card.Pose(card.Home);
+            remove();
+            if (remains) Dispatcher.BeginInvoke(() => RiseStack(shown));
+        };
+        for (var i = 0; i < going.Count; i++)
+        {
+            var card = going[i];
+            TakeDimmed(card.Card);
+            var (start, side, home) = (card.Card.Opacity, i % 2 == 0 ? -1 : 1, card.Home);
+            Tween(TimeSpan.Zero, RemoveDuration, t =>
+                card.Pose(new LocalCardPose(home.X, home.Y + 10 * t, home.Angle + side * 6 * t, 1 - 0.3 * t, start * (1 - t))));
+        }
+        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+    }
+
+    /// <summary>堆叠移除之后补位：每张牌从它原来所在的那一层升到现在这一层，新露出来的从最下面一层淡入。</summary>
+    private void RiseStack(ShelfItem?[] shown)
+    {
+        if (IsClosing || !IsVisible || ViewModel.IsExpanded) return;
+        FinishMotion();
+        var cards = StackCards;
+        var moved = false;
+        for (var i = 0; i < cards.Length; i++)
+        {
+            var card = cards[i];
+            if (card.Card.DataContext is not ShelfItem item) continue;
+            var then = Array.IndexOf(shown, item);
+            if (then == i) continue;
+            var from = then > i ? cards[then].Home : cards[^1].Home with { Y = cards[^1].Home.Y + 6, Scale = 0.94, Opacity = 0 };
+            Tween(TimeSpan.Zero, CloseUpDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
+            moved = true;
+        }
+        if (!moved) return;
+        _motionCleanup = () =>
+        {
+            foreach (var card in cards) card.Pose(card.Home);
+        };
+        Tween(TimeSpan.Zero, CloseUpDuration, _ => { }, FinishMotion);
     }
 
     /// <summary>

@@ -48,6 +48,8 @@ public partial class ShelfWindow
         if (_closing || _closed) return;
         _closing = true;
         IsHitTestVisible = false;
+        // 内容里的动画停在这一帧，缓存的画面不必每帧重建；没做完的收尾（比如待移除的项目）在窗口关闭时补上。
+        StopMotion();
         if (!ShelfMotion.Enabled)
         {
             Close();

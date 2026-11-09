@@ -70,6 +70,24 @@ public sealed class CustomQuickAction
 
     public CustomQuickAction Clone() => (CustomQuickAction)MemberwiseClone();
 
+    /// <summary>所有设置都相同。</summary>
+    public bool SameAs(CustomQuickAction other) =>
+        Id == other.Id && Kind == other.Kind && Name == other.Name && Folder == other.Folder && FolderMode == other.FolderMode &&
+        ImageSizeKb == other.ImageSizeKb && ProgramPath == other.ProgramPath && Arguments == other.Arguments;
+
+    /// <summary>两组自定义操作逐项相同；用来判断设置变化后要不要重建操作，不必每次都序列化比较。</summary>
+    public static bool SameList(IReadOnlyList<CustomQuickAction>? first, IReadOnlyList<CustomQuickAction>? second)
+    {
+        if (first is null || second is null) return first is null && second is null;
+        if (first.Count != second.Count) return false;
+        for (var index = 0; index < first.Count; index++)
+            if (!first[index].SameAs(second[index])) return false;
+        return true;
+    }
+
+    /// <summary>所有设置连成的一串文字，同样只用来比较。</summary>
+    public string Key => string.Join('\u001F', Id, Kind, Name, Folder, FolderMode, ImageSizeKb, ProgramPath, Arguments);
+
     public static string NewId() => Guid.NewGuid().ToString("N");
 }
 

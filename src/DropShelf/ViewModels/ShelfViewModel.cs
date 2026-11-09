@@ -270,6 +270,17 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Clear() => Items.Clear();
 
+    /// <summary>拖出之后、以及稍后确认文件已被移走时，交给窗口移除项目，窗口可以先播放移除的动画；没有窗口时直接移除。</summary>
+    public Action<IReadOnlyList<ShelfItem>>? RemoveVisibly { get; set; }
+
+    private void RemoveShown(IEnumerable<ShelfItem> items)
+    {
+        var removing = items.Where(Items.Contains).ToArray();
+        if (removing.Length == 0) return;
+        if (RemoveVisibly is { } remove && !_released) remove(removing);
+        else Remove(removing);
+    }
+
     /// <summary>接管读取结果替置物架持有的缓存；已经持有或置物架已关闭时释放多出来的这一次。</summary>
     private void AdoptCache(string? cacheDirectory)
     {
@@ -282,6 +293,35 @@ public sealed class ShelfViewModel : ObservableObject
         foreach (var item in Items) item.RefreshAvailability();
     }
 
+    private bool _checkingAvailability;
+
+    /// <summary>
+    /// 在后台检查磁盘上的项目是否还在，查完回到界面线程更新：项目在断开的网络盘上时，点一下置物架不会卡住。
+    /// 上一次还没查完时跳过。
+    /// </summary>
+    public async void RefreshAvailabilityInBackground()
+    {
+        var items = Items.Where(item => item.IsFileSystem).ToArray();
+        if (_checkingAvailability || _released || items.Length == 0) return;
+        _checkingAvailability = true;
+        try
+        {
+            var present = new bool[items.Length];
+            await Task.Run(() => Parallel.For(0, items.Length, new ParallelOptions { MaxDegreeOfParallelism = 4 },
+                index => present[index] = items[index].ExistsOnDisk()));
+            if (_released) return;
+            for (var index = 0; index < items.Length; index++) items[index].IsAvailable = present[index];
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("检查项目是否还在失败", exception);
+        }
+        finally
+        {
+            _checkingAvailability = false;
+        }
+    }
+
     /// <summary>处理拖出结果；返回置物架内容是否发生变化。</summary>
     public bool ApplyDragOut(IReadOnlyList<ShelfItem> dragged, DragOutResult result, bool removeCopied)
     {
@@ -289,7 +329,7 @@ public sealed class ShelfViewModel : ObservableObject
         {
             case DragOutResult.Moved:
                 var pending = dragged.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
-                Remove(dragged.Except(pending));
+                RemoveShown(dragged.Except(pending));
                 // 资源管理器可能在后台继续移动大文件，稍后再确认一次。
                 if (pending.Count > 0) _ = RemoveWhenGoneAsync(pending);
                 return pending.Count < dragged.Count;
@@ -297,7 +337,7 @@ public sealed class ShelfViewModel : ObservableObject
             case DragOutResult.Copied:
             case DragOutResult.Linked:
                 if (!removeCopied) return false;
-                Remove(dragged);
+                RemoveShown(dragged);
                 return true;
 
             default:
@@ -546,7 +586,7 @@ public sealed class ShelfViewModel : ObservableObject
     private async Task RemoveWhenGoneAsync(IReadOnlyList<ShelfItem> items)
     {
         await Task.Delay(TimeSpan.FromSeconds(2.5));
-        Remove(items.Where(item => Items.Contains(item) && !item.RefreshAvailability()));
+        RemoveShown(items.Where(item => Items.Contains(item) && !item.RefreshAvailability()));
     }
 
     private int IndexOfPath(string path)

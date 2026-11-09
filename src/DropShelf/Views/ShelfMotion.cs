@@ -13,6 +13,17 @@ internal static class ShelfMotion
     /// <summary>用户在 Windows 中关闭了动画效果时直接显示和关闭。</summary>
     public static bool Enabled => SystemParameters.ClientAreaAnimation;
 
+    /// <summary>
+    /// 关闭了动画效果时让这段动画在第一帧就走到终点（延迟一并取消），照常触发 Completed，收尾的代码不用另写一套；打开时原样返回。
+    /// </summary>
+    public static T Gate<T>(T timeline) where T : Timeline
+    {
+        if (Enabled) return timeline;
+        if (timeline.BeginTime is not null) timeline.BeginTime = TimeSpan.Zero;
+        timeline.SpeedRatio = 1e6;
+        return timeline;
+    }
+
     public sealed record Motion(TimeSpan Duration, TimeSpan FadeDuration, double StartScale, IEasingFunction ScaleEase);
 
     public static Motion For(ShelfEntrance entrance) => entrance.Kind switch

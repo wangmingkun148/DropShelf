@@ -198,6 +198,7 @@ internal static class NativeMethods
 {
     public const int WM_QUIT = 0x0012;
     public const int WM_INPUT = 0x00FF;
+    public const uint QS_RAWINPUT = 0x0400;
     public const int WM_LBUTTONUP = 0x0202;
     public const int WM_RBUTTONUP = 0x0205;
     public const int WM_CONTEXTMENU = 0x007B;
@@ -294,6 +295,10 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int virtualKey);
+
+    /// <summary>高 16 位是消息队列里现有的消息种类。</summary>
+    [DllImport("user32.dll")]
+    public static extern uint GetQueueStatus(uint flags);
 
     [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int index);

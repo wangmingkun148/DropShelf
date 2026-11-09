@@ -40,21 +40,10 @@ public sealed class AppController : IDisposable
 
     public static AppController? Current { get; private set; }
 
-    /// <summary>开发调试时可通过环境变量使用独立实例，避免与已安装的版本冲突。</summary>
-    public static string InstanceSuffix =>
-        Environment.GetEnvironmentVariable("DROPSHELF_INSTANCE") is { Length: > 0 } suffix ? "." + suffix : string.Empty;
-
-    public static string MessageWindowTitle => "DropShelfMessageWindow" + InstanceSuffix;
-
-    /// <summary>命令行包含 --shelf 或直接带有文件路径（“发送到”菜单、拖到程序图标上）。</summary>
-    public static bool IsShelfRequest(IReadOnlyList<string> arguments) =>
-        arguments.Any(argument => string.Equals(argument, "--shelf", StringComparison.OrdinalIgnoreCase)) ||
-        GetPathArguments(arguments).Count > 0;
-
-    public static IReadOnlyList<string> GetPathArguments(IReadOnlyList<string> arguments) => arguments
-        .Where(argument => !argument.StartsWith("--", StringComparison.Ordinal))
-        .Where(argument => System.IO.File.Exists(argument) || System.IO.Directory.Exists(argument))
-        .ToArray();
+    public static string InstanceSuffix => SingleInstance.InstanceSuffix;
+    public static string MessageWindowTitle => SingleInstance.MessageWindowTitle;
+    public static bool IsShelfRequest(IReadOnlyList<string> arguments) => SingleInstance.IsShelfRequest(arguments);
+    public static IReadOnlyList<string> GetPathArguments(IReadOnlyList<string> arguments) => SingleInstance.GetPathArguments(arguments);
 
     public AppSettings Settings => _settings;
     public ShelfManager Shelves { get; }
@@ -109,6 +98,10 @@ public sealed class AppController : IDisposable
         _appWatcher = watcher;
 
         Shelves.Prewarm();
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_exiting) _probe?.Prewarm();
+        }, DispatcherPriority.ApplicationIdle);
 
         if (!startInBackground)
         {
@@ -141,7 +134,7 @@ public sealed class AppController : IDisposable
         change(next);
         _settings = SettingsService.Normalize(next);
         Apply(previous, _settings);
-        _settingsService.Save(_settings);
+        _settingsService.SaveInBackground(_settings);
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -164,7 +157,7 @@ public sealed class AppController : IDisposable
         _settings.WindowTop = bounds.Top;
         _settings.WindowWidth = bounds.Width;
         _settings.WindowHeight = bounds.Height;
-        _settingsService.Save(_settings);
+        _settingsService.SaveInBackground(_settings);
     }
 
     public void ShowMainWindow()
@@ -303,7 +296,7 @@ public sealed class AppController : IDisposable
         previous.DragOutMode != current.DragOutMode ||
         previous.QuickActionLayout != current.QuickActionLayout ||
         !previous.QuickActionSlots!.SequenceEqual(current.QuickActionSlots!) ||
-        !System.Text.Json.JsonSerializer.Serialize(previous.CustomActions).Equals(System.Text.Json.JsonSerializer.Serialize(current.CustomActions));
+        !CustomQuickAction.SameList(previous.CustomActions, current.CustomActions);
 
     private void OnShakeDetected(object? sender, GestureTriggeredEventArgs e)
     {

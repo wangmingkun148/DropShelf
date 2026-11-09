@@ -125,9 +125,12 @@ public sealed class ShelfItem : INotifyPropertyChanged
     public bool RefreshAvailability()
     {
         if (!IsFileSystem) return true;
-        IsAvailable = Kind == ShelfItemKind.Folder ? Directory.Exists(Value) : File.Exists(Value);
+        IsAvailable = ExistsOnDisk();
         return IsAvailable;
     }
+
+    /// <summary>只检查不修改，可以在后台线程上调用。</summary>
+    public bool ExistsOnDisk() => !IsFileSystem || (Kind == ShelfItemKind.Folder ? Directory.Exists(Value) : File.Exists(Value));
 
     public static string FormatSize(long bytes)
     {

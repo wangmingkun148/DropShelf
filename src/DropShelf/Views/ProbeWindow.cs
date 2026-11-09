@@ -58,6 +58,17 @@ public sealed class ProbeWindow : Window
         _timeout.Start();
     }
 
+    /// <summary>
+    /// 空闲时在屏幕外显示一次再隐藏：窗口句柄和透明窗口的绘制资源提前准备好，开机后第一次晃动也能立即弹出。
+    /// </summary>
+    public void Prewarm()
+    {
+        if (IsVisible) return;
+        WindowEffects.Handle(this);
+        Show();
+        Hide();
+    }
+
     public void HideProbe()
     {
         _timeout.Stop();

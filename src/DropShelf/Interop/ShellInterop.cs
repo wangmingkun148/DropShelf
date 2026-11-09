@@ -85,50 +85,69 @@ internal static class ShellInterop
     /// <summary>为一组磁盘路径创建 Windows 资源管理器使用的同款数据对象。</summary>
     public static IDataObject? CreateShellDataObject(IReadOnlyList<string> paths)
     {
-        var pidls = new List<IntPtr>(paths.Count);
+        var pidls = ParsePaths(paths);
         try
         {
-            foreach (var path in paths)
-            {
-                if (SHParse(path) is { } pidl && pidl != IntPtr.Zero) pidls.Add(pidl);
-            }
+            return CreateShellDataObject(pidls);
+        }
+        finally
+        {
+            FreePidls(pidls);
+        }
+    }
 
-            if (pidls.Count == 0) return null;
-            if (NativeMethods.SHCreateShellItemArrayFromIDLists((uint)pidls.Count, pidls.ToArray(), out var array) != 0 || array is null)
+    /// <summary>把路径解析为外壳的项目标识；项目很多时可以在后台线程上调用，用完交给 <see cref="FreePidls"/>。</summary>
+    public static List<IntPtr> ParsePaths(IReadOnlyList<string> paths)
+    {
+        var pidls = new List<IntPtr>(paths.Count);
+        foreach (var path in paths)
+        {
+            if (SHParse(path) is { } pidl && pidl != IntPtr.Zero) pidls.Add(pidl);
+        }
+        return pidls;
+    }
+
+    public static void FreePidls(IEnumerable<IntPtr> pidls)
+    {
+        foreach (var pidl in pidls) NativeMethods.ILFree(pidl);
+    }
+
+    /// <summary>由已经解析好的项目标识创建数据对象，标识仍归调用方释放。</summary>
+    public static IDataObject? CreateShellDataObject(IReadOnlyList<IntPtr> pidls)
+    {
+        if (pidls.Count == 0) return null;
+        if (NativeMethods.SHCreateShellItemArrayFromIDLists((uint)pidls.Count, pidls.ToArray(), out var array) != 0 || array is null)
+            return null;
+
+        try
+        {
+            var handlerId = DataObjectHandlerId;
+            var interfaceId = DataObjectInterfaceId;
+            if (array.BindToHandler(IntPtr.Zero, ref handlerId, ref interfaceId, out var pointer) != 0 || pointer == IntPtr.Zero)
                 return null;
-
             try
             {
-                var handlerId = DataObjectHandlerId;
-                var interfaceId = DataObjectInterfaceId;
-                if (array.BindToHandler(IntPtr.Zero, ref handlerId, ref interfaceId, out var pointer) != 0 || pointer == IntPtr.Zero)
-                    return null;
-                try
-                {
-                    return Marshal.GetObjectForIUnknown(pointer) as IDataObject;
-                }
-                finally
-                {
-                    Marshal.Release(pointer);
-                }
+                return Marshal.GetObjectForIUnknown(pointer) as IDataObject;
             }
             finally
             {
-                Marshal.ReleaseComObject(array);
+                Marshal.Release(pointer);
             }
         }
         finally
         {
-            foreach (var pidl in pidls) NativeMethods.ILFree(pidl);
+            Marshal.ReleaseComObject(array);
         }
     }
 
     /// <summary>
     /// 创建文件拖放数据：优先使用资源管理器同款数据对象，失败时退回标准 CF_HDROP 文件列表。
+    /// 传入事先解析好的项目标识时不再重新解析。
     /// </summary>
-    public static IDataObject? CreateFileDataObject(IReadOnlyList<string> paths)
+    public static IDataObject? CreateFileDataObject(IReadOnlyList<string> paths, IReadOnlyList<IntPtr>? pidls = null)
     {
-        if (CreateShellDataObject(paths) is { } shell) return shell;
+        var shell = pidls is null ? CreateShellDataObject(paths) : CreateShellDataObject(pidls);
+        if (shell is not null) return shell;
         var data = CreateEmptyDataObject();
         if (data is null) return null;
         return TrySetBytes(data, System.Windows.DataFormats.FileDrop, BuildDropFiles(paths)) ? data : null;

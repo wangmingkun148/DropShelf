@@ -21,11 +21,16 @@ public static class SegmentedIndicator
     public static ListBox? GetOwner(DependencyObject element) => (ListBox?)element.GetValue(OwnerProperty);
     public static void SetOwner(DependencyObject element, ListBox? value) => element.SetValue(OwnerProperty, value);
 
+    /// <summary>
+    /// 选中块铺满整条分段选择，只露出裁剪范围里的一块；切换时只移动、伸缩裁剪的矩形，不改选中块的大小和位置，每帧都不用重新排版。
+    /// </summary>
     private static void OnOwnerChanged(DependencyObject element, DependencyPropertyChangedEventArgs e)
     {
         if (element is not FrameworkElement block || e.NewValue is not ListBox owner) return;
-        var shift = new TranslateTransform();
-        block.RenderTransform = shift;
+        block.Width = double.NaN;
+        block.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var clip = new RectangleGeometry();
+        block.Clip = clip;
         var placed = false;
 
         void Place(bool animate)
@@ -37,17 +42,16 @@ public static class SegmentedIndicator
                 placed = false;
                 return;
             }
-            var (left, width) = (item.TranslatePoint(default, area).X, item.ActualWidth);
+            var bounds = new Rect(item.TranslatePoint(default, area), item.RenderSize);
+            clip.RadiusX = clip.RadiusY = block is Border border ? border.CornerRadius.TopLeft : 0;
             block.Visibility = Visibility.Visible;
             if (animate && placed && owner.IsVisible && ShelfMotion.Enabled)
             {
-                shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(left, Duration) { EasingFunction = Ease });
-                block.BeginAnimation(FrameworkElement.WidthProperty, new DoubleAnimation(width, Duration) { EasingFunction = Ease });
+                clip.BeginAnimation(RectangleGeometry.RectProperty, new RectAnimation(bounds, Duration) { EasingFunction = Ease });
                 return;
             }
-            shift.BeginAnimation(TranslateTransform.XProperty, null);
-            block.BeginAnimation(FrameworkElement.WidthProperty, null);
-            (shift.X, block.Width, placed) = (left, width, true);
+            clip.BeginAnimation(RectangleGeometry.RectProperty, null);
+            (clip.Rect, placed) = (bounds, true);
         }
 
         owner.SizeChanged += (_, _) => Place(false);
