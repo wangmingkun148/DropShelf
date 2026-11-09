@@ -201,7 +201,7 @@ public partial class ShelfWindow
         element.BeginAnimation(OpacityProperty, null);
         element.Opacity = to;
         _fades.Remove(element);
-        if (!ShelfMotion.Enabled || from == to)
+        if (!ShelfMotion.Enabled || from == to || duration <= TimeSpan.Zero)
         {
             done?.Invoke();
             return;
