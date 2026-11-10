@@ -18,6 +18,7 @@ public partial class OnboardingWindow : Window
     public OnboardingWindow()
     {
         InitializeComponent();
+        PowerQoS.Track(this);
         _art = [Step1Art, Step2Art, Step3Art, Step4Art];
         for (var index = 0; index < StepCount; index++)
             Dots.Children.Add(new System.Windows.Shapes.Rectangle { Width = 6, Height = 6, RadiusX = 3, RadiusY = 3, Margin = new Thickness(0, 0, 8, 0) });

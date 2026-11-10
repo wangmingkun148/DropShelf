@@ -127,6 +127,7 @@ public partial class ShelfWindow : Window
         Drop += OnDrop;
         PreviewKeyDown += OnPreviewKeyDown;
         Activated += (_, _) => ViewModel.RefreshAvailabilityInBackground();
+        PowerQoS.Track(this);
 
         Surface.Opacity = 0;
         ApplySettings(host.Settings);
