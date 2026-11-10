@@ -111,6 +111,8 @@ public sealed class GestureService : IDisposable
     private void Run()
     {
         _threadId = NativeMethods.GetCurrentThreadId();
+        // 没按住时只等按下，节能运行即可；按住后跟随进程，进程也切到正常性能。
+        PowerQoS.BackgroundThread();
         _listening = StartListening();
         _started.Set();
 
@@ -130,6 +132,7 @@ public sealed class GestureService : IDisposable
 
         StopEdgeTimer();
         StopListening();
+        PowerQoS.Hold(this, false);
     }
 
     /// <summary>
@@ -336,6 +339,8 @@ public sealed class GestureService : IDisposable
 
     private void BeginPress()
     {
+        PowerQoS.FollowProcess();
+        PowerQoS.Hold(this, true);
         _movesThisPress = 0;
         _triggered = false;
         _lastButtonCheck = NowMilliseconds();
@@ -348,6 +353,8 @@ public sealed class GestureService : IDisposable
 
     private void EndPress()
     {
+        PowerQoS.Hold(this, false);
+        PowerQoS.BackgroundThread();
         if (LogService.TraceEnabled && _movesThisPress > 20)
             LogService.Trace($"按住期间收到 {_movesThisPress} 次移动，{(_triggered ? "已识别手势" : "未识别手势")}");
         var notify = _triggered;

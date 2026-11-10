@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         SetupSensitivityLabels();
         DataContext = new SettingsViewModel(controller);
         ApplySavedBounds(controller.Settings);
+        PowerQoS.Track(this);
 
         SourceInitialized += OnSourceInitialized;
         StateChanged += (_, _) =>

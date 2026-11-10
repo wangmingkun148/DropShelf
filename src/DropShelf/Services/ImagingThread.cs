@@ -10,7 +10,7 @@ namespace DropShelf.Services;
 /// </summary>
 internal static class ImagingThread
 {
-    private static readonly Lazy<Dispatcher> Worker = new(() => Start("DropShelf 图片处理"));
+    private static readonly Lazy<Dispatcher> Worker = new(() => Start("DropShelf 图片处理", background: true));
     private static readonly Lazy<Dispatcher> LongWorker = new(() => Start("DropShelf 图片压缩"));
 
     /// <summary>轮到这项工作时如果已经取消（例如置物架已关闭），直接跳过。</summary>
@@ -42,11 +42,13 @@ internal static class ImagingThread
         return completion.Task;
     }
 
-    private static Dispatcher Start(string name)
+    /// <summary>background：缩略图晚一点出现不影响操作，节能运行，把性能让给界面；压缩图片时用户在等结果，不节能。</summary>
+    private static Dispatcher Start(string name, bool background = false)
     {
         var ready = new TaskCompletionSource<Dispatcher>();
         var thread = new Thread(() =>
         {
+            if (background) PowerQoS.BackgroundThread();
             ready.SetResult(Dispatcher.CurrentDispatcher);
             Dispatcher.Run();
         }) { IsBackground = true, Name = name };

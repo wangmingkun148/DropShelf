@@ -418,6 +418,34 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
+    // 进程和线程的节能（EcoQoS）设置，两者的状态结构相同。
+    public const int ProcessPowerThrottling = 4;
+    public const int ThreadPowerThrottling = 3;
+    public const uint POWER_THROTTLING_EXECUTION_SPEED = 0x1;
+    public const uint PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION = 0x4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public readonly struct PowerThrottlingState(uint controlMask, uint stateMask)
+    {
+        public readonly uint Version = 1;
+        public readonly uint ControlMask = controlMask;
+        public readonly uint StateMask = stateMask;
+    }
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetProcessInformation(IntPtr process, int informationClass, ref PowerThrottlingState information, uint size);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetThreadInformation(IntPtr thread, int informationClass, ref PowerThrottlingState information, uint size);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr GetModuleHandle(string? moduleName);
 
