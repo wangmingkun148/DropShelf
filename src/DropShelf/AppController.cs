@@ -264,6 +264,8 @@ public sealed class AppController : IDisposable
         _onboarding?.Close();
         _mainWindow?.Close();
         _messageWindow?.Dispose();
+        // 关闭主窗口时会再保存一次窗口位置，等它写完再退出。
+        SettingsService.Flush();
     }
 
     public void Dispose() => PrepareForShutdown();
