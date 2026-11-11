@@ -19,14 +19,32 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
         </Style>
-        <Style x:Key="MiniShelf" TargetType="Border">
-            <Setter Property="CornerRadius" Value="14" />
-            <Setter Property="Background" Value="{DynamicResource ShelfSolidBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Effect">
+        <!--
+            小置物架。阴影预制：放在底下单独缓存为位图，循环动画期间里面的内容每帧在变，不用跟着重新计算模糊；
+            底色不透明，正好盖住阴影层自身的底色。
+        -->
+        <Style x:Key="MiniShelf" TargetType="ContentControl">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
                 <Setter.Value>
-                    <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.18" Color="Black" />
+                    <ControlTemplate TargetType="ContentControl">
+                        <Grid>
+                            <Border>
+                                <Border.CacheMode>
+                                    <BitmapCache />
+                                </Border.CacheMode>
+                                <Border CornerRadius="14" Background="{DynamicResource ShelfSolidBrush}">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.18" Color="Black" />
+                                    </Border.Effect>
+                                </Border>
+                            </Border>
+                            <Border CornerRadius="14" Background="{DynamicResource ShelfSolidBrush}" BorderBrush="{DynamicResource CardBorderBrush}"
+                                    BorderThickness="1">
+                                <ContentPresenter />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
@@ -255,7 +273,7 @@
                     <Canvas.RenderTransform>
                         <TranslateTransform x:Name="S1Float" />
                     </Canvas.RenderTransform>
-                    <Border Canvas.Left="186" Canvas.Top="32" Width="180" Height="198" Style="{StaticResource MiniShelf}">
+                    <ContentControl Canvas.Left="186" Canvas.Top="32" Width="180" Height="198" Style="{StaticResource MiniShelf}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="28" />
@@ -317,16 +335,16 @@
                                 <TextBlock Text="{StaticResource Glyph.Info}" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="10,0" />
                             </StackPanel>
                         </Grid>
-                    </Border>
+                    </ContentControl>
                 </Canvas>
 
                 <!-- 第 2 步：拖住并晃动 -->
                 <Canvas x:Name="Step2Art" Width="552" Height="262" Visibility="Collapsed">
-                    <Border x:Name="S2Shelf" Canvas.Left="186" Canvas.Top="30" Width="180" Height="196" Opacity="0"
-                            Style="{StaticResource MiniShelf}" RenderTransformOrigin="0.5,0.5">
-                        <Border.RenderTransform>
+                    <ContentControl x:Name="S2Shelf" Canvas.Left="186" Canvas.Top="30" Width="180" Height="196" Opacity="0"
+                                    Style="{StaticResource MiniShelf}" RenderTransformOrigin="0.5,0.5">
+                        <ContentControl.RenderTransform>
                             <ScaleTransform x:Name="S2ShelfScale" ScaleX="0.9" ScaleY="0.9" />
-                        </Border.RenderTransform>
+                        </ContentControl.RenderTransform>
                         <Grid Margin="14">
                             <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.4" StrokeDashArray="4 3"
                                        Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" Margin="0,22,0,0" />
@@ -337,7 +355,7 @@
                                            Foreground="{DynamicResource AccentTextBrush}" />
                             </StackPanel>
                         </Grid>
-                    </Border>
+                    </ContentControl>
                     <Canvas Canvas.Left="246" Canvas.Top="96">
                         <Canvas.RenderTransform>
                             <TranslateTransform x:Name="S2Move" />
@@ -352,7 +370,7 @@
 
                 <!-- 第 3 步：放进来，再拖出去 -->
                 <Canvas x:Name="Step3Art" Width="552" Height="262" Visibility="Collapsed">
-                    <Border Canvas.Left="70" Canvas.Top="34" Width="170" Height="194" Style="{StaticResource MiniShelf}">
+                    <ContentControl Canvas.Left="70" Canvas.Top="34" Width="170" Height="194" Style="{StaticResource MiniShelf}">
                         <Grid>
                             <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.2" StrokeDashArray="4 3" Margin="14,34,14,40"
                                        Stroke="{DynamicResource ControlStrongBorderBrush}" Opacity="0.4" />
@@ -360,7 +378,7 @@
                                 <TextBlock Text="{StaticResource Glyph.Picture}" Style="{StaticResource CardGlyph}" />
                             </Border>
                         </Grid>
-                    </Border>
+                    </ContentControl>
                     <StackPanel Canvas.Left="392" Canvas.Top="86" RenderTransformOrigin="0.5,0.5">
                         <StackPanel.RenderTransform>
                             <ScaleTransform x:Name="S3FolderScale" />
@@ -394,7 +412,7 @@
 
                 <!-- 第 4 步：快速操作。和真实的置物架一样：拖到底部时按钮栏向上展开成一排操作，放下后压缩包留在置物架上 -->
                 <Canvas x:Name="Step4Art" Width="552" Height="262" Visibility="Collapsed">
-                    <Border Canvas.Left="156" Canvas.Top="24" Width="240" Height="214" Style="{StaticResource MiniShelf}">
+                    <ContentControl Canvas.Left="156" Canvas.Top="24" Width="240" Height="214" Style="{StaticResource MiniShelf}">
                         <Grid>
                             <Grid Margin="10,14,10,8">
                                 <Grid.RowDefinitions>
@@ -467,7 +485,7 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
-                    </Border>
+                    </ContentControl>
                     <Canvas x:Name="S4Card" Canvas.Left="155" Canvas.Top="159">
                         <Canvas.RenderTransform>
                             <TranslateTransform x:Name="S4Move" X="-150" Y="-110" />

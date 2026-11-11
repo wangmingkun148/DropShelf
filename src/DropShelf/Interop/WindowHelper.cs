@@ -144,12 +144,10 @@ internal static class CacheScale
     /// 位图缓存的 RenderAtScale。缓存本身已按系统 DPI（主显示器）生成，只需补上元素所在显示器与它之比：
     /// 两者相同时为 1，再乘一次显示缩放比例在 200% 时会占用四倍内存；所在显示器缩放更高时按比例补足，不会发虚。
     /// </summary>
-    public static double For(Visual visual)
-    {
-        var system = Math.Max(1, NativeMethods.GetDpiForSystem());
-        var scale = VisualTreeHelper.GetDpi(visual).PixelsPerInchX / system;
-        return Reduced ? Math.Min(scale, 96.0 / system) : scale;
-    }
+    public static double For(Visual visual) => Reduced ? Math.Min(Sharp(visual), 96.0 / Math.Max(1, NativeMethods.GetDpiForSystem())) : Sharp(visual);
+
+    /// <summary>不随低性能模式降低：缓存的是要看清的文字、面积又很小时用。</summary>
+    public static double Sharp(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerInchX / Math.Max(1, NativeMethods.GetDpiForSystem());
 
     /// <summary>
     /// 低性能模式：这些缓存只在动画和拖动期间使用，改为每个逻辑像素只用一个像素，缩放 150% 时像素数约为原来的 44%，
