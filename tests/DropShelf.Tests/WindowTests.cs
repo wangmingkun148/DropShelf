@@ -363,17 +363,16 @@ internal static partial class Program
             }
             AssertCardFacesVisible("打开的第一帧");
             var tileFace = (UIElement)stackLayer.Children[^1];
+            // 拖动的位置在下一帧才画出来；换面那一帧要把整页画进缓存，显卡慢时要等几十毫秒以上，等到画好再检查。
             window.DragFlip(0.3);
-            Pump(50);
-            Assert(generalTile.Opacity == 0 && tileFace.Visibility == Visibility.Visible && !tileFace.RenderTransform.Value.IsIdentity &&
-                   generalHost.Visibility == Visibility.Hidden, "拖到侧立前应只转动卡片的截图");
+            Assert(PumpUntil(() => generalTile.Opacity == 0 && tileFace.Visibility == Visibility.Visible && !tileFace.RenderTransform.Value.IsIdentity &&
+                   generalHost.Visibility == Visibility.Hidden), "拖到侧立前应只转动卡片的截图");
             window.DragFlip(0.7);
-            Pump(50);
-            Assert(tileFace.Visibility == Visibility.Hidden && generalHost.Visibility == Visibility.Visible && overviewHost.Clip is not null && stackLayer.Clip is not null,
-                "拖过侧立后应换成页面");
+            Assert(PumpUntil(() => tileFace.Visibility == Visibility.Hidden && generalHost.Visibility == Visibility.Visible && overviewHost.Clip is not null &&
+                   stackLayer.Clip is not null), "拖过侧立后应换成页面");
             window.DragFlip(0.2);
-            Pump(50);
-            Assert(tileFace.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Hidden && overviewHost.Clip is null, "往回拖过侧立后应换回卡片");
+            Assert(PumpUntil(() => tileFace.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Hidden && overviewHost.Clip is null),
+                "往回拖过侧立后应换回卡片");
             window.ReleaseFlip(0);
             Pump(700);
             Assert(overviewHost.Visibility == Visibility.Visible && generalHost.Visibility == Visibility.Collapsed && overviewPage is { Opacity: 1, CacheMode: null } &&
