@@ -60,7 +60,7 @@ public sealed class AppController : IDisposable
     {
         LanguageService.SetMode(_settings.Language);
         ThemeService.Initialize(_settings.Theme, _settings.AccentColor);
-        LowPerformance.Enabled = _settings.LowPerformanceMode;
+        LowPerformance.Mode = _settings.PerformanceMode;
         LogService.CleanupOldLogs();
         _ = VirtualFileDropService.CleanupStaleCacheAsync();
         RestoreStartupRegistration();
@@ -289,7 +289,7 @@ public sealed class AppController : IDisposable
             _gestures.SetTrigger(current.AutoOpenTrigger);
             _gestures.SetEdgeDwell(current.EdgeDwell);
         }
-        LowPerformance.Enabled = current.LowPerformanceMode;
+        LowPerformance.Mode = current.PerformanceMode;
         if (previous.Hotkey != current.Hotkey && _hotkey is not null)
             IsHotkeyRegistered = _hotkey.Register(current.HotkeyGesture);
         if (!previous.BlockedApps!.SequenceEqual(current.BlockedApps!, StringComparer.OrdinalIgnoreCase))

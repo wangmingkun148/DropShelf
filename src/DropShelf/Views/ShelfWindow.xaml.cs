@@ -166,6 +166,7 @@ public partial class ShelfWindow : Window
         _closed = true;
         _lifetime.Cancel();
         StopSlide();
+        StopPop();
         // 没播完的动画在这里收尾：待移除的项目先移除，不会记进最近关闭。
         FinishMotion();
         ViewModel.RemoveVisibly = null;

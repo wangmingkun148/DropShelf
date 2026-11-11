@@ -139,6 +139,8 @@ public partial class MainWindow
         DragGhostGlyph.Text = card.Glyph;
         DragGhostText.Text = card.Title;
         ClearGhostAnimations();
+        // 底色不透明，缓存里的文字可以照常用 ClearType，和不缓存时一样。
+        DragGhost.CacheMode = new BitmapCache(CacheScale.Sharp(this)) { EnableClearType = true, SnapsToDevicePixels = true };
         DragGhost.Visibility = Visibility.Visible;
         var zoneBrush = (System.Windows.Media.Brush)FindResource(card.IsCustom ? "DeleteBrush" : "LockedBrush");
         DeleteGlow.Fill = DeleteHint.Background = zoneBrush;

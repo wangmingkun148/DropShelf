@@ -650,10 +650,16 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
                     <Grid Margin="12,10,12,16">
-                        <Border Background="{DynamicResource FlyoutBrush}" CornerRadius="8">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="20" ShadowDepth="5" Direction="270" Opacity="0.2" Color="Black" />
-                            </Border.Effect>
+                        <!-- 预制阴影：单独缓存为位图，淡入和悬停高亮时不用重新计算模糊 -->
+                        <Border>
+                            <Border.CacheMode>
+                                <BitmapCache />
+                            </Border.CacheMode>
+                            <Border Background="{DynamicResource FlyoutBrush}" CornerRadius="8">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="20" ShadowDepth="5" Direction="270" Opacity="0.2" Color="Black" />
+                                </Border.Effect>
+                            </Border>
                         </Border>
                         <Border Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
                                 BorderThickness="1" CornerRadius="8" Padding="4" MinWidth="180">
@@ -693,10 +699,16 @@
                        Focusable="False" PopupAnimation="Fade"
                        IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
                     <Grid Margin="12,10,12,16">
-                        <Border Background="{DynamicResource FlyoutBrush}" CornerRadius="8">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="20" ShadowDepth="5" Direction="270" Opacity="0.2" Color="Black" />
-                            </Border.Effect>
+                        <!-- 预制阴影：单独缓存为位图，淡入和悬停高亮时不用重新计算模糊 -->
+                        <Border>
+                            <Border.CacheMode>
+                                <BitmapCache />
+                            </Border.CacheMode>
+                            <Border Background="{DynamicResource FlyoutBrush}" CornerRadius="8">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="20" ShadowDepth="5" Direction="270" Opacity="0.2" Color="Black" />
+                                </Border.Effect>
+                            </Border>
                         </Border>
                         <Border Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
                                 BorderThickness="1" CornerRadius="8" Padding="4" MinWidth="220">

@@ -23,7 +23,7 @@ internal static partial class Program
     {
         var service = new SettingsService();
         var defaults = service.Load();
-        Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted && !defaults.LowPerformanceMode, "默认开关不正确");
+        Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted && defaults.PerformanceMode == PerformanceMode.Auto, "默认开关不正确");
         Assert(defaults.AccentColor is null, "默认强调色应跟随 Windows");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
@@ -48,7 +48,7 @@ internal static partial class Program
         defaults.QuickActionSlots = ["Reveal", custom.Id, "CopyFullPath", "MoveTo"];
         defaults.CloseWhenEmpty = false;
         defaults.ShowGettingStarted = false;
-        defaults.LowPerformanceMode = true;
+        defaults.PerformanceMode = PerformanceMode.Normal;
         defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
@@ -69,7 +69,7 @@ internal static partial class Program
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
         Assert(!loaded.CloseWhenEmpty && !loaded.ShowGettingStarted, "自动关闭或快速上手设置未恢复");
-        Assert(loaded.LowPerformanceMode, "低性能模式未恢复");
+        Assert(loaded.PerformanceMode == PerformanceMode.Normal, "低性能模式未恢复");
         Assert(loaded.AccentColor == "#8764B8", "强调色未恢复");
         Assert(loaded.Hotkey == "Ctrl+Alt+D", "快捷键未恢复");
         Assert(loaded.HasCompletedFirstRun, "首次运行状态未恢复");
@@ -96,6 +96,7 @@ internal static partial class Program
               "StartWithWindows": false,
               "QuickShelfSize": "Small",
               "QuickAction": "CompressZip",
+              "LowPerformanceMode": true,
               "HasCompletedFirstRun": true
             }
             """);
@@ -107,6 +108,7 @@ internal static partial class Program
         Assert(migrated.QuickActionLayout == QuickActionLayout.Four &&
                migrated.QuickActionSlots!.SequenceEqual(QuickActions.Defaults.Select(type => type.ToString())), "旧的单个快速操作没有迁移为默认组合");
         Assert(migrated.WindowLeft == 624 && migrated.HasCompletedFirstRun, "窗口位置或首次运行状态丢失");
+        Assert(migrated.PerformanceMode == PerformanceMode.Low && migrated.LowPerformanceMode is null, "旧的低性能模式开关打开时应迁移为始终启用");
         Assert(migrated.AutoOpenTrigger == AutoOpenTrigger.Both && migrated.DragOutMode == TransferMode.Move, "新增设置没有使用默认值");
 
         File.WriteAllText(service.SettingsPath, """{ "QuickAction": "None" }""");

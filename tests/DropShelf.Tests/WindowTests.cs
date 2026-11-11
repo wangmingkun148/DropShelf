@@ -135,7 +135,7 @@ internal static partial class Program
         Pump(200);
 
         foreach (var name in new[] { "PageCards", "VersionButton", "StatusIndicator", "GettingStartedSection", "HistorySection", "HistoryList",
-                     "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "LowPerformanceBox", "TriggerSelector", "SensitivitySlider", "EdgeDwellSelector",
+                     "LanguageSelector", "StartupEnabledBox", "HotkeyEditor", "PerformanceSelector", "TriggerSelector", "SensitivitySlider", "EdgeDwellSelector",
                      "ShelfSizeSelector", "DragOutModeSelector", "CloseWhenEmptyBox", "ClearHistoryButton", "ThemeSelector",
                      "AccentSelector", "ActionLayoutSelector", "ActionSlotsList", "MoreActionsList", "AddCustomActionButton", "EditorOverlay" })
             Assert(window.FindName(name) is not null, $"主窗口缺少 {name}");
@@ -264,11 +264,14 @@ internal static partial class Program
         ((System.Windows.Controls.ListBox)window.FindName("AccentSelector")!).SelectedValue = "#038387";
         ((System.Windows.Controls.ListBox)window.FindName("ActionLayoutSelector")!).SelectedValue = QuickActionLayout.Two;
         ((System.Windows.Controls.CheckBox)window.FindName("CloseWhenEmptyBox")!).IsChecked = false;
-        var lowPerformance = (System.Windows.Controls.CheckBox)window.FindName("LowPerformanceBox")!;
-        lowPerformance.IsChecked = true;
-        Assert(controller.Settings.LowPerformanceMode && LowPerformance.Enabled, "打开低性能模式后应立即降低动画缓存的精度");
-        lowPerformance.IsChecked = false;
-        Assert(!controller.Settings.LowPerformanceMode && !LowPerformance.Enabled, "关闭低性能模式后应恢复动画缓存的精度");
+        var performance = (System.Windows.Controls.ListBox)window.FindName("PerformanceSelector")!;
+        Assert((PerformanceMode)performance.SelectedValue == PerformanceMode.Auto &&
+               viewModel.PerformanceDescription == Strings.PerformanceDescription(PerformanceMode.Auto), "低性能模式默认应为自动，说明随之对应");
+        performance.SelectedValue = PerformanceMode.Low;
+        Assert(viewModel.PerformanceDescription == Strings.PerformanceDescription(PerformanceMode.Low), "切换低性能模式后说明没有更新");
+        Assert(controller.Settings.PerformanceMode == PerformanceMode.Low && LowPerformance.Enabled, "打开低性能模式后应立即降低动画缓存的精度");
+        performance.SelectedValue = PerformanceMode.Normal;
+        Assert(controller.Settings.PerformanceMode == PerformanceMode.Normal && !LowPerformance.Enabled, "关闭低性能模式后应恢复动画缓存的精度");
         viewModel.AssignSlot(1, "Reveal");
         Assert(viewModel.ShelfSummary == "屏幕边缘呼出 · 拖出时复制" && viewModel.ActionsSummary == "压缩、显示位置" &&
                viewModel.AppearanceSummary == "深色 · 自选强调色", "设置卡片上的摘要不正确");

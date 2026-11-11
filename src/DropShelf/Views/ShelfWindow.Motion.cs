@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -35,7 +34,7 @@ public partial class ShelfWindow
 
     private readonly List<MotionTween> _tweens = [];
     private bool _motionHooked;
-    private TimeSpan _motionFrameTime;
+    private FrameClock _motionClock = new();
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
     /// <summary>列表里移除之后、下面的行补位之前，数量变化引起的刷新不改窗口大小；补位后窗口再平滑变小。</summary>
@@ -45,10 +44,10 @@ public partial class ShelfWindow
     /// 正在滑入、退出，内容里有动画，或正在读取拖入的内容（读完紧接着就是落下的动画）：
     /// 这时界面线程不适合再做别的重活，比如创建备用窗口、回收内存。
     /// </summary>
-    public bool IsAnimating => IsSliding || _entering || _motionHooked || _receiving > 0 || _closing;
+    public bool IsAnimating => IsSliding || _popFrame is not null || _motionHooked || _receiving > 0 || _closing;
 
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
-    private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
+    private sealed record MotionTween(TimeSpan Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
 
     /// <summary>牌在置物架里的姿态（DIP，相对所在的画布）：中心位置、角度、缩放和透明度。与拖动历史卡片用的 ScreenCardPose 不同。</summary>
     private readonly record struct LocalCardPose(double X, double Y, double Angle, double Scale = 1, double Opacity = 1)
@@ -500,7 +499,9 @@ public partial class ShelfWindow
     private void Tween(TimeSpan delay, TimeSpan duration, Action<double> apply, Action? completed = null)
     {
         apply(0);
-        _tweens.Add(new MotionTween(Stopwatch.GetTimestamp(), delay, duration, apply, completed));
+        // 没有动画在播时时钟从头开始，新动画从它的第一帧起算。
+        if (!_motionHooked) _motionClock = new FrameClock();
+        _tweens.Add(new MotionTween(_motionClock.Elapsed, delay, duration, apply, completed));
         if (_motionHooked) return;
         _motionHooked = true;
         CompositionTarget.Rendering += OnMotionFrame;
@@ -512,14 +513,13 @@ public partial class ShelfWindow
     /// <summary>所有动画共用一个逐帧回调：同一帧重复触发时跳过，还在等待的动画停在起点不更新；这一帧里各段动画按同一个时刻推进。</summary>
     private void OnMotionFrame(object? sender, EventArgs e)
     {
-        var time = ((RenderingEventArgs)e).RenderingTime;
-        if (time == _motionFrameTime || LowPerformance.Skip(time)) return;
-        _motionFrameTime = time;
-        var now = Stopwatch.GetTimestamp();
+        // 低性能模式下高刷新率屏幕上隔一帧更新，跳过的帧不推进时钟，见 LowPerformance.Skip。
+        if (LowPerformance.Skip(((RenderingEventArgs)e).RenderingTime) || !_motionClock.Tick(e)) return;
+        var now = _motionClock.Elapsed;
         for (var i = 0; i < _tweens.Count; i++)
         {
             var tween = _tweens[i];
-            var elapsed = Stopwatch.GetElapsedTime(tween.Start, now) - tween.Delay;
+            var elapsed = now - tween.Start - tween.Delay;
             if (elapsed < TimeSpan.Zero) continue;
             var progress = tween.Duration <= TimeSpan.Zero ? 1 : Math.Min(elapsed / tween.Duration, 1);
             tween.Apply(MotionEase.Ease(progress));

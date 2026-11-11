@@ -763,8 +763,13 @@
                                         <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc LowPerformanceMode}"
-                                                           Description="{l:Loc LowPerformanceModeDescription}">
-                                        <CheckBox x:Name="LowPerformanceBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding LowPerformanceMode}" />
+                                                           Description="{Binding PerformanceDescription}">
+                                        <ListBox x:Name="PerformanceSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding PerformanceMode}">
+                                            <ListBoxItem Content="{l:Loc PerformanceAuto}" Tag="{x:Static models:PerformanceMode.Auto}" />
+                                            <ListBoxItem Content="{l:Loc PerformanceOff}" Tag="{x:Static models:PerformanceMode.Normal}" />
+                                            <ListBoxItem Content="{l:Loc PerformanceOn}" Tag="{x:Static models:PerformanceMode.Low}" />
+                                        </ListBox>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
                                         <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
@@ -1310,20 +1315,23 @@
 
         <!-- 拖动快速操作时跟随光标的卡片 -->
         <Canvas x:Name="DragLayer" Grid.RowSpan="2" IsHitTestVisible="False">
-            <Border x:Name="DragGhost" Visibility="Collapsed" CornerRadius="8" Padding="12,8,16,9" Background="{DynamicResource FlyoutBrush}"
-                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+            <!-- 外层只负责平移和缓存：卡片连同阴影画一次存成位图，跟随光标时每帧只移动这张图，不重新计算阴影模糊 -->
+            <Border x:Name="DragGhost" Visibility="Collapsed">
                 <!-- 跟随光标和弹回都改这个平移，不改 Canvas.Left/Top，拖动时窗口不必每帧重新排版 -->
                 <Border.RenderTransform>
                     <TranslateTransform x:Name="DragGhostShift" />
                 </Border.RenderTransform>
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.22" Color="Black" />
-                </Border.Effect>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock x:Name="DragGhostGlyph" FontFamily="{StaticResource IconFont}" FontSize="16" Margin="0,1,10,0"
-                               VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
-                    <TextBlock x:Name="DragGhostText" FontSize="13" VerticalAlignment="Center" />
-                </StackPanel>
+                <Border CornerRadius="8" Padding="12,8,16,9" Background="{DynamicResource FlyoutBrush}"
+                        BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.22" Color="Black" />
+                    </Border.Effect>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="DragGhostGlyph" FontFamily="{StaticResource IconFont}" FontSize="16" Margin="0,1,10,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
+                        <TextBlock x:Name="DragGhostText" FontSize="13" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
             </Border>
         </Canvas>
     </Grid>
