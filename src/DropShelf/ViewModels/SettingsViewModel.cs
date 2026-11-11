@@ -221,11 +221,13 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.CloseWhenEmpty = value);
     }
 
-    public bool LowPerformanceMode
+    public PerformanceMode PerformanceMode
     {
-        get => Settings.LowPerformanceMode;
-        set => Update(settings => settings.LowPerformanceMode = value);
+        get => Settings.PerformanceMode;
+        set => Update(settings => settings.PerformanceMode = value);
     }
+
+    public string PerformanceDescription => Strings.PerformanceDescription(Settings.PerformanceMode);
 
     // ───────────── 外观 ─────────────
 
@@ -465,7 +467,7 @@ public sealed class SettingsViewModel : ObservableObject
         foreach (var name in new[]
                  {
                      nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity), nameof(SensitivityDescription),
-                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty), nameof(LowPerformanceMode),
+                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty), nameof(PerformanceMode), nameof(PerformanceDescription),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),

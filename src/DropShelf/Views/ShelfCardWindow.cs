@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -69,7 +68,7 @@ internal sealed class ShelfCardWindow : Window
         Margin = new Thickness(9), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, 0xFB, 0xFA, 0xF6))
     };
     private readonly Border _shade = new() { Background = Brushes.Black };
-    private readonly Stopwatch _clock = new();
+    private FrameClock _clock = new();
     private CardMotion _motion = new([new CardKey(0)]);
     private RECT _target;
     private RECT _bounds;
@@ -205,13 +204,16 @@ internal sealed class ShelfCardWindow : Window
             case Stage.Showing:
                 if (++_frames < 2) return;
                 _stage = Stage.Playing;
-                _clock.Restart();
+                // 从这一帧起计时，卡顿时放慢而不跳过，见 FrameClock。
+                _clock = new FrameClock();
+                _clock.Tick(e);
                 WindowEffects.SetCloaked(this, false);
                 Take(ref _shown)?.Invoke();
                 break;
             case Stage.Playing:
                 // 低性能模式下高刷新率屏幕上隔一帧更新，见 LowPerformance.Skip。
                 if (LowPerformance.Skip(time)) return;
+                _clock.Tick(e);
                 var ms = _clock.Elapsed.TotalMilliseconds;
                 Apply(_motion.At(ms));
                 if (ms < _motion.Duration) return;
@@ -291,7 +293,6 @@ internal sealed class ShelfCardWindow : Window
     private void Release()
     {
         CompositionTarget.Rendering -= OnFrame;
-        _clock.Stop();
         _stage = Stage.Idle;
         Hide();
         // 不再引用置物架的截图，缓存的位图也一起释放。

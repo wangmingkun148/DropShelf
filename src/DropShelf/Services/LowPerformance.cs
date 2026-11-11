@@ -1,10 +1,11 @@
 using System.Windows.Media.Animation;
 using DropShelf.Interop;
+using DropShelf.Models;
 
 namespace DropShelf.Services;
 
 /// <summary>
-/// 低性能模式（常规页的开关），在动画效果上做几处不显眼的让步，减轻显卡和界面线程的负担：
+/// 低性能模式（常规页的三档：自动、关闭、开启），在动画效果上做几处不显眼的让步，减轻显卡和界面线程的负担：
 /// 动画和拖动期间的位图缓存降低精度，见 CacheScale；高刷新率屏幕上动画隔一帧更新；
 /// 置物架弹出和收起时窗口不动，内容在窗口里移动。
 /// </summary>
@@ -16,7 +17,28 @@ internal static class LowPerformance
     private static TimeSpan _frame, _shown, _interval;
     private static bool _skip;
 
-    public static bool Enabled { get; set; }
+    public static PerformanceMode Mode { get; set; }
+
+    /// <summary>现在是否启用。自动时在使用电池或系统开启节能模式期间启用，每次用到时现查，切换电源立即生效。</summary>
+    public static bool Enabled => Mode switch
+    {
+        PerformanceMode.Low => true,
+        PerformanceMode.Normal => false,
+        _ => SavingPower()
+    };
+
+    private const long PowerCheckInterval = 2000;
+    private static long _powerChecked = -PowerCheckInterval;
+    private static bool _savingPower;
+
+    /// <summary>使用电池或系统开启了节能模式。逐帧回调里也会问到，电源状态几秒内不会来回变，两秒内不重复查。</summary>
+    private static bool SavingPower()
+    {
+        var now = Environment.TickCount64;
+        if (now - _powerChecked < PowerCheckInterval) return _savingPower;
+        _powerChecked = now;
+        return _savingPower = NativeMethods.GetSystemPowerStatus(out var status) && (status.ACLineStatus == 0 || status.SystemStatusFlag == 1);
+    }
 
     /// <summary>
     /// 逐帧回调里调用：这一帧要不要跳过不更新。各窗口的逐帧回调在同一帧拿到同样的时刻，都跳过同一帧，

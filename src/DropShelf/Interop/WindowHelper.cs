@@ -117,12 +117,11 @@ internal static class CacheScale
     /// 低性能模式下，这些缓存只在动画和拖动期间使用，改为每个逻辑像素只用一个像素，缩放 150% 时像素数约为原来的 44%，
     /// 显卡生成和合成缓存都轻得多；动画途中略微模糊，停下后去掉缓存就恢复清晰。缩放 100% 时没有变化。
     /// </summary>
-    public static double For(Visual visual)
-    {
-        var system = Math.Max(1, NativeMethods.GetDpiForSystem());
-        var scale = VisualTreeHelper.GetDpi(visual).PixelsPerInchX / system;
-        return LowPerformance.Enabled ? Math.Min(scale, 96.0 / system) : scale;
-    }
+    public static double For(Visual visual) =>
+        LowPerformance.Enabled ? Math.Min(Sharp(visual), 96.0 / Math.Max(1, NativeMethods.GetDpiForSystem())) : Sharp(visual);
+
+    /// <summary>不随低性能模式降低：缓存的是要看清的文字、面积又很小时用。</summary>
+    public static double Sharp(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerInchX / Math.Max(1, NativeMethods.GetDpiForSystem());
 }
 
 internal static class WindowPlacement

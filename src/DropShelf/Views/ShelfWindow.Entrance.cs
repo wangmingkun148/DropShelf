@@ -106,6 +106,7 @@ public partial class ShelfWindow
         IsHitTestVisible = false;
         FinishEntrance();
         StopSlide();
+        StopPop();
         // 发牌、移除、补位和窗口大小的动画停在这一帧：截下的牌面和屏幕上一样，置物架隐身后也不再逐帧白做。没做完的收尾（比如待移除的项目）在窗口关闭时补上。
         StopMotion();
         if (!ShelfMotion.Enabled || !IsVisible || !NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect) ||
@@ -133,6 +134,7 @@ public partial class ShelfWindow
     private void AnimateIn()
     {
         StopSlide();
+        StopPop();
         if (!ShelfMotion.Enabled)
         {
             Surface.BeginAnimation(OpacityProperty, null);
@@ -141,24 +143,45 @@ public partial class ShelfWindow
             return;
         }
 
-        if (LowPerformance.Enabled)
-            ShiftSurface((0, ShelfMotion.RiseOffset(1)), (0, 0), ShelfMotion.RiseDuration, new QuinticEase { EasingMode = EasingMode.EaseOut });
-        else if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
-            SlideWindow(rect.Left, rect.Top + ShelfMotion.RiseOffset(DpiScale()), rect.Left, rect.Top, ShelfMotion.RiseDuration,
-                new QuinticEase { EasingMode = EasingMode.EaseOut }, () => WindowPlacement.KeepInWorkArea(this));
+        var ease = new QuinticEase { EasingMode = EasingMode.EaseOut };
+        if (!LowPerformance.Enabled && NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
+            SlideWindow(rect.Left, rect.Top + ShelfMotion.RiseOffset(DpiScale()), rect.Left, rect.Top, ShelfMotion.RiseDuration, ease,
+                () => WindowPlacement.KeepInWorkArea(this));
+        // 低性能模式下内容在窗口里升起同样一段（逻辑像素），缓动和升起窗口一样。
+        var shift = LowPerformance.Enabled ? ShelfMotion.RiseOffset(1) : 0;
 
+        // 淡入、放大和升起用同一种时钟逐帧推进，第一帧耽搁时一起从头开始，见 FrameClock。
         CacheSurface();
-        _entering = true;
-        Surface.BeginAnimation(OpacityProperty, LowPerformance.Pace(new DoubleAnimation(0, 1, ShelfMotion.RiseFadeDuration) { EasingFunction = MotionEase }));
-        var scale = LowPerformance.Pace(new DoubleAnimation(ShelfMotion.RiseStartScale, 1, ShelfMotion.RiseDuration) { EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut } });
-        scale.Completed += (_, _) =>
+        Surface.BeginAnimation(OpacityProperty, null);
+        var clock = new FrameClock();
+        void Pose()
         {
-            _entering = false;
+            var eased = ease.Ease(Math.Min(1, clock.Elapsed / ShelfMotion.RiseDuration));
+            Surface.Opacity = MotionEase.Ease(Math.Min(1, clock.Elapsed / ShelfMotion.RiseFadeDuration));
+            SurfaceScale.ScaleX = SurfaceScale.ScaleY = ShelfMotion.RiseStartScale + (1 - ShelfMotion.RiseStartScale) * eased;
+            if (shift != 0) SurfaceOffset.Y = shift * (1 - eased);
+        }
+        Pose();
+        _popFrame = (_, e) =>
+        {
+            // 低性能模式下高刷新率屏幕上隔一帧更新，跳过的帧不推进时钟，见 LowPerformance.Skip。
+            if (LowPerformance.Skip(((RenderingEventArgs)e).RenderingTime) || !clock.Tick(e)) return;
+            Pose();
+            if (clock.Elapsed < ShelfMotion.RiseDuration) return;
+            StopPop();
             Surface.CacheMode = null;
             EndOpenTrace("done");
         };
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+        CompositionTarget.Rendering += _popFrame;
+    }
+
+    private EventHandler? _popFrame;
+
+    private void StopPop()
+    {
+        if (_popFrame is null) return;
+        CompositionTarget.Rendering -= _popFrame;
+        _popFrame = null;
     }
 
     /// <summary>
@@ -226,18 +249,6 @@ public partial class ShelfWindow
     /// </summary>
     private void CacheSurface() => Surface.CacheMode = new BitmapCache(CacheScale.For(this));
 
-    /// <summary>出场动画还没播完。低性能模式下窗口不滑动，靠它让 ShelfManager 把重活往后推，见 IsAnimating。</summary>
-    private bool _entering;
-
-    /// <summary>低性能模式下代替移动窗口：内容在窗口里从 from 移到 to（逻辑像素），from 为 null 时从当前位置开始。</summary>
-    private void ShiftSurface((double X, double Y)? from, (double X, double Y) to, TimeSpan duration, IEasingFunction ease)
-    {
-        SurfaceOffset.BeginAnimation(TranslateTransform.XProperty,
-            LowPerformance.Pace(new DoubleAnimation { From = from?.X, To = to.X, Duration = duration, EasingFunction = ease }));
-        SurfaceOffset.BeginAnimation(TranslateTransform.YProperty,
-            LowPerformance.Pace(new DoubleAnimation { From = from?.Y, To = to.Y, Duration = duration, EasingFunction = ease }));
-    }
-
     /// <summary>逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。</summary>
     private void SlideWindow(int fromX, int fromY, int toX, int toY, TimeSpan duration, IEasingFunction ease, Action? completed = null)
     {
@@ -250,15 +261,13 @@ public partial class ShelfWindow
         }
 
         MoveWindow(handle, fromX, fromY);
-        var clock = Stopwatch.StartNew();
-        var (x, y, frame) = (fromX, fromY, TimeSpan.Zero);
+        var clock = new FrameClock();
+        var (x, y) = (fromX, fromY);
         _slideFrame = (_, e) =>
         {
-            // 同一帧可能触发多次；取整后位置没变时也不必移动窗口。
-            var time = ((RenderingEventArgs)e).RenderingTime;
-            if (time == frame) return;
-            frame = time;
-            var progress = Math.Min(1, clock.Elapsed.TotalMilliseconds / duration.TotalMilliseconds);
+            // 取整后位置没变时不必移动窗口。
+            if (!clock.Tick(e)) return;
+            var progress = Math.Min(1, clock.Elapsed / duration);
             var eased = ease.Ease(progress);
             var (nextX, nextY) = ((int)Math.Round(fromX + (toX - fromX) * eased), (int)Math.Round(fromY + (toY - fromY) * eased));
             if (nextX != x || nextY != y) MoveWindow(handle, nextX, nextY);

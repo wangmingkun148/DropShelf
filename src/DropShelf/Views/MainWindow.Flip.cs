@@ -129,9 +129,10 @@ public partial class MainWindow
         public double RunMs { get; set; }
         public double StartSlope { get; set; }
         public double EndSlope { get; set; }
-        /// <summary>开始播放的时刻；第一帧按从这里经过的时间摆放，松手后不会先停一帧。</summary>
+        /// <summary>开始播放的时刻；第一帧按从这里经过的时间摆放（最多一帧），松手后不会先停一帧。</summary>
         public long RunBegun { get; set; }
-        public TimeSpan? RunStart { get; set; }
+        /// <summary>已经播放的时间，卡顿时一帧最多前进 FrameClock.MaxStep，放慢而不跳过。</summary>
+        public TimeSpan? Ran { get; set; }
         public TimeSpan Last { get; set; }
     }
 
@@ -295,7 +296,7 @@ public partial class MainWindow
         flip.StartSlope = distance > 0 ? Math.Min(3, speed * milliseconds / distance) : 1;
         flip.EndSlope = distance > 0 ? natural * milliseconds / distance : 1;
         flip.RunBegun = Stopwatch.GetTimestamp();
-        flip.RunStart = null;
+        flip.Ran = null;
         HookFlipFrames();
     }
 
@@ -444,11 +445,14 @@ public partial class MainWindow
             if (flip.Posed != flip.Progress) Pose(flip);
             return;
         }
-        // 低性能模式下高刷新率屏幕上隔一帧更新，见 LowPerformance.Skip；拖动时跟着鼠标，不经过这里。
-        if (flip.RunStart is not null && (time == flip.Last || LowPerformance.Skip(time))) return;
-        flip.RunStart ??= time - Stopwatch.GetElapsedTime(flip.RunBegun);
+        // 低性能模式下高刷新率屏幕上隔一帧更新，跳过的帧不推进，见 LowPerformance.Skip；拖动时跟着鼠标，不经过这里。
+        if (flip.Ran is not null && (time == flip.Last || LowPerformance.Skip(time))) return;
+        var ran = flip.Ran is { } before
+            ? before + FrameClock.Step(time - flip.Last)
+            : FrameClock.Step(Stopwatch.GetElapsedTime(flip.RunBegun) * 2) / 2;
+        flip.Ran = ran;
         flip.Last = time;
-        var u = flip.RunMs > 0 ? Math.Min(1, (time - flip.RunStart.Value).TotalMilliseconds / flip.RunMs) : 1;
+        var u = flip.RunMs > 0 ? Math.Min(1, ran.TotalMilliseconds / flip.RunMs) : 1;
         flip.Progress = flip.RunFrom + (flip.RunTo - flip.RunFrom) * Glide(u, flip.StartSlope, flip.EndSlope);
         Pose(flip);
         if (u >= 1) Land(flip, forward: flip.RunTo >= 1, jump: false);
