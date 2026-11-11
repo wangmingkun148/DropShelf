@@ -223,8 +223,12 @@ public partial class ShelfWindow
         }, animate: !closes);
     }
 
-    private IReadOnlyList<ShelfItem> GetSelectedItems() =>
-        ItemsList.SelectedItems.Cast<ShelfItem>().OrderBy(item => ViewModel.Items.IndexOf(item)).ToArray();
+    /// <summary>选中的项目，按在置物架里的顺序：顺着列表走一遍挑出来，不用给每个选中项各找一次位置再排序。</summary>
+    private IReadOnlyList<ShelfItem> GetSelectedItems()
+    {
+        var selected = ItemsList.SelectedItems.Cast<ShelfItem>().ToHashSet();
+        return ViewModel.Items.Where(selected.Contains).ToArray();
+    }
 
     /// <summary>展开且有选中项时只处理选中项，否则处理整个置物架。</summary>
     private IReadOnlyList<ShelfItem> GetTargets()

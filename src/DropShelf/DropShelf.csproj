@@ -10,9 +10,9 @@
     <RootNamespace>DropShelf</RootNamespace>
     <!-- 自己的入口先判断是否已经在运行，再启动 WPF，见 Program。 -->
     <StartupObject>DropShelf.Program</StartupObject>
-    <Version>2.7.2</Version>
-    <AssemblyVersion>2.7.2.0</AssemblyVersion>
-    <FileVersion>2.7.2.0</FileVersion>
+    <Version>2.7.3</Version>
+    <AssemblyVersion>2.7.3.0</AssemblyVersion>
+    <FileVersion>2.7.3.0</FileVersion>
     <Product>DropShelf for Windows</Product>
     <Company>DropShelf</Company>
     <Authors>DropShelf Project</Authors>
