@@ -138,14 +138,29 @@ public sealed class ShelfViewModel : ObservableObject
     public ShelfAddSummary AddFiles(IEnumerable<string> paths, bool temporary = false) =>
         AddEntries(paths.Select(path => new DroppedEntry(ShelfItemKind.File, path, IsTemporary: temporary)));
 
-    public ShelfAddSummary Add(DropReadResult result)
+    /// <summary>facts 是 <see cref="ReadFactsAsync(DropReadResult)"/> 在后台读好的文件信息；没有时在这里逐个读取。</summary>
+    public ShelfAddSummary Add(DropReadResult result, IReadOnlyDictionary<string, FileFacts?>? facts = null)
     {
         foreach (var cache in result.CacheDirectories) AdoptCache(cache);
-        return AddEntries(result.Entries);
+        return AddEntries(result.Entries, facts);
     }
+
+    /// <summary>
+    /// 在后台读好拖入的文件信息，再交给 <see cref="Add"/>：一次拖入很多文件、文件在网络盘上时，
+    /// 界面线程不用逐个查询，紧接着的落下动画不被拖住。没有文件（文本、链接）时不用读，直接返回 null。
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, FileFacts?>?> ReadFactsAsync(DropReadResult result) =>
+        result.FilePaths is { Count: > 0 } paths ? await ReadFactsAsync(paths) : null;
 
     /// <summary>先在后台限量读取文件信息（网络路径可能很慢），再一次放入，顺序和去重规则与 <see cref="AddFiles"/> 相同。</summary>
     public async Task<ShelfAddSummary> AddFilesAsync(IReadOnlyList<string> paths)
+    {
+        var facts = await ReadFactsAsync(paths);
+        if (_released) return new ShelfAddSummary(0, 0, paths.Count);
+        return AddEntries(paths.Select(path => new DroppedEntry(ShelfItemKind.File, path)), facts);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, FileFacts?>> ReadFactsAsync(IReadOnlyList<string> paths)
     {
         var facts = new System.Collections.Concurrent.ConcurrentDictionary<string, FileFacts?>(StringComparer.OrdinalIgnoreCase);
         await Parallel.ForEachAsync(paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase),
@@ -154,8 +169,7 @@ public sealed class ShelfViewModel : ObservableObject
                 facts[path] = ReadFacts(path);
                 return ValueTask.CompletedTask;
             });
-        if (_released) return new ShelfAddSummary(0, 0, paths.Count);
-        return AddEntries(paths.Select(path => new DroppedEntry(ShelfItemKind.File, path)), facts);
+        return facts;
     }
 
     public ShelfAddSummary AddEntries(IEnumerable<DroppedEntry> entries) => AddEntries(entries, null);
@@ -185,7 +199,8 @@ public sealed class ShelfViewModel : ObservableObject
         }
     }
 
-    private readonly record struct FileFacts(bool IsFolder, long? SizeBytes);
+    /// <summary>文件是不是文件夹、有多大。</summary>
+    public readonly record struct FileFacts(bool IsFolder, long? SizeBytes);
 
     /// <summary>读取文件夹标记和文件大小；已删除、无权限等读不到时返回 null。</summary>
     private static FileFacts? ReadFacts(string path)

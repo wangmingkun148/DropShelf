@@ -10,6 +10,7 @@ using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
+using DropShelf.ViewModels;
 using DropShelf.Views.Controls;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfDragEventArgs = System.Windows.DragEventArgs;
@@ -128,7 +129,7 @@ public partial class ShelfWindow
         {
             if (action is not null)
             {
-                var files = await DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token);
+                var files = await Receive(DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token));
                 if (IsClosing)
                 {
                     foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
@@ -139,13 +140,14 @@ public partial class ShelfWindow
             }
             else
             {
-                var read = await DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token);
+                var read = await Receive(DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token));
+                var facts = await Receive(ShelfViewModel.ReadFactsAsync(read));
                 if (IsClosing)
                 {
                     foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                     return;
                 }
-                var summary = ViewModel.Add(read);
+                var summary = ViewModel.Add(read, facts);
                 if (summary.Added > 0) _landing = (dropPoint, summary.Added);
                 else CloseFan();
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
@@ -159,6 +161,22 @@ public partial class ShelfWindow
             LogService.Error("处理拖入内容失败", exception);
             ViewModel.Notify(Strings.DropFailed, false);
             CloseFan();
+        }
+    }
+
+    /// <summary>正在读取的拖入内容有几批；这期间算作忙碌，见 IsAnimating。</summary>
+    private int _receiving;
+
+    private async Task<T> Receive<T>(Task<T> work)
+    {
+        _receiving++;
+        try
+        {
+            return await work;
+        }
+        finally
+        {
+            _receiving--;
         }
     }
 
@@ -212,10 +230,9 @@ public partial class ShelfWindow
             (FanSlotScale, ScaleTransform.ScaleXProperty, 0.9, 1), (FanSlotScale, ScaleTransform.ScaleYProperty, 0.9, 1),
             (FanSlotShift, TranslateTransform.YProperty, 6, -3)
         };
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         foreach (var (target, property, from, to) in moves)
-            target.BeginAnimation(property, ShelfMotion.Enabled ? new DoubleAnimation(from, to, FanDuration) { EasingFunction = ease } : null);
-        FanSlot.BeginAnimation(OpacityProperty, ShelfMotion.Enabled ? new DoubleAnimation(0, 1, FanDuration) { EasingFunction = ease } : null);
+            target.BeginAnimation(property, ShelfMotion.Enabled ? new DoubleAnimation(from, to, FanDuration) { EasingFunction = MotionEase } : null);
+        FanSlot.BeginAnimation(OpacityProperty, ShelfMotion.Enabled ? new DoubleAnimation(0, 1, FanDuration) { EasingFunction = MotionEase } : null);
     }
 
     /// <summary>摊开的两张牌在 StackCanvas 里的姿态：松手后堆叠里的牌从这里合拢，看起来是同一摞牌。没有摊开的牌时为 null。</summary>
@@ -267,7 +284,7 @@ public partial class ShelfWindow
             done?.Invoke();
             return;
         }
-        var fade = new DoubleAnimation(from, to, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop };
+        var fade = new DoubleAnimation(from, to, duration) { EasingFunction = MotionEase, FillBehavior = FillBehavior.Stop };
         _fades[element] = fade;
         fade.Completed += (_, _) =>
         {
@@ -283,28 +300,15 @@ public partial class ShelfWindow
     private void ResetTiles()
     {
         _tilesExpanded = false;
-        foreach (var (element, property, value) in TileStates(expanded: false))
-        {
-            element.BeginAnimation(property, null);
-            element.SetValue(property, value);
-        }
+        foreach (var (element, property, value) in TileStates(expanded: false)) Ease(element, property, value, null);
     }
 
     private void SetTilesExpanded(bool expanded)
     {
         if (expanded == _tilesExpanded) return;
         _tilesExpanded = expanded;
-        var duration = expanded ? TilesExpandDuration : TilesCollapseDuration;
-        foreach (var (element, property, value) in TileStates(expanded))
-        {
-            if (ShelfMotion.Enabled)
-                element.BeginAnimation(property, new DoubleAnimation(value, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
-            else
-            {
-                element.BeginAnimation(property, null);
-                element.SetValue(property, value);
-            }
-        }
+        TimeSpan? duration = !ShelfMotion.Enabled ? null : expanded ? TilesExpandDuration : TilesCollapseDuration;
+        foreach (var (element, property, value) in TileStates(expanded)) Ease(element, property, value, duration);
     }
 
     /// <summary>展开时快速操作从按钮栏向上长高并淡入，按钮栏同时淡出。</summary>
@@ -331,9 +335,9 @@ public partial class ShelfWindow
 
     private void SetDescription(System.Windows.IDataObject data, DropImageType type, string message)
     {
-        var key = $"{(int)type}:{message}";
-        if (key == _lastDescription) return;
-        _lastDescription = key;
+        // 拖动途中系统不停地来问，说明没变时不用重新设置，也不用每次拼一个字符串来比较。
+        if (_lastDescription is { } last && last == (type, message)) return;
+        _lastDescription = (type, message);
         DropTargetHelper.SetDescription(data, type, message);
     }
 

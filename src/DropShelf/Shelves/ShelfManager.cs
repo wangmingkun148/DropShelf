@@ -19,7 +19,8 @@ public sealed class ShelfManager : IShelfHost
     private ShelfWindow? _spare;
     /// <summary>正在屏幕外画第一帧的备用窗口，画完才成为 _spare；这期间要用置物架就照旧新建一个。</summary>
     private ShelfWindow? _warming;
-    private DispatcherTimer? _prewarmTimer;
+    private DispatcherTimer? _idleTimer;
+    private bool _collectWanted;
     private bool _shuttingDown;
 
     public ShelfManager(Func<AppSettings> settings, Action showSettings, Action<Action<AppSettings>> updateSettings,
@@ -37,41 +38,67 @@ public sealed class ShelfManager : IShelfHost
     public IReadOnlyList<ShelfWindow> OpenShelves => _open;
 
     /// <summary>
-    /// 准备一个隐藏的置物架窗口。创建窗口会占用界面线程几十毫秒，若在弹出动画或拖动途中进行会造成卡顿，
-    /// 所以等鼠标松开、动画结束、置物架不再自动收起后再创建。
+    /// 准备一个隐藏的置物架窗口。创建窗口会占用界面线程几十毫秒，若在动画或拖动途中进行会造成卡顿，
+    /// 所以等到空闲再创建，见 OnIdleTick。
     /// </summary>
     public void Prewarm()
     {
-        if (_shuttingDown || _spare is not null || _warming is not null) return;
-        if (_prewarmTimer is null)
-        {
-            _prewarmTimer = new DispatcherTimer(DispatcherPriority.ApplicationIdle, _dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
-            _prewarmTimer.Tick += OnPrewarmTick;
-        }
-        _prewarmTimer.Stop();
-        _prewarmTimer.Start();
+        if (!_shuttingDown && NeedsSpare) WaitForIdle();
     }
 
-    private void OnPrewarmTick(object? sender, EventArgs e)
+    /// <summary>
+    /// 空闲时回收一次内存。回收期间界面线程停着不动，和创建备用窗口一样避开拖动和动画：
+    /// 置物架刚自动收起、马上又晃动呼出时，不会正好撞上。
+    /// </summary>
+    public void CollectWhenIdle()
     {
-        if (_shuttingDown || _spare is not null || _warming is not null)
+        if (_shuttingDown) return;
+        _collectWanted = true;
+        WaitForIdle();
+    }
+
+    private bool NeedsSpare => _spare is null && _warming is null;
+
+    private void WaitForIdle()
+    {
+        if (_idleTimer is null)
         {
-            _prewarmTimer!.Stop();
+            _idleTimer = new DispatcherTimer(DispatcherPriority.ApplicationIdle, _dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
+            _idleTimer.Tick += OnIdleTick;
+        }
+        _idleTimer.Stop();
+        _idleTimer.Start();
+    }
+
+    /// <summary>
+    /// 不急的重活留到空闲时做，一次只做一件：仍在拖动，有置物架正在滑入、退出、播放内容里的动画或接收拖入的内容，
+    /// 或晃动呼出的空置物架松手后马上要收起时，稍后再试。
+    /// </summary>
+    private void OnIdleTick(object? sender, EventArgs e)
+    {
+        if (_shuttingDown || !_collectWanted && !NeedsSpare)
+        {
+            _idleTimer!.Stop();
             return;
         }
-        // 仍在拖动、有置物架正在播放动画，或晃动呼出的空置物架松手后马上要收起时，稍后再试。
         if (NativeMethods.IsButtonPhysicallyDown() ||
-            _open.Any(shelf => shelf.IsSliding || shelf.ViewModel.OpenedByGesture && shelf.IsReusable)) return;
-        _prewarmTimer!.Stop();
-        var window = _warming = CreateWindow();
-        window.Prewarm(() =>
+            _open.Any(shelf => shelf.IsAnimating || shelf.ViewModel.OpenedByGesture && shelf.IsReusable)) return;
+        if (NeedsSpare)
         {
-            if (!ReferenceEquals(_warming, window)) return;
-            _warming = null;
-            _spare = window;
-        });
-        // 替置物架出场的那张牌也先备好。
-        ShelfCardWindow.Prewarm();
+            var window = _warming = CreateWindow();
+            window.Prewarm(() =>
+            {
+                if (!ReferenceEquals(_warming, window)) return;
+                _warming = null;
+                _spare = window;
+            });
+            // 替置物架出场的那张牌也先备好。
+            ShelfCardWindow.Prewarm();
+            return;
+        }
+        _collectWanted = false;
+        _idleTimer!.Stop();
+        GC.Collect();
     }
 
     /// <summary>
@@ -155,7 +182,7 @@ public sealed class ShelfManager : IShelfHost
     public void CloseAll()
     {
         _shuttingDown = true;
-        _prewarmTimer?.Stop();
+        _idleTimer?.Stop();
         foreach (var shelf in _open.ToArray()) shelf.Close();
         _open.Clear();
         _spare?.Close();
@@ -172,7 +199,7 @@ public sealed class ShelfManager : IShelfHost
         if (ReferenceEquals(window, _warming)) _warming = null;
         _open.Remove(window);
         // 拖入的数据、缩略图和动画位图大多占用原生内存，托管堆很小时很少触发回收；全部关闭后空闲时回收一次。
-        if (_open.Count == 0 && !_shuttingDown) _dispatcher.BeginInvoke(() => GC.Collect(), DispatcherPriority.ApplicationIdle);
+        if (_open.Count == 0) CollectWhenIdle();
     }
 
     public void ShowSettings() => _showSettings();

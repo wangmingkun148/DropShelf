@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
+using DropShelf.ViewModels;
 using DropShelf.Views.Controls;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfDragEventArgs = System.Windows.DragEventArgs;
@@ -140,12 +141,13 @@ public partial class ShelfWindow
         try
         {
             var read = await DropDataReader.ReadAsync(data, cancellationToken: _lifetime.Token);
+            var facts = await ShelfViewModel.ReadFactsAsync(read);
             if (IsClosing)
             {
                 foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                 return;
             }
-            var summary = ViewModel.Add(read);
+            var summary = ViewModel.Add(read, facts);
             ViewModel.Notify(summary.Added == 0 ? read.ErrorMessage ?? summary.Message : summary.Message, summary.Added > 0);
         }
         catch (Exception exception)

@@ -55,6 +55,8 @@ public sealed class GestureService : IDisposable
     private bool _hasMonitor;
     private RECT _monitorBounds;
     private RECT _monitorWork;
+    /// <summary>所有显示器合起来的范围，每次按下后第一次用到时读取。</summary>
+    private RECT? _virtualScreen;
     private bool _disposed;
 
     public event EventHandler<GestureTriggeredEventArgs>? ShakeDetected;
@@ -348,6 +350,7 @@ public sealed class GestureService : IDisposable
         _edgeDetector.Reset();
         // 每次按下时重新读取显示器信息，显示器布局变化后也能正确判断边缘。
         _hasMonitor = false;
+        _virtualScreen = null;
         if (_edgeEnabled && !_paused) StartEdgeTimer();
     }
 
@@ -373,14 +376,24 @@ public sealed class GestureService : IDisposable
         _detector.SetSensitivity(requested);
     }
 
-    private static bool IsNearOuterScreenEdge(POINT point)
+    /// <summary>按住期间每条输入都要判断，屏幕范围一次按下只向系统查询一次。</summary>
+    private bool IsNearOuterScreenEdge(POINT point)
     {
         const int margin = 5;
+        var screen = _virtualScreen ??= ReadVirtualScreen();
+        return point.X <= screen.Left + margin || point.Y <= screen.Top + margin ||
+               point.X >= screen.Right - margin || point.Y >= screen.Bottom - margin;
+    }
+
+    private static RECT ReadVirtualScreen()
+    {
         var left = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
         var top = NativeMethods.GetSystemMetrics(NativeMethods.SM_YVIRTUALSCREEN);
-        var width = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
-        var height = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
-        return point.X <= left + margin || point.Y <= top + margin ||
-               point.X >= left + width - margin || point.Y >= top + height - margin;
+        return new RECT
+        {
+            Left = left, Top = top,
+            Right = left + NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN),
+            Bottom = top + NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN)
+        };
     }
 }

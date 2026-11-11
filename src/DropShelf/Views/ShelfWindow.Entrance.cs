@@ -143,7 +143,7 @@ public partial class ShelfWindow
                 new QuinticEase { EasingMode = EasingMode.EaseOut }, () => WindowPlacement.KeepInWorkArea(this));
 
         CacheSurface();
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, ShelfMotion.RiseFadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, ShelfMotion.RiseFadeDuration) { EasingFunction = MotionEase });
         var scale = new DoubleAnimation(ShelfMotion.RiseStartScale, 1, ShelfMotion.RiseDuration) { EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut } };
         scale.Completed += (_, _) =>
         {

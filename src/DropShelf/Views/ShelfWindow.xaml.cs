@@ -89,7 +89,7 @@ public partial class ShelfWindow : Window
     private bool _shownExpanded;
     private (WpfPoint Point, int Added)? _landing;
     private int _shownCount;
-    private string? _lastDescription;
+    private (DropImageType Type, string Message)? _lastDescription;
     private long _lastDragOverTick;
     private WpfPoint _pressPoint;
     private bool _stackPressed;
@@ -261,9 +261,8 @@ public partial class ShelfWindow : Window
     private void RollRank()
     {
         if (!ShelfMotion.Enabled || !IsVisible) return;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        StackRankShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, RankRollDuration) { EasingFunction = ease });
-        StackRank.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, RankRollDuration) { EasingFunction = ease });
+        StackRankShift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, RankRollDuration) { EasingFunction = MotionEase });
+        StackRank.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, RankRollDuration) { EasingFunction = MotionEase });
     }
 
     /// <summary>数量或视图变化后更新界面：只是切换了堆叠和平铺时播放切换动画，刚拖入文件时播放落下的动画。</summary>
@@ -460,30 +459,26 @@ public partial class ShelfWindow : Window
         if (!force && ReferenceEquals(action, _hoveredAction)) return;
         _hoveredAction = action;
         var animate = !force && ShelfMotion.Enabled;
+        TimeSpan? duration = animate ? HoverDuration : null;
         foreach (var tile in _tiles)
         {
             var active = ReferenceEquals(tile.Info, action);
-            Ease(tile.Highlight, OpacityProperty, active ? 1 : 0, animate);
-            Ease(tile.Scale, ScaleTransform.ScaleXProperty, active ? HoverScale : 1, animate);
-            Ease(tile.Scale, ScaleTransform.ScaleYProperty, active ? HoverScale : 1, animate);
+            Ease(tile.Highlight, OpacityProperty, active ? 1 : 0, duration);
+            Ease(tile.Scale, ScaleTransform.ScaleXProperty, active ? HoverScale : 1, duration);
+            Ease(tile.Scale, ScaleTransform.ScaleYProperty, active ? HoverScale : 1, duration);
             var text = active ? "TextOnAccentBrush" : "TextPrimaryBrush";
             FadeForeground(tile.Glyph, text, animate);
             FadeForeground(tile.Label, text, animate);
         }
-        Ease(ShelfDropFrame, OpacityProperty, action is null ? 1 : 0.45, animate);
+        Ease(ShelfDropFrame, OpacityProperty, action is null ? 1 : 0.45, duration);
     }
 
-    /// <summary>过渡到 to；不播放动画时直接设为 to。</summary>
-    private static void Ease(DependencyObject target, DependencyProperty property, double to, bool animate)
+    /// <summary>在 duration 内过渡到 to；duration 为 null（不播放动画）时直接设为 to。</summary>
+    private static void Ease(DependencyObject target, DependencyProperty property, double to, TimeSpan? duration)
     {
         var animatable = (IAnimatable)target;
-        if (animate)
-        {
-            animatable.BeginAnimation(property, new DoubleAnimation(to, HoverDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
-            return;
-        }
-        animatable.BeginAnimation(property, null);
-        target.SetValue(property, to);
+        animatable.BeginAnimation(property, duration is { } time ? new DoubleAnimation(to, time) { EasingFunction = MotionEase } : null);
+        if (duration is null) target.SetValue(property, to);
     }
 
     /// <summary>文字颜色换成另一个主题颜色：过渡期间用一支单独的画刷，过渡完交还给主题，切换主题时照常更新。</summary>
@@ -554,9 +549,8 @@ public partial class ShelfWindow : Window
         ToastText.Text = toast.Message;
         ToastGlyph.Text = toast.Success ? "" : "";
         ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(1, TimeSpan.FromMilliseconds(140))));
-        ToastOffset.BeginAnimation(TranslateTransform.YProperty, ShelfMotion.Gate(new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease }));
+        ToastOffset.BeginAnimation(TranslateTransform.YProperty, ShelfMotion.Gate(new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = MotionEase }));
         _toastTimer.Stop();
         _toastTimer.Start();
     }
