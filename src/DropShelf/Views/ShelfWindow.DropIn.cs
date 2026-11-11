@@ -10,6 +10,7 @@ using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
+using DropShelf.ViewModels;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfDragEventArgs = System.Windows.DragEventArgs;
 
@@ -124,7 +125,7 @@ public partial class ShelfWindow
         {
             if (action is not null)
             {
-                var files = await DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token);
+                var files = await Receive(DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token));
                 if (IsClosing)
                 {
                     foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
@@ -135,13 +136,14 @@ public partial class ShelfWindow
             }
             else
             {
-                var read = await DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token);
+                var read = await Receive(DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token));
+                var facts = await Receive(ShelfViewModel.ReadFactsAsync(read));
                 if (IsClosing)
                 {
                     foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
                     return;
                 }
-                var summary = ViewModel.Add(read);
+                var summary = ViewModel.Add(read, facts);
                 if (summary.Added > 0) _landing = (dropPoint, summary.Added);
                 if (summary.Added == 0) ViewModel.Notify(read.ErrorMessage ?? summary.Message, false);
                 else if (summary.Duplicates > 0 || summary.Unavailable > 0 || read.FailedCount > 0)
@@ -153,6 +155,22 @@ public partial class ShelfWindow
         {
             LogService.Error("处理拖入内容失败", exception);
             ViewModel.Notify(Strings.DropFailed, false);
+        }
+    }
+
+    /// <summary>正在读取、放入的拖入内容有几批；这期间算作忙碌，见 IsAnimating。</summary>
+    private int _receiving;
+
+    private async Task<T> Receive<T>(Task<T> work)
+    {
+        _receiving++;
+        try
+        {
+            return await work;
+        }
+        finally
+        {
+            _receiving--;
         }
     }
 

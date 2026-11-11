@@ -40,6 +40,12 @@ public partial class ShelfWindow
     /// <summary>列表里移除之后、下面的行补位之前，数量变化引起的刷新不改窗口大小；补位后窗口再平滑变小。</summary>
     private bool _holdSize;
 
+    /// <summary>
+    /// 正在滑入、退出，内容里有动画，或正在读取拖入的内容（读完紧接着就是落下的动画）：
+    /// 这时界面线程不适合再做别的重活，比如创建备用窗口、回收内存。
+    /// </summary>
+    public bool IsAnimating => IsSliding || _motionHooked || _receiving > 0 || _closing;
+
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
     private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
 

@@ -206,7 +206,7 @@ public sealed class AppController : IDisposable
         _mainWindow = null;
         if (_exiting) return;
         // 窗口占用的内存早已进入老一代，空闲时主动回收一次，否则长时间待在通知区域时不会释放。
-        _dispatcher.BeginInvoke(() => GC.Collect(), DispatcherPriority.ApplicationIdle);
+        Shelves.CollectWhenIdle();
         if (_hasShownTrayHint) return;
         _hasShownTrayHint = true;
         _tray?.ShowStillRunningHint();
