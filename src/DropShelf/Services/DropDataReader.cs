@@ -30,7 +30,10 @@ public sealed record DropReadResult(
 {
     public static DropReadResult Failed(string message) => new([], [], 1, message);
 
-    public IReadOnlyList<string> FilePaths =>
+    private IReadOnlyList<string>? _filePaths;
+
+    /// <summary>文件和文件夹的路径；一次读取结果会被问好几次，只整理一次。</summary>
+    public IReadOnlyList<string> FilePaths => _filePaths ??=
         Entries.Where(entry => entry.Kind is ShelfItemKind.File or ShelfItemKind.Folder).Select(entry => entry.Value).ToArray();
 
     public bool HasTemporaryFiles => Entries.Any(entry => entry.IsTemporary);

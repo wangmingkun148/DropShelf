@@ -43,6 +43,8 @@ public sealed class ShelfViewModel : ObservableObject
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Dictionary<ShelfItem, CancellationTokenSource> _thumbnails = [];
     private readonly HashSet<ShelfItem> _visibleRows = [];
+    /// <summary>和 Items 内容相同，随它增减：判断某个项目还在不在置物架上时不用把列表从头找一遍。</summary>
+    private readonly HashSet<ShelfItem> _members = [];
 
     public ShelfViewModel()
     {
@@ -276,10 +278,18 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Remove(IEnumerable<ShelfItem> items)
     {
-        var removing = items.ToArray();
+        var removing = items.Where(_members.Contains).ToHashSet();
+        if (removing.Count == 0) return;
         Batch(() =>
         {
-            foreach (var item in removing) Items.Remove(item);
+            // 全部移除时一次清空，列表只刷新一次；否则从后往前找，每个项目只经过一遍，后面的项目也不用反复前移。
+            if (removing.Count == Items.Count)
+            {
+                Items.Clear();
+                return;
+            }
+            for (var index = Items.Count - 1; index >= 0 && removing.Count > 0; index--)
+                if (removing.Remove(Items[index])) Items.RemoveAt(index);
         });
     }
 
@@ -290,7 +300,7 @@ public sealed class ShelfViewModel : ObservableObject
 
     private void RemoveShown(IEnumerable<ShelfItem> items)
     {
-        var removing = items.Where(Items.Contains).ToArray();
+        var removing = items.Where(_members.Contains).ToArray();
         if (removing.Length == 0) return;
         if (RemoveVisibly is { } remove && !_released) remove(removing);
         else Remove(removing);
@@ -601,7 +611,7 @@ public sealed class ShelfViewModel : ObservableObject
     private async Task RemoveWhenGoneAsync(IReadOnlyList<ShelfItem> items)
     {
         await Task.Delay(TimeSpan.FromSeconds(2.5));
-        RemoveShown(items.Where(item => Items.Contains(item) && !item.RefreshAvailability()));
+        RemoveShown(items.Where(item => _members.Contains(item) && !item.RefreshAvailability()));
     }
 
     private int IndexOfPath(string path)
@@ -646,11 +656,28 @@ public sealed class ShelfViewModel : ObservableObject
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)
-            foreach (ShelfItem item in e.OldItems) item.PropertyChanged -= OnItemPropertyChanged;
+            foreach (ShelfItem item in e.OldItems)
+            {
+                item.PropertyChanged -= OnItemPropertyChanged;
+                _members.Remove(item);
+            }
         if (e.NewItems is not null)
-            foreach (ShelfItem item in e.NewItems) item.PropertyChanged += OnItemPropertyChanged;
+            foreach (ShelfItem item in e.NewItems)
+            {
+                item.PropertyChanged += OnItemPropertyChanged;
+                _members.Add(item);
+            }
         if (e.Action == NotifyCollectionChangedAction.Reset)
-            foreach (var item in Items) item.PropertyChanged += OnItemPropertyChanged;
+        {
+            // 清空时拿不到被移除的项目，按原来的成员取消订阅。
+            foreach (var item in _members) item.PropertyChanged -= OnItemPropertyChanged;
+            _members.Clear();
+            foreach (var item in Items)
+            {
+                item.PropertyChanged += OnItemPropertyChanged;
+                _members.Add(item);
+            }
+        }
 
         if (_batchDepth > 0) _batchChanged = true;
         else NotifyItemsChanged();
@@ -685,7 +712,7 @@ public sealed class ShelfViewModel : ObservableObject
     /// </summary>
     private void UpdateThumbnails()
     {
-        var wanted = new HashSet<ShelfItem>(_visibleRows.Where(Items.Contains));
+        var wanted = new HashSet<ShelfItem>(_visibleRows.Where(_members.Contains));
         for (var position = 1; position <= 3; position++)
             if (ItemFromEnd(position) is { } top) wanted.Add(top);
 
