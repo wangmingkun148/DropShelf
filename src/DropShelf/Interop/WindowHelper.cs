@@ -33,26 +33,45 @@ internal static class WindowEffects
     }
 
     /// <summary>
-    /// 没有系统材质时窗口背景是不透明的纯色，会盖住系统画在标题栏里的按钮（Windows 10 上右上角什么都看不到），
-    /// 改为显示窗口自己画的按钮。
+    /// 要用的系统材质：低性能模式下不用，窗口改用不透明的纯色背景。半透明的材质要由 Windows 和窗口背后的内容一起合成，
+    /// 用电池时显卡跟不上，动画会卡。
     /// </summary>
-    public static void ShowOwnCaptionButtons(Window window, UIElement buttons)
+    public static SystemBackdrop Material(SystemBackdrop wanted) => LowPerformance.Enabled ? SystemBackdrop.None : wanted;
+
+    /// <summary>
+    /// 主窗口这类用云母材质、标题栏按钮由系统画的窗口：按低性能模式启用或去掉材质。
+    /// 有材质时窗口背景透明，用系统的标题栏按钮；没有时背景是样式里的纯色，会盖住系统画的按钮（Windows 10 上右上角什么都看不到），
+    /// 改为显示窗口自己画的按钮。返回这次用的材质，下次作为 current 传回，没变时不重设；主题切换时不传，重新启用。
+    /// </summary>
+    public static SystemBackdrop ApplyMica(Window window, UIElement captionButtons, SystemBackdrop? current = null)
     {
-        if (System.Windows.Shell.WindowChrome.GetWindowChrome(window) is { } chrome) chrome.UseAeroCaptionButtons = false;
-        buttons.Visibility = Visibility.Visible;
+        var material = Material(SystemBackdrop.Mica);
+        if (material == current) return material;
+        var active = ApplyTheme(window, material, ThemeService.IsDark);
+        if (active) window.Background = Brushes.Transparent;
+        else window.ClearValue(Window.BackgroundProperty);
+        if (System.Windows.Shell.WindowChrome.GetWindowChrome(window) is { } chrome) chrome.UseAeroCaptionButtons = active;
+        captionButtons.Visibility = active ? Visibility.Collapsed : Visibility.Visible;
+        return material;
     }
 
     private static bool TryApplyBackdrop(Window window, SystemBackdrop backdrop)
     {
-        if (!SupportsSystemBackdrop || backdrop == SystemBackdrop.None) return false;
+        if (!SupportsSystemBackdrop) return false;
         try
         {
             var handle = Handle(window);
+            var none = (int)SystemBackdrop.None;
+            // 不用材质时也要清掉之前启用的，例如切换到低性能模式。
+            if (backdrop == SystemBackdrop.None)
+            {
+                NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
+                return false;
+            }
             if (HwndSource.FromHwnd(handle)?.CompositionTarget is not { } target) return false;
             target.BackgroundColor = Colors.Transparent;
             var margins = MARGINS.Sheet;
             NativeMethods.DwmExtendFrameIntoClientArea(handle, ref margins);
-            var none = (int)SystemBackdrop.None;
             NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
             var value = (int)backdrop;
             return NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref value, sizeof(int)) == 0;

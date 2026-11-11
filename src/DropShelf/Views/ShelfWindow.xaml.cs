@@ -115,6 +115,7 @@ public partial class ShelfWindow : Window
 
         SourceInitialized += OnSourceInitialized;
         ThemeService.ThemeChanged += OnThemeChanged;
+        LowPerformance.ModeChanged += OnPerformanceModeChanged;
         LanguageService.LanguageChanged += OnLanguageChanged;
         DragEnter += OnDragEnter;
         DragOver += OnDragOver;
@@ -174,6 +175,7 @@ public partial class ShelfWindow : Window
         _leaveCheck.Stop();
         _busyTimer.Stop();
         ThemeService.ThemeChanged -= OnThemeChanged;
+        LowPerformance.ModeChanged -= OnPerformanceModeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         var items = ViewModel.Items.ToArray();
@@ -192,11 +194,28 @@ public partial class ShelfWindow : Window
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
             NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_FRAMECHANGED);
         WindowEffects.SetRoundedCorners(this);
-        BackdropActive = WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
+        ApplyMaterial();
+    }
+
+    /// <summary>窗口现在用的系统材质。</summary>
+    private SystemBackdrop? _material;
+
+    /// <summary>
+    /// 启用亚克力材质，背景是半透明的底色；低性能模式下不用材质，背景改为不透明的底色，见 WindowEffects.Material。
+    /// 没变时不重设，显示置物架前都会调用（自动档下电源状态可能变了）；主题切换时 force，按新的深浅重新启用。
+    /// </summary>
+    private void ApplyMaterial(bool force = false)
+    {
+        var material = WindowEffects.Material(SystemBackdrop.Acrylic);
+        if (!force && material == _material) return;
+        _material = material;
+        BackdropActive = WindowEffects.ApplyTheme(this, material, ThemeService.IsDark);
         Root.SetResourceReference(Border.BackgroundProperty, BackdropActive ? "ShelfAcrylicTintBrush" : "ShelfSolidBrush");
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => WindowEffects.ApplyTheme(this, SystemBackdrop.Acrylic, ThemeService.IsDark);
+    private void OnThemeChanged(object? sender, EventArgs e) => ApplyMaterial(force: true);
+
+    private void OnPerformanceModeChanged(object? sender, EventArgs e) => ApplyMaterial();
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {

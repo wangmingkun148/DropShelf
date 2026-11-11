@@ -55,6 +55,7 @@ public partial class ShelfWindow
         var started = Stopwatch.GetTimestamp();
         // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
         if (wasVisible) StopSlide();
+        else ApplyMaterial();
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
         trace?.Mark("show", started);

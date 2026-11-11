@@ -12,13 +12,7 @@ public partial class AboutWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
-        SourceInitialized += (_, _) =>
-        {
-            if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
-                Background = System.Windows.Media.Brushes.Transparent;
-            else
-                WindowEffects.ShowOwnCaptionButtons(this, CaptionButtons);
-        };
+        SourceInitialized += (_, _) => WindowEffects.ApplyMica(this, CaptionButtons);
     }
 
     private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);

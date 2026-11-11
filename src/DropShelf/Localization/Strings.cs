@@ -125,10 +125,10 @@ public static class Strings
     {
         PerformanceMode.Normal => T("动画始终按完整的精度和帧率播放。用电池时动画卡顿的话，可以改为自动",
             "Animations always play at full detail and frame rate. If they stutter on battery, switch to Auto"),
-        PerformanceMode.Low => T("始终减轻动画对显卡的负担：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动。高分屏上动画途中略微模糊，停下后恢复清晰",
-            "Always eases the graphics load of animations: they draw at lower detail, update every other frame on high-refresh screens, and shelves open and close without moving the window. On high-DPI screens, motion looks slightly soft and turns sharp once it stops"),
-        _ => T("使用电池或 Windows 开启节能模式时减轻动画对显卡的负担，接通电源后恢复：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动。高分屏上动画途中略微模糊，停下后恢复清晰",
-            "On battery or with Windows energy saver on, eases the graphics load of animations until you plug in: they draw at lower detail, update every other frame on high-refresh screens, and shelves open and close without moving the window. On high-DPI screens, motion looks slightly soft and turns sharp once it stops")
+        PerformanceMode.Low => T("始终减轻动画对显卡的负担：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动，置物架和主窗口改用不透明的背景。高分屏上动画途中略微模糊，停下后恢复清晰",
+            "Always eases the graphics load of animations: they draw at lower detail, update every other frame on high-refresh screens, shelves open and close without moving the window, and shelves and the main window use a solid background instead of a translucent one. On high-DPI screens, motion looks slightly soft and turns sharp once it stops"),
+        _ => T("使用电池或 Windows 开启节能模式时减轻动画对显卡的负担，接通电源后恢复：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动，置物架和主窗口改用不透明的背景。高分屏上动画途中略微模糊，停下后恢复清晰",
+            "On battery or with Windows energy saver on, eases the graphics load of animations until you plug in: they draw at lower detail, update every other frame on high-refresh screens, shelves open and close without moving the window, and shelves and the main window use a solid background instead of a translucent one. On high-DPI screens, motion looks slightly soft and turns sharp once it stops")
     };
     public static string GlobalHotkey => T("快捷键", "Keyboard shortcut");
     public static string HotkeyNotSet => T("未设置快捷键", "No shortcut set");

@@ -7,7 +7,7 @@ namespace DropShelf.Services;
 /// <summary>
 /// 低性能模式（常规页的三档：自动、关闭、开启），在动画效果上做几处不显眼的让步，减轻显卡和界面线程的负担：
 /// 动画和拖动期间的位图缓存降低精度，见 CacheScale；高刷新率屏幕上动画隔一帧更新；
-/// 置物架弹出和收起时窗口不动，内容在窗口里移动。
+/// 置物架弹出和收起时窗口不动，内容在窗口里移动；置物架和主窗口不用半透明的系统材质，见 WindowEffects.Material。
 /// </summary>
 internal static class LowPerformance
 {
@@ -17,7 +17,21 @@ internal static class LowPerformance
     private static TimeSpan _frame, _shown, _interval;
     private static bool _skip;
 
-    public static PerformanceMode Mode { get; set; }
+    private static PerformanceMode _mode;
+
+    public static PerformanceMode Mode
+    {
+        get => _mode;
+        set
+        {
+            if (_mode == value) return;
+            _mode = value;
+            ModeChanged?.Invoke(null, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>设置里换了档位。自动档随电源状态的变化不通知，窗口在显示或激活时自己再查一次。</summary>
+    public static event EventHandler? ModeChanged;
 
     /// <summary>现在是否启用。自动时在使用电池或系统开启节能模式期间启用，每次用到时现查，切换电源立即生效。</summary>
     public static bool Enabled => Mode switch

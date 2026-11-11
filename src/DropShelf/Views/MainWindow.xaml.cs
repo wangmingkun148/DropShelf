@@ -38,6 +38,9 @@ public partial class MainWindow : Window
             if (!_morphing) LayoutEdges();
         };
         ThemeService.ThemeChanged += OnThemeChanged;
+        // 低性能模式换了档位，或自动档下电源状态变了：再次激活时按现在的状态启用或去掉材质。
+        LowPerformance.ModeChanged += OnPerformanceModeChanged;
+        Activated += OnPerformanceModeChanged;
 
         _pages = new()
         {
@@ -75,12 +78,14 @@ public partial class MainWindow : Window
         StackLayer.Children.Add(_tileFace);
     }
 
-    private void OnSourceInitialized(object? sender, EventArgs e)
+    /// <summary>窗口现在用的系统材质，见 WindowEffects.ApplyMica。</summary>
+    private SystemBackdrop? _material;
+
+    private void OnSourceInitialized(object? sender, EventArgs e) => _material = WindowEffects.ApplyMica(this, CaptionButtons);
+
+    private void OnPerformanceModeChanged(object? sender, EventArgs e)
     {
-        if (WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark))
-            Background = System.Windows.Media.Brushes.Transparent;
-        else
-            WindowEffects.ShowOwnCaptionButtons(this, CaptionButtons);
+        if (_material is { } current) _material = WindowEffects.ApplyMica(this, CaptionButtons, current);
     }
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
@@ -96,7 +101,7 @@ public partial class MainWindow : Window
     private void OnThemeChanged(object? sender, EventArgs e)
     {
         CancelFlip();
-        WindowEffects.ApplyTheme(this, SystemBackdrop.Mica, ThemeService.IsDark);
+        _material = WindowEffects.ApplyMica(this, CaptionButtons);
     }
 
     private SettingsViewModel ViewModel => (SettingsViewModel)DataContext;
@@ -353,6 +358,7 @@ public partial class MainWindow : Window
     {
         CancelFlip();
         ThemeService.ThemeChanged -= OnThemeChanged;
+        LowPerformance.ModeChanged -= OnPerformanceModeChanged;
         ViewModel.Detach();
         _ghost?.Close();
         base.OnClosed(e);
