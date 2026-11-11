@@ -4,7 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
-using Image = System.Windows.Controls.Image;
+using DropShelf.Interop;
 
 namespace DropShelf.Views;
 
@@ -23,8 +23,11 @@ public partial class MainWindow
         public required Rect[] Bands { get; init; }
         public required int[] Slots { get; init; }
         public required int Selected { get; init; }
-        public required Image OldFace { get; init; }
-        public required Image NewFace { get; init; }
+        public required FrameworkElement OldFace { get; init; }
+        public required FrameworkElement NewFace { get; init; }
+        /// <summary>新页面的外框在动画期间去掉，结束时还原成原来的值。</summary>
+        public required Border NewSheet { get; init; }
+        public required object NewSheetBorder { get; init; }
         public MatrixTransform OldTransform { get; } = new();
         public MatrixTransform NewTransform { get; } = new();
         public RectangleGeometry OldCard { get; } = new();
@@ -35,8 +38,8 @@ public partial class MainWindow
     private StackSlide? _stackSlide;
 
     /// <summary>
-    /// 从露出的牌边抽出下一页。只有新旧两张可视区的临时位图，不缓存四张整页；
-    /// 页面只在开始时排版一次，途中只改位图的矩阵、裁剪和三条简单的牌边。
+    /// 从露出的牌边抽出下一页。只有新旧两张可视区的卡面，不缓存四张整页；
+    /// 页面只在开始时排版一次，途中只改卡面的矩阵、裁剪和三条简单的牌边。
     /// </summary>
     private void SwitchStackPage(int index)
     {
@@ -65,28 +68,20 @@ public partial class MainWindow
         var slots = _edges.Select((edge, k) => Array.FindIndex(others,
             tile => Equals(tile.Tag, k == index ? _page : edge.Root.Tag))).ToArray();
 
-        // 先把两张卡面准备好，再隐藏真实页面，不会在截图准备时露出空白。
+        // 先把两张卡面准备好，再隐藏真实页面，不会露出空白。
         var capturing = Stopwatch.GetTimestamp();
-        var oldFace = new Image { Source = VisualCapture.Of(from.Sheet), Stretch = Stretch.Fill, Width = fromArea.Width, Height = fromArea.Height };
+        var oldFace = LiveFace(from.Sheet, fromArea);
+        // 新卡展开时下沿会变，单独画外框；卡面是实时画面，页面的边框要到动画结束再还原，否则和单独画的外框重叠。
         var border = to.Sheet.ReadLocalValue(Border.BorderBrushProperty);
-        Image newFace;
-        try
-        {
-            // 新卡展开时下沿会变，单独画外框，避免截图里的边框重叠。
-            to.Sheet.BorderBrush = Brushes.Transparent;
-            newFace = new Image { Source = VisualCapture.Of(to.Sheet), Stretch = Stretch.Fill, Width = toArea.Width, Height = toArea.Height };
-        }
-        finally
-        {
-            if (border == DependencyProperty.UnsetValue) to.Sheet.ClearValue(Border.BorderBrushProperty);
-            else to.Sheet.SetValue(Border.BorderBrushProperty, border);
-        }
-        TraceMark("capture", capturing);
+        to.Sheet.BorderBrush = Brushes.Transparent;
+        var newFace = LiveFace(to.Sheet, toArea);
+        TraceMark("faces", capturing);
 
         var slide = new StackSlide
         {
             Page = page, FromArea = fromArea, ToArea = toArea,
-            Bands = bands, Slots = slots, Selected = index, OldFace = oldFace, NewFace = newFace
+            Bands = bands, Slots = slots, Selected = index, OldFace = oldFace, NewFace = newFace,
+            NewSheet = to.Sheet, NewSheetBorder = border
         };
         _morphing = true;
         _stackSlide = slide;
@@ -124,6 +119,24 @@ public partial class MainWindow
             if (session == _flipSession) FinishStackSwitch(slide);
         };
         BeginAnimation(StackSwitchProgressProperty, animation);
+    }
+
+    /// <summary>
+    /// 页面的实时画面，用来代替点击时用处理器截图（整页截两张要八九十毫秒）。由显卡按位图缓存绘制，
+    /// 途中只改矩阵和裁剪，缓存不用重画；藏起来的是页面外层的宿主，页面本身照样能画进卡面。Viewbox 的换算见 VisualCapture。
+    /// </summary>
+    private Rectangle LiveFace(FrameworkElement element, Rect area)
+    {
+        var bounds = new Rect(0, 0, element.ActualWidth, element.ActualHeight);
+        var viewbox = VisualTreeHelper.GetParent(element) is Visual parent ? element.TransformToAncestor(parent).TransformBounds(bounds) : bounds;
+        return new Rectangle
+        {
+            Width = area.Width,
+            Height = area.Height,
+            IsHitTestVisible = false,
+            Fill = new VisualBrush(element) { Viewbox = viewbox, ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill },
+            CacheMode = new BitmapCache(CacheScale.For(this)) { SnapsToDevicePixels = true },
+        };
     }
 
     private void PoseStackSwitch(double progress)
@@ -171,6 +184,8 @@ public partial class MainWindow
         if (!ReferenceEquals(_stackSlide, slide)) return;
         _stackSlide = null;
         BeginAnimation(StackSwitchProgressProperty, null);
+        if (slide.NewSheetBorder == DependencyProperty.UnsetValue) slide.NewSheet.ClearValue(Border.BorderBrushProperty);
+        else slide.NewSheet.SetValue(Border.BorderBrushProperty, slide.NewSheetBorder);
         foreach (var layer in new[] { StackBackLayer, StackFrontLayer })
         {
             layer.Visibility = Visibility.Collapsed;

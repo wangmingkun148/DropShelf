@@ -56,6 +56,9 @@ public sealed class AppSettings
 
     /// <summary>自动关闭空置物架：拖出的项目从置物架移走，全部拖出或移除后关闭置物架。</summary>
     public bool CloseWhenEmpty { get; set; } = true;
+
+    /// <summary>低性能模式：动画期间用较低精度的位图缓存，减轻显卡负担，见 CacheScale。</summary>
+    public bool LowPerformanceMode { get; set; }
     public string Hotkey { get; set; } = HotkeyGesture.Default.ToString();
     public bool HasCompletedFirstRun { get; set; }
 

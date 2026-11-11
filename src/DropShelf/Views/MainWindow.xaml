@@ -762,6 +762,10 @@
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Keyboard}" Header="{l:Loc GlobalHotkey}" Description="{Binding HotkeyDescription}">
                                         <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
                                     </controls:SettingsCard>
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc LowPerformanceMode}"
+                                                           Description="{l:Loc LowPerformanceModeDescription}">
+                                        <CheckBox x:Name="LowPerformanceBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding LowPerformanceMode}" />
+                                    </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
                                         <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />
                                     </controls:SettingsCard>

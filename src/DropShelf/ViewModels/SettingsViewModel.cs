@@ -218,6 +218,12 @@ public sealed class SettingsViewModel : ObservableObject
         set => Update(settings => settings.CloseWhenEmpty = value);
     }
 
+    public bool LowPerformanceMode
+    {
+        get => Settings.LowPerformanceMode;
+        set => Update(settings => settings.LowPerformanceMode = value);
+    }
+
     // ───────────── 外观 ─────────────
 
     public AppTheme Theme
@@ -455,7 +461,7 @@ public sealed class SettingsViewModel : ObservableObject
         foreach (var name in new[]
                  {
                      nameof(StartWithWindows), nameof(Trigger), nameof(UsesShake), nameof(UsesEdge), nameof(Sensitivity), nameof(SensitivityDescription),
-                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty),
+                     nameof(EdgeDwell), nameof(BlockedApps), nameof(ShelfSize), nameof(DragOutMode), nameof(CloseWhenEmpty), nameof(LowPerformanceMode),
                      nameof(Theme), nameof(Accent), nameof(Language), nameof(Hotkey), nameof(HotkeyDescription), nameof(HotkeyHasError),
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),

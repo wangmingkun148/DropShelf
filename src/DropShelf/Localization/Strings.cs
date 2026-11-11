@@ -117,6 +117,9 @@ public static class Strings
     public static string StartWithWindows => T("开机自动启动", "Start with Windows");
     public static string StartupDescription => T("登录 Windows 后在后台运行，不弹出窗口", "Runs in the background after you sign in, without opening a window");
     public static string StartupFailed => T("Windows 没有允许修改开机启动，设置保持不变", "Windows didn't allow the startup change, so the setting is unchanged");
+    public static string LowPerformanceMode => T("低性能模式", "Low performance mode");
+    public static string LowPerformanceModeDescription => T("动画期间降低画面精度，减轻显卡负担，适合用电池时卡顿的电脑。高分屏上动画途中略微模糊，停下后恢复清晰",
+        "Draws animations at lower detail to ease the graphics load, for PCs that stutter on battery. On high-DPI screens, motion looks slightly soft and turns sharp once it stops");
     public static string GlobalHotkey => T("快捷键", "Keyboard shortcut");
     public static string HotkeyNotSet => T("未设置快捷键", "No shortcut set");
     public static string HotkeyNotSetDescription => T("设置后，在任何程序中按下都能在光标处打开空置物架", "Set one to open an empty shelf at the cursor from any app");

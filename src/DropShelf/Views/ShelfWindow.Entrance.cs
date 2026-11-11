@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DropShelf.Interop;
 using DropShelf.Models;
 using DropShelf.Services;
@@ -20,6 +21,30 @@ namespace DropShelf.Views;
 public partial class ShelfWindow
 {
     // ───────────── 出场和离场 ─────────────
+
+    /// <summary>
+    /// 备用窗口在空闲时先到屏幕外显示一次，画出第一帧再隐藏：模板、排版和第一次绘制都在这时做完，
+    /// 晃动弹出时显示窗口只剩少量工作。隐藏后才交给 ready；第一帧迟迟画不出来时最多等一秒。
+    /// </summary>
+    public void Prewarm(Action ready)
+    {
+        WindowEffects.Handle(this);
+        var finished = false;
+        void Finish()
+        {
+            if (finished) return;
+            finished = true;
+            ContentRendered -= OnRendered;
+            if (_closed) return;
+            Hide();
+            ready();
+        }
+        void OnRendered(object? sender, EventArgs e) => Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(Finish));
+        ContentRendered += OnRendered;
+        Left = Top = -32000;
+        Show();
+        _ = Task.Delay(1000).ContinueWith(_ => Dispatcher.BeginInvoke(new Action(Finish)), TaskScheduler.Default);
+    }
 
     /// <summary>以屏幕像素坐标为中心显示置物架。</summary>
     public void ShowAt(POINT center, bool activate, ShelfEntrance entrance = default)
