@@ -65,6 +65,12 @@ public partial class ShelfWindow
         public ContentControl Card { get; } = card;
         public LocalCardPose Home { get; } = home;
 
+        /// <summary>
+        /// 运动期间把牌缓存为位图：牌上的缩略图按高质量缩放，牌的大小每帧在变时要在处理器上重新缩放一遍，
+        /// 缓存后每帧只是把这张位图摆到新的位置和大小。回到原位时去掉，见 RestCards。
+        /// </summary>
+        public void Cache(double scale) => Card.CacheMode ??= new BitmapCache(scale);
+
         /// <summary>按中心摆放：牌在画布上的位置不变，平移量把中心移到目标点，旋转和缩放都绕中心。</summary>
         public void Pose(LocalCardPose pose)
         {
@@ -93,7 +99,11 @@ public partial class ShelfWindow
     /// <summary>堆叠里的牌都回到原位。</summary>
     private void RestCards()
     {
-        foreach (var card in StackCards) card.Pose(card.Home);
+        foreach (var card in StackCards)
+        {
+            card.Pose(card.Home);
+            card.Card.CacheMode = null;
+        }
     }
 
     /// <summary>
@@ -113,9 +123,11 @@ public partial class ShelfWindow
         var count = ViewModel.Count;
         BeginLandingMark(count - incoming);
         var end = TimeSpan.Zero;
+        var cacheScale = CacheScale.For(this);
         for (var i = 0; i < shown; i++)
         {
             var card = cards[i];
+            card.Cache(cacheScale);
             if (i < incoming)
             {
                 var delay = LandStagger * (incoming - 1 - i);
@@ -183,6 +195,8 @@ public partial class ShelfWindow
             var slide = new TranslateTransform();
             thumb.RenderTransformOrigin = new WpfPoint(0.5, 0.5);
             thumb.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
+            // 和堆叠里的牌一样，飞行途中大小在变，缓存为位图免得每帧重新缩放缩略图；按起飞时放大的尺寸缓存，放大着也清晰。
+            thumb.CacheMode = new BitmapCache(CacheScale.For(this) * from.Scale);
             text.RenderTransform = slide;
             rows.Add((thumb, text));
 
@@ -209,7 +223,7 @@ public partial class ShelfWindow
         {
             foreach (var (thumb, text) in rows)
             {
-                foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty })
+                foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty, CacheModeProperty })
                     thumb.ClearValue(property);
                 text.ClearValue(RenderTransformProperty);
                 text.ClearValue(OpacityProperty);
@@ -333,6 +347,7 @@ public partial class ShelfWindow
         for (var i = 0; i < going.Count; i++)
         {
             var card = going[i];
+            card.Cache(CacheScale.For(this));
             TakeDimmed(card.Card);
             var (start, side, home) = (card.Card.Opacity, i % 2 == 0 ? -1 : 1, card.Home);
             Tween(TimeSpan.Zero, RemoveDuration, t =>
@@ -355,6 +370,7 @@ public partial class ShelfWindow
             var then = Array.IndexOf(shown, item);
             if (then == i) continue;
             var from = then > i ? cards[then].Home : cards[^1].Home with { Y = cards[^1].Home.Y + 6, Scale = 0.94, Opacity = 0 };
+            card.Cache(CacheScale.For(this));
             Tween(TimeSpan.Zero, CloseUpDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
             moved = true;
         }
@@ -401,6 +417,7 @@ public partial class ShelfWindow
         {
             var card = cards[i];
             if (card.Card.DataContext is not ShelfItem item) continue;
+            card.Cache(CacheScale.For(this));
             var row = ItemsList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem;
             var thumb = row is null ? null : FindNamed(row, "RowThumb");
             LocalCardPose target;
