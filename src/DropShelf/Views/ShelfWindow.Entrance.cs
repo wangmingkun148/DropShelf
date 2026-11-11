@@ -35,6 +35,8 @@ public partial class ShelfWindow
     {
         ShowActivated = activate;
         var wasVisible = IsVisible;
+        var trace = wasVisible ? null : FrameTrace.Start($"Shelf open {entrance.Kind}");
+        var started = Stopwatch.GetTimestamp();
         // 复用正在出场的置物架时先让它落定，否则下一帧会把窗口拉回原来的位置。
         if (wasVisible)
         {
@@ -46,6 +48,7 @@ public partial class ShelfWindow
         if (dealt) WindowEffects.SetCloaked(this, true);
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
+        trace?.Mark("show", started);
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (activate)
         {
@@ -54,8 +57,20 @@ public partial class ShelfWindow
         }
         if (wasVisible) return;
         _entrance = entrance;
+        _openTrace = trace;
+        var animating = Stopwatch.GetTimestamp();
         if (dealt) DealIn(center);
         else AnimateIn();
+        trace?.Mark("animate", animating);
+    }
+
+    /// <summary>诊断日志打开时记下出场动画的帧，见 FrameTrace。</summary>
+    private FrameTrace? _openTrace;
+
+    private void EndOpenTrace(string ending)
+    {
+        _openTrace?.End(ending);
+        _openTrace = null;
     }
 
     /// <summary>关闭：一张牌先盖住置物架，置物架隐身后牌再离场，播完才真正关闭窗口。</summary>
@@ -94,6 +109,7 @@ public partial class ShelfWindow
         {
             Surface.BeginAnimation(OpacityProperty, null);
             Surface.Opacity = 1;
+            EndOpenTrace("instant");
             return;
         }
 
@@ -104,7 +120,11 @@ public partial class ShelfWindow
         CacheSurface();
         Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, ShelfMotion.RiseFadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
         var scale = new DoubleAnimation(ShelfMotion.RiseStartScale, 1, ShelfMotion.RiseDuration) { EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut } };
-        scale.Completed += (_, _) => Surface.CacheMode = null;
+        scale.Completed += (_, _) =>
+        {
+            Surface.CacheMode = null;
+            EndOpenTrace("done");
+        };
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
     }
@@ -117,11 +137,14 @@ public partial class ShelfWindow
     {
         Surface.BeginAnimation(OpacityProperty, null);
         Surface.Opacity = 1;
+        var capturing = Stopwatch.GetTimestamp();
         if (!NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect) || CaptureSurface() is not { } face)
         {
             WindowEffects.SetCloaked(this, false);
+            EndOpenTrace("no capture");
             return;
         }
+        _openTrace?.Mark("capture", capturing);
 
         var dpiScale = DpiScale();
         var work = WorkArea(rect);
@@ -135,6 +158,7 @@ public partial class ShelfWindow
         {
             _card = null;
             WindowEffects.SetCloaked(this, false);
+            EndOpenTrace("done");
         });
     }
 
