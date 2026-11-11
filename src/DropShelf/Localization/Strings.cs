@@ -50,7 +50,7 @@ public static class Strings
     public static string UninstallHeader => T("卸载 DropShelf", "Uninstall DropShelf");
     public static string UninstallDescription => T("打开卸载程序并退出 DropShelf，设置和日志会保留", "Opens the uninstaller and quits DropShelf. Settings and logs are kept");
     public static string UninstallPortable => T("便携版或开发版无需卸载：退出后删除程序所在的文件夹即可",
-        "The portable or development version doesn't need uninstalling. Quit and delete its folder");
+        "Portable and development copies don't need uninstalling. Quit DropShelf and delete its folder");
     public static string UninstallFailed => T("无法启动卸载程序，请从 Windows 设置中卸载", "Couldn't start the uninstaller. Uninstall DropShelf from Windows Settings instead");
     public static string QuitDescription => T("关闭所有置物架，不再响应拖动", "Closes every shelf and stops responding to drags");
     public static string Quit => T("退出", "Quit");
@@ -65,9 +65,9 @@ public static class Strings
         {
             AutoOpenTrigger.Shake => T("晃动呼出", "Shake to open"),
             AutoOpenTrigger.Edge => T("屏幕边缘呼出", "Pause at edge to open"),
-            _ => T("晃动或屏幕边缘呼出", "Shake or pause at edge")
+            _ => T("晃动或屏幕边缘呼出", "Shake or pause at edge to open")
         },
-        mode == TransferMode.Copy ? T("拖出时复制", "Drag out copies") : T("拖出时移动", "Drag out moves"));
+        mode == TransferMode.Copy ? T("拖出时复制", "Drag out to copy") : T("拖出时移动", "Drag out to move"));
 
     public static string ActionsSummary(IEnumerable<string> labels) =>
         string.Join(T("、", ", "), labels) is { Length: > 0 } text ? text : T("不显示快速操作", "Quick actions are off");
@@ -86,7 +86,7 @@ public static class Strings
         "Call it up while dragging files, park them for a moment, then drop them anywhere.");
     public static string PanelWays => T("呼出方式", "Ways to open");
     public static string WayShake => T("拖住文件晃一晃", "Drag a file and shake");
-    public static string WayEdge => T("拖到屏幕边缘停一下", "Pause at the screen edge");
+    public static string WayEdge => T("拖到屏幕边缘停一下", "Drag to the screen edge and pause");
 
     public static string StatusRunningDetail(AutoOpenTrigger trigger, string? hotkey) => trigger switch
     {
@@ -98,7 +98,7 @@ public static class Strings
             $"Drag a file and shake it, or pause at the screen edge{(hotkey is null ? null : $". You can also press {hotkey}")}")
     };
 
-    public static string GettingStarted => T("快速上手", "Get started");
+    public static string GettingStarted => T("快速上手", "Getting started");
     public static string DismissTooltip => T("不再显示", "Don't show again");
     public static string TipShakeTitle => T("拖住并晃动", "Drag and shake");
     public static string TipShakeBody => T("拖住文件后快速晃动鼠标，或拖到屏幕边缘停一下，置物架就会出现。",
@@ -117,18 +117,17 @@ public static class Strings
     public static string StartWithWindows => T("开机自动启动", "Start with Windows");
     public static string StartupDescription => T("登录 Windows 后在后台运行，不弹出窗口", "Runs in the background after you sign in, without opening a window");
     public static string StartupFailed => T("Windows 没有允许修改开机启动，设置保持不变", "Windows didn't allow the startup change, so the setting is unchanged");
-    public static string LowPerformanceMode => T("低性能模式", "Low performance mode");
+    public static string LowPerformanceMode => T("低性能模式", "Low-performance mode");
     public static string PerformanceAuto => T("自动", "Auto");
     public static string PerformanceOff => T("关闭", "Off");
     public static string PerformanceOn => T("开启", "On");
     public static string PerformanceDescription(PerformanceMode mode) => mode switch
     {
-        PerformanceMode.Normal => T("动画始终按完整的精度和帧率播放。用电池时动画卡顿的话，可以改为自动",
-            "Animations always play at full detail and frame rate. If they stutter on battery, switch to Auto"),
-        PerformanceMode.Low => T("始终减轻动画对显卡的负担：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动，置物架和主窗口改用不透明的背景。高分屏上动画途中略微模糊，停下后恢复清晰",
-            "Always eases the graphics load of animations: they draw at lower detail, update every other frame on high-refresh screens, shelves open and close without moving the window, and shelves and the main window use a solid background instead of a translucent one. On high-DPI screens, motion looks slightly soft and turns sharp once it stops"),
-        _ => T("使用电池或 Windows 开启节能模式时减轻动画对显卡的负担，接通电源后恢复：动画期间降低画面精度，高刷新率屏幕上隔一帧更新，置物架弹出和收起时窗口不再移动，置物架和主窗口改用不透明的背景。高分屏上动画途中略微模糊，停下后恢复清晰",
-            "On battery or with Windows energy saver on, eases the graphics load of animations until you plug in: they draw at lower detail, update every other frame on high-refresh screens, shelves open and close without moving the window, and shelves and the main window use a solid background instead of a translucent one. On high-DPI screens, motion looks slightly soft and turns sharp once it stops")
+        PerformanceMode.Normal => T("动画始终完整播放。用电池时卡顿的话，可以改为自动",
+            "Animations always play in full. If they stutter on battery, switch to Auto"),
+        PerformanceMode.Low => T("始终降低动画对显卡的负担", "Always reduces the graphics load from animations"),
+        _ => T("使用电池或 Windows 开启节能模式时，降低动画对显卡的负担",
+            "Reduces the graphics load from animations on battery or when Windows energy saver is on")
     };
     public static string GlobalHotkey => T("快捷键", "Keyboard shortcut");
     public static string HotkeyNotSet => T("未设置快捷键", "No shortcut set");
@@ -159,7 +158,7 @@ public static class Strings
     public static string DwellMedium => T("0.6 秒", "0.6 s");
     public static string DwellLong => T("1 秒", "1 s");
     public static string BlockedAppsHeader => T("屏蔽的应用", "Excluded apps");
-    public static string BlockedAppsDescription => T("这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", "Shelves don't open while one of these apps is in the foreground or you drag over its windows, and the keyboard shortcut is left to the app");
+    public static string BlockedAppsDescription => T("这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", "Shelves don't open while one of these apps is in the foreground or while you drag over its windows, and the keyboard shortcut goes to the app instead");
     public static string AddApp => T("添加应用", "Add app");
     public static string BrowseApp => T("浏览…", "Browse…");
     public static string AppFilter => T("程序|*.exe", "Programs|*.exe");
@@ -176,7 +175,7 @@ public static class Strings
     public static string TransferCopy => T("复制", "Copy");
     public static string CloseWhenEmpty => T("自动关闭空置物架", "Close empty shelves");
     public static string CloseWhenEmptyDescription => T("拖出的文件会离开置物架，空了就自动关闭。关闭此项后，复制出去的文件仍留在架上，可以再拖到别处",
-        "Dragged-out files leave the shelf, and it closes once empty. Turn off to keep copied files on the shelf so you can drag them elsewhere too");
+        "Dragged-out files leave the shelf, and it closes once empty. Turn this off to keep copied files on the shelf so you can drag them elsewhere too");
     public static string RecentShelves => T("最近关闭的置物架", "Recently closed shelves");
     public static string ClearShelfHistory => T("清空置物架历史", "Clear shelf history");
     public static string HistoryEmpty => T("暂无最近关闭的置物架", "No recently closed shelves");
@@ -247,14 +246,14 @@ public static class Strings
         "While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.");
     public static string OnboardingStackTitle => T("放进来，再拖出去", "Drop it in, drag it out");
     public static string OnboardingStackBody => T("松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的列表按钮展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。",
-        "Release to hold the files. Drag the thumbnail stack to take everything at once, or click the list button at the top to open the list and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
+        "Let go and the files stay on the shelf. Drag the thumbnail stack to take everything at once, or click the list button at the top to open the list and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.");
     public static string OnboardingActionsTitle => T("快速操作与快捷键", "Quick actions and shortcut");
 
     public static string OnboardingActionsBody(string? hotkey) => hotkey is null
         ? T("把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。在设置中设定快捷键后，还能随时打开空置物架。",
-            "Drag files to the bottom of the shelf to reveal quick actions: compress, copy paths, move them or view their properties. You can change these actions or add your own in Settings, and set a keyboard shortcut there to open an empty shelf at any time.")
+            "Drag files to the bottom of the shelf to reveal quick actions: compress them, copy their paths, move them or view their properties. You can change these actions or add your own in Settings, and set a keyboard shortcut there to open an empty shelf at any time.")
         : T($"把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。按 {hotkey} 能随时打开空置物架。",
-            $"Drag files to the bottom of the shelf to reveal quick actions: compress, copy paths, move them or view their properties. You can change these actions or add your own in Settings. Press {hotkey} to open an empty shelf at any time.");
+            $"Drag files to the bottom of the shelf to reveal quick actions: compress them, copy their paths, move them or view their properties. You can change these actions or add your own in Settings. Press {hotkey} to open an empty shelf at any time.");
 
     public static string OnboardingSampleCount => ItemCount(3);
     public static string OnboardingSampleFolder => T("文档", "Documents");
@@ -270,7 +269,7 @@ public static class Strings
     public static string TrayTip => T("DropShelf · 拖动文件时呼出置物架", "DropShelf · Open a shelf while dragging files");
     public static string StillRunningTitle => T("DropShelf 仍在运行", "DropShelf is still running");
     public static string StillRunningBody => T("拖动文件时晃一晃或拖到屏幕边缘，即可呼出置物架。可从通知区域重新打开设置。",
-        "While dragging files, shake or pause at the screen edge to open a shelf. You can reopen Settings from the notification area.");
+        "While dragging files, shake the mouse or pause at the screen edge to open a shelf. You can reopen Settings from the notification area.");
 
     // ───────────── 置物架 ─────────────
 
@@ -421,7 +420,7 @@ public static class Strings
     // ───────────── 自定义操作 ─────────────
 
     public static string KindFolder => T("发送到文件夹", "Send to folder");
-    public static string KindCompressImage => T("压缩图片", "Compress image");
+    public static string KindCompressImage => T("压缩图片", "Compress images");
     public static string KindOpenWith => T("用程序打开", "Open with app");
     public static string ActionKind => T("类型", "Type");
     public static string FolderLabel => T("目标文件夹", "Destination folder");
@@ -479,7 +478,7 @@ public static class Strings
             ? T($"复制到 {action.Folder}", $"Copies items to {action.Folder}")
             : T($"移动到 {action.Folder}", $"Moves items to {action.Folder}"),
         CustomActionKind.CompressImage => T($"压缩为不超过 {ImageSizeText(action.ImageSizeKb)} 的 JPG，原图保持不变",
-            $"Saves a JPG under {ImageSizeText(action.ImageSizeKb)}. The original stays unchanged"),
+            $"Saves a JPG copy of {ImageSizeText(action.ImageSizeKb)} or less. The original stays unchanged"),
         _ => T($"用 {action.ProgramPath} 打开", $"Opens with {action.ProgramPath}")
     };
 
@@ -509,7 +508,7 @@ public static class Strings
     public static string NoFilesToProcess => T("没有可操作的文件", "No files to work with");
     public static string OutputFolderUnavailable => T("无法使用输出文件夹，原文件没有改变", "Couldn't use the output folder. The original files are unchanged");
     public static string ClipboardBusyOtherApp => T("剪贴板正被其他程序占用，请重试", "Another app is using the clipboard. Please try again");
-    public static string MoveCancelled => T("已取消移动", "Move cancelled");
+    public static string MoveCancelled => T("已取消移动", "Move canceled");
     public static string MovedTo(int count, string folder) => T($"已移动 {count} 项到 {folder}", $"Moved {Count(count, "item", "items")} to {folder}");
     public static string MoveFailed => T("移动失败，原项目保持不变", "Move failed. The items are unchanged");
     public static string MovedPartially(int moved, int failed) => T($"已移动 {moved} 项，{failed} 项未能移动",
