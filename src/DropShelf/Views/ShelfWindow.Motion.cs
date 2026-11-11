@@ -60,14 +60,17 @@ public partial class ShelfWindow
     /// <summary>堆叠里的一张牌和它在 XAML 中的原位。</summary>
     private sealed class StackCard(ContentControl card, ScaleTransform scale, RotateTransform turn, TranslateTransform shift, LocalCardPose home)
     {
+        // 牌在画布上的位置和大小是固定的，中心只算一次，不用每帧再读。
+        private readonly double _centerX = Canvas.GetLeft(card) + card.Width / 2, _centerY = Canvas.GetTop(card) + card.Height / 2;
+
         public ContentControl Card { get; } = card;
         public LocalCardPose Home { get; } = home;
 
         /// <summary>按中心摆放：牌在画布上的位置不变，平移量把中心移到目标点，旋转和缩放都绕中心。</summary>
         public void Pose(LocalCardPose pose)
         {
-            shift.X = pose.X - (Canvas.GetLeft(Card) + Card.Width / 2);
-            shift.Y = pose.Y - (Canvas.GetTop(Card) + Card.Height / 2);
+            shift.X = pose.X - _centerX;
+            shift.Y = pose.Y - _centerY;
             turn.Angle = pose.Angle;
             scale.ScaleX = scale.ScaleY = pose.Scale;
             Card.Opacity = pose.Opacity;
@@ -87,6 +90,12 @@ public partial class ShelfWindow
 
     /// <summary>从上到下：最上面一张、第二张、最下面一张。</summary>
     private StackCard[] StackCards => _stackCards ??= [StackCard.From(Card0), StackCard.From(Card1), StackCard.From(Card2)];
+
+    /// <summary>堆叠里的牌都回到原位。</summary>
+    private void RestCards()
+    {
+        foreach (var card in StackCards) card.Pose(card.Home);
+    }
 
     /// <summary>
     /// 松手后，拖进来的文件从松手处飞进堆叠：从拖动图像大小放大，划一道弧落到自己的位置，原来的牌往下退一层。
@@ -128,10 +137,10 @@ public partial class ShelfWindow
 
         _motionCleanup = () =>
         {
-            foreach (var card in cards) card.Pose(card.Home);
+            RestCards();
             RestoreStackMark();
         };
-        Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+        FinishAfter(end);
     }
 
     /// <summary>落下的路径：位置沿二次贝塞尔曲线划一道弧，缩放途中略微超过原大小，开头很快变得不透明。</summary>
@@ -207,7 +216,7 @@ public partial class ShelfWindow
                 text.ClearValue(OpacityProperty);
             }
         };
-        Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+        FinishAfter(end);
     }
 
     /// <summary>
@@ -260,7 +269,7 @@ public partial class ShelfWindow
                 shift.X = -12 * t;
             });
         }
-        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+        FinishAfter(RemoveDuration);
     }
 
     /// <summary>列表移除之后补位：每一行从移除前的位置滑到现在的位置，之前没有生成的行从下面一点淡入；补完窗口再平滑变小。</summary>
@@ -301,7 +310,7 @@ public partial class ShelfWindow
             }
             UpdateWindowSize();
         };
-        Tween(TimeSpan.Zero, lead + ResizeDuration, _ => { }, FinishMotion);
+        FinishAfter(lead + ResizeDuration);
     }
 
     private void RemoveFromStack(HashSet<ShelfItem> leaving, Action remove, bool remains)
@@ -318,7 +327,7 @@ public partial class ShelfWindow
 
         _motionCleanup = () =>
         {
-            foreach (var card in cards) card.Pose(card.Home);
+            RestCards();
             remove();
             if (remains) Dispatcher.BeginInvoke(() => RiseStack(shown));
         };
@@ -330,7 +339,7 @@ public partial class ShelfWindow
             Tween(TimeSpan.Zero, RemoveDuration, t =>
                 card.Pose(new LocalCardPose(home.X, home.Y + 10 * t, home.Angle + side * 6 * t, 1 - 0.3 * t, start * (1 - t))));
         }
-        Tween(TimeSpan.Zero, RemoveDuration, _ => { }, FinishMotion);
+        FinishAfter(RemoveDuration);
     }
 
     /// <summary>堆叠移除之后补位：每张牌从它原来所在的那一层升到现在这一层，新露出来的从最下面一层淡入。</summary>
@@ -351,11 +360,8 @@ public partial class ShelfWindow
             moved = true;
         }
         if (!moved) return;
-        _motionCleanup = () =>
-        {
-            foreach (var card in cards) card.Pose(card.Home);
-        };
-        Tween(TimeSpan.Zero, CloseUpDuration, _ => { }, FinishMotion);
+        _motionCleanup = RestCards;
+        FinishAfter(CloseUpDuration);
     }
 
     /// <summary>
@@ -470,7 +476,7 @@ public partial class ShelfWindow
 
         _motionCleanup = () =>
         {
-            foreach (var card in cards) card.Pose(card.Home);
+            RestCards();
             foreach (var thumb in thumbs) thumb.ClearValue(OpacityProperty);
             foreach (var row in rows)
             {
@@ -486,7 +492,7 @@ public partial class ShelfWindow
             UpdateViews();
             UpdateWindowSize();
         };
-        Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+        FinishAfter(end);
     }
 
     /// <summary>逐帧调用 apply，参数是缓动后的进度 0–1；delay 之前停在起点。</summary>
@@ -499,16 +505,20 @@ public partial class ShelfWindow
         CompositionTarget.Rendering += OnMotionFrame;
     }
 
-    /// <summary>所有动画共用一个逐帧回调：同一帧重复触发时跳过，还在等待的动画停在起点不更新。</summary>
+    /// <summary>过了 end，整段动画结束：牌、列表和窗口都回到最终状态。</summary>
+    private void FinishAfter(TimeSpan end) => Tween(TimeSpan.Zero, end, _ => { }, FinishMotion);
+
+    /// <summary>所有动画共用一个逐帧回调：同一帧重复触发时跳过，还在等待的动画停在起点不更新；这一帧里各段动画按同一个时刻推进。</summary>
     private void OnMotionFrame(object? sender, EventArgs e)
     {
         var time = ((RenderingEventArgs)e).RenderingTime;
         if (time == _motionFrameTime) return;
         _motionFrameTime = time;
+        var now = Stopwatch.GetTimestamp();
         for (var i = 0; i < _tweens.Count; i++)
         {
             var tween = _tweens[i];
-            var elapsed = Stopwatch.GetElapsedTime(tween.Start) - tween.Delay;
+            var elapsed = Stopwatch.GetElapsedTime(tween.Start, now) - tween.Delay;
             if (elapsed < TimeSpan.Zero) continue;
             var progress = tween.Duration <= TimeSpan.Zero ? 1 : Math.Min(elapsed / tween.Duration, 1);
             tween.Apply(MotionEase.Ease(progress));

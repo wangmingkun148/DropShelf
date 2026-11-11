@@ -143,7 +143,7 @@ public partial class ShelfWindow
         }
 
         CacheSurface();
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = MotionEase });
         var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
         scale.Completed += (_, _) =>
         {

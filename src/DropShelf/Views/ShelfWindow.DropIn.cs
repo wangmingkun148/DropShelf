@@ -158,7 +158,7 @@ public partial class ShelfWindow
         }
     }
 
-    /// <summary>正在读取、放入的拖入内容有几批；这期间算作忙碌，见 IsAnimating。</summary>
+    /// <summary>正在读取的拖入内容有几批；这期间算作忙碌，见 IsAnimating。</summary>
     private int _receiving;
 
     private async Task<T> Receive<T>(Task<T> work)
@@ -224,7 +224,7 @@ public partial class ShelfWindow
             done?.Invoke();
             return;
         }
-        var fade = new DoubleAnimation(from, to, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop };
+        var fade = new DoubleAnimation(from, to, duration) { EasingFunction = MotionEase, FillBehavior = FillBehavior.Stop };
         _fades[element] = fade;
         fade.Completed += (_, _) =>
         {
@@ -239,28 +239,15 @@ public partial class ShelfWindow
     private void ResetTiles()
     {
         _tilesExpanded = false;
-        foreach (var (element, property, value) in TileStates(expanded: false))
-        {
-            element.BeginAnimation(property, null);
-            element.SetValue(property, value);
-        }
+        foreach (var (element, property, value) in TileStates(expanded: false)) Ease(element, property, value, null);
     }
 
     private void SetTilesExpanded(bool expanded)
     {
         if (expanded == _tilesExpanded) return;
         _tilesExpanded = expanded;
-        var duration = expanded ? TilesExpandDuration : TilesCollapseDuration;
-        foreach (var (element, property, value) in TileStates(expanded))
-        {
-            if (ShelfMotion.Enabled)
-                element.BeginAnimation(property, new DoubleAnimation(value, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
-            else
-            {
-                element.BeginAnimation(property, null);
-                element.SetValue(property, value);
-            }
-        }
+        TimeSpan? duration = !ShelfMotion.Enabled ? null : expanded ? TilesExpandDuration : TilesCollapseDuration;
+        foreach (var (element, property, value) in TileStates(expanded)) Ease(element, property, value, duration);
     }
 
     /// <summary>展开时快速操作从按钮栏向上长高并淡入，按钮栏同时淡出。</summary>
@@ -287,9 +274,9 @@ public partial class ShelfWindow
 
     private void SetDescription(System.Windows.IDataObject data, DropImageType type, string message)
     {
-        var key = $"{(int)type}:{message}";
-        if (key == _lastDescription) return;
-        _lastDescription = key;
+        // 拖动途中系统不停地来问，说明没变时不用重新设置，也不用每次拼一个字符串来比较。
+        if (_lastDescription is { } last && last == (type, message)) return;
+        _lastDescription = (type, message);
         DropTargetHelper.SetDescription(data, type, message);
     }
 
