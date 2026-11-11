@@ -6,6 +6,8 @@ public sealed class MouseGestureDetector
 {
     private readonly Queue<long> _reversals = new();
     private readonly Queue<(long Time, double Distance)> _travel = new();
+    /// <summary>_travel 里各段距离之和：随入队、出队增减，不用每次采样都把整个队列加一遍。</summary>
+    private double _totalTravel;
     private GestureProfile _profile;
     private bool _hasLastPoint;
     private int _lastX;
@@ -130,13 +132,12 @@ public sealed class MouseGestureDetector
             return false;
         }
 
-        Trim(timestampMilliseconds);
-        var totalTravel = _travel.Sum(item => item.Distance);
+        // 两个分支都刚经过 AddTravel，超出时间窗口的记录已经去掉。
         var gestureDuration = _travel.TryPeek(out var firstTravel)
             ? timestampMilliseconds - firstTravel.Time
             : 0;
         if (_reversals.Count < _profile.RequiredReversals ||
-            totalTravel < _profile.MinimumTotalTravel ||
+            _totalTravel < _profile.MinimumTotalTravel ||
             gestureDuration < _profile.MinimumDurationMilliseconds)
             return false;
 
@@ -156,8 +157,7 @@ public sealed class MouseGestureDetector
         _consecutiveEdgeSamples = 0;
         _toleratedSideStep = false;
         _hasRawPoint = false;
-        _reversals.Clear();
-        _travel.Clear();
+        ClearWindow();
     }
 
     private void SetLastPoint(int x, int y, long time)
@@ -174,13 +174,20 @@ public sealed class MouseGestureDetector
         _directionX = 0;
         _directionY = 0;
         _segmentDistance = 0;
+        ClearWindow();
+    }
+
+    private void ClearWindow()
+    {
         _reversals.Clear();
         _travel.Clear();
+        _totalTravel = 0;
     }
 
     private void AddTravel(long time, double distance)
     {
         _travel.Enqueue((time, distance));
+        _totalTravel += distance;
         Trim(time);
     }
 
@@ -188,7 +195,9 @@ public sealed class MouseGestureDetector
     {
         var cutoff = now - _profile.MaximumDurationMilliseconds;
         while (_reversals.TryPeek(out var reversal) && reversal < cutoff) _reversals.Dequeue();
-        while (_travel.TryPeek(out var travel) && travel.Time < cutoff) _travel.Dequeue();
+        while (_travel.TryPeek(out var travel) && travel.Time < cutoff) _totalTravel -= _travel.Dequeue().Distance;
+        // 队列空了就从零算起，加减留下的舍入误差不会一直带下去。
+        if (_travel.Count == 0) _totalTravel = 0;
     }
 
     private sealed record GestureProfile(
