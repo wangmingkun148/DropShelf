@@ -234,7 +234,7 @@ internal static partial class Program
         var viewModel = new ShelfViewModel();
         viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Link, "calc.exe")]);
         viewModel.Open(viewModel.Items[0]);
-        Assert(System.Windows.Clipboard.GetText() == "calc.exe", "非网页链接被交给系统打开");
+        Assert(ReadClipboardText("calc.exe") == "calc.exe", "非网页链接被交给系统打开");
     }
 
     private static async Task TestChatAppImageFormats()
