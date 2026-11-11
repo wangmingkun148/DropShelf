@@ -442,7 +442,8 @@ public partial class MainWindow
             if (flip.Posed != flip.Progress) Pose(flip);
             return;
         }
-        if (flip.RunStart is not null && time == flip.Last) return;
+        // 低性能模式下高刷新率屏幕上隔一帧更新，见 LowPerformance.Skip；拖动时跟着鼠标，不经过这里。
+        if (flip.RunStart is not null && (time == flip.Last || LowPerformance.Skip(time))) return;
         flip.RunStart ??= time - Stopwatch.GetElapsedTime(flip.RunBegun);
         flip.Last = time;
         var u = flip.RunMs > 0 ? Math.Min(1, (time - flip.RunStart.Value).TotalMilliseconds / flip.RunMs) : 1;

@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using DropShelf.Models;
+using DropShelf.Services;
 
 namespace DropShelf.Interop;
 
@@ -143,19 +144,15 @@ internal static class CacheScale
     /// <summary>
     /// 位图缓存的 RenderAtScale。缓存本身已按系统 DPI（主显示器）生成，只需补上元素所在显示器与它之比：
     /// 两者相同时为 1，再乘一次显示缩放比例在 200% 时会占用四倍内存；所在显示器缩放更高时按比例补足，不会发虚。
+    /// 低性能模式下，这些缓存只在动画和拖动期间使用，改为每个逻辑像素只用一个像素，缩放 150% 时像素数约为原来的 44%，
+    /// 显卡生成和合成缓存都轻得多；动画途中略微模糊，停下后去掉缓存就恢复清晰。缩放 100% 时没有变化。
     /// </summary>
     public static double For(Visual visual)
     {
         var system = Math.Max(1, NativeMethods.GetDpiForSystem());
         var scale = VisualTreeHelper.GetDpi(visual).PixelsPerInchX / system;
-        return Reduced ? Math.Min(scale, 96.0 / system) : scale;
+        return LowPerformance.Enabled ? Math.Min(scale, 96.0 / system) : scale;
     }
-
-    /// <summary>
-    /// 低性能模式：这些缓存只在动画和拖动期间使用，改为每个逻辑像素只用一个像素，缩放 150% 时像素数约为原来的 44%，
-    /// 显卡生成和合成缓存都轻得多；动画途中略微模糊，停下后去掉缓存就恢复清晰。缩放 100% 时没有变化。
-    /// </summary>
-    public static bool Reduced { get; set; }
 }
 
 internal static class WindowPlacement

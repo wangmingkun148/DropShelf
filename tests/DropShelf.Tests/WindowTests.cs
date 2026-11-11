@@ -266,9 +266,9 @@ internal static partial class Program
         ((System.Windows.Controls.CheckBox)window.FindName("CloseWhenEmptyBox")!).IsChecked = false;
         var lowPerformance = (System.Windows.Controls.CheckBox)window.FindName("LowPerformanceBox")!;
         lowPerformance.IsChecked = true;
-        Assert(controller.Settings.LowPerformanceMode && CacheScale.Reduced, "打开低性能模式后应立即降低动画缓存的精度");
+        Assert(controller.Settings.LowPerformanceMode && LowPerformance.Enabled, "打开低性能模式后应立即降低动画缓存的精度");
         lowPerformance.IsChecked = false;
-        Assert(!controller.Settings.LowPerformanceMode && !CacheScale.Reduced, "关闭低性能模式后应恢复动画缓存的精度");
+        Assert(!controller.Settings.LowPerformanceMode && !LowPerformance.Enabled, "关闭低性能模式后应恢复动画缓存的精度");
         viewModel.AssignSlot(1, "Reveal");
         Assert(viewModel.ShelfSummary == "屏幕边缘呼出 · 拖出时复制" && viewModel.ActionsSummary == "压缩、显示位置" &&
                viewModel.AppearanceSummary == "深色 · 自选强调色", "设置卡片上的摘要不正确");

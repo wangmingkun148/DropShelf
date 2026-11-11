@@ -99,14 +99,19 @@ public partial class ShelfWindow
         var duration = ShelfMotion.CloseDuration;
         var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
         CacheSurface();
-        var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
+        var fade = LowPerformance.Pace(new DoubleAnimation(0, duration) { EasingFunction = ease });
         fade.Completed += (_, _) => Close();
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease });
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, LowPerformance.Pace(new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease }));
+        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, LowPerformance.Pace(new DoubleAnimation(ShelfMotion.CloseScale, duration) { EasingFunction = ease }));
         Surface.BeginAnimation(OpacityProperty, fade);
 
-        // 窗口本身也朝来时的方向退回一小段，避免内容消失后只剩空的背景。
-        if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
+        // 窗口本身也朝来时的方向退回一小段，避免内容消失后只剩空的背景；低性能模式下窗口不动，内容在窗口里退回。
+        if (LowPerformance.Enabled)
+        {
+            var (dx, dy) = ShelfMotion.CloseOffset(_entrance, 1);
+            ShiftSurface(null, (dx, dy), duration, ease);
+        }
+        else if (NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect))
         {
             var (dx, dy) = ShelfMotion.CloseOffset(_entrance, DpiScale());
             SlideWindow(rect.Left, rect.Top, rect.Left + dx, rect.Top + dy, duration, ease);
@@ -116,6 +121,7 @@ public partial class ShelfWindow
     /// <summary>
     /// 弹出动画：窗口从来源方向滑入（亚克力背景随窗口一起移动），内容同时淡入并放大到原尺寸。
     /// 晃动呼出时内容从光标处弹出，带一点回弹；从屏幕边缘呼出时从该边缘滑入。
+    /// 低性能模式下窗口直接出现在原处，内容在窗口里走同样一段路：不用逐帧移动窗口，系统也不用每帧重新计算亚克力背景。
     /// </summary>
     private void AnimateIn(POINT cursor)
     {
@@ -137,16 +143,26 @@ public partial class ShelfWindow
                 ? new WpfPoint(Math.Clamp((cursor.X - rect.Left) / (double)rect.Width, 0.15, 0.85),
                     Math.Clamp((cursor.Y - rect.Top) / (double)rect.Height, 0.15, 0.85))
                 : new WpfPoint(0.5, 0.4);
-            var (dx, dy) = ShelfMotion.OpenOffset(_entrance, DpiScale());
-            SlideWindow(rect.Left + dx, rect.Top + dy, rect.Left, rect.Top, motion.Duration, new QuinticEase { EasingMode = EasingMode.EaseOut },
-                () => WindowPlacement.KeepInWorkArea(this));
+            if (!LowPerformance.Enabled)
+            {
+                var (dx, dy) = ShelfMotion.OpenOffset(_entrance, DpiScale());
+                SlideWindow(rect.Left + dx, rect.Top + dy, rect.Left, rect.Top, motion.Duration, new QuinticEase { EasingMode = EasingMode.EaseOut },
+                    () => WindowPlacement.KeepInWorkArea(this));
+            }
+        }
+        if (LowPerformance.Enabled)
+        {
+            var (dx, dy) = ShelfMotion.OpenOffset(_entrance, 1);
+            ShiftSurface((dx, dy), (0, 0), motion.Duration, new QuinticEase { EasingMode = EasingMode.EaseOut });
         }
 
         CacheSurface();
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = MotionEase });
-        var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
+        _entering = true;
+        Surface.BeginAnimation(OpacityProperty, LowPerformance.Pace(new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = MotionEase }));
+        var scale = LowPerformance.Pace(new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase });
         scale.Completed += (_, _) =>
         {
+            _entering = false;
             Surface.CacheMode = null;
             EndOpenTrace("done");
         };
@@ -159,6 +175,18 @@ public partial class ShelfWindow
     /// 按所在显示器的缩放比例缓存，高分屏上也保持清晰，见 CacheScale。
     /// </summary>
     private void CacheSurface() => Surface.CacheMode = new BitmapCache(CacheScale.For(this));
+
+    /// <summary>出场动画还没播完。低性能模式下窗口不滑动，靠它让 ShelfManager 把重活往后推，见 IsAnimating。</summary>
+    private bool _entering;
+
+    /// <summary>低性能模式下代替移动窗口：内容在窗口里从 from 移到 to（逻辑像素），from 为 null 时从当前位置开始。</summary>
+    private void ShiftSurface((double X, double Y)? from, (double X, double Y) to, TimeSpan duration, IEasingFunction ease)
+    {
+        SurfaceOffset.BeginAnimation(TranslateTransform.XProperty,
+            LowPerformance.Pace(new DoubleAnimation { From = from?.X, To = to.X, Duration = duration, EasingFunction = ease }));
+        SurfaceOffset.BeginAnimation(TranslateTransform.YProperty,
+            LowPerformance.Pace(new DoubleAnimation { From = from?.Y, To = to.Y, Duration = duration, EasingFunction = ease }));
+    }
 
     /// <summary>逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。</summary>
     private void SlideWindow(int fromX, int fromY, int toX, int toY, TimeSpan duration, IEasingFunction ease, Action? completed = null)
