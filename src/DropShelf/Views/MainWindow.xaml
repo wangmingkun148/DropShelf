@@ -763,8 +763,13 @@
                                         <controls:HotkeyBox x:Name="HotkeyEditor" Gesture="{Binding Hotkey}" />
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Lightning}" Header="{l:Loc LowPerformanceMode}"
-                                                           Description="{l:Loc LowPerformanceModeDescription}">
-                                        <CheckBox x:Name="LowPerformanceBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding LowPerformanceMode}" />
+                                                           Description="{Binding PerformanceDescription}">
+                                        <ListBox x:Name="PerformanceSelector" Style="{StaticResource SegmentedStyle}" SelectedValuePath="Tag"
+                                                 SelectedValue="{Binding PerformanceMode}">
+                                            <ListBoxItem Content="{l:Loc PerformanceAuto}" Tag="{x:Static models:PerformanceMode.Auto}" />
+                                            <ListBoxItem Content="{l:Loc PerformanceOff}" Tag="{x:Static models:PerformanceMode.Normal}" />
+                                            <ListBoxItem Content="{l:Loc PerformanceOn}" Tag="{x:Static models:PerformanceMode.Low}" />
+                                        </ListBox>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Help}" Header="{l:Loc Tutorial}" Description="{l:Loc TutorialDescription}">
                                         <Button Content="{l:Loc ViewTutorial}" Command="{Binding ShowTutorialCommand}" MinWidth="96" />

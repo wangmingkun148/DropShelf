@@ -57,8 +57,12 @@ public sealed class AppSettings
     /// <summary>自动关闭空置物架：拖出的项目从置物架移走，全部拖出或移除后关闭置物架。</summary>
     public bool CloseWhenEmpty { get; set; } = true;
 
-    /// <summary>低性能模式：动画期间用较低精度的位图缓存，减轻显卡负担，见 CacheScale。</summary>
-    public bool LowPerformanceMode { get; set; }
+    /// <summary>低性能模式：动画期间用较低精度的位图缓存，减轻显卡负担，见 CacheScale。默认在使用电池或节能模式时自动启用。</summary>
+    public PerformanceMode PerformanceMode { get; set; } = PerformanceMode.Auto;
+
+    /// <summary>2.7.1 及以前低性能模式是一个开关，仅用于迁移旧设置：打开的保持始终启用，其余改为自动。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LowPerformanceMode { get; set; }
     public string Hotkey { get; set; } = HotkeyGesture.Default.ToString();
     public bool HasCompletedFirstRun { get; set; }
 
@@ -189,6 +193,11 @@ public sealed class SettingsService
             settings.DragOutMode = TransferMode.Move;
         if (!Enum.IsDefined(settings.QuickActionLayout))
             settings.QuickActionLayout = QuickActionLayout.Four;
+        if (settings.LowPerformanceMode == true)
+            settings.PerformanceMode = PerformanceMode.Low;
+        settings.LowPerformanceMode = null;
+        if (!Enum.IsDefined(settings.PerformanceMode))
+            settings.PerformanceMode = PerformanceMode.Auto;
 
         settings.BlockedApps = (settings.BlockedApps ?? [])
             .Select(name => Path.GetFileName(name?.Trim() ?? string.Empty))

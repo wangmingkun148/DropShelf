@@ -152,8 +152,28 @@ internal static class CacheScale
     /// <summary>
     /// 低性能模式：这些缓存只在动画和拖动期间使用，改为每个逻辑像素只用一个像素，缩放 150% 时像素数约为原来的 44%，
     /// 显卡生成和合成缓存都轻得多；动画途中略微模糊，停下后去掉缓存就恢复清晰。缩放 100% 时没有变化。
+    /// 设为自动时在使用电池或系统开启节能模式期间启用：每次建缓存时现查，电源状态几秒内不会来回变，两秒内不重复查。
     /// </summary>
-    public static bool Reduced { get; set; }
+    public static bool Reduced => Mode switch
+    {
+        PerformanceMode.Low => true,
+        PerformanceMode.Normal => false,
+        _ => SavingPower()
+    };
+
+    public static PerformanceMode Mode { get; set; }
+
+    private static long _powerChecked = -PowerCheckInterval;
+    private static bool _savingPower;
+    private const long PowerCheckInterval = 2000;
+
+    private static bool SavingPower()
+    {
+        var now = Environment.TickCount64;
+        if (now - _powerChecked < PowerCheckInterval) return _savingPower;
+        _powerChecked = now;
+        return _savingPower = NativeMethods.GetSystemPowerStatus(out var status) && (status.ACLineStatus == 0 || status.SystemStatusFlag == 1);
+    }
 }
 
 internal static class WindowPlacement
