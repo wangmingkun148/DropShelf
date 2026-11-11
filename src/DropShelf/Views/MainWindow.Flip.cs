@@ -129,8 +129,9 @@ public partial class MainWindow
         public double EndSlope { get; set; }
         /// <summary>开始播放的时刻；第一帧按从这里经过的时间摆放（最多一帧），松手后不会先停一帧。</summary>
         public long RunBegun { get; set; }
-        /// <summary>已经播放的时间，卡顿时一帧最多前进 FrameClock.MaxStep，放慢而不跳过。</summary>
+        /// <summary>已经播放的时间，卡顿时一帧最多前进 FrameClock.MaxStep，放慢而不跳过；累计拖长的时间记在 Lag，有上限。</summary>
         public TimeSpan? Ran { get; set; }
+        public TimeSpan Lag;
         public TimeSpan Last { get; set; }
     }
 
@@ -295,6 +296,7 @@ public partial class MainWindow
         flip.EndSlope = distance > 0 ? natural * milliseconds / distance : 1;
         flip.RunBegun = Stopwatch.GetTimestamp();
         flip.Ran = null;
+        flip.Lag = default;
         HookFlipFrames();
     }
 
@@ -445,9 +447,10 @@ public partial class MainWindow
         }
         // 低性能模式下高刷新率屏幕上隔一帧更新，跳过的帧不推进，见 LowPerformance.Skip；拖动时跟着鼠标，不经过这里。
         if (flip.Ran is not null && (time == flip.Last || LowPerformance.Skip(time))) return;
+        // 第一帧最多前进半个 MaxStep，不计入拖长的时间。
         var ran = flip.Ran is { } before
-            ? before + FrameClock.Step(time - flip.Last)
-            : FrameClock.Step(Stopwatch.GetElapsedTime(flip.RunBegun) * 2) / 2;
+            ? before + FrameClock.Step(time - flip.Last, ref flip.Lag)
+            : TimeSpan.FromTicks(Math.Min(Stopwatch.GetElapsedTime(flip.RunBegun).Ticks, FrameClock.MaxStep.Ticks / 2));
         flip.Ran = ran;
         flip.Last = time;
         var u = flip.RunMs > 0 ? Math.Min(1, ran.TotalMilliseconds / flip.RunMs) : 1;

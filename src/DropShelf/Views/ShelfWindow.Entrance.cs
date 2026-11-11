@@ -187,6 +187,9 @@ public partial class ShelfWindow
 
     private EventHandler? _popFrame;
 
+    /// <summary>出场动画还在播。这期间拖入的反馈从简，见 OnDragEnter、OnDragLeave 和 UpdateDrag。</summary>
+    private bool IsPopping => _popFrame is not null;
+
     private void StopPop()
     {
         if (_popFrame is null) return;
