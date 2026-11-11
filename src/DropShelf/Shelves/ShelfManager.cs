@@ -17,6 +17,8 @@ public sealed class ShelfManager : IShelfHost
     private readonly Dispatcher _dispatcher;
     private readonly List<ShelfWindow> _open = [];
     private ShelfWindow? _spare;
+    /// <summary>正在屏幕外画第一帧的备用窗口，画完才成为 _spare；这期间要用置物架就照旧新建一个。</summary>
+    private ShelfWindow? _warming;
     private DispatcherTimer? _prewarmTimer;
     private bool _shuttingDown;
 
@@ -40,7 +42,7 @@ public sealed class ShelfManager : IShelfHost
     /// </summary>
     public void Prewarm()
     {
-        if (_shuttingDown || _spare is not null) return;
+        if (_shuttingDown || _spare is not null || _warming is not null) return;
         if (_prewarmTimer is null)
         {
             _prewarmTimer = new DispatcherTimer(DispatcherPriority.ApplicationIdle, _dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
@@ -52,7 +54,7 @@ public sealed class ShelfManager : IShelfHost
 
     private void OnPrewarmTick(object? sender, EventArgs e)
     {
-        if (_shuttingDown || _spare is not null)
+        if (_shuttingDown || _spare is not null || _warming is not null)
         {
             _prewarmTimer!.Stop();
             return;
@@ -61,8 +63,13 @@ public sealed class ShelfManager : IShelfHost
         if (NativeMethods.IsButtonPhysicallyDown() ||
             _open.Any(shelf => shelf.IsSliding || shelf.ViewModel.OpenedByGesture && shelf.IsReusable)) return;
         _prewarmTimer!.Stop();
-        _spare = CreateWindow();
-        WindowEffects.Handle(_spare);
+        var window = _warming = CreateWindow();
+        window.Prewarm(() =>
+        {
+            if (!ReferenceEquals(_warming, window)) return;
+            _warming = null;
+            _spare = window;
+        });
         // 替置物架出场的那张牌也先备好。
         ShelfCardWindow.Prewarm();
     }
@@ -142,6 +149,7 @@ public sealed class ShelfManager : IShelfHost
     {
         foreach (var shelf in _open) shelf.ApplySettings(settings);
         _spare?.ApplySettings(settings);
+        _warming?.ApplySettings(settings);
     }
 
     public void CloseAll()
@@ -152,6 +160,8 @@ public sealed class ShelfManager : IShelfHost
         _open.Clear();
         _spare?.Close();
         _spare = null;
+        _warming?.Close();
+        _warming = null;
     }
 
     public void OnShelfClosed(ShelfWindow window, IReadOnlyList<ShelfItem> items)
@@ -159,6 +169,7 @@ public sealed class ShelfManager : IShelfHost
         // 关闭时仍有文件的置物架记入最近关闭，误关或退出后可以恢复。
         if (items.Count > 0) History?.Record(items);
         if (ReferenceEquals(window, _spare)) _spare = null;
+        if (ReferenceEquals(window, _warming)) _warming = null;
         _open.Remove(window);
         // 拖入的数据、缩略图和动画位图大多占用原生内存，托管堆很小时很少触发回收；全部关闭后空闲时回收一次。
         if (_open.Count == 0 && !_shuttingDown) _dispatcher.BeginInvoke(() => GC.Collect(), DispatcherPriority.ApplicationIdle);

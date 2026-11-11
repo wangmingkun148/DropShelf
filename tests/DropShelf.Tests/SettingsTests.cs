@@ -23,7 +23,7 @@ internal static partial class Program
     {
         var service = new SettingsService();
         var defaults = service.Load();
-        Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted, "默认开关不正确");
+        Assert(defaults.CloseWhenEmpty && defaults.ShowGettingStarted && !defaults.LowPerformanceMode, "默认开关不正确");
         Assert(defaults.AccentColor is null, "默认强调色应为钴蓝");
         Assert(defaults.QuickShelfSize == QuickShelfSize.Medium, "默认尺寸不是中档");
         Assert(defaults.QuickActionLayout == QuickActionLayout.Four &&
@@ -48,6 +48,7 @@ internal static partial class Program
         defaults.QuickActionSlots = ["Reveal", custom.Id, "CopyFullPath", "MoveTo"];
         defaults.CloseWhenEmpty = false;
         defaults.ShowGettingStarted = false;
+        defaults.LowPerformanceMode = true;
         defaults.AccentColor = "#8764B8";
         defaults.Hotkey = "Ctrl+Alt+D";
         defaults.HasCompletedFirstRun = true;
@@ -68,6 +69,7 @@ internal static partial class Program
         Assert(restored.Folder == folder && restored.FolderMode == TransferMode.Copy && restored.Name == "素材", "自定义操作未恢复");
         Assert(QuickActions.Visible(loaded).Select(info => info.Id).SequenceEqual(["Reveal", custom.Id]), "只显示两个时应使用前两个位置");
         Assert(!loaded.CloseWhenEmpty && !loaded.ShowGettingStarted, "自动关闭或快速上手设置未恢复");
+        Assert(loaded.LowPerformanceMode, "低性能模式未恢复");
         Assert(loaded.AccentColor == "#8764B8", "强调色未恢复");
         Assert(loaded.Hotkey == "Ctrl+Alt+D", "快捷键未恢复");
         Assert(loaded.HasCompletedFirstRun, "首次运行状态未恢复");
