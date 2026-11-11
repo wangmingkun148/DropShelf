@@ -96,6 +96,8 @@ public partial class ShelfWindow
             return;
         }
 
+        // 出场还没播完就关闭：从当前的大小和透明度接着退出。
+        StopPop();
         var duration = ShelfMotion.CloseDuration;
         var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
         CacheSurface();
@@ -120,6 +122,7 @@ public partial class ShelfWindow
     private void AnimateIn(POINT cursor)
     {
         StopSlide();
+        StopPop();
         if (!ShelfMotion.Enabled)
         {
             Surface.BeginAnimation(OpacityProperty, null);
@@ -142,16 +145,35 @@ public partial class ShelfWindow
                 () => WindowPlacement.KeepInWorkArea(this));
         }
 
+        // 淡入和放大与滑入用同一种时钟逐帧推进，第一帧耽搁时三者一起从头开始，见 FrameClock。
         CacheSurface();
-        Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = MotionEase });
-        var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
-        scale.Completed += (_, _) =>
+        Surface.BeginAnimation(OpacityProperty, null);
+        var clock = new FrameClock();
+        void Pose()
         {
+            Surface.Opacity = MotionEase.Ease(Math.Min(1, clock.Elapsed / motion.FadeDuration));
+            SurfaceScale.ScaleX = SurfaceScale.ScaleY = motion.StartScale + (1 - motion.StartScale) * motion.ScaleEase.Ease(Math.Min(1, clock.Elapsed / motion.Duration));
+        }
+        Pose();
+        _popFrame = (_, e) =>
+        {
+            if (!clock.Tick(e)) return;
+            Pose();
+            if (clock.Elapsed < motion.Duration) return;
+            StopPop();
             Surface.CacheMode = null;
             EndOpenTrace("done");
         };
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-        SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+        CompositionTarget.Rendering += _popFrame;
+    }
+
+    private EventHandler? _popFrame;
+
+    private void StopPop()
+    {
+        if (_popFrame is null) return;
+        CompositionTarget.Rendering -= _popFrame;
+        _popFrame = null;
     }
 
     /// <summary>
@@ -172,15 +194,13 @@ public partial class ShelfWindow
         }
 
         MoveWindow(handle, fromX, fromY);
-        var clock = Stopwatch.StartNew();
-        var (x, y, frame) = (fromX, fromY, TimeSpan.Zero);
+        var clock = new FrameClock();
+        var (x, y) = (fromX, fromY);
         _slideFrame = (_, e) =>
         {
-            // 同一帧可能触发多次；取整后位置没变时也不必移动窗口。
-            var time = ((RenderingEventArgs)e).RenderingTime;
-            if (time == frame) return;
-            frame = time;
-            var progress = Math.Min(1, clock.Elapsed.TotalMilliseconds / duration.TotalMilliseconds);
+            // 取整后位置没变时不必移动窗口。
+            if (!clock.Tick(e)) return;
+            var progress = Math.Min(1, clock.Elapsed / duration);
             var eased = ease.Ease(progress);
             var (nextX, nextY) = ((int)Math.Round(fromX + (toX - fromX) * eased), (int)Math.Round(fromY + (toY - fromY) * eased));
             if (nextX != x || nextY != y) MoveWindow(handle, nextX, nextY);
