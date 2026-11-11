@@ -327,30 +327,35 @@ public static class ArchiveService
         return string.IsNullOrWhiteSpace(systemDirectory) ? string.Empty : Path.Combine(systemDirectory, "tar.exe");
     }
 
+    /// <summary>
+    /// 整棵目录树只走一遍：每个文件夹列一次，文件直接写入，子文件夹排队，什么都没有的文件夹留一个空条目。
+    /// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。
+    /// </summary>
     private static void AddDirectory(ZipArchive archive, string directoryPath, HashSet<string> usedEntryNames)
     {
         var rootName = GetAvailableEntryName(new DirectoryInfo(directoryPath).Name, usedEntryNames);
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = false,
-            AttributesToSkip = FileAttributes.ReparsePoint,
-            ReturnSpecialDirectories = false
-        };
-
+        var options = new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0, ReturnSpecialDirectories = false };
         var hasEntries = false;
-        foreach (var directory in Directory.EnumerateDirectories(directoryPath, "*", options))
+        var pending = new Stack<(string Path, string Name)>();
+        pending.Push((directoryPath, rootName));
+        while (pending.TryPop(out var current))
         {
-            if (Directory.EnumerateFileSystemEntries(directory).Any()) continue;
-            var relative = Path.GetRelativePath(directoryPath, directory).Replace('\\', '/');
-            archive.CreateEntry($"{rootName}/{relative}/");
-            hasEntries = true;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(directoryPath, "*", options))
-        {
-            var relative = Path.GetRelativePath(directoryPath, file).Replace('\\', '/');
-            archive.CreateEntryFromFile(file, $"{rootName}/{relative}", CompressionLevel.Optimal);
+            var empty = true;
+            foreach (var entry in new DirectoryInfo(current.Path).EnumerateFileSystemInfos("*", options))
+            {
+                empty = false;
+                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                var name = $"{current.Name}/{entry.Name}";
+                if (entry.Attributes.HasFlag(FileAttributes.Directory))
+                {
+                    pending.Push((entry.FullName, name));
+                    continue;
+                }
+                archive.CreateEntryFromFile(entry.FullName, name, CompressionLevel.Optimal);
+                hasEntries = true;
+            }
+            if (!empty || ReferenceEquals(current.Path, directoryPath)) continue;
+            archive.CreateEntry(current.Name + "/");
             hasEntries = true;
         }
 

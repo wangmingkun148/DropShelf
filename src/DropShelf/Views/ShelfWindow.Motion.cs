@@ -71,6 +71,12 @@ public partial class ShelfWindow
         public ContentControl Card { get; } = card;
         public LocalCardPose Home { get; } = home;
 
+        /// <summary>
+        /// 运动期间把牌缓存为位图：牌上的缩略图按高质量缩放，牌的大小每帧在变时要在处理器上重新缩放一遍，
+        /// 缓存后每帧只是把这张位图摆到新的位置和大小。回到原位时去掉，见 RestCards。
+        /// </summary>
+        public void Cache(double scale) => Card.CacheMode ??= new BitmapCache(scale);
+
         /// <summary>按中心摆放：牌在画布上的位置不变，平移量把中心移到目标点，旋转和缩放都绕中心。</summary>
         public void Pose(LocalCardPose pose)
         {
@@ -99,7 +105,11 @@ public partial class ShelfWindow
     /// <summary>堆叠里的牌都回到原位。</summary>
     private void RestCards()
     {
-        foreach (var card in StackCards) card.Pose(card.Home);
+        foreach (var card in StackCards)
+        {
+            card.Pose(card.Home);
+            card.Card.CacheMode = null;
+        }
     }
 
     /// <summary>
@@ -164,9 +174,11 @@ public partial class ShelfWindow
         var count = ViewModel.Count;
         BeginLandingMark(count - incoming);
         var end = TimeSpan.Zero;
+        var cacheScale = CacheScale.For(this);
         for (var i = 0; i < shown; i++)
         {
             var card = cards[i];
+            card.Cache(cacheScale);
             if (i < incoming)
             {
                 var delay = LandStagger * (incoming - 1 - i);
@@ -320,6 +332,7 @@ public partial class ShelfWindow
         for (var i = 0; i < going.Count; i++)
         {
             var card = going[i];
+            card.Cache(CacheScale.For(this));
             TakeDimmed(card.Card);
             var (start, side, home) = (card.Card.Opacity, i % 2 == 0 ? -1 : 1, card.Home);
             Tween(TimeSpan.Zero, RemoveDuration, t =>
@@ -342,6 +355,7 @@ public partial class ShelfWindow
             var then = Array.IndexOf(shown, item);
             if (then == i) continue;
             var from = then > i ? cards[then].Home : cards[^1].Home with { Y = cards[^1].Home.Y + 6, Scale = 0.94, Opacity = 0 };
+            card.Cache(CacheScale.For(this));
             Tween(TimeSpan.Zero, CloseUpDuration, t => card.Pose(LocalCardPose.Lerp(from, card.Home, t)));
             moved = true;
         }
@@ -492,9 +506,13 @@ public partial class ShelfWindow
     /// <summary>牌面在格子顶部居中，这是它的中心。</summary>
     private static readonly WpfPoint TileCardCenter = new(CardGridPanel.SlotWidth / 2, CardGridPanel.CardHeight / 2);
 
-    /// <summary>平铺里的一张牌：以牌面中心为原点缩放、转动，再平移；名字跟着一起动。</summary>
+    /// <summary>
+    /// 平铺里的一张牌：以牌面中心为原点缩放、转动，再平移；名字跟着一起动。
+    /// 和堆叠里的牌一样，运动期间缓存为位图，免得每帧重新缩放缩略图，ResetTile 时去掉。
+    /// </summary>
     private static Action<LocalCardPose> PoseTile(ListBoxItem tile)
     {
+        tile.CacheMode = new BitmapCache(CacheScale.For(tile));
         var (scale, turn, shift) = (new ScaleTransform(), new RotateTransform(), new TranslateTransform());
         tile.RenderTransformOrigin = new WpfPoint(TileCardCenter.X / CardGridPanel.SlotWidth, TileCardCenter.Y / CardGridPanel.SlotHeight);
         tile.RenderTransform = new TransformGroup { Children = { scale, turn, shift } };
@@ -510,7 +528,7 @@ public partial class ShelfWindow
 
     private static void ResetTile(ListBoxItem tile)
     {
-        foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty }) tile.ClearValue(property);
+        foreach (var property in new[] { RenderTransformProperty, RenderTransformOriginProperty, OpacityProperty, CacheModeProperty }) tile.ClearValue(property);
         if (FindNamed(tile, "TileName") is { } name) name.ClearValue(OpacityProperty);
     }
 
