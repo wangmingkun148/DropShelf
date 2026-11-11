@@ -49,6 +49,15 @@ internal sealed class FrameTrace
     /// <summary>再记一帧后写入日志：结束后的第一帧通常是去掉缓存后直接绘制，也值得一看。</summary>
     public void End(string ending) => _ending ??= ending;
 
+    /// <summary>
+    /// 系统拖放的回调（拖入、悬停、离开）由系统直接调进界面线程，不经过调度器，上面的钩子看不到：
+    /// 晃动呼出时它们正好压在出场动画上，不算进去就会显得界面线程不忙。在回调末尾调用，把从 since 起用的时间也算作忙。
+    /// </summary>
+    public void Outside(long since)
+    {
+        if (_depth == 0) _busyTicks += Stopwatch.GetTimestamp() - since;
+    }
+
     private void OnOperationStarted(object? sender, DispatcherHookEventArgs e)
     {
         if (_depth++ == 0) _operationStart = Stopwatch.GetTimestamp();
