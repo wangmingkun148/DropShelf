@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -40,6 +41,8 @@ public partial class ShelfWindow
     private readonly List<MotionTween> _tweens = [];
     private bool _motionHooked;
     private FrameClock _motionClock = new();
+    /// <summary>诊断日志打开时记下这一段动画的帧间隔，名字是开始它的方法和当时的项目数，见 FrameTrace。</summary>
+    private FrameTrace? _motionTrace;
     private Action? _motionCleanup;
     private StackCard[]? _stackCards;
     /// <summary>松手后堆叠接着拖入时摊开的样子，等新牌落进中间再合拢；只在松手到落下动画开始之间有值。</summary>
@@ -533,11 +536,15 @@ public partial class ShelfWindow
     }
 
     /// <summary>逐帧调用 apply，参数是缓动后的进度 0–1；delay 之前停在起点。</summary>
-    private void Tween(TimeSpan delay, TimeSpan duration, Action<double> apply, Action? completed = null)
+    private void Tween(TimeSpan delay, TimeSpan duration, Action<double> apply, Action? completed = null, [CallerMemberName] string caller = "")
     {
         apply(0);
         // 没有动画在播时时钟从头开始，新动画从它的第一帧起算。
-        if (!_motionHooked) _motionClock = new FrameClock();
+        if (!_motionHooked)
+        {
+            _motionClock = new FrameClock();
+            _motionTrace = FrameTrace.Start($"Shelf {caller} {ViewModel.Count}");
+        }
         _tweens.Add(new MotionTween(_motionClock.Elapsed, delay, duration, apply, completed));
         if (_motionHooked) return;
         _motionHooked = true;
@@ -607,6 +614,8 @@ public partial class ShelfWindow
         _tweens.Clear();
         if (!_motionHooked) return;
         _motionHooked = false;
+        _motionTrace?.End(_closing ? "closing" : "end");
+        _motionTrace = null;
         CompositionTarget.Rendering -= OnMotionFrame;
     }
 
