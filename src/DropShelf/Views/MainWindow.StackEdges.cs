@@ -96,7 +96,9 @@ public partial class MainWindow
         StackLayer.Opacity = 1;
         StackLayer.IsHitTestVisible = false;
         StackLayer.Visibility = Visibility.Visible;
-        ShowFace(_tileFace, flip.Tile, flip.Home.Size);
+        // 翻到侧立时这张卡面会被拉大，按它最大时的倍数画，放大时不发虚；其余几张只会缩小。
+        var reach = Math.Max(flip.Edge.Width / flip.Home.Width, flip.Edge.Height * FlipLift / flip.Home.Height);
+        ShowFace(_tileFace, flip.Tile, flip.Home.Size, Math.Max(1, reach));
         Canvas.SetLeft(_tileFace, flip.Home.X);
         Canvas.SetTop(_tileFace, flip.Home.Y);
         flip.Tile.Opacity = 0;
@@ -119,12 +121,13 @@ public partial class MainWindow
     /// 卡面按卡片原来的大小画一次，缓存为位图，之后每帧只改它外面的变换。
     /// 不缓存的话，画刷里的内容每一帧都要重新画一遍：卡片上有半透明的大图标、裁剪和几行字，四张卡每帧各画一次。
     /// </summary>
-    private void ShowFace(Border face, Controls.PageTile tile, Size size)
+    private void ShowFace(Border face, Controls.PageTile tile, Size size, double reach = 1)
     {
         face.Width = size.Width;
         face.Height = size.Height;
         face.Background = TileFace(tile);
-        face.CacheMode = new BitmapCache(CacheScale.For(this));
+        // 低性能模式下照旧每个逻辑像素一个像素，放大时略微模糊。
+        face.CacheMode = new BitmapCache(CacheScale.For(this) * (CacheScale.Reduced ? 1 : reach));
     }
 
     /// <summary>解除临时卡面对模板的引用，释放缓存。</summary>
