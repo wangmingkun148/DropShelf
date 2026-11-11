@@ -179,6 +179,18 @@ internal static partial class Program
         }
     }
 
+    /// <summary>处理消息直到条件成立，最多等 timeout 毫秒。</summary>
+    private static bool PumpUntil(Func<bool> condition, int timeout = 1000)
+    {
+        var end = Environment.TickCount64 + timeout;
+        while (!condition())
+        {
+            if (Environment.TickCount64 >= end) return false;
+            Pump(10);
+        }
+        return true;
+    }
+
     /// <summary>剪贴板工具会在内容一变就打开剪贴板去读，这时读到的可能是空的；稍等再读几次。</summary>
     private static string ReadClipboardText(string expected)
     {
