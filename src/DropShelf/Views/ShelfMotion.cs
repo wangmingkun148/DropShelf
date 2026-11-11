@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Media.Animation;
 using DropShelf.Interop;
 using DropShelf.Models;
+using DropShelf.Services;
 
 namespace DropShelf.Views;
 
@@ -16,11 +17,12 @@ internal static class ShelfMotion
     public static bool Enabled => SystemParameters.ClientAreaAnimation;
 
     /// <summary>
-    /// 关闭了动画效果时让这段动画在第一帧就走到终点（延迟一并取消），照常触发 Completed，收尾的代码不用另写一套；打开时原样返回。
+    /// 关闭了动画效果时让这段动画在第一帧就走到终点（延迟一并取消），照常触发 Completed，收尾的代码不用另写一套；
+    /// 打开时原样返回，低性能模式下在高刷新率屏幕上按一半帧率计算，见 LowPerformance.Pace。
     /// </summary>
     public static T Gate<T>(T timeline) where T : Timeline
     {
-        if (Enabled) return timeline;
+        if (Enabled) return LowPerformance.Pace(timeline);
         if (timeline.BeginTime is not null) timeline.BeginTime = TimeSpan.Zero;
         timeline.SpeedRatio = 1e6;
         return timeline;

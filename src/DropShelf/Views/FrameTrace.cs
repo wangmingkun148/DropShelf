@@ -63,7 +63,8 @@ internal sealed class FrameTrace
     private void OnFrame(object? sender, EventArgs e)
     {
         var time = ((RenderingEventArgs)e).RenderingTime;
-        if (_last == time) return;
+        // 低性能模式下动画隔一帧更新，只记更新了的帧，间隔反映实际的节奏。
+        if (_last == time || LowPerformance.Skip(time)) return;
         var busy = Stopwatch.GetElapsedTime(0, _busyTicks - _busyAtFrame).TotalMilliseconds;
         _busyAtFrame = _busyTicks;
         if (_last is { } last)
@@ -98,9 +99,6 @@ internal sealed class FrameTrace
         var power = NativeMethods.GetSystemPowerStatus(out var status)
             ? $"{(status.ACLineStatus == 1 ? "交流" : status.ACLineStatus == 0 ? "电池" : "未知")}{(status.SystemStatusFlag == 1 ? "+节电" : "")}"
             : "未知";
-        var screen = NativeMethods.GetDC(IntPtr.Zero);
-        var refresh = screen == IntPtr.Zero ? 0 : NativeMethods.GetDeviceCaps(screen, NativeMethods.VREFRESH);
-        if (screen != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, screen);
-        return $"[电源 {power} 性能 {(PowerQoS.IsHigh ? "正常" : "系统决定")} 渲染 {RenderCapability.Tier >> 16} {refresh}Hz]";
+        return $"[电源 {power} 性能 {(PowerQoS.IsHigh ? "正常" : "系统决定")} 渲染 {RenderCapability.Tier >> 16} {LowPerformance.RefreshRate()}Hz{(LowPerformance.Enabled ? " 低性能" : "")}]";
     }
 }

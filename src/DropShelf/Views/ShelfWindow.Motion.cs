@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using DropShelf.Interop;
 using DropShelf.Models;
+using DropShelf.Services;
 using DropShelf.Views.Controls;
 using WpfPoint = System.Windows.Point;
 using WpfSize = System.Windows.Size;
@@ -49,7 +50,7 @@ public partial class ShelfWindow
     /// 正在滑入、退出，内容里有动画，或正在读取拖入的内容（读完紧接着就是落下的动画）：
     /// 这时界面线程不适合再做别的重活，比如创建备用窗口、回收内存。
     /// </summary>
-    public bool IsAnimating => IsSliding || _motionHooked || _receiving > 0 || _closing;
+    public bool IsAnimating => IsSliding || _entering || _motionHooked || _receiving > 0 || _closing;
 
     /// <summary>一段逐帧动画：从 Start 起等 Delay，再在 Duration 内推进。</summary>
     private sealed record MotionTween(long Start, TimeSpan Delay, TimeSpan Duration, Action<double> Apply, Action? Completed);
@@ -531,7 +532,7 @@ public partial class ShelfWindow
     private void OnMotionFrame(object? sender, EventArgs e)
     {
         var time = ((RenderingEventArgs)e).RenderingTime;
-        if (time == _motionFrameTime) return;
+        if (time == _motionFrameTime || LowPerformance.Skip(time)) return;
         _motionFrameTime = time;
         var now = Stopwatch.GetTimestamp();
         for (var i = 0; i < _tweens.Count; i++)

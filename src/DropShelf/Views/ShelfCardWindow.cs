@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using DropShelf.Interop;
+using DropShelf.Services;
 
 namespace DropShelf.Views;
 
@@ -209,6 +210,8 @@ internal sealed class ShelfCardWindow : Window
                 Take(ref _shown)?.Invoke();
                 break;
             case Stage.Playing:
+                // 低性能模式下高刷新率屏幕上隔一帧更新，见 LowPerformance.Skip。
+                if (LowPerformance.Skip(time)) return;
                 var ms = _clock.Elapsed.TotalMilliseconds;
                 Apply(_motion.At(ms));
                 if (ms < _motion.Duration) return;

@@ -128,7 +128,7 @@ public partial class MainWindow
         face.Height = size.Height;
         face.Background = TileFace(tile);
         // 低性能模式下照旧每个逻辑像素一个像素，放大时略微模糊。
-        face.CacheMode = new BitmapCache(CacheScale.For(this) * (CacheScale.Reduced ? 1 : reach));
+        face.CacheMode = new BitmapCache(CacheScale.For(this) * (LowPerformance.Enabled ? 1 : reach));
     }
 
     /// <summary>解除临时卡面对模板的引用，释放缓存。</summary>
