@@ -22,6 +22,8 @@ public sealed class AppController : IDisposable
     private GestureService? _gestures;
     private ForegroundAppWatcher? _appWatcher;
     private ProbeWindow? _probe;
+    /// <summary>诊断日志用：识别到手势的时刻，记下探针多久后确认正在拖放。</summary>
+    private long _gestureAt;
     private MainWindow? _mainWindow;
     private bool _showingMainWindow;
     private OnboardingWindow? _onboarding;
@@ -77,6 +79,7 @@ public sealed class AppController : IDisposable
         _probe = new ProbeWindow();
         _probe.DragDetected += (_, _) =>
         {
+            LogService.Trace($"探针确认正在拖放，距识别到手势 {System.Diagnostics.Stopwatch.GetElapsedTime(_gestureAt).TotalMilliseconds:F0}ms");
             Shelves.OpenAt(WindowPlacement.GetCursor(), openedByGesture: true, activate: false, _pendingEdge);
             if (_pendingEdge != ScreenEdge.None) _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);
         };
@@ -304,6 +307,7 @@ public sealed class AppController : IDisposable
     {
         if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"识别到晃动 ({e.X}, {e.Y})，显示探针窗口");
+        _gestureAt = System.Diagnostics.Stopwatch.GetTimestamp();
         _pendingEdge = ScreenEdge.None;
         _probe?.ShowAt(new POINT(e.X, e.Y));
     }
@@ -312,6 +316,7 @@ public sealed class AppController : IDisposable
     {
         if (_exiting || IsBlockedAt(e)) return;
         LogService.Trace($"在屏幕边缘停留 ({e.X}, {e.Y}, {e.Edge})，显示探针窗口");
+        _gestureAt = System.Diagnostics.Stopwatch.GetTimestamp();
         _pendingEdge = e.Edge;
         _probe?.ShowAt(new POINT(e.X, e.Y));
         _dispatcher.BeginInvoke(NativeMethods.NudgeMouse, DispatcherPriority.Background);

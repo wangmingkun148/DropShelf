@@ -15,6 +15,9 @@ internal static class PowerQoS
     private static readonly HashSet<object> Holders = [];
     private static bool _high;
 
+    /// <summary>当前是否声明了正常性能，供诊断日志使用。</summary>
+    public static bool IsHigh => _high;
+
     /// <summary>窗口显示期间保持正常性能，隐藏或关闭后释放。</summary>
     public static void Track(Window window)
     {

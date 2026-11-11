@@ -26,10 +26,13 @@ public partial class ShelfWindow
     {
         ShowActivated = activate;
         var wasVisible = IsVisible;
+        var trace = wasVisible ? null : FrameTrace.Start($"Shelf open {entrance.Kind}");
+        var started = Stopwatch.GetTimestamp();
         // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
         if (wasVisible) StopSlide();
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
+        trace?.Mark("show", started);
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (activate)
         {
@@ -39,8 +42,20 @@ public partial class ShelfWindow
         if (!wasVisible)
         {
             _entrance = entrance;
+            _openTrace = trace;
+            var animating = Stopwatch.GetTimestamp();
             AnimateIn(center);
+            trace?.Mark("animate", animating);
         }
+    }
+
+    /// <summary>诊断日志打开时记下出场动画的帧，见 FrameTrace。</summary>
+    private FrameTrace? _openTrace;
+
+    private void EndOpenTrace(string ending)
+    {
+        _openTrace?.End(ending);
+        _openTrace = null;
     }
 
     public void CloseAnimated()
@@ -84,6 +99,7 @@ public partial class ShelfWindow
         {
             Surface.BeginAnimation(OpacityProperty, null);
             Surface.Opacity = 1;
+            EndOpenTrace("instant");
             return;
         }
 
@@ -104,7 +120,11 @@ public partial class ShelfWindow
         CacheSurface();
         Surface.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, motion.FadeDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
         var scale = new DoubleAnimation(motion.StartScale, 1, motion.Duration) { EasingFunction = motion.ScaleEase };
-        scale.Completed += (_, _) => Surface.CacheMode = null;
+        scale.Completed += (_, _) =>
+        {
+            Surface.CacheMode = null;
+            EndOpenTrace("done");
+        };
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
         SurfaceScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
     }

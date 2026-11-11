@@ -435,6 +435,33 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetCurrentProcess();
 
+    /// <summary>诊断日志用：ACLineStatus 0 是电池、1 是交流电；SystemStatusFlag 1 表示节电模式已打开。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SystemPowerStatus
+    {
+        public byte ACLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte SystemStatusFlag;
+        public int BatteryLifeTime;
+        public int BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
+
+    public const int VREFRESH = 116;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDC(IntPtr window);
+
+    [DllImport("user32.dll")]
+    public static extern int ReleaseDC(IntPtr window, IntPtr dc);
+
+    [DllImport("gdi32.dll")]
+    public static extern int GetDeviceCaps(IntPtr dc, int index);
+
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetCurrentThread();
 
