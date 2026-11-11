@@ -183,7 +183,8 @@ internal static partial class Program
         File.WriteAllText(b, "b");
         var result = await QuickActionService.ExecuteAsync(new QuickActionRequest(QuickActions.Get(QuickActionType.CopyFullPath), [a, b], false, IntPtr.Zero));
         Assert(result.Succeeded, result.Message);
-        Assert(System.Windows.Clipboard.GetText() == a + Environment.NewLine + b, "剪贴板中的路径不正确");
+        var text = ReadClipboardText(a + Environment.NewLine + b);
+        Assert(text == a + Environment.NewLine + b, $"剪贴板中的路径不正确，读到的是“{text}”");
     }
 
     private static async Task TestMoveToAction()

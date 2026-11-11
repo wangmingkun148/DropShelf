@@ -179,6 +179,19 @@ internal static partial class Program
         }
     }
 
+    /// <summary>剪贴板工具会在内容一变就打开剪贴板去读，这时读到的可能是空的；稍等再读几次。</summary>
+    private static string ReadClipboardText(string expected)
+    {
+        var text = string.Empty;
+        for (var attempt = 0; attempt < 10 && text != expected; attempt++)
+        {
+            if (attempt > 0) Pump(50);
+            try { text = System.Windows.Clipboard.GetText(); }
+            catch (System.Runtime.InteropServices.COMException) { }
+        }
+        return text;
+    }
+
     private static void Run(string name, Action test) => Run(name, () =>
     {
         test();

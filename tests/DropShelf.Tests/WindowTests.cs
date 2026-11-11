@@ -224,8 +224,16 @@ internal static partial class Program
             edges.Single(edge => Equals(edge.Tag, page)).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             if (frontLayer.Visibility == Visibility.Visible)
             {
-                var image = frontLayer.Children.OfType<System.Windows.Controls.Image>().Single();
-                var bitmap = (System.Windows.Media.Imaging.BitmapSource)image.Source;
+                // 新卡面是目标页面的实时画面；把同一个画刷单独画一遍，确认上面有设置 UI。
+                var face = frontLayer.Children.OfType<System.Windows.Shapes.Rectangle>().Single();
+                Assert(face.Fill is System.Windows.Media.VisualBrush { Visual: System.Windows.Media.Visual content } &&
+                       content.IsDescendantOf((DependencyObject)window.FindName(page + "Host")!), "新卡面应是目标页面的实时画面");
+                var probe = new System.Windows.Shapes.Rectangle { Width = face.Width, Height = face.Height, Fill = face.Fill };
+                probe.Measure(new System.Windows.Size(face.Width, face.Height));
+                probe.Arrange(new Rect(0, 0, face.Width, face.Height));
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(face.Width), (int)Math.Ceiling(face.Height),
+                    96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                bitmap.Render(probe);
                 var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
                 bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
                 Assert(Enumerable.Range(0, pixels.Length / 4).Count(i => pixels[i * 4 + 3] > 127) > 50,
