@@ -55,6 +55,7 @@ internal static partial class Program
         Run("正式版本号已写入程序", TestProductVersion);
         Run("界面文字中英文齐全", TestStringTables);
         Run("切换语言后文字随之更新", TestLanguageSwitch);
+        Run("语言包按原文模板提供译文", TestLanguagePacks);
 
         // 手势识别
         Run("均衡手势可识别快速左右晃动", TestBalancedGestureTriggers);

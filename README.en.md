@@ -77,7 +77,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ### Settings and appearance
 - Light (ivory background), Dark or System theme; the accent color follows Windows or can be one of eight colors.
-- English and Simplified Chinese interface, following the system language by default.
+- English and Simplified Chinese interface, following the system language by default. Other languages can be added as language packs (a JSON file each) without changing the program; see [docs/translating.md](docs/translating.md).
 - Settings apply immediately and are saved automatically.
 - A tutorial is shown on first run and can be viewed again from General.
 
@@ -103,6 +103,7 @@ DropShelf installs to `%LOCALAPPDATA%\Programs\DropShelf` without admin rights; 
 - Settings: `%LOCALAPPDATA%\DropShelf\settings.json`
 - Recently closed shelves: `%LOCALAPPDATA%\DropShelf\history.json`
 - Logs: `%LOCALAPPDATA%\DropShelf\Logs` (kept for 14 days)
+- Language packs: `%LOCALAPPDATA%\DropShelf\Languages`, or a `Languages` folder next to the program
 
 ## System requirements
 

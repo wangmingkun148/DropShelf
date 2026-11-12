@@ -756,6 +756,13 @@
                                             <ListBoxItem Content="English" Tag="{x:Static models:AppLanguage.English}" />
                                         </ListBox>
                                     </controls:SettingsCard>
+                                    <!-- 找到语言包时才显示：用别的语言显示界面 -->
+                                    <controls:SettingsCard Icon="{StaticResource Glyph.Language}" Header="{l:Loc LanguagePackHeader}"
+                                                           Description="{l:Loc LanguagePackDescription}"
+                                                           Visibility="{Binding HasLanguagePacks, Converter={StaticResource BoolToVisibility}}">
+                                        <ListBox x:Name="LanguagePackSelector" Style="{StaticResource SegmentedStyle}" ItemsSource="{Binding LanguagePackOptions}"
+                                                 DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding LanguagePack}" />
+                                    </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc StartWithWindows}" Description="{Binding StartupDescription}">
                                         <CheckBox x:Name="StartupEnabledBox" Style="{StaticResource ToggleSwitchStyle}" IsChecked="{Binding StartWithWindows}" />
                                     </controls:SettingsCard>

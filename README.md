@@ -78,7 +78,7 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 
 ### 设置与外观
 - 浅色（象牙白背景）、深色或跟随系统主题；强调色可跟随 Windows 或从八种颜色中选择。
-- 界面支持简体中文和英文，默认跟随系统语言。
+- 界面支持简体中文和英文，默认跟随系统语言；其他语言可以用语言包（一个 JSON 文件），不用改程序，做法见 [docs/translating.md](docs/translating.md)。
 - 设置修改后立即生效并自动保存。
 - 在概览页按住设置卡片左右拖动，卡片会跟着鼠标翻开；在设置页的空白处左右拖动可以翻回概览。拖过一半或快速甩动后松手就翻过去，否则退回原样。
 - 设置页是翻过来的那张卡片：其余几张卡片翻牌时收到它底下，露出三条边；鼠标移到边上会多露出一截，显示是哪一页。
@@ -108,6 +108,7 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 - 设置：`%LOCALAPPDATA%\DropShelf\settings.json`
 - 最近关闭的置物架：`%LOCALAPPDATA%\DropShelf\history.json`
 - 运行日志：`%LOCALAPPDATA%\DropShelf\Logs`（保留 14 天）
+- 语言包：`%LOCALAPPDATA%\DropShelf\Languages`，或程序所在文件夹里的 `Languages`
 
 ## 系统要求
 
@@ -145,7 +146,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 - `src/DropShelf/Shelves/ShelfManager.cs`：置物架的创建、复用与关闭。
 - `src/DropShelf/Views`：置物架、设置、教程等窗口。主窗口和置物架的代码按功能分在 `MainWindow.*.cs`、`ShelfWindow.*.cs` 里，如翻牌、状态栏、拖入、拖出。
 - `src/DropShelf/Services`：拖入拖出、快速操作、压缩解压、历史记录、剪贴板、主题、托盘、快捷键等。
-- `src/DropShelf/Localization`：中英文界面文字。
+- `src/DropShelf/Localization`：中英文界面文字，以及读取语言包、导出翻译模板。
 - `src/DropShelf/Themes`：颜色、图标与控件样式。
 - `src/DropShelf/Interop`：Win32、DWM 与 Shell 接口。
 - `tests/DropShelf.Tests`：自动化测试。

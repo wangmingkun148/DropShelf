@@ -5,12 +5,25 @@ using DropShelf.Services;
 namespace DropShelf.Localization;
 
 /// <summary>
-/// 界面文字。每一项同时写出中文和英文，按 <see cref="LanguageService"/> 的当前语言返回。
+/// 界面文字。每一项同时写出中文和英文，按 <see cref="LanguageService"/> 的当前语言返回；
+/// 选了语言包时按原文模板找译文，没有译文的显示原文，见 <see cref="LanguagePack"/>。
 /// 代码直接读取属性；XAML 用 {l:Loc 属性名} 引用，切换语言后自动刷新。
 /// </summary>
 public static class Strings
 {
-    private static string T(string chinese, string english) => LanguageService.IsChinese ? chinese : english;
+    /// <summary>
+    /// 两个参数是 <see cref="LocalizedFormat"/>：带参数的文字（$"…{count}…"）由编译器连同模板和参数一起交过来，
+    /// 语言包才能按模板找到译文、把参数填进去。调用的写法和普通字符串一样。
+    /// </summary>
+    private static string T(LocalizedFormat chinese, LocalizedFormat english)
+    {
+        Collector?.Invoke(chinese, english);
+        if (LanguageService.Pack is { } pack) return pack.Translate(chinese, english);
+        return LanguageService.IsChinese ? chinese.ToString() : english.ToString();
+    }
+
+    /// <summary>导出翻译模板时用来收集每一条文字的原文，见 <see cref="LanguageTemplate"/>；平时为 null。</summary>
+    internal static Action<LocalizedFormat, LocalizedFormat>? Collector;
 
     private static string Count(int count, string one, string many) => count == 1 ? $"1 {one}" : $"{count} {many}";
 
@@ -235,6 +248,12 @@ public static class Strings
     public static string CaptionMaximize => T("最大化", "Maximize");
     public static string CaptionClose => T("关闭", "Close");
 
+    public static string LanguagePackHeader => T("语言包", "Language pack");
+    public static string LanguagePackDescription => T("用语言包里的译文显示界面，没有译文的地方显示原文", "Shows the interface in a language pack's translation; untranslated text stays as it is");
+    public static string LanguagePackNone => T("不使用", "None");
+    public static string ExportLanguageTemplate => T("导出翻译模板…", "Export template…");
+    public static string LanguageTemplateFilter => T("语言包|*.json", "Language pack|*.json");
+    public static string LanguageTemplateFailed => T("没能写出翻译模板，请换个位置重试", "Couldn't write the template. Try another location");
     public static string CheckForUpdates => T("检查更新", "Check for updates");
     public static string UpdateIdle => T("点了才联网，只访问 GitHub 上的发布列表；不自动下载", "Goes online only when you click, and only to the release list on GitHub. Nothing is downloaded");
     public static string UpdateChecking => T("正在检查…", "Checking…");

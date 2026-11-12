@@ -33,6 +33,9 @@ public sealed class AppSettings
     public string? AccentColor { get; set; }
 
     public AppLanguage Language { get; set; } = AppLanguage.System;
+
+    /// <summary>选用的语言包（文件名，不含扩展名）；为空时不使用，界面按 <see cref="Language"/> 显示中文或英文。</summary>
+    public string? LanguagePack { get; set; }
     public bool StartWithWindows { get; set; }
     public QuickShelfSize QuickShelfSize { get; set; } = QuickShelfSize.Medium;
 
@@ -177,6 +180,7 @@ public sealed class SettingsService
             settings.ShakeSensitivity = ShakeSensitivities.FromLegacy(legacySensitivity);
         settings.MouseGestureSensitivity = null;
         settings.ShakeSensitivity = ShakeSensitivities.Clamp(settings.ShakeSensitivity);
+        settings.LanguagePack = string.IsNullOrWhiteSpace(settings.LanguagePack) ? null : settings.LanguagePack.Trim();
         if (!Enum.IsDefined(settings.AutoOpenTrigger))
             settings.AutoOpenTrigger = AutoOpenTrigger.Both;
         if (!Enum.IsDefined(settings.EdgeDwell))

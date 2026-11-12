@@ -12,6 +12,16 @@ public static class LanguageService
     public static AppLanguage Mode => _mode;
     public static bool IsChinese { get; private set; } = ResolveIsChinese(AppLanguage.System, CultureInfo.CurrentUICulture);
 
+    /// <summary>选用的语言包；有的话界面按它的译文显示，没有译文的条目显示原文。</summary>
+    public static Localization.LanguagePack? Pack { get; private set; }
+
+    public static void SetPack(Localization.LanguagePack? pack)
+    {
+        if (ReferenceEquals(pack, Pack)) return;
+        Pack = pack;
+        LanguageChanged?.Invoke(null, EventArgs.Empty);
+    }
+
     public static void SetMode(AppLanguage mode)
     {
         _mode = mode;

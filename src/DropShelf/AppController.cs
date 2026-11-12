@@ -54,11 +54,17 @@ public sealed class AppController : IDisposable
     public bool IsHotkeyRegistered { get; private set; }
     public string SettingsPath => _settingsService.SettingsPath;
 
+    /// <summary>用户放语言包的文件夹：和设置文件在同一个文件夹里。</summary>
+    public string LanguagePackDirectory =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(SettingsPath) ?? AppContext.BaseDirectory, Localization.LanguagePacks.FolderName);
+
     public event EventHandler? SettingsChanged;
 
     public void Start(bool startInBackground)
     {
         LanguageService.SetMode(_settings.Language);
+        Localization.LanguagePacks.Reload(LanguagePackDirectory);
+        LanguageService.SetPack(Localization.LanguagePacks.Find(_settings.LanguagePack));
         ThemeService.Initialize(_settings.Theme, _settings.AccentColor);
         LowPerformance.Mode = _settings.PerformanceMode;
         LogService.CleanupOldLogs();
@@ -278,9 +284,10 @@ public sealed class AppController : IDisposable
     {
         if (previous.Theme != current.Theme || previous.AccentColor != current.AccentColor)
             ThemeService.SetMode(current.Theme, current.AccentColor);
-        if (previous.Language != current.Language)
+        if (previous.Language != current.Language || previous.LanguagePack != current.LanguagePack)
         {
             LanguageService.SetMode(current.Language);
+            LanguageService.SetPack(Localization.LanguagePacks.Find(current.LanguagePack));
             _tray?.RefreshText();
         }
         if (_gestures is not null)
