@@ -1424,25 +1424,38 @@
                             <TextBlock Text="{l:Loc CalibrationIntro}" Style="{StaticResource BodyTextStyle}" FontSize="13" Margin="0,10,0,0"
                                        Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                            <!-- 练习区：按下后那张“文件”跟着光标走，松手弹回 -->
-                            <Border x:Name="CalibrationPad" Height="170" Margin="0,16,0,0" CornerRadius="8" ClipToBounds="True" Cursor="Hand"
-                                    Background="{DynamicResource ControlAltBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
+                            <!-- 练习区是一小块牌桌，那张“文件”是一张竖版牌：按下后跟着光标走，松手弹回 -->
+                            <Border x:Name="CalibrationPad" Height="170" Margin="0,16,0,0" CornerRadius="{StaticResource CardCornerRadius}"
+                                    ClipToBounds="True" Cursor="Hand" Background="{DynamicResource TableBrush}"
                                     MouseLeftButtonDown="OnCalibrationPadDown" MouseMove="OnCalibrationPadMove"
                                     MouseLeftButtonUp="OnCalibrationPadUp" LostMouseCapture="OnCalibrationPadLostCapture"
                                     Visibility="{Binding IsPracticing, Converter={StaticResource BoolToVisibility}}">
-                                <Border Width="92" Height="92" CornerRadius="10" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        IsHitTestVisible="False" Background="{DynamicResource ShelfTileBrush}"
-                                        BorderBrush="{DynamicResource ShelfTileBorderBrush}" BorderThickness="1">
-                                    <Border.RenderTransform>
-                                        <TranslateTransform x:Name="CalibrationChipOffset" />
-                                    </Border.RenderTransform>
-                                    <StackPanel VerticalAlignment="Center">
-                                        <TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" FontSize="30" HorizontalAlignment="Center"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
-                                        <TextBlock Text="{l:Loc CalibrationPadHint}" FontSize="11" Margin="4,8,4,0" HorizontalAlignment="Center"
-                                                   TextAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    </StackPanel>
-                                </Border>
+                                <Grid>
+                                    <TextBlock Text="{l:Loc CalibrationPadHint}" FontSize="11" Margin="0,0,0,10" HorizontalAlignment="Center"
+                                               VerticalAlignment="Bottom" IsHitTestVisible="False" Foreground="{DynamicResource TableTextBrush}" Opacity="0.8" />
+                                    <Border Width="72" Height="100" Margin="0,0,0,14" CornerRadius="5" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            IsHitTestVisible="False" Background="{DynamicResource ShelfTileBrush}"
+                                            BorderBrush="{DynamicResource ShelfTileBorderBrush}" BorderThickness="1.2">
+                                        <Border.RenderTransform>
+                                            <TranslateTransform x:Name="CalibrationChipOffset" />
+                                        </Border.RenderTransform>
+                                        <Grid>
+                                            <StackPanel Margin="6,5,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                                <TextBlock Text="1" Style="{StaticResource CardRankTextStyle}" FontSize="18" LineHeight="18" />
+                                                <Path Style="{StaticResource SuitStyle}" Tag="{x:Static models:FileSuit.Document}" Width="6" Height="6" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" FontSize="24" HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            <StackPanel Margin="0,0,6,5" HorizontalAlignment="Right" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5">
+                                                <StackPanel.RenderTransform>
+                                                    <RotateTransform Angle="180" />
+                                                </StackPanel.RenderTransform>
+                                                <TextBlock Text="1" Style="{StaticResource CardRankTextStyle}" FontSize="18" LineHeight="18" />
+                                                <Path Style="{StaticResource SuitStyle}" Tag="{x:Static models:FileSuit.Document}" Width="6" Height="6" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
                             </Border>
 
                             <!-- 结果：滑块上标出建议的位置，下面是这个位置需要晃多远、掉头几次 -->
@@ -1460,27 +1473,30 @@
                                            Margin="0,12,0,0" />
                             </StackPanel>
 
-                            <!-- 进度：三个点，记下一次亮一个 -->
+                            <!-- 进度：三张小牌，记下一次翻开一张：没记下时是虚线空位，记下后是强调色的牌 -->
                             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                                 <StackPanel.Resources>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Width" Value="8" />
-                                        <Setter Property="Height" Value="8" />
-                                        <Setter Property="Margin" Value="0,0,6,0" />
+                                    <Style TargetType="Rectangle">
+                                        <Setter Property="Width" Value="10" />
+                                        <Setter Property="Height" Value="14" />
+                                        <Setter Property="RadiusX" Value="2" />
+                                        <Setter Property="RadiusY" Value="2" />
+                                        <Setter Property="Margin" Value="0,0,5,0" />
                                         <Setter Property="VerticalAlignment" Value="Center" />
-                                        <Setter Property="Fill" Value="{DynamicResource ControlStrongBorderBrush}" />
-                                        <Setter Property="Opacity" Value="0.4" />
+                                        <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
+                                        <Setter Property="StrokeDashArray" Value="2 2" />
                                         <Style.Triggers>
                                             <Trigger Property="IsEnabled" Value="True">
                                                 <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
-                                                <Setter Property="Opacity" Value="1" />
+                                                <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
+                                                <Setter Property="StrokeDashArray" Value="{x:Null}" />
                                             </Trigger>
                                         </Style.Triggers>
                                     </Style>
                                 </StackPanel.Resources>
-                                <Ellipse IsEnabled="{Binding FirstDone}" />
-                                <Ellipse IsEnabled="{Binding SecondDone}" />
-                                <Ellipse IsEnabled="{Binding ThirdDone}" />
+                                <Rectangle IsEnabled="{Binding FirstDone}" />
+                                <Rectangle IsEnabled="{Binding SecondDone}" />
+                                <Rectangle IsEnabled="{Binding ThirdDone}" />
                                 <TextBlock x:Name="CalibrationStatusText" Text="{Binding Status}" FontSize="13" Margin="6,0,0,1" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextSecondaryBrush}" />
                             </StackPanel>
