@@ -78,6 +78,7 @@ internal static partial class Program
         Run("移除后可以按原位撤销", TestRemoveUndo);
         Run("文本与链接可以暂存并去重", TestTextAndLinkEntries);
         Run("堆叠显示最新项目和汇总", TestStackSummary);
+        Run("文件夹显示项目数和大小", TestFolderContents);
         Run("拖出结果按设置移除或保留", TestApplyDragOut);
         Run("拖出结果判定（含资源管理器优化移动）", TestResolveDragOut);
         Run("移动后更新置物架中的路径", TestApplyMoves);

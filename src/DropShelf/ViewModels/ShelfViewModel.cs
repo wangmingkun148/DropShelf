@@ -271,6 +271,7 @@ public sealed class ShelfViewModel : ObservableObject
                 item.TypeName = ShellFileInfo.GetTypeName(entry.Value);
             }
             Items.Add(item);
+            if (facts.IsFolder) _ = MeasureFolderAsync(item);
             existingPaths.Add(entry.Value);
             added++;
         }
@@ -414,6 +415,7 @@ public sealed class ShelfViewModel : ObservableObject
                 Kind = old.Kind,
                 Value = destination,
                 SizeBytes = old.SizeBytes,
+                ChildCount = old.ChildCount,
                 TypeName = old.TypeName,
                 Thumbnail = old.Thumbnail
             };
@@ -670,7 +672,10 @@ public sealed class ShelfViewModel : ObservableObject
                     files++;
                     total += item.SizeBytes ?? 0;
                     break;
-                case ShelfItemKind.Folder: folders++; break;
+                case ShelfItemKind.Folder:
+                    folders++;
+                    total += item.SizeBytes ?? 0;
+                    break;
                 case ShelfItemKind.Text: texts++; break;
                 case ShelfItemKind.Link: links++; break;
             }
@@ -770,6 +775,48 @@ public sealed class ShelfViewModel : ObservableObject
         if (_batchDepth > 0) return;
         if (e.PropertyName is nameof(ShelfItem.Detail) or nameof(ShelfItem.SizeBytes))
             OnPropertyChanged(nameof(StackDetail));
+    }
+
+    /// <summary>同时统计的文件夹不超过两个：一次拖入很多文件夹时不把磁盘占满。</summary>
+    private static readonly SemaphoreSlim FolderMeasuring = new(2);
+
+    /// <summary>
+    /// 在后台统计文件夹里有几项、一共多大，统计完回到界面线程写进项目，说明文字和汇总随之更新。
+    /// 置物架关闭时取消；读不了的文件夹照旧只显示“文件夹”。
+    /// </summary>
+    private async Task MeasureFolderAsync(ShelfItem item)
+    {
+        var cancellationToken = _lifetime.Token;
+        try
+        {
+            await FolderMeasuring.WaitAsync(cancellationToken).ConfigureAwait(false);
+            FolderContents? measured;
+            try
+            {
+                measured = await Task.Run(() => FolderContents.Measure(item.Value, cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                FolderMeasuring.Release();
+            }
+            if (measured is not { } contents) return;
+            void Apply()
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                item.SizeBytes = contents.SizeBytes;
+                item.ChildCount = contents.Children;
+            }
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.CheckAccess()) Apply();
+            else await dispatcher.InvokeAsync(Apply);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("统计文件夹内容失败", exception);
+        }
     }
 
     private async Task LoadThumbnailAsync(ShelfItem item, CancellationToken cancellationToken)

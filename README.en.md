@@ -46,7 +46,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Left, right and top screen edges are supported, with a pause of 0.3, 0.6 or 1 s; edges with the taskbar and edges shared between monitors don't trigger.
 
 ### The shelf
-- When collapsed, it shows a thumbnail stack, the item count and the total size. If it holds both files and text, only the files are dragged out.
+- When collapsed, it shows a thumbnail stack, the item count and the total size. A folder shows how many items it holds and their total size (counted in the background; a folder with a huge number of files shows only the item count). If it holds both files and text, only the files are dragged out.
 - Dropped files fly from where you let go into the stack, or to the start of their own row when the list is open; when you drop several, up to 3 land one after another.
 - The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
@@ -82,7 +82,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ## Privacy and data safety
 
-- Files are recorded by path only and their contents are never read; removing items or clearing a shelf doesn't affect files on disk.
+- Files are recorded by path only and their contents are never read; for a folder, only the number and sizes of the items inside are counted, and none of them is opened; removing items or clearing a shelf doesn't affect files on disk.
 - Temporary attachments and dropped images are cached in the system temp folder and cleaned up after the shelf closes.
 - "Recently closed shelves" records only paths and names of files and folders, and can be cleared in settings.
 - Mouse positions are only used to detect gestures and are never saved.

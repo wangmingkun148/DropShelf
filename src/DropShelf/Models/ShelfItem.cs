@@ -19,6 +19,7 @@ public sealed class ShelfItem : INotifyPropertyChanged
     private ImageSource? _thumbnail;
     private bool _isAvailable = true;
     private long? _sizeBytes;
+    private int? _childCount;
     private string _typeName = string.Empty;
 
     public required string Id { get; init; }
@@ -53,7 +54,12 @@ public sealed class ShelfItem : INotifyPropertyChanged
                 ShelfItemKind.File => SizeBytes is { } size
                     ? string.IsNullOrEmpty(TypeName) ? FormatSize(size) : $"{FormatSize(size)} · {TypeName}"
                     : TypeName,
-                ShelfItemKind.Folder => Strings.Folder,
+                ShelfItemKind.Folder => ChildCount switch
+                {
+                    null => Strings.Folder,
+                    0 => Strings.EmptyFolder,
+                    { } count => SizeBytes is { } total ? $"{Strings.FolderItems(count)} · {FormatSize(total)}" : Strings.FolderItems(count)
+                },
                 ShelfItemKind.Link => Uri.TryCreate(Value, UriKind.Absolute, out var uri) ? uri.Host : Strings.Link,
                 _ => Strings.TextDetail(Value.Length)
             };
@@ -75,6 +81,19 @@ public sealed class ShelfItem : INotifyPropertyChanged
         {
             if (_sizeBytes == value) return;
             _sizeBytes = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Detail));
+        }
+    }
+
+    /// <summary>文件夹第一层有几项；还没统计出来或不是文件夹时为 null。文件夹的 <see cref="SizeBytes"/> 是里面全部文件的大小。</summary>
+    public int? ChildCount
+    {
+        get => _childCount;
+        set
+        {
+            if (_childCount == value) return;
+            _childCount = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(Detail));
         }

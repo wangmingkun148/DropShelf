@@ -127,6 +127,30 @@ internal static partial class Program
         Assert(viewModel.Title == "3 个项目", "标题不正确");
     }
 
+    private static void TestFolderContents()
+    {
+        var folder = CreateFolder("folder-contents");
+        File.WriteAllBytes(Path.Combine(folder, "a.bin"), new byte[1024]);
+        var inner = Directory.CreateDirectory(Path.Combine(folder, "inner")).FullName;
+        File.WriteAllBytes(Path.Combine(inner, "b.bin"), new byte[2048]);
+        Directory.CreateDirectory(Path.Combine(folder, "empty"));
+
+        Assert(FolderContents.Measure(folder) is { Children: 3, SizeBytes: 3072 }, "文件夹的项目数或大小不正确");
+        Assert(FolderContents.Measure(Path.Combine(folder, "empty")) is { Children: 0, SizeBytes: 0 }, "空文件夹的统计不正确");
+        Assert(FolderContents.Measure(Path.Combine(folder, "missing")) is null, "不存在的文件夹没有返回空");
+        Assert(FolderContents.Measure(folder, FolderContents.SizeBudget, maximumFiles: 1) is { Children: 3, SizeBytes: null }, "文件太多时仍给出了大小");
+
+        var item = new ShelfItem { Id = "1", Kind = ShelfItemKind.Folder, Value = folder };
+        Assert(item.Detail == "文件夹", "还没统计时文件夹的说明不正确");
+        item.SizeBytes = 3072;
+        item.ChildCount = 3;
+        Assert(item.Detail == "3 项 · 3 KB", $"文件夹的说明不正确：{item.Detail}");
+        item.SizeBytes = null;
+        Assert(item.Detail == "3 项", "不知道大小时文件夹的说明不正确");
+        item.ChildCount = 0;
+        Assert(item.Detail == "空文件夹", "空文件夹的说明不正确");
+    }
+
     private static void TestApplyDragOut()
     {
         var folder = CreateFolder("drag-out");

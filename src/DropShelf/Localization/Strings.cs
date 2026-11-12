@@ -366,6 +366,8 @@ public static class Strings
 
     public static string MovedOrDeleted => T("已删除或移动", "Moved or deleted");
     public static string Folder => T("文件夹", "Folder");
+    public static string EmptyFolder => T("空文件夹", "Empty folder");
+    public static string FolderItems(int count) => T($"{count} 项", Count(count, "item", "items"));
     public static string Link => T("链接", "Link");
     public static string TextDetail(int characters) => T($"文本 · {characters} 个字符", $"Text · {Count(characters, "character", "characters")}");
     public static string GenericFileType => T("文件", "File");
