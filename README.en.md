@@ -150,7 +150,9 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish.
-3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later.
+3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`.
+
+Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
 
 ## License
 
