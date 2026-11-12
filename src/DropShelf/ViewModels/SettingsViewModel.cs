@@ -40,6 +40,7 @@ public sealed class SettingsViewModel : ObservableObject
         OpenProgramFolderCommand = new RelayCommand(_ => OpenFolder(ProgramDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
+        CheckUpdateCommand = new RelayCommand(_ => CheckOrOpenUpdate(), _ => _updateState != UpdateState.Checking);
         CalibrateShakeCommand = new RelayCommand(_ => Calibration = new ShakeCalibrationViewModel(ApplyCalibration, () => Calibration = null));
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
         RemoveBlockedAppCommand = new RelayCommand(app => Update(settings => settings.BlockedApps!.Remove((string)app!)));
@@ -59,6 +60,7 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
     public ICommand CalibrateShakeCommand { get; }
+    public ICommand CheckUpdateCommand { get; }
     public ICommand ClearHistoryCommand { get; }
     public ICommand RemoveBlockedAppCommand { get; }
 
@@ -73,6 +75,72 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool CanUninstall => File.Exists(UninstallerPath);
     public string UninstallDescription => CanUninstall ? Strings.UninstallDescription : Strings.UninstallPortable;
+
+    // ───────────── 检查更新 ─────────────
+
+    private enum UpdateState
+    {
+        Idle,
+        Checking,
+        UpToDate,
+        Available,
+        Failed
+    }
+
+    private UpdateState _updateState;
+    private UpdateInfo? _update;
+
+    public string UpdateDescription => _updateState switch
+    {
+        UpdateState.Checking => Strings.UpdateChecking,
+        UpdateState.UpToDate => Strings.UpdateLatest(VersionNumber),
+        UpdateState.Available when _update is not null => Strings.UpdateAvailable(_update.Version.ToString(3)),
+        UpdateState.Failed => Strings.UpdateFailed,
+        _ => Strings.UpdateIdle
+    };
+
+    /// <summary>有新版本时按钮改为打开下载页。</summary>
+    public string UpdateButtonText => _updateState == UpdateState.Available ? Strings.UpdateOpenPage : Strings.CheckForUpdates;
+
+    /// <summary>
+    /// 点“检查更新”：访问一次 GitHub 上的发布列表，告诉用户有没有新版本；有的话再点一次打开下载页。
+    /// 只有点了才联网，不自动下载或安装。
+    /// </summary>
+    private async void CheckOrOpenUpdate()
+    {
+        if (_updateState == UpdateState.Available && _update is not null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(_update.Url) { UseShellExecute = true });
+            }
+            catch (Exception exception)
+            {
+                LogService.Error("打开下载页失败", exception);
+            }
+            return;
+        }
+
+        SetUpdateState(UpdateState.Checking);
+        try
+        {
+            _update = await UpdateChecker.CheckAsync();
+            SetUpdateState(_update is null ? UpdateState.UpToDate : UpdateState.Available);
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("检查更新失败", exception);
+            SetUpdateState(UpdateState.Failed);
+        }
+    }
+
+    private void SetUpdateState(UpdateState state)
+    {
+        _updateState = state;
+        OnPropertyChanged(nameof(UpdateDescription));
+        OnPropertyChanged(nameof(UpdateButtonText));
+        CommandManager.InvalidateRequerySuggested();
+    }
 
     // ───────────── 运行状态与概览 ─────────────
 
@@ -493,7 +561,8 @@ public sealed class SettingsViewModel : ObservableObject
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),
                      nameof(StartupDescription), nameof(Version), nameof(HistoryDescription), nameof(GeneralSummary),
-                     nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription)
+                     nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription),
+                     nameof(UpdateDescription), nameof(UpdateButtonText)
                  })
             OnPropertyChanged(name);
         if (ActionsKey() != _actionsKey) RefreshActions();

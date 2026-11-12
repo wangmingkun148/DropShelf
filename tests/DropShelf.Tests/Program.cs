@@ -127,6 +127,7 @@ internal static partial class Program
         Run("托盘图标可从图标资源创建", TestTrayIconLoader);
         Run("全局快捷键可注册和注销", TestHotkeyRegistration);
         Run("命令行文件可转交给运行中的实例", TestArgumentForwarding);
+        Run("检查更新只认比当前新的正式版本", TestUpdateChecker);
         Run("错误日志已生成", TestFailureLogExists);
 
         // 界面

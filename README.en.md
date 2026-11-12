@@ -11,7 +11,7 @@ DropShelf is a temporary shelf for files on Windows. While dragging files, shake
 - Built-in quick actions such as compress, extract and move to, plus your own custom actions.
 - Shelves closed by mistake can be reopened.
 - Smooth animations: cards and pages follow your mouse as you drag.
-- No admin rights needed, never reads file contents, never goes online.
+- No admin rights needed, never reads file contents, and stays offline unless you ask it to check for updates.
 
 There are already plenty of apps like this, and DropShelf may look like reinventing the wheel, but it tries to improve on some of their shortcomings. Inspired by [Dropover](https://dropoverapp.com) on macOS. DropShelf is an independent project and is not affiliated with Dropover.
 
@@ -92,6 +92,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Temporary attachments and dropped images are cached in the system temp folder and cleaned up after the shelf closes.
 - "Recently closed shelves" records only paths and names of files and folders, and can be cleared in settings.
 - Mouse positions are only used to detect gestures and are never saved.
+- DropShelf stays offline. It goes online only when you click "Check for updates" in the About window, and then only to this project's release list on GitHub; the request carries nothing but the app name and version. If there's a newer version, click again to open the download page. Nothing is downloaded or installed automatically.
 
 ## Install and uninstall
 

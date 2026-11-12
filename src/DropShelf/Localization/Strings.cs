@@ -235,6 +235,13 @@ public static class Strings
     public static string CaptionMaximize => T("最大化", "Maximize");
     public static string CaptionClose => T("关闭", "Close");
 
+    public static string CheckForUpdates => T("检查更新", "Check for updates");
+    public static string UpdateIdle => T("点了才联网，只访问 GitHub 上的发布列表；不自动下载", "Goes online only when you click, and only to the release list on GitHub. Nothing is downloaded");
+    public static string UpdateChecking => T("正在检查…", "Checking…");
+    public static string UpdateLatest(string version) => T($"已经是最新版本（{version}）", $"You have the latest version ({version})");
+    public static string UpdateAvailable(string version) => T($"有新版本 {version}", $"Version {version} is available");
+    public static string UpdateFailed => T("没有连上 GitHub，请稍后再试", "Couldn't reach GitHub. Try again later");
+    public static string UpdateOpenPage => T("打开下载页", "Open download page");
     public static string Version(string? version) => T($"版本 {version}", $"Version {version}");
     public static string AboutTagline => T("通过鼠标手势呼出的临时文件置物架", "A temporary file shelf you open with a mouse gesture");
     public static string DataLocations => T("数据位置", "Data locations");

@@ -40,6 +40,10 @@
         </controls:SettingsCard>
 
         <TextBlock Text="{l:Loc General}" Style="{StaticResource SectionHeaderTextStyle}" />
+        <!-- 平时不联网：点了这个按钮才访问一次 GitHub 上的发布列表 -->
+        <controls:SettingsCard Icon="{StaticResource Glyph.Download}" Header="{l:Loc CheckForUpdates}" Description="{Binding UpdateDescription}">
+            <Button x:Name="CheckUpdateButton" Content="{Binding UpdateButtonText}" Command="{Binding CheckUpdateCommand}" MinWidth="96" />
+        </controls:SettingsCard>
         <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc QuitApp}" Description="{l:Loc QuitDescription}">
             <Button x:Name="QuitButton" Content="{l:Loc Quit}" Command="{Binding ExitCommand}" MinWidth="96" />
         </controls:SettingsCard>
