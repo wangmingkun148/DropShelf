@@ -237,6 +237,7 @@ internal static class NativeMethods
     public const int MDT_EFFECTIVE_DPI = 0;
 
     public const int SM_CXSMICON = 49;
+    public const int SM_CXICON = 11;
     public const int SM_XVIRTUALSCREEN = 76;
     public const int SM_YVIRTUALSCREEN = 77;
     public const int SM_CXVIRTUALSCREEN = 78;
@@ -272,6 +273,8 @@ internal static class NativeMethods
     public const uint NIF_INFO = 0x10;
     public const uint NIF_SHOWTIP = 0x80;
     public const uint NIIF_INFO = 0x01;
+    public const uint NIIF_USER = 0x04;
+    public const uint NIIF_LARGE_ICON = 0x20;
     public const uint NIIF_RESPECT_QUIET_TIME = 0x80;
     public const uint NOTIFYICON_VERSION_4 = 4;
     public const int NIN_SELECT = 0x0400;

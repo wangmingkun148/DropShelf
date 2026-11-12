@@ -71,6 +71,7 @@ public sealed class TrayIconService : IDisposable
     private readonly Action _clearHistory;
     private readonly Action _exit;
     private IntPtr _icon;
+    private IntPtr _balloonIcon;
     private bool _added;
     private bool _disposed;
     private ContextMenu? _menu;
@@ -86,7 +87,7 @@ public sealed class TrayIconService : IDisposable
         _clearHistory = clearHistory;
         _exit = exit;
         _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
-        _icon = LoadTrayIcon();
+        _icon = LoadTrayIcon(NativeMethods.SM_CXSMICON, 16);
         _window.MessageReceived += OnMessage;
         AddIcon();
     }
@@ -97,7 +98,11 @@ public sealed class TrayIconService : IDisposable
         var data = CreateData(NativeMethods.NIF_INFO);
         data.InfoTitle = Strings.StillRunningTitle;
         data.Info = Strings.StillRunningBody;
-        data.InfoFlags = NativeMethods.NIIF_INFO | NativeMethods.NIIF_RESPECT_QUIET_TIME;
+        // 通知里放程序自己的大图标，不用系统的信息图标。
+        if (_balloonIcon == IntPtr.Zero) _balloonIcon = LoadTrayIcon(NativeMethods.SM_CXICON, 32);
+        data.BalloonIcon = _balloonIcon;
+        data.InfoFlags = (_balloonIcon != IntPtr.Zero ? NativeMethods.NIIF_USER | NativeMethods.NIIF_LARGE_ICON : NativeMethods.NIIF_INFO) |
+                         NativeMethods.NIIF_RESPECT_QUIET_TIME;
         NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref data);
     }
 
@@ -121,7 +126,8 @@ public sealed class TrayIconService : IDisposable
             _added = false;
         }
         if (_icon != IntPtr.Zero) NativeMethods.DestroyIcon(_icon);
-        _icon = IntPtr.Zero;
+        if (_balloonIcon != IntPtr.Zero) NativeMethods.DestroyIcon(_balloonIcon);
+        _icon = _balloonIcon = IntPtr.Zero;
     }
 
     private void AddIcon()
@@ -210,7 +216,8 @@ public sealed class TrayIconService : IDisposable
         return item;
     }
 
-    private static IntPtr LoadTrayIcon()
+    /// <summary>按系统度量 metric 的尺寸从内嵌的 .ico 里取图标；读不到度量时用 fallback 像素。</summary>
+    private static IntPtr LoadTrayIcon(int metric, int fallback)
     {
         try
         {
@@ -219,8 +226,8 @@ public sealed class TrayIconService : IDisposable
             using var stream = resource.Stream;
             using var memory = new MemoryStream();
             stream.CopyTo(memory);
-            var size = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXSMICON);
-            return IconLoader.CreateFromIco(memory.ToArray(), size <= 0 ? 16 : size);
+            var size = NativeMethods.GetSystemMetrics(metric);
+            return IconLoader.CreateFromIco(memory.ToArray(), size <= 0 ? fallback : size);
         }
         catch (Exception exception)
         {
