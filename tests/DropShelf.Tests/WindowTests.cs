@@ -257,7 +257,7 @@ internal static partial class Program
 
         var viewModel = (SettingsViewModel)window.DataContext;
         ((System.Windows.Controls.Slider)window.FindName("SensitivitySlider")!).Value = 20;
-        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 63), "拖动滑块时说明没有立即更新");
+        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 75), "拖动滑块时说明没有立即更新");
         Pump(400);
         var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }
             .Select(name => ((System.Windows.Media.ScaleTransform)((FrameworkElement)window.FindName(name)!).RenderTransform).ScaleX).ToArray();

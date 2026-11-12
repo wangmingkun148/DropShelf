@@ -15,6 +15,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly AppController _controller;
     private bool _startupFailed;
     private CustomActionEditorViewModel? _editor;
+    private ShakeCalibrationViewModel? _calibration;
     private string? _actionsKey;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
@@ -39,6 +40,7 @@ public sealed class SettingsViewModel : ObservableObject
         OpenProgramFolderCommand = new RelayCommand(_ => OpenFolder(ProgramDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
+        CalibrateShakeCommand = new RelayCommand(_ => Calibration = new ShakeCalibrationViewModel(ApplyCalibration, () => Calibration = null));
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
         RemoveBlockedAppCommand = new RelayCommand(app => Update(settings => settings.BlockedApps!.Remove((string)app!)));
         RefreshActions();
@@ -56,6 +58,7 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand OpenProgramFolderCommand { get; }
     public ICommand OpenSettingsFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
+    public ICommand CalibrateShakeCommand { get; }
     public ICommand ClearHistoryCommand { get; }
     public ICommand RemoveBlockedAppCommand { get; }
 
@@ -178,6 +181,27 @@ public sealed class SettingsViewModel : ObservableObject
             _sensitivitySave.Stop();
             _sensitivitySave.Start();
         }
+    }
+
+    /// <summary>晃动示范校准的对话框；没打开时为 null。</summary>
+    public ShakeCalibrationViewModel? Calibration
+    {
+        get => _calibration;
+        private set
+        {
+            if (SetField(ref _calibration, value)) OnPropertyChanged(nameof(IsCalibrating));
+        }
+    }
+
+    public bool IsCalibrating => _calibration is not null;
+
+    /// <summary>采用校准给出的灵敏度：立即保存，滑块随之移到新的位置。</summary>
+    private void ApplyCalibration(int level)
+    {
+        _sensitivitySave.Stop();
+        _pendingSensitivity = null;
+        Update(settings => settings.ShakeSensitivity = ShakeSensitivities.Clamp(level));
+        Calibration = null;
     }
 
     public string SensitivityDescription
@@ -456,6 +480,7 @@ public sealed class SettingsViewModel : ObservableObject
         RefreshAll();
         RefreshActions();
         RefreshHistory();
+        Calibration?.RefreshText();
     }
 
     private void RefreshAll()

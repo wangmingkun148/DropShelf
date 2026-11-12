@@ -9,6 +9,7 @@ using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services.Gestures;
+using DropShelf.ViewModels;
 using DropShelf.Views;
 using WpfApplication = System.Windows.Application;
 using WpfDataObject = System.Windows.DataObject;
@@ -30,8 +31,10 @@ internal static partial class Program
     {
         Assert(Shake(ShakeSensitivities.Responsive, [100, 134, 100, 134], 70), "灵敏档无法通过短距离两次来回触发");
         Assert(Shake(ShakeSensitivities.Balanced, [100, 143, 100, 143, 100], 70), "均衡档无法通过正常幅度晃动触发");
-        Assert(Shake(ShakeSensitivities.Steady, [100, 185, 100, 185, 100, 185, 100, 185], 100), "稳健档无法通过明确晃动触发");
+        Assert(Shake(ShakeSensitivities.Steady, [100, 210, 100, 210, 100, 210, 100, 210, 100], 100), "稳健档无法通过明确晃动触发");
         Assert(!Shake(ShakeSensitivities.Steady, [100, 165, 100, 165, 100, 165, 100], 70), "最稳健时被 2.5.7 的稳健档晃动触发");
+        // 2.8.2 起最稳健更难触发：要掉头 6 次、每段约 100 像素，原来 5 次、每段 80 像素的晃法不够了。
+        Assert(!Shake(ShakeSensitivities.Steady, [100, 185, 100, 185, 100, 185, 100, 185], 100), "最稳健时被 2.8.1 的最稳健晃动触发");
 
         // 三档的差距：灵敏档轻晃即可，均衡档不行；均衡档的正常晃动在稳健档不够。
         Assert(Shake(ShakeSensitivities.Responsive, [100, 125, 100, 125], 70), "灵敏档无法通过轻晃触发");
@@ -58,7 +61,7 @@ internal static partial class Program
 
         // 设置页的说明：两端和中间与原来的三档一致，拖向灵敏时幅度和次数只减不增，且照说明晃动一定能触发。
         var descriptions = Enumerable.Range(0, 101).Select(MouseGestureDetector.Describe).ToArray();
-        Assert(descriptions[0] == (5, 80) && descriptions[50] == (3, 38) && descriptions[100] == (2, 23), "灵敏度两端和中间的说明不正确");
+        Assert(descriptions[0] == (6, 100) && descriptions[50] == (3, 38) && descriptions[100] == (2, 23), "灵敏度两端和中间的说明不正确");
         Assert(descriptions.Zip(descriptions.Skip(1)).All(pair => pair.Second.Distance <= pair.First.Distance && pair.Second.Reversals <= pair.First.Reversals),
             "灵敏度说明没有随滑块单调变化");
         Assert(descriptions.Select((description, level) => (description, level)).All(item =>
@@ -71,6 +74,38 @@ internal static partial class Program
             var detector = new MouseGestureDetector(sensitivity);
             return xs.Select((x, index) => (x, index)).Any(sample => detector.AddSample(sample.x, 100, sample.index * interval, false));
         }
+    }
+
+    private static void TestShakeCalibration()
+    {
+        // 一次示范：1000 Hz、每秒来回 4 次的左右晃动，幅度越大，能触发的档位越稳健。
+        static List<ShakeSample> Demo(double amplitude) => Enumerable.Range(0, 1200)
+            .Select(ms => new ShakeSample(500 + (int)Math.Round(amplitude * Math.Sin(ms / 1000.0 * 2 * Math.PI * 4)), 300, ms)).ToList();
+
+        var light = ShakeCalibration.SteadiestLevel(Demo(15));
+        var normal = ShakeCalibration.SteadiestLevel(Demo(40));
+        var strong = ShakeCalibration.SteadiestLevel(Demo(60));
+        Assert(light is > 50 and < 100 && normal is > 0 and < 50 && strong == ShakeSensitivities.Steady,
+            $"示范的力度和能触发的档位对不上：{light}、{normal}、{strong}");
+        Assert(ShakeCalibration.SteadiestLevel(Demo(3)) is null, "几乎没动的示范也算数了");
+        Assert(ShakeCalibration.Triggers(Demo(40), normal!.Value) && !ShakeCalibration.Triggers(Demo(40), normal.Value - 1), "最稳健的档位不是刚好能触发的那一档");
+
+        // 建议值取几次里最吃力的那次，再往灵敏方向留余量；不会超出滑块。
+        Assert(ShakeCalibration.Recommend([30, 42, 36]) == 42 + ShakeCalibration.Margin && ShakeCalibration.Recommend([95, 99, 97]) == 100, "建议的灵敏度不正确");
+
+        var applied = -1;
+        var calibration = new ShakeCalibrationViewModel(level => applied = level, () => { });
+        Assert(!calibration.IsComplete && !calibration.ApplyCommand.CanExecute(null) && calibration.Status == Strings.CalibrationStart, "校准的初始状态不正确");
+        Assert(!calibration.Submit(Demo(3)) && calibration.Done == 0 && calibration.Status == Strings.CalibrationTooWeak, "太轻的示范没有提示重来");
+        Assert(calibration.Submit(Demo(40)) && calibration.Submit(Demo(60)) && calibration.FirstDone && calibration.SecondDone && !calibration.ThirdDone,
+            "示范没有记下");
+        Assert(calibration.Status == Strings.CalibrationProgress(2, 1), "校准的进度文字不正确");
+        Assert(calibration.Submit(Demo(40)) && calibration.IsComplete && !calibration.Submit(Demo(40)), "示范三次后没有完成");
+        Assert(calibration.Recommended == normal.Value + ShakeCalibration.Margin, $"校准给出的灵敏度不正确：{calibration.Recommended}");
+        calibration.ApplyCommand.Execute(null);
+        Assert(applied == calibration.Recommended, "采用后没有把灵敏度交出去");
+        calibration.RetryCommand.Execute(null);
+        Assert(calibration.Done == 0 && !calibration.IsComplete, "重来后没有清空");
     }
 
     private static void TestGestureDurationBounds()

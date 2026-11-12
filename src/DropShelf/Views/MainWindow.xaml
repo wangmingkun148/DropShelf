@@ -815,6 +815,11 @@
                                                 <TextBlock x:Name="BalancedLabel" Text="{l:Loc SensitivityBalanced}" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0" />
                                                 <TextBlock x:Name="ResponsiveLabel" Text="{l:Loc SensitivityResponsive}" HorizontalAlignment="Right" RenderTransformOrigin="1,0" />
                                             </Grid>
+                                            <!-- 不想猜滑块位置时：晃几下给它看，按实际的晃法定灵敏度 -->
+                                            <Button x:Name="CalibrateShakeButton" Style="{StaticResource SubtleButtonStyle}" Height="26" MinHeight="0"
+                                                    Padding="8,0,8,1" Margin="0,4,-8,-2" FontSize="12" HorizontalAlignment="Right"
+                                                    Foreground="{DynamicResource AccentTextBrush}" Content="{l:Loc CalibrateShake}"
+                                                    ToolTip="{l:Loc CalibrateShakeTooltip}" Command="{Binding CalibrateShakeCommand}" />
                                         </StackPanel>
                                     </controls:SettingsCard>
                                     <controls:SettingsCard Icon="{StaticResource Glyph.Timer}" Header="{l:Loc EdgeDwellHeader}"
@@ -1166,6 +1171,97 @@
                 </Grid>
             </Grid>
         </Border>
+
+        <!-- 晃动示范校准：在练习区按住“文件”晃三次，按实际的晃法给出灵敏度 -->
+        <Grid x:Name="CalibrationOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}"
+              Visibility="{Binding IsCalibrating, Converter={StaticResource BoolToVisibility}}">
+            <Grid Width="480" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                <Control Style="{StaticResource DialogShadowStyle}" />
+                <Border x:Name="CalibrationDialog" DataContext="{Binding Calibration}" Background="{DynamicResource FlyoutBrush}"
+                        BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="24,22,24,22">
+                            <TextBlock Text="{l:Loc CalibrationTitle}" Style="{StaticResource SubtitleTextStyle}" />
+                            <TextBlock Text="{l:Loc CalibrationIntro}" Style="{StaticResource BodyTextStyle}" FontSize="13" Margin="0,10,0,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+
+                            <!-- 练习区：按下后那张“文件”跟着光标走，松手弹回 -->
+                            <Border x:Name="CalibrationPad" Height="170" Margin="0,16,0,0" CornerRadius="8" ClipToBounds="True" Cursor="Hand"
+                                    Background="{DynamicResource ControlAltBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
+                                    MouseLeftButtonDown="OnCalibrationPadDown" MouseMove="OnCalibrationPadMove"
+                                    MouseLeftButtonUp="OnCalibrationPadUp" LostMouseCapture="OnCalibrationPadLostCapture"
+                                    Visibility="{Binding IsPracticing, Converter={StaticResource BoolToVisibility}}">
+                                <Border Width="92" Height="92" CornerRadius="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        IsHitTestVisible="False" Background="{DynamicResource ShelfTileBrush}"
+                                        BorderBrush="{DynamicResource ShelfTileBorderBrush}" BorderThickness="1">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="CalibrationChipOffset" />
+                                    </Border.RenderTransform>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" FontSize="30" HorizontalAlignment="Center"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        <TextBlock Text="{l:Loc CalibrationPadHint}" FontSize="11" Margin="4,8,4,0" HorizontalAlignment="Center"
+                                                   TextAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </Border>
+
+                            <!-- 结果：滑块上标出建议的位置，下面是这个位置需要晃多远、掉头几次 -->
+                            <StackPanel Margin="0,20,0,0" Visibility="{Binding IsComplete, Converter={StaticResource BoolToVisibility}}">
+                                <Slider x:Name="CalibrationResultSlider" Minimum="0" Maximum="100" Value="{Binding Recommended, Mode=OneWay}"
+                                        IsHitTestVisible="False" Focusable="False" IsTabStop="False" />
+                                <Grid Margin="0,-3,0,0">
+                                    <TextBlock Text="{l:Loc SensitivitySteady}" Style="{StaticResource CaptionTextStyle}" HorizontalAlignment="Left" />
+                                    <TextBlock Text="{l:Loc SensitivityResponsive}" Style="{StaticResource CaptionTextStyle}" HorizontalAlignment="Right" />
+                                </Grid>
+                                <TextBlock x:Name="CalibrationResultText" Text="{Binding Result}" Style="{StaticResource BodyTextStyle}" FontSize="13"
+                                           Margin="0,12,0,0" />
+                            </StackPanel>
+
+                            <!-- 进度：三个点，记下一次亮一个 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                <StackPanel.Resources>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Width" Value="8" />
+                                        <Setter Property="Height" Value="8" />
+                                        <Setter Property="Margin" Value="0,0,6,0" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="Fill" Value="{DynamicResource ControlStrongBorderBrush}" />
+                                        <Setter Property="Opacity" Value="0.4" />
+                                        <Style.Triggers>
+                                            <Trigger Property="IsEnabled" Value="True">
+                                                <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+                                                <Setter Property="Opacity" Value="1" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Resources>
+                                <Ellipse IsEnabled="{Binding FirstDone}" />
+                                <Ellipse IsEnabled="{Binding SecondDone}" />
+                                <Ellipse IsEnabled="{Binding ThirdDone}" />
+                                <TextBlock x:Name="CalibrationStatusText" Text="{Binding Status}" FontSize="13" Margin="6,0,0,1" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}"
+                                BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="24,20">
+                            <UniformGrid Columns="3" HorizontalAlignment="Right" Width="390">
+                                <Button x:Name="CalibrationApplyButton" Style="{StaticResource AccentButtonStyle}" Content="{l:Loc CalibrationApply}"
+                                        Command="{Binding ApplyCommand}" Margin="0,0,4,0" />
+                                <Button x:Name="CalibrationRetryButton" Content="{l:Loc CalibrationRetry}" Command="{Binding RetryCommand}" Margin="4,0,4,0" />
+                                <Button x:Name="CalibrationCancelButton" Content="{l:Loc Cancel}" Command="{Binding CancelCommand}" Margin="4,0,0,0"
+                                        IsCancel="True" />
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
 
         <!-- 添加或编辑自定义操作（Windows 11 对话框样式） -->
         <Grid x:Name="EditorOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}"

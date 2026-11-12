@@ -152,6 +152,18 @@ public static class Strings
     public static string SensitivityDetail(int reversals, int distance) => T(
         $"来回晃动约 {distance} 像素、掉头 {reversals} 次即可弹出",
         $"Opens when you shake about {distance} px back and forth, changing direction {reversals} times");
+    public static string CalibrateShake => T("示范校准…", "Calibrate…");
+    public static string CalibrateShakeTooltip => T("晃几下给它看，按你的习惯定灵敏度", "Show it how you shake, and it sets the sensitivity to match");
+    public static string CalibrationTitle => T("按你的晃法定灵敏度", "Set the sensitivity from your shake");
+    public static string CalibrationIntro => T("按住下面这张文件，像平时拖着文件那样来回晃几下再松开，一共做 3 次。",
+        "Press and hold the file below, shake it back and forth the way you would while dragging, then let go. Do this 3 times.");
+    public static string CalibrationPadHint => T("按住我晃一晃", "Hold and shake");
+    public static string CalibrationStart => T("还没开始", "Not started yet");
+    public static string CalibrationProgress(int done, int left) => T($"第 {done} 次记下了，再来 {left} 次", $"Got shake {done}. {left} more to go");
+    public static string CalibrationTooWeak => T("这次晃得太轻或太短，没有算上，再来一次", "That shake was too light or too short to count. Try again");
+    public static string CalibrationDone => T("好了，按你的晃法定在这里比较合适", "Done. This suits the way you shake");
+    public static string CalibrationApply => T("采用", "Use this");
+    public static string CalibrationRetry => T("重来", "Start over");
     public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
     public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘后，停留多久弹出置物架", "How long to pause at the left, right or top edge before a shelf opens");
     public static string DwellShort => T("0.3 秒", "0.3 s");

@@ -59,6 +59,7 @@ internal static partial class Program
         // 手势识别
         Run("均衡手势可识别快速左右晃动", TestBalancedGestureTriggers);
         Run("三档灵敏度都能触发", TestSensitivityProfilesTrigger);
+        Run("晃动示范校准按实际的晃法给出灵敏度", TestShakeCalibration);
         Run("过快抖动和缓慢往返不会触发", TestGestureDurationBounds);
         Run("不规则采样和自然晃动不会漏识别", TestGestureToleratesIrregularSamples);
         Run("纵向和斜向晃动可以触发", TestOtherDirectionGesturesTrigger);

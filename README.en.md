@@ -41,7 +41,8 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ### Opening a shelf
 - Open shelves by Shake, Screen edge or Both.
-- Shakes can be horizontal, vertical or diagonal. A slider sets the sensitivity anywhere from Steady to Responsive, and settings show how far and how many times you need to shake.
+- Shakes can be horizontal, vertical or diagonal. A slider sets the sensitivity anywhere from Steady to Responsive, and settings show how far and how many times you need to shake. At the steadiest setting that's about 100 px back and forth with 6 changes of direction.
+- If you'd rather not guess the slider position, click "Calibrate" under it: hold the file in the practice area and shake it three times the way you normally do. DropShelf works out a sensitivity from your shakes, and "Use this" writes it back to the slider.
 - Add excluded apps: while one of them is in the foreground or you drag over its windows, no shelf opens and the keyboard shortcut is left to the app. Handy for games and drawing apps.
 - Left, right and top screen edges are supported, with a pause of 0.3, 0.6 or 1 s; edges with the taskbar and edges shared between monitors don't trigger.
 
