@@ -53,7 +53,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
 - While dragging in, move to the bottom button bar to reveal quick actions and drop directly on one.
-- "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.
+- "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf.
 - Chat app support: temporary images and files deleted right after the drop are saved; PNG, JPG, GIF and DIB image data and older QQ versions are supported; temporary attachments dragged or copied to chat apps are kept for 10 more minutes.
 - Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu. You can also drag a card out of the Overview page to reopen the shelf where you let go, or drop it back anywhere in the stack, where the other cards make room for it.
 - If a file on a shelf is renamed elsewhere, or moved to another folder on the same disk, the shelf follows it instead of showing "Moved or deleted". Files sent to the Recycle Bin or moved to another disk or a network location aren't followed. This works for files on NTFS disks.
@@ -141,7 +141,7 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 - `src/DropShelf/Shelves/ShelfManager.cs`: creating, reusing and closing shelves.
 - `src/DropShelf/Views`: shelf, settings, tutorial and other windows. The main window and shelf code is split by feature into `MainWindow.*.cs` and `ShelfWindow.*.cs`, such as flipping, the side panel, dropping in and dragging out.
 - `src/DropShelf/Services`: drag in and out, quick actions, archives, history, clipboard, theme, tray, hotkeys and more.
-- `src/DropShelf/Localization`: English and Chinese UI text.
+- `src/DropShelf/Localization`: English and Chinese UI text, plus loading language packs and exporting the translation template.
 - `src/DropShelf/Themes`: colors, icons and control styles.
 - `src/DropShelf/Interop`: Win32, DWM and Shell interfaces.
 - `tests/DropShelf.Tests`: automated tests.
