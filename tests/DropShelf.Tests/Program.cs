@@ -55,10 +55,12 @@ internal static partial class Program
         Run("正式版本号已写入程序", TestProductVersion);
         Run("界面文字中英文齐全", TestStringTables);
         Run("切换语言后文字随之更新", TestLanguageSwitch);
+        Run("语言包按原文模板提供译文", TestLanguagePacks);
 
         // 手势识别
         Run("均衡手势可识别快速左右晃动", TestBalancedGestureTriggers);
         Run("三档灵敏度都能触发", TestSensitivityProfilesTrigger);
+        Run("晃动示范校准按实际的晃法给出灵敏度", TestShakeCalibration);
         Run("过快抖动和缓慢往返不会触发", TestGestureDurationBounds);
         Run("不规则采样和自然晃动不会漏识别", TestGestureToleratesIrregularSamples);
         Run("纵向和斜向晃动可以触发", TestOtherDirectionGesturesTrigger);
@@ -75,11 +77,16 @@ internal static partial class Program
         Run("100 个文件与重复路径", TestOneHundredFilesAndDuplicates);
         Run("拖入文件只读取路径属性", TestAddingLockedFileReadsNoContent);
         Run("清空置物架不影响磁盘文件", TestClearKeepsFiles);
+        Run("移除后可以按原位撤销", TestRemoveUndo);
         Run("文本与链接可以暂存并去重", TestTextAndLinkEntries);
+        Run("文本和链接可以转成文件", TestTextBecomesFiles);
         Run("堆叠显示最新项目和汇总", TestStackSummary);
+        Run("合并和拆分时项目原样交给另一个置物架", TestAdoptBetweenShelves);
+        Run("文件夹显示项目数和大小", TestFolderContents);
         Run("拖出结果按设置移除或保留", TestApplyDragOut);
         Run("拖出结果判定（含资源管理器优化移动）", TestResolveDragOut);
         Run("移动后更新置物架中的路径", TestApplyMoves);
+        Run("文件在别处改名或移动后跟着更新路径", TestFollowsRenamedFiles);
         Run("最近关闭的置物架只记录路径和名称", TestShelfHistory);
         Run("拖出时按设置移动或复制", TestDragOutEffects);
 
@@ -110,6 +117,7 @@ internal static partial class Program
         Run("自定义操作：复制或移动到文件夹", TestCustomFolderAction);
         Run("自定义操作：压缩图片到指定大小", TestImageCompression);
         Run("压缩后的图片替换置物架中的原图", TestCompressImageReplacesItems);
+        Run("自定义操作：图片转成 JPG 或 PNG", TestImageConversion);
         Run("自定义操作：用程序打开的参数", TestOpenWithArguments);
 
         // 系统集成
@@ -122,6 +130,7 @@ internal static partial class Program
         Run("托盘图标可从图标资源创建", TestTrayIconLoader);
         Run("全局快捷键可注册和注销", TestHotkeyRegistration);
         Run("命令行文件可转交给运行中的实例", TestArgumentForwarding);
+        Run("检查更新只认比当前新的正式版本", TestUpdateChecker);
         Run("错误日志已生成", TestFailureLogExists);
 
         // 界面

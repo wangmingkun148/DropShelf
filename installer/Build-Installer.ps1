@@ -4,6 +4,20 @@
 )
 
 $ErrorActionPreference = "Stop"
+
+# 可选的代码签名：设置了环境变量 DROPSHELF_SIGN_COMMAND 时，用它给主程序、卸载程序和安装包签名，
+# 命令里的 {file} 换成要签名的文件，例如
+#   signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "{file}"
+# 命令按 PowerShell 的写法执行：工具的路径里有空格时写成 & "C:\路径\signtool.exe" sign … "{file}"。
+# 没有设置时不签名，其余照常。详见 docs/publishing.md。
+function Invoke-Sign([string]$File) {
+    if ([string]::IsNullOrWhiteSpace($env:DROPSHELF_SIGN_COMMAND)) { return }
+    if (-not (Test-Path -LiteralPath $File)) { throw "找不到要签名的文件：$File" }
+    Write-Host "签名：$File"
+    $global:LASTEXITCODE = 0
+    Invoke-Expression $env:DROPSHELF_SIGN_COMMAND.Replace("{file}", $File)
+    if ($LASTEXITCODE -ne 0) { throw "签名失败：$File" }
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $projectRoot "src\DropShelf\DropShelf.csproj"
 $portableOutput = Join-Path $projectRoot "artifacts\win-x64"
@@ -21,6 +35,7 @@ if ($LASTEXITCODE -ne 0) { throw "无法准备发布文件。" }
     -p:PublishReadyToRun=true -p:DebugType=none `
     --no-restore -o $portableOutput
 if ($LASTEXITCODE -ne 0) { throw "无法生成 DropShelf.exe。" }
+Invoke-Sign (Join-Path $portableOutput "DropShelf.exe")
 
 if ([string]::IsNullOrWhiteSpace($InnoCompilerPath)) {
     $compilerCandidates = @(
@@ -50,6 +65,10 @@ if ([string]::IsNullOrWhiteSpace($InnoCompilerPath) -or
 
 & $InnoCompilerPath $uninstallLauncherScript
 if ($LASTEXITCODE -ne 0) { throw "无法生成卸载程序。" }
+Invoke-Sign (Join-Path $portableOutput "卸载 DropShelf.exe")
 
 & $InnoCompilerPath $installerScript
 if ($LASTEXITCODE -ne 0) { throw "无法生成安装包。" }
+Get-ChildItem (Join-Path $projectRoot "artifacts\installer") -Filter "DropShelf-Setup-*.exe" |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+    ForEach-Object { Invoke-Sign $_.FullName }

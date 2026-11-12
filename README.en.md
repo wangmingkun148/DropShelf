@@ -11,7 +11,7 @@ DropShelf is a temporary shelf for files on Windows. While dragging files, shake
 - Built-in quick actions such as compress, extract and move to, plus your own custom actions.
 - Shelves closed by mistake can be reopened.
 - Smooth animations: cards and pages follow your mouse as you drag.
-- No admin rights needed, never reads file contents, never goes online.
+- No admin rights needed, never reads file contents, and stays offline unless you ask it to check for updates.
 
 There are already plenty of apps like this, and DropShelf may look like reinventing the wheel, but it tries to improve on some of their shortcomings. Inspired by [Dropover](https://dropoverapp.com) on macOS. DropShelf is an independent project and is not affiliated with Dropover.
 
@@ -41,12 +41,14 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ### Opening a shelf
 - Open shelves by Shake, Screen edge or Both.
-- Shakes can be horizontal, vertical or diagonal. A slider sets the sensitivity anywhere from Steady to Responsive, and settings show how far and how many times you need to shake.
+- Shakes can be horizontal, vertical or diagonal. A slider sets the sensitivity anywhere from Steady to Responsive, and settings show how far and how many times you need to shake. At the steadiest setting that's about 100 px back and forth with 6 changes of direction.
+- If you'd rather not guess the slider position, click "Calibrate" under it: hold the file in the practice area and shake it three times the way you normally do. DropShelf works out a sensitivity from your shakes, and "Use this" writes it back to the slider.
 - Add excluded apps: while one of them is in the foreground or you drag over its windows, no shelf opens and the keyboard shortcut is left to the app. Handy for games and drawing apps.
 - Left, right and top screen edges are supported, with a pause of 0.3, 0.6 or 1 s; edges with the taskbar and edges shared between monitors don't trigger.
 
 ### The shelf
-- When collapsed, it shows a thumbnail stack, the item count and the total size. If it holds both files and text, only the files are dragged out.
+- When collapsed, it shows a thumbnail stack, the item count and the total size. A folder shows how many items it holds and their total size (counted in the background; a folder with a huge number of files shows only the item count). Text and links dragged out on their own stay text; dragged out together with files, text goes along as a `.txt` file and a web link as a `.url` shortcut.
+- Right-click text or a link and choose "Turn into a file" to make it a file in place, which you can then drop into File Explorer, onto the desktop or anywhere else. When you drop text somewhere that doesn't take text, the shelf offers the same. The compress, move to, send to folder and open with quick actions treat text and links as files automatically.
 - While you drag in, the top two cards of the stack fan out to the sides, leaving a dashed slot in the middle. Dropped files fly from where you let go into that slot and the fan closes, or to the start of their own row when the list is open; when you drop several, up to 3 land one after another.
 - The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list, and clicking the stack opens it too. The list shows 4, 5 or 6 cards per row for the small, medium and large sizes; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more; double-click empty space to stack them back. Removed cards shrink away and the rest slide over to fill the gap.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
@@ -54,8 +56,12 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.
 - Chat app support: temporary images and files deleted right after the drop are saved; PNG, JPG, GIF and DIB image data and older QQ versions are supported; temporary attachments dragged or copied to chat apps are kept for 10 more minutes.
 - Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu. You can also drag a card out of the Overview page to reopen the shelf where you let go, or drop it back anywhere in the stack, where the other cards make room for it.
+- If a file on a shelf is renamed elsewhere, or moved to another folder on the same disk, the shelf follows it instead of showing "Moved or deleted". Files sent to the Recycle Bin or moved to another disk or a network location aren't followed. This works for files on NTFS disks.
 - Several shelves can be open at once, in Small, Medium or Large.
-- Shortcuts: `Esc` collapses or closes, `Delete` removes the selection, `Ctrl+A` selects all, `Ctrl+C` copies, `Ctrl+V` pastes, `Enter` opens.
+- Merge: drag one shelf by its title bar onto another. The other shelf shows "Release to merge"; let go and the items fly into it while the shelf you dragged closes. Dragging items from one shelf onto another moves them, and text, links and temporary attachments go along as they are.
+- Split: when you drag only some of the cards out of the spread, a "New shelf" strip slides out below the shelf. Drop on it to split those items into a new shelf right there. You can also right-click selected items and choose "Move to a new shelf". A new shelf summoned by shaking mid-drag catches them too.
+- After you remove items or clear the shelf, a "Removed N items" notice appears at the bottom. Click "Undo" or press `Ctrl+Z` within 5 seconds to put them back where they were. A shelf you emptied closes only after the notice goes away.
+- Shortcuts: `Esc` collapses or closes, `Delete` removes the selection, `Ctrl+Z` undoes a removal, `Ctrl+A` selects all, `Ctrl+C` copies, `Ctrl+V` pastes, `Enter` opens.
 
 ### Quick actions
 - The bottom of the shelf shows 0, 2 or 4 quick actions; drag cards in settings to replace or swap them.
@@ -63,6 +69,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Custom actions:
   - Send to folder: move or copy to a fixed folder with one click.
   - Compress image: compress to a JPG no larger than a given size (e.g. 200 KB), replacing the image on the shelf while the original file stays unchanged.
+  - Convert image: save HEIC, WebP, AVIF, BMP and other images as JPG or PNG, replacing the image on the shelf while the original file stays unchanged. PNG keeps transparency.
   - Open with app: hand files to a chosen program; use `{files}` to place them in the arguments.
   - To delete one, drag it to the red area at the bottom of the settings window and confirm.
 - Click a button to process the items on the shelf, or only the selected ones when the list is expanded.
@@ -70,7 +77,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ### Settings and appearance
 - Light, Dark or System theme; the accent color is cobalt by default and can follow Windows or be one of seven other colors.
-- English and Simplified Chinese interface, following the system language by default.
+- English and Simplified Chinese interface, following the system language by default. Other languages can be added as language packs (a JSON file each) without changing the program; see [docs/translating.md](docs/translating.md).
 - Settings apply immediately and are saved automatically.
 - A tutorial is shown on first run and can be viewed again from General.
 
@@ -81,10 +88,11 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ## Privacy and data safety
 
-- Files are recorded by path only and their contents are never read; removing items or clearing a shelf doesn't affect files on disk.
+- Files are recorded by path and by their ID number on the disk only, and their contents are never read; for a folder, only the number and sizes of the items inside are counted, and none of them is opened; removing items or clearing a shelf doesn't affect files on disk.
 - Temporary attachments and dropped images are cached in the system temp folder and cleaned up after the shelf closes.
 - "Recently closed shelves" records only paths and names of files and folders, and can be cleared in settings.
 - Mouse positions are only used to detect gestures and are never saved.
+- DropShelf stays offline. It goes online only when you click "Check for updates" in the About window, and then only to this project's release list on GitHub; the request carries nothing but the app name and version. If there's a newer version, click again to open the download page. Nothing is downloaded or installed automatically.
 
 ## Install and uninstall
 
@@ -95,6 +103,7 @@ DropShelf installs to `%LOCALAPPDATA%\Programs\DropShelf` without admin rights; 
 - Settings: `%LOCALAPPDATA%\DropShelf\settings.json`
 - Recently closed shelves: `%LOCALAPPDATA%\DropShelf\history.json`
 - Logs: `%LOCALAPPDATA%\DropShelf\Logs` (kept for 14 days)
+- Language packs: `%LOCALAPPDATA%\DropShelf\Languages`, or a `Languages` folder next to the program
 
 ## System requirements
 
@@ -141,7 +150,9 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish.
-3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later.
+3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`.
+
+Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
 
 ## License
 

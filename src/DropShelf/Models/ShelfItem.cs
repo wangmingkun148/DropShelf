@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
+using DropShelf.Interop;
 using DropShelf.Localization;
 
 namespace DropShelf.Models;
@@ -19,13 +20,35 @@ public sealed class ShelfItem : INotifyPropertyChanged
     private ImageSource? _thumbnail;
     private bool _isAvailable = true;
     private long? _sizeBytes;
+    private int? _childCount;
     private string _typeName = string.Empty;
+    private string _value = string.Empty;
 
     public required string Id { get; init; }
     public required ShelfItemKind Kind { get; init; }
 
     /// <summary>文件或文件夹的完整路径、文本内容或网址。</summary>
-    public required string Value { get; init; }
+    public required string Value
+    {
+        get => _value;
+        init => _value = value;
+    }
+
+    /// <summary>文件在磁盘上的标识：在别处被改名或移动后，按它找到现在的路径，见 <see cref="Relocate"/>。取不到时为 null。</summary>
+    public FileIdentity? Identity { get; set; }
+
+    /// <summary>文件在别处被改名或移动了：换成现在的路径，名称和说明随之更新；选中状态、缩略图都留着。</summary>
+    public void Relocate(string path)
+    {
+        if (!IsFileSystem || string.Equals(_value, path, StringComparison.Ordinal)) return;
+        var extension = Path.GetExtension(_value);
+        _value = path;
+        OnPropertyChanged(nameof(Value));
+        OnPropertyChanged(nameof(DisplayName));
+        IsAvailable = true;
+        if (Kind == ShelfItemKind.File && !string.Equals(extension, Path.GetExtension(path), StringComparison.OrdinalIgnoreCase))
+            TypeName = Services.ShellFileInfo.GetTypeName(path);
+    }
 
     /// <summary>链接的标题。</summary>
     public string? Title { get; init; }
@@ -53,7 +76,12 @@ public sealed class ShelfItem : INotifyPropertyChanged
                 ShelfItemKind.File => SizeBytes is { } size
                     ? string.IsNullOrEmpty(TypeName) ? FormatSize(size) : $"{FormatSize(size)} · {TypeName}"
                     : TypeName,
-                ShelfItemKind.Folder => Strings.Folder,
+                ShelfItemKind.Folder => ChildCount switch
+                {
+                    null => Strings.Folder,
+                    0 => Strings.EmptyFolder,
+                    { } count => SizeBytes is { } total ? $"{Strings.FolderItems(count)} · {FormatSize(total)}" : Strings.FolderItems(count)
+                },
                 ShelfItemKind.Link => Uri.TryCreate(Value, UriKind.Absolute, out var uri) ? uri.Host : Strings.Link,
                 _ => Strings.TextDetail(Value.Length)
             };
@@ -89,6 +117,19 @@ public sealed class ShelfItem : INotifyPropertyChanged
         {
             if (_sizeBytes == value) return;
             _sizeBytes = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Detail));
+        }
+    }
+
+    /// <summary>文件夹第一层有几项；还没统计出来或不是文件夹时为 null。文件夹的 <see cref="SizeBytes"/> 是里面全部文件的大小。</summary>
+    public int? ChildCount
+    {
+        get => _childCount;
+        set
+        {
+            if (_childCount == value) return;
+            _childCount = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(Detail));
         }

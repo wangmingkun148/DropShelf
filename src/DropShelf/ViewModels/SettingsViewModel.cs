@@ -10,11 +10,15 @@ using DropShelf.Services.Gestures;
 
 namespace DropShelf.ViewModels;
 
+/// <summary>设置里“语言包”的一个选项；Id 为空表示不使用语言包。</summary>
+public sealed record LanguagePackOption(string Id, string Name);
+
 public sealed class SettingsViewModel : ObservableObject
 {
     private readonly AppController _controller;
     private bool _startupFailed;
     private CustomActionEditorViewModel? _editor;
+    private ShakeCalibrationViewModel? _calibration;
     private string? _actionsKey;
     private IReadOnlyList<ActionSlotViewModel> _visibleSlots = [];
     private IReadOnlyList<ActionCardViewModel> _moreActions = [];
@@ -25,6 +29,9 @@ public sealed class SettingsViewModel : ObservableObject
     public SettingsViewModel(AppController controller)
     {
         _controller = controller;
+        // 每次打开设置重新找一遍语言包：新放进文件夹的、刚改过的译文不用重启程序就能用上。
+        LanguagePacks.Reload(controller.LanguagePackDirectory);
+        LanguageService.SetPack(LanguagePacks.Find(controller.Settings.LanguagePack));
         controller.SettingsChanged += OnSettingsChanged;
         _sensitivitySave.Tick += (_, _) => SaveSensitivity();
         controller.History.Changed += OnHistoryChanged;
@@ -38,7 +45,10 @@ public sealed class SettingsViewModel : ObservableObject
         OpenLogFolderCommand = new RelayCommand(_ => OpenFolder(LogService.LogDirectory));
         OpenProgramFolderCommand = new RelayCommand(_ => OpenFolder(ProgramDirectory));
         OpenSettingsFolderCommand = new RelayCommand(_ => OpenFolder(Path.GetDirectoryName(controller.SettingsPath) ?? string.Empty));
+        OpenLanguageFolderCommand = new RelayCommand(_ => OpenFolder(LanguagePackFolder));
         AddCustomActionCommand = new RelayCommand(_ => BeginNewCustomAction());
+        CheckUpdateCommand = new RelayCommand(_ => CheckOrOpenUpdate(), _ => _updateState != UpdateState.Checking);
+        CalibrateShakeCommand = new RelayCommand(_ => Calibration = new ShakeCalibrationViewModel(ApplyCalibration, () => Calibration = null));
         ClearHistoryCommand = new RelayCommand(_ => controller.History.Clear(), _ => HasHistory);
         RemoveBlockedAppCommand = new RelayCommand(app => Update(settings => settings.BlockedApps!.Remove((string)app!)));
         RefreshActions();
@@ -55,7 +65,10 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand OpenLogFolderCommand { get; }
     public ICommand OpenProgramFolderCommand { get; }
     public ICommand OpenSettingsFolderCommand { get; }
+    public ICommand OpenLanguageFolderCommand { get; }
     public ICommand AddCustomActionCommand { get; }
+    public ICommand CalibrateShakeCommand { get; }
+    public ICommand CheckUpdateCommand { get; }
     public ICommand ClearHistoryCommand { get; }
     public ICommand RemoveBlockedAppCommand { get; }
 
@@ -70,6 +83,110 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool CanUninstall => File.Exists(UninstallerPath);
     public string UninstallDescription => CanUninstall ? Strings.UninstallDescription : Strings.UninstallPortable;
+
+    // ───────────── 语言包 ─────────────
+
+    /// <summary>用户放语言包的文件夹。</summary>
+    public string LanguagePackFolder => _controller.LanguagePackDirectory;
+
+    public bool HasLanguagePacks => LanguagePacks.Available.Count > 0;
+
+    /// <summary>“不使用”加上找到的语言包。</summary>
+    public IReadOnlyList<LanguagePackOption> LanguagePackOptions =>
+        [new LanguagePackOption(string.Empty, Strings.LanguagePackNone), .. LanguagePacks.Available.Select(pack => new LanguagePackOption(pack.Id, pack.Name))];
+
+    public string LanguagePack
+    {
+        get => LanguagePacks.Find(Settings.LanguagePack)?.Id ?? string.Empty;
+        set
+        {
+            // 选项列表刷新时界面会先把选中的值清成 null，那不是用户选的，不理会；“不使用”的值是空字符串。
+            if (value is null) return;
+            Update(settings => settings.LanguagePack = value.Length == 0 ? null : value);
+        }
+    }
+
+    /// <summary>把全部界面文字的原文写成一个空白的语言包，交给翻译的人去填。</summary>
+    public bool ExportLanguageTemplate(string path)
+    {
+        try
+        {
+            // 对照中文还是英文来翻译，按现在的界面语言定。
+            File.WriteAllText(path, LanguageTemplate.Build(LanguageService.Pack?.FromChinese ?? LanguageService.IsChinese));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("导出翻译模板失败", exception);
+            return false;
+        }
+    }
+
+    // ───────────── 检查更新 ─────────────
+
+    private enum UpdateState
+    {
+        Idle,
+        Checking,
+        UpToDate,
+        Available,
+        Failed
+    }
+
+    private UpdateState _updateState;
+    private UpdateInfo? _update;
+
+    public string UpdateDescription => _updateState switch
+    {
+        UpdateState.Checking => Strings.UpdateChecking,
+        UpdateState.UpToDate => Strings.UpdateLatest(VersionNumber),
+        UpdateState.Available when _update is not null => Strings.UpdateAvailable(_update.Version.ToString(3)),
+        UpdateState.Failed => Strings.UpdateFailed,
+        _ => Strings.UpdateIdle
+    };
+
+    /// <summary>有新版本时按钮改为打开下载页。</summary>
+    public string UpdateButtonText => _updateState == UpdateState.Available ? Strings.UpdateOpenPage : Strings.CheckForUpdates;
+
+    /// <summary>
+    /// 点“检查更新”：访问一次 GitHub 上的发布列表，告诉用户有没有新版本；有的话再点一次打开下载页。
+    /// 只有点了才联网，不自动下载或安装。
+    /// </summary>
+    private async void CheckOrOpenUpdate()
+    {
+        if (_updateState == UpdateState.Available && _update is not null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(_update.Url) { UseShellExecute = true });
+            }
+            catch (Exception exception)
+            {
+                LogService.Error("打开下载页失败", exception);
+            }
+            return;
+        }
+
+        SetUpdateState(UpdateState.Checking);
+        try
+        {
+            _update = await UpdateChecker.CheckAsync();
+            SetUpdateState(_update is null ? UpdateState.UpToDate : UpdateState.Available);
+        }
+        catch (Exception exception)
+        {
+            LogService.Error("检查更新失败", exception);
+            SetUpdateState(UpdateState.Failed);
+        }
+    }
+
+    private void SetUpdateState(UpdateState state)
+    {
+        _updateState = state;
+        OnPropertyChanged(nameof(UpdateDescription));
+        OnPropertyChanged(nameof(UpdateButtonText));
+        CommandManager.InvalidateRequerySuggested();
+    }
 
     // ───────────── 运行状态与概览 ─────────────
 
@@ -181,6 +298,27 @@ public sealed class SettingsViewModel : ObservableObject
             _sensitivitySave.Stop();
             _sensitivitySave.Start();
         }
+    }
+
+    /// <summary>晃动示范校准的对话框；没打开时为 null。</summary>
+    public ShakeCalibrationViewModel? Calibration
+    {
+        get => _calibration;
+        private set
+        {
+            if (SetField(ref _calibration, value)) OnPropertyChanged(nameof(IsCalibrating));
+        }
+    }
+
+    public bool IsCalibrating => _calibration is not null;
+
+    /// <summary>采用校准给出的灵敏度：立即保存，滑块随之移到新的位置。</summary>
+    private void ApplyCalibration(int level)
+    {
+        _sensitivitySave.Stop();
+        _pendingSensitivity = null;
+        Update(settings => settings.ShakeSensitivity = ShakeSensitivities.Clamp(level));
+        Calibration = null;
     }
 
     public string SensitivityDescription
@@ -460,6 +598,7 @@ public sealed class SettingsViewModel : ObservableObject
         RefreshAll();
         RefreshActions();
         RefreshHistory();
+        Calibration?.RefreshText();
     }
 
     private void RefreshAll()
@@ -472,7 +611,8 @@ public sealed class SettingsViewModel : ObservableObject
                      nameof(StatusTitle), nameof(StatusDetail), nameof(IsHealthy), nameof(PanelTitle), nameof(PanelBody),
                      nameof(ShowShakeWay), nameof(ShowEdgeWay), nameof(HotkeyKeys), nameof(ShowHotkeyWay), nameof(ShowGettingStarted), nameof(ActionLayout),
                      nameof(StartupDescription), nameof(Version), nameof(HistoryDescription), nameof(GeneralSummary),
-                     nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription)
+                     nameof(ShelfSummary), nameof(ActionsSummary), nameof(AppearanceSummary), nameof(UninstallDescription),
+                     nameof(UpdateDescription), nameof(UpdateButtonText), nameof(LanguagePack), nameof(LanguagePackOptions), nameof(HasLanguagePacks)
                  })
             OnPropertyChanged(name);
         if (ActionsKey() != _actionsKey) RefreshActions();

@@ -117,6 +117,19 @@ public static class QuickActionService
                     return new QuickActionResult(false, Strings.ImageCompressFailed);
                 }
 
+            case CustomActionKind.ConvertImage:
+                try
+                {
+                    var outputDirectory = request.HasTemporaryFiles ? GetPersistentOutputDirectory() : null;
+                    var results = await ImagingThread.RunLongAsync(() => ImageConverter.ConvertAll(paths, custom.ImageFormat, outputDirectory));
+                    return SummarizeImageConversion(results, Strings.ImageFormatName(custom.ImageFormat));
+                }
+                catch (Exception exception)
+                {
+                    LogService.Error("转换图片失败", exception);
+                    return new QuickActionResult(false, Strings.ImageConvertFailed);
+                }
+
             default:
                 return OpenWith(custom, label, paths) with { KeepsTemporaryFiles = request.HasTemporaryFiles };
         }
@@ -169,6 +182,26 @@ public static class QuickActionService
         if (small > 0) message += Strings.ImagesSkippedSmall(small);
         if (failed > 0) message += Strings.ImagesFailed(failed);
         return new QuickActionResult(true, message, compressed.Select(item => item.Item2).ToArray()) { Replacements = compressed };
+    }
+
+    private static QuickActionResult SummarizeImageConversion(IReadOnlyList<ImageConversionResult> results, string format)
+    {
+        var converted = results.Where(result => result.Status == ImageConversionStatus.Converted && result.Output is not null)
+            .Select(result => (result.Source, result.Output!))
+            .ToArray();
+        var same = results.Count(result => result.Status == ImageConversionStatus.AlreadyFormat);
+        var failed = results.Count(result => result.Status == ImageConversionStatus.Failed);
+
+        if (converted.Length + same + failed == 0) return new QuickActionResult(false, Strings.NoImagesToConvert);
+        if (converted.Length == 0)
+            return failed == 0
+                ? new QuickActionResult(true, Strings.ImagesAlreadyFormat(format))
+                : new QuickActionResult(false, Strings.ImageConvertFailed);
+
+        var message = Strings.ImagesConverted(converted.Length, format);
+        if (same > 0) message += Strings.ImagesSkippedSameFormat(same, format);
+        if (failed > 0) message += Strings.ImagesFailed(failed);
+        return new QuickActionResult(true, message, converted.Select(item => item.Item2).ToArray()) { Replacements = converted };
     }
 
     private static QuickActionResult OpenWith(CustomQuickAction custom, string label, IReadOnlyList<string> paths)

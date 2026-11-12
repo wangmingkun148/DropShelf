@@ -37,8 +37,20 @@
         <controls:SettingsCard Icon="{StaticResource Glyph.Document}" Header="{l:Loc Logs}" Description="{Binding LogDirectory}">
             <Button Content="{l:Loc OpenFolder}" Command="{Binding OpenLogFolderCommand}" />
         </controls:SettingsCard>
+        <!-- 语言包放在这个文件夹里；导出的模板是一个空白的语言包，填上译文再放回来 -->
+        <controls:SettingsCard Icon="{StaticResource Glyph.Language}" Header="{l:Loc LanguagePackHeader}" Description="{Binding LanguagePackFolder}">
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="ExportLanguageTemplateButton" Content="{l:Loc ExportLanguageTemplate}" Click="OnExportLanguageTemplateClick"
+                        Margin="0,0,8,0" />
+                <Button Content="{l:Loc OpenFolder}" Command="{Binding OpenLanguageFolderCommand}" />
+            </StackPanel>
+        </controls:SettingsCard>
 
         <TextBlock Text="{l:Loc General}" Style="{StaticResource SectionHeaderTextStyle}" />
+        <!-- 平时不联网：点了这个按钮才访问一次 GitHub 上的发布列表 -->
+        <controls:SettingsCard Icon="{StaticResource Glyph.Download}" Header="{l:Loc CheckForUpdates}" Description="{Binding UpdateDescription}">
+            <Button x:Name="CheckUpdateButton" Content="{Binding UpdateButtonText}" Command="{Binding CheckUpdateCommand}" MinWidth="96" />
+        </controls:SettingsCard>
         <controls:SettingsCard Icon="{StaticResource Glyph.Power}" Header="{l:Loc QuitApp}" Description="{l:Loc QuitDescription}">
             <Button x:Name="QuitButton" Content="{l:Loc Quit}" Command="{Binding ExitCommand}" MinWidth="96" />
         </controls:SettingsCard>

@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using DropShelf.Interop;
 using DropShelf.Localization;
 using DropShelf.Models;
 using DropShelf.Services;
@@ -48,15 +49,32 @@ public partial class ShelfWindow
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState != MouseButtonState.Pressed) return;
+        // 有东西的置物架拖到另一个置物架上松手就合并：移动途中留意光标下面是不是别的置物架。
+        var mergeable = ViewModel.HasItems && !ViewModel.IsBusy && !IsDraggingOut && !IsClosing;
         try
         {
             StopSlide();
             ViewModel.HasInteracted = true;
+            if (mergeable) LocationChanged += OnMovedByHand;
             DragMove();
         }
         catch (InvalidOperationException)
         {
         }
+        finally
+        {
+            LocationChanged -= OnMovedByHand;
+        }
+
+        // 松手时还在那个置物架上就合并：对方收起放置区域，这边不恢复原样，直接带着变淡的样子并过去。
+        if (_mergeTarget is { IsClosing: false } target && !target.ViewModel.IsBusy && target.ContainsScreenPoint(WindowPlacement.GetCursor()))
+        {
+            _mergeTarget = null;
+            target.ShowMergeHint(false);
+            HideToast();
+            MergeInto(target);
+        }
+        else SetMergeTarget(null);
     }
 
     private ContextMenu BuildShelfMenu()
@@ -73,13 +91,15 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
+        if (targets.Any(item => !item.IsFileSystem))
+            menu.Items.Add(CreateMenuItem(Strings.MenuConvertToFile, "\uE8A5", () => ConvertToFiles(targets)));
         menu.Items.Add(new Separator());
         if (_host.History is { Latest: { } latest } history)
         {
             menu.Items.Add(CreateMenuItem(Strings.RestoreLastShelf, "", () => Restore(latest)));
             menu.Items.Add(HistoryMenu.Create(history.Entries, Restore, history.Clear));
         }
-        menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
+        menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveByUser(ViewModel.Items.ToArray()), enabled: hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, "Esc"));
@@ -98,8 +118,12 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(items), enabled: items.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(items), "Ctrl+C"));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(items), enabled: items.Any(item => item.IsFileSystem)));
+        if (items.Any(item => !item.IsFileSystem))
+            menu.Items.Add(CreateMenuItem(Strings.MenuConvertToFile, "\uE8A5", () => ConvertToFiles(items)));
+        if (items.Count < ViewModel.Count)
+            menu.Items.Add(CreateMenuItem(Strings.MenuMoveToNewShelf, "\uE78B", () => SplitOff(items)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveItems(items), "Delete"));
+        menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveByUser(items), "Delete"));
         return menu;
     }
 
@@ -168,8 +192,11 @@ public partial class ShelfWindow
                 e.Handled = true;
                 break;
             case Key.Delete when ViewModel.IsExpanded && ItemsList.SelectedItems.Count > 0:
-                RemoveItems(GetSelectedItems());
+                RemoveByUser(GetSelectedItems());
                 e.Handled = true;
+                break;
+            case Key.Z when control:
+                if (UndoRemoval()) e.Handled = true;
                 break;
             case Key.Enter when ViewModel.IsExpanded && ItemsList.SelectedItems.Count == 1:
                 ViewModel.Open(GetSelectedItems()[0]);

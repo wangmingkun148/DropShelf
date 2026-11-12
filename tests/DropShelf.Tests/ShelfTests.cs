@@ -69,6 +69,35 @@ internal static partial class Program
         Assert(File.ReadAllText(path) == "keep me", "清空置物架改变了磁盘文件");
     }
 
+    private static void TestRemoveUndo()
+    {
+        var folder = CreateFolder("remove-undo");
+        var paths = Enumerable.Range(1, 5).Select(index =>
+        {
+            var path = Path.Combine(folder, $"undo-{index}.txt");
+            File.WriteAllText(path, index.ToString());
+            return path;
+        }).ToArray();
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles(paths);
+        var order = viewModel.Items.ToArray();
+
+        var removal = viewModel.Remove([order[3], order[1]]);
+        Assert(removal is { Entries.Count: 2 } && viewModel.Items.Count == 3, "移除没有返回可撤销的记录");
+        Assert(removal!.Entries[0].Index == 1 && removal.Entries[1].Index == 3, "移除记录里的位置不是从前到后");
+        var restored = viewModel.Restore(removal);
+        Assert(restored.Count == 2 && viewModel.Items.SequenceEqual(order), "撤销后项目没有回到原来的位置");
+        Assert(viewModel.Remove([order[0]]) is not null && viewModel.Remove([order[0]]) is null, "移除不在置物架上的项目也返回了记录");
+        viewModel.Restore(new ShelfRemoval([(order[0], 0)]));
+
+        // 清空后又放上来一个相同的文件，撤销时不重复放回。
+        var all = viewModel.Remove(viewModel.Items.ToArray());
+        viewModel.AddFiles([paths[0]]);
+        var back = viewModel.Restore(all!);
+        Assert(back.Count == 4 && viewModel.Items.Count == 5, "撤销时重复放回了已经在置物架上的文件");
+        Assert(viewModel.Items.Select(item => item.Value).SequenceEqual(paths), "清空后撤销的顺序不对");
+    }
+
     private static void TestTextAndLinkEntries()
     {
         var viewModel = new ShelfViewModel();
@@ -79,6 +108,150 @@ internal static partial class Program
         ]);
         Assert(summary.Added == 2 && summary.Duplicates == 1, "文本或链接去重不正确");
         Assert(viewModel.Items[1].Title == "示例", "链接标题丢失");
+    }
+
+    private static void TestTextBecomesFiles()
+    {
+        var text = new ShelfItem { Id = "1", Kind = ShelfItemKind.Text, Value = "会议纪要：a/b?\n第二行" };
+        var link = new ShelfItem { Id = "2", Kind = ShelfItemKind.Link, Value = "https://example.com/路径?q=1", Title = "示例: 首页" };
+        var bare = new ShelfItem { Id = "3", Kind = ShelfItemKind.Link, Value = "https://example.com/a" };
+        var odd = new ShelfItem { Id = "4", Kind = ShelfItemKind.Text, Value = "???" };
+        var reserved = new ShelfItem { Id = "5", Kind = ShelfItemKind.Text, Value = "con" };
+        Assert(ShelfItemFiles.FileName(text) == "会议纪要：a b.txt", $"文本的文件名不正确：{ShelfItemFiles.FileName(text)}");
+        Assert(ShelfItemFiles.FileName(link) == "示例 首页.url" && ShelfItemFiles.FileName(bare) == "example.com.url", "链接的文件名不正确");
+        Assert(ShelfItemFiles.FileName(odd) == "文本.txt" && ShelfItemFiles.FileName(reserved) == "_con.txt", "无法使用的文件名没有换掉");
+
+        var folder = CreateFolder("text-files");
+        var first = ShelfItemFiles.Write(text, folder);
+        var second = ShelfItemFiles.Write(text, folder);
+        Assert(first != second && Path.GetFileName(second) == "会议纪要：a b (2).txt", "同名时覆盖了已有的文件");
+        Assert(File.ReadAllText(first) == text.Value && File.ReadAllBytes(first)[0] == 0xEF, "文本文件的内容或编码不正确");
+        var shortcut = File.ReadAllText(ShelfItemFiles.Write(link, folder));
+        Assert(shortcut.StartsWith("[InternetShortcut]") && shortcut.Contains("URL=https://example.com/%E8%B7%AF%E5%BE%84?q=1"), $"快捷方式的内容不正确：{shortcut}");
+
+        var viewModel = new ShelfViewModel();
+        viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "第一段"), new DroppedEntry(ShelfItemKind.Link, "https://example.com", "示例")]);
+        var carried = viewModel.WriteForDrag(viewModel.Items.ToArray());
+        Assert(carried.Count == 2 && carried.All(File.Exists) && viewModel.Items.All(item => !item.IsFileSystem), "和文件一起拖出时没有替文本写好文件，或改动了置物架上的项目");
+        Assert(viewModel.WriteForDrag(viewModel.Items.ToArray()).SequenceEqual(carried), "再次拖出时没有接着用写好的文件");
+
+        var ids = viewModel.Items.Select(item => item.Id).ToArray();
+        var converted = viewModel.ConvertToFiles(viewModel.Items.ToArray());
+        Assert(converted.Count == 2 && viewModel.Items.All(item => item.Kind == ShelfItemKind.File && item.IsTemporaryAttachment && File.Exists(item.Value)),
+            "文本和链接没有原地转成文件");
+        Assert(viewModel.Items.Select(item => item.Id).SequenceEqual(ids) && Path.GetExtension(viewModel.Items[1].Value) == ".url", "转成文件后位置或类型不对");
+        var cache = viewModel.CacheDirectories.Single();
+        viewModel.ReleaseResources();
+        Assert(PumpUntil(() => !Directory.Exists(cache), 3000), "关闭置物架后没有清理文本转成的文件");
+
+        Assert(QuickActions.Get(QuickActionType.CompressZip).TakesText && QuickActions.Get(QuickActionType.MoveTo).TakesText &&
+               !QuickActions.Get(QuickActionType.Properties).TakesText && !QuickActions.Get(QuickActionType.CopyFullPath).TakesText,
+            "哪些操作把文本当文件处理不正确");
+    }
+
+    private static async Task TestAdoptBetweenShelves()
+    {
+        var folder = CreateFolder("adopt");
+        var paths = Enumerable.Range(1, 3).Select(index =>
+        {
+            var path = Path.Combine(folder, $"adopt-{index}.txt");
+            File.WriteAllText(path, index.ToString());
+            return path;
+        }).ToArray();
+        var source = new ShelfViewModel();
+        source.AddFiles(paths);
+        source.AddEntries([new DroppedEntry(ShelfItemKind.Text, "备注"), new DroppedEntry(ShelfItemKind.Link, "https://example.com", "示例")]);
+        var target = new ShelfViewModel();
+        target.AddFiles([paths[0]]);
+
+        // 缩略图跟着项目走：对方接着用，这边移除时不清掉。
+        var thumbnail = new System.Windows.Media.Imaging.WriteableBitmap(4, 4, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+        thumbnail.Freeze();
+        var moving = source.Items.ToArray();
+        moving[2].Thumbnail = thumbnail;
+
+        var added = target.Adopt(moving, source);
+        Assert(added == 4 && target.Items.Count == 5, $"交过来的项目数量不对：{added}");
+        Assert(ReferenceEquals(target.Items[1], moving[1]) && ReferenceEquals(target.Items[^1], moving[4]) && target.Items[^1].Title == "示例",
+            "项目没有原样交过来，或顺序不对");
+        Assert(target.HasInteracted && source.Items.Count == 5, "接收之后对方应该自己移除，这边不替它移除");
+        source.Remove(moving);
+        Assert(source.IsEmpty && target.Items.Count == 5 && ReferenceEquals(moving[2].Thumbnail, thumbnail), "来源移除项目时清掉了已经交出去的缩略图");
+        Assert(target.Adopt(target.Items.ToArray(), target) == 0 && target.Items.Count == 5, "不应该把项目交给自己");
+        source.ReleaseResources();
+        Assert(new ShelfViewModel().Adopt([], source) == 0 && source.Adopt(target.Items.ToArray(), target) == 0, "已关闭的置物架不应该再接收项目");
+
+        // 临时附件：缓存目录由两边共同持有，来源关闭后文件还在，最后一个关闭后才清理。
+        var cache = VirtualFileDropService.CreateCacheDirectory();
+        var file = Path.Combine(cache, "附件.txt");
+        File.WriteAllText(file, "shared");
+        var first = new ShelfViewModel();
+        first.Add(new DropReadResult([new DroppedEntry(ShelfItemKind.File, file, IsTemporary: true)], [cache], 0, null));
+        var second = new ShelfViewModel();
+        Assert(second.Adopt(first.Items.ToArray(), first) == 1 && second.CacheDirectories.Count == 1, "接收临时附件时没有一起持有缓存");
+        first.ReleaseResources();
+        await Task.Delay(300);
+        Assert(File.Exists(file), "来源置物架关闭后，交出去的临时附件被删除");
+        second.ReleaseResources();
+        await Task.Delay(300);
+        Assert(!Directory.Exists(cache), "两个置物架都关闭后临时附件没有清理");
+    }
+
+    private static void TestFollowsRenamedFiles()
+    {
+        var folder = CreateStableFolder("follow-rename");
+        var path = Path.Combine(folder, "before.txt");
+        File.WriteAllText(path, "x");
+        if (FileIdentity.TryGet(path) is not { } identity)
+        {
+            // 只有 NTFS 上的文件有稳定的标识；测试目录在别的文件系统上时没法验证。
+            Console.WriteLine("    （测试目录不在 NTFS 上，跳过）");
+            return;
+        }
+        Assert(FileIdentity.TryGet(Path.Combine(folder, "missing.txt")) is null && FileIdentity.TryGet(@"\\server\share\a.txt") is null,
+            "不存在的文件或网络路径取到了标识");
+
+        var sub = Directory.CreateDirectory(Path.Combine(folder, "sub")).FullName;
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles([path, sub]);
+        var (file, directory) = (viewModel.Items[0], viewModel.Items[1]);
+        Assert(file.Identity == identity && directory.Identity is not null && directory.Identity != identity, "放进置物架时没有记下文件标识");
+
+        // 改名并挪进另一个文件夹：原来的路径没了，按标识找到现在的位置；项目还是原来那个，名称和类型跟着变。
+        var inner = Directory.CreateDirectory(Path.Combine(folder, "inner")).FullName;
+        File.Move(path, Path.Combine(inner, "after.md"));
+        Directory.Move(sub, Path.Combine(folder, "renamed"));
+        var captions = 0;
+        viewModel.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ShelfViewModel.StackCaption)) captions++; };
+        viewModel.Relink(viewModel.Items.ToArray());
+        Assert(ReferenceEquals(viewModel.Items[0], file) && file.DisplayName == "after.md" && File.Exists(file.Value) && file.IsAvailable,
+            $"改名并移动后的文件没有跟上：{file.Value}");
+        Assert(Path.GetFileName(Path.GetDirectoryName(file.Value)) == "inner" && captions > 0, "文件的新位置不对，或名称变了没有通知");
+        Assert(directory.DisplayName == "renamed" && Directory.Exists(directory.Value), $"改名后的文件夹没有跟上：{directory.Value}");
+
+        // 正在拖出时文件不见了，是被目标程序移走的，不跟过去。
+        var away = Path.Combine(folder, "away.md");
+        File.Move(file.Value, away);
+        var before = file.Value;
+        viewModel.IsDraggingOut = true;
+        viewModel.Relink([file]);
+        Assert(file.Value == before, "拖出期间不应该跟着文件走");
+        viewModel.IsDraggingOut = false;
+        viewModel.Relink([file]);
+        Assert(file.DisplayName == "away.md" && File.Exists(file.Value), "拖出结束后没有再跟上");
+
+        // 置物架上已经有这个路径时不重复；真的删除了就照旧显示找不到。
+        var twin = Path.Combine(folder, "twin.md");
+        File.WriteAllText(twin, "y");
+        viewModel.AddFiles([twin]);
+        File.Delete(twin);
+        File.Move(file.Value, twin);
+        viewModel.Relink([file]);
+        Assert(file.DisplayName == "away.md" && viewModel.Items.Count(item => item.DisplayName == "twin.md") == 1, "跟过去之后和置物架上已有的项目重复了");
+        File.Delete(twin);
+        viewModel.Relink(viewModel.Items.ToArray());
+        Assert(!file.RefreshAvailability() && file.DisplayName == "away.md", "已经删除的文件不应该再有路径");
+        Assert(identity.Resolve(path, isFolder: false) is null, "已经删除的文件按标识还能找到");
     }
 
     private static void TestStackSummary()
@@ -96,6 +269,30 @@ internal static partial class Program
         Assert(viewModel.Stack2 is not null && viewModel.HasMultiple, "三张堆叠卡片不完整");
         Assert(viewModel.StackCaption == "3 个项目" && viewModel.StackDetail == "2 个文件 · 1 个文件夹 · 3 KB", $"汇总不正确：{viewModel.StackDetail}");
         Assert(viewModel.Title == "3 个项目", "标题不正确");
+    }
+
+    private static void TestFolderContents()
+    {
+        var folder = CreateFolder("folder-contents");
+        File.WriteAllBytes(Path.Combine(folder, "a.bin"), new byte[1024]);
+        var inner = Directory.CreateDirectory(Path.Combine(folder, "inner")).FullName;
+        File.WriteAllBytes(Path.Combine(inner, "b.bin"), new byte[2048]);
+        Directory.CreateDirectory(Path.Combine(folder, "empty"));
+
+        Assert(FolderContents.Measure(folder) is { Children: 3, SizeBytes: 3072 }, "文件夹的项目数或大小不正确");
+        Assert(FolderContents.Measure(Path.Combine(folder, "empty")) is { Children: 0, SizeBytes: 0 }, "空文件夹的统计不正确");
+        Assert(FolderContents.Measure(Path.Combine(folder, "missing")) is null, "不存在的文件夹没有返回空");
+        Assert(FolderContents.Measure(folder, FolderContents.SizeBudget, maximumFiles: 1) is { Children: 3, SizeBytes: null }, "文件太多时仍给出了大小");
+
+        var item = new ShelfItem { Id = "1", Kind = ShelfItemKind.Folder, Value = folder };
+        Assert(item.Detail == "文件夹", "还没统计时文件夹的说明不正确");
+        item.SizeBytes = 3072;
+        item.ChildCount = 3;
+        Assert(item.Detail == "3 项 · 3 KB", $"文件夹的说明不正确：{item.Detail}");
+        item.SizeBytes = null;
+        Assert(item.Detail == "3 项", "不知道大小时文件夹的说明不正确");
+        item.ChildCount = 0;
+        Assert(item.Detail == "空文件夹", "空文件夹的说明不正确");
     }
 
     private static void TestApplyDragOut()

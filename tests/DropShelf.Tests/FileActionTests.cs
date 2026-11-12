@@ -305,6 +305,47 @@ internal static partial class Program
         Assert(copy.PixelWidth == 1200 && copy.PixelHeight == 1500 && expected.AsSpan().SequenceEqual(actual), "分段复制的像素与原图不一致");
     }
 
+    private static async Task TestImageConversion()
+    {
+        var folder = CreateFolder("convert-image");
+        var png = Path.Combine(folder, "shot.png");
+        File.WriteAllBytes(png, CreateNoisyPng(300, 200));
+
+        var jpg = ImageConverter.Convert(png, ImageFormat.Jpeg);
+        Assert(jpg.Status == ImageConversionStatus.Converted && Path.GetFileName(jpg.Output!) == "shot.jpg", "PNG 没有转成 JPG");
+        var decoded = System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(jpg.Output!), System.Windows.Media.Imaging.BitmapCreateOptions.None,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        Assert(decoded is System.Windows.Media.Imaging.JpegBitmapDecoder && decoded.Frames[0].PixelWidth == 300 && decoded.Frames[0].PixelHeight == 200,
+            "转出的 JPG 格式或尺寸不对");
+        Assert(File.Exists(png), "原图被改动");
+        Assert(ImageConverter.Convert(jpg.Output!, ImageFormat.Jpeg).Status == ImageConversionStatus.AlreadyFormat, "已经是 JPG 的图片不应再转");
+
+        // 同名的 PNG 已经在了，转回去时另起一个名字，不覆盖。
+        var back = ImageConverter.Convert(jpg.Output!, ImageFormat.Png);
+        Assert(back.Status == ImageConversionStatus.Converted && Path.GetFileName(back.Output!) == "shot (2).png", "转成 PNG 时覆盖了同名文件");
+        Assert(System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(back.Output!), System.Windows.Media.Imaging.BitmapCreateOptions.None,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad) is System.Windows.Media.Imaging.PngBitmapDecoder, "转出的不是 PNG");
+
+        var text = Path.Combine(folder, "note.txt");
+        File.WriteAllText(text, "x");
+        Assert(ImageConverter.Convert(text, ImageFormat.Png).Status == ImageConversionStatus.NotImage, "非图片文件没有跳过");
+        var broken = Path.Combine(folder, "broken.webp");
+        File.WriteAllText(broken, new string('x', 2000));
+        Assert(ImageConverter.Convert(broken, ImageFormat.Png).Status == ImageConversionStatus.Failed, "损坏的图片没有报告失败");
+        Assert(Directory.GetFiles(folder, ".dropshelf-*").Length == 0, "转换失败后留下了临时文件");
+
+        // 作为快速操作：转出的图片替换置物架上的原图，本来就是这个格式的和不是图片的留着不动。
+        var custom = new CustomQuickAction { Kind = CustomActionKind.ConvertImage, ImageFormat = ImageFormat.Png };
+        var action = QuickActionInfo.ForCustom(custom);
+        Assert(action.Label == "→ PNG" && action.Title == "图片转成 PNG" && action.ShowsProgress && !action.TakesText, "转换图片的名称或属性不正确");
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles([jpg.Output!, png, text]);
+        var result = await viewModel.RunActionAsync(action, viewModel.Items.ToArray(), IntPtr.Zero, null);
+        Assert(result.Succeeded && result.Replacements is { Count: 1 }, $"转换图片的结果不正确：{result.Message}");
+        Assert(viewModel.Items.Count == 3 && Path.GetFileName(viewModel.Items[0].Value) == "shot (3).png" && viewModel.Items[1].Value == png,
+            "转出的图片没有替换置物架上的原图");
+    }
+
     private static async Task TestCompressImageReplacesItems()
     {
         var folder = CreateFolder("compress-replace");

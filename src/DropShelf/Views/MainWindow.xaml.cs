@@ -373,7 +373,7 @@ public partial class MainWindow : Window
     }
 
     // 对话框开着时 Esc 留给它的取消按钮。
-    private bool CanGoBack => _page != "Overview" && !ViewModel.IsEditorOpen && _pendingDelete is null && !_draggingCard && !_draggingHistory;
+    private bool CanGoBack => _page != "Overview" && !ViewModel.IsEditorOpen && !ViewModel.IsCalibrating && _pendingDelete is null && !_draggingCard && !_draggingHistory;
 
     private static T? FindAncestor<T>(DependencyObject? source, Func<T, bool>? match = null) where T : DependencyObject
     {

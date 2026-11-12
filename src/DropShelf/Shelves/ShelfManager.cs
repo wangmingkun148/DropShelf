@@ -170,6 +170,9 @@ public sealed class ShelfManager : IShelfHost
     public void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths) =>
         OpenNextTo(source, activate: false).ViewModel.AddFiles(paths);
 
+    /// <summary>拆分时在指定位置打开一个空置物架，不抢焦点。</summary>
+    public ShelfWindow OpenNew(POINT center) => OpenAt(center, openedByGesture: false, activate: false);
+
     public void SetDragOutMode(TransferMode mode) => _updateSettings(settings => settings.DragOutMode = mode);
 
     public void ApplySettings(AppSettings settings)
@@ -189,6 +192,7 @@ public sealed class ShelfManager : IShelfHost
         _spare = null;
         _warming?.Close();
         _warming = null;
+        SplitPadWindow.CloseShared();
     }
 
     public void OnShelfClosed(ShelfWindow window, IReadOnlyList<ShelfItem> items)

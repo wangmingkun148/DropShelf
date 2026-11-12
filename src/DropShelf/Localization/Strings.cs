@@ -5,12 +5,25 @@ using DropShelf.Services;
 namespace DropShelf.Localization;
 
 /// <summary>
-/// 界面文字。每一项同时写出中文和英文，按 <see cref="LanguageService"/> 的当前语言返回。
+/// 界面文字。每一项同时写出中文和英文，按 <see cref="LanguageService"/> 的当前语言返回；
+/// 选了语言包时按原文模板找译文，没有译文的显示原文，见 <see cref="LanguagePack"/>。
 /// 代码直接读取属性；XAML 用 {l:Loc 属性名} 引用，切换语言后自动刷新。
 /// </summary>
 public static class Strings
 {
-    private static string T(string chinese, string english) => LanguageService.IsChinese ? chinese : english;
+    /// <summary>
+    /// 两个参数是 <see cref="LocalizedFormat"/>：带参数的文字（$"…{count}…"）由编译器连同模板和参数一起交过来，
+    /// 语言包才能按模板找到译文、把参数填进去。调用的写法和普通字符串一样。
+    /// </summary>
+    private static string T(LocalizedFormat chinese, LocalizedFormat english)
+    {
+        Collector?.Invoke(chinese, english);
+        if (LanguageService.Pack is { } pack) return pack.Translate(chinese, english);
+        return LanguageService.IsChinese ? chinese.ToString() : english.ToString();
+    }
+
+    /// <summary>导出翻译模板时用来收集每一条文字的原文，见 <see cref="LanguageTemplate"/>；平时为 null。</summary>
+    internal static Action<LocalizedFormat, LocalizedFormat>? Collector;
 
     private static string Count(int count, string one, string many) => count == 1 ? $"1 {one}" : $"{count} {many}";
 
@@ -157,6 +170,18 @@ public static class Strings
     public static string SensitivityDetail(int reversals, int distance) => T(
         $"来回晃动约 {distance} 像素、掉头 {reversals} 次即可弹出",
         $"Opens when you shake about {distance} px back and forth, changing direction {reversals} times");
+    public static string CalibrateShake => T("示范校准…", "Calibrate…");
+    public static string CalibrateShakeTooltip => T("晃几下给它看，按你的习惯定灵敏度", "Show it how you shake, and it sets the sensitivity to match");
+    public static string CalibrationTitle => T("按你的晃法定灵敏度", "Set the sensitivity from your shake");
+    public static string CalibrationIntro => T("按住下面这张文件，像平时拖着文件那样来回晃几下再松开，一共做 3 次。",
+        "Press and hold the file below, shake it back and forth the way you would while dragging, then let go. Do this 3 times.");
+    public static string CalibrationPadHint => T("按住我晃一晃", "Hold and shake");
+    public static string CalibrationStart => T("还没开始", "Not started yet");
+    public static string CalibrationProgress(int done, int left) => T($"第 {done} 次记下了，再来 {left} 次", $"Got shake {done}. {left} more to go");
+    public static string CalibrationTooWeak => T("这次晃得太轻或太短，没有算上，再来一次", "That shake was too light or too short to count. Try again");
+    public static string CalibrationDone => T("好了，按你的晃法定在这里比较合适", "Done. This suits the way you shake");
+    public static string CalibrationApply => T("采用", "Use this");
+    public static string CalibrationRetry => T("重来", "Start over");
     public static string EdgeDwellHeader => T("边缘停留时间", "Edge delay");
     public static string EdgeDwellDescription => T("拖到屏幕左、右或上边缘后，停留多久弹出置物架", "How long to pause at the left, right or top edge before a shelf opens");
     public static string DwellShort => T("0.3 秒", "0.3 s");
@@ -229,6 +254,19 @@ public static class Strings
     public static string CaptionMaximize => T("最大化", "Maximize");
     public static string CaptionClose => T("关闭", "Close");
 
+    public static string LanguagePackHeader => T("语言包", "Language pack");
+    public static string LanguagePackDescription => T("用语言包里的译文显示界面，没有译文的地方显示原文", "Shows the interface in a language pack's translation; untranslated text stays as it is");
+    public static string LanguagePackNone => T("不使用", "None");
+    public static string ExportLanguageTemplate => T("导出翻译模板…", "Export template…");
+    public static string LanguageTemplateFilter => T("语言包|*.json", "Language pack|*.json");
+    public static string LanguageTemplateFailed => T("没能写出翻译模板，请换个位置重试", "Couldn't write the template. Try another location");
+    public static string CheckForUpdates => T("检查更新", "Check for updates");
+    public static string UpdateIdle => T("点了才联网，只访问 GitHub 上的发布列表；不自动下载", "Goes online only when you click, and only to the release list on GitHub. Nothing is downloaded");
+    public static string UpdateChecking => T("正在检查…", "Checking…");
+    public static string UpdateLatest(string version) => T($"已经是最新版本（{version}）", $"You have the latest version ({version})");
+    public static string UpdateAvailable(string version) => T($"有新版本 {version}", $"Version {version} is available");
+    public static string UpdateFailed => T("没有连上 GitHub，请稍后再试", "Couldn't reach GitHub. Try again later");
+    public static string UpdateOpenPage => T("打开下载页", "Open download page");
     public static string Version(string? version) => T($"版本 {version}", $"Version {version}");
     public static string AboutTagline => T("通过鼠标手势呼出的临时文件置物架", "A temporary file shelf you open with a mouse gesture");
     public static string DataLocations => T("数据位置", "Data locations");
@@ -288,6 +326,12 @@ public static class Strings
     public static string RemoveItemTooltip => T("从置物架移除（不会删除文件）", "Remove from shelf (doesn't delete the file)");
     public static string ReleaseToAdd => T("松开以添加", "Release to add");
     public static string ReleaseToHold => T("松开以暂存", "Release to hold");
+    public static string ReleaseToMoveHere => T("松开以移到这里", "Release to move here");
+    public static string ReleaseToMerge => T("松开以合并", "Release to merge");
+    public static string MoveToThisShelf => T("移到这个置物架", "Move to this shelf");
+    public static string SplitPadLabel => T("新置物架", "New shelf");
+    public static string MenuMoveToNewShelf => T("移到新置物架", "Move to a new shelf");
+    public static string MergedShelves(int count) => T($"已合并 {count} 项", $"Merged {Count(count, "item", "items")}");
     public static string RestoreLastShelf => T("恢复上次的置物架", "Reopen last shelf");
 
     public static string DragOutModeTooltip(TransferMode mode) => mode == TransferMode.Copy
@@ -352,6 +396,15 @@ public static class Strings
     public static string MenuOpen => T("打开", "Open");
     public static string MenuCopyText => T("复制文本", "Copy text");
     public static string MenuRemove => T("从置物架移除", "Remove from shelf");
+    public static string RemovedItems(int count) => T($"已移除 {count} 项", $"Removed {Count(count, "item", "items")}");
+    public static string MenuConvertToFile => T("转成文件", "Turn into a file");
+    public static string ConvertedToFiles(int count) => T($"已转成 {count} 个文件", $"Turned into {Count(count, "file", "files")}");
+    public static string ConvertToFileFailed => T("没能写成文件，请重试", "Couldn't write the file. Please try again");
+    public static string TextNotAccepted => T("这里放不了文字", "Text can't be dropped here");
+    public static string TextFileName => T("文本", "Text");
+    public static string LinkFileName => T("链接", "Link");
+    public static string Undo => T("撤销", "Undo");
+    public static string UndoTooltip => T("放回刚才移除的项目（Ctrl+Z）", "Put back what you just removed (Ctrl+Z)");
 
     public static string AlreadyOnShelf => T("这些项目已在置物架中", "These items are already on the shelf");
     public static string ItemsUnavailable => T("项目无法访问，未能添加", "The items couldn't be accessed and weren't added");
@@ -377,6 +430,8 @@ public static class Strings
 
     public static string MovedOrDeleted => T("已删除或移动", "Moved or deleted");
     public static string Folder => T("文件夹", "Folder");
+    public static string EmptyFolder => T("空文件夹", "Empty folder");
+    public static string FolderItems(int count) => T($"{count} 项", Count(count, "item", "items"));
     public static string Link => T("链接", "Link");
     public static string TextDetail(int characters) => T($"文本 · {characters} 个字符", $"Text · {Count(characters, "character", "characters")}");
     public static string GenericFileType => T("文件", "File");
@@ -435,7 +490,12 @@ public static class Strings
 
     public static string KindFolder => T("发送到文件夹", "Send to folder");
     public static string KindCompressImage => T("压缩图片", "Compress images");
+    public static string KindConvertImage => T("转换图片", "Convert images");
     public static string KindOpenWith => T("用程序打开", "Open with app");
+    public static string ImageFormatLabel => T("转成什么格式", "Convert to");
+    public static string ImageFormatHint => T("另存为新文件，原图保持不变。转成 PNG 保留透明，转成 JPG 时透明的部分变成白色",
+        "Saves a new file and leaves the original unchanged. PNG keeps transparency; in a JPG, transparent areas turn white");
+    public static string ImageFormatName(ImageFormat format) => format == ImageFormat.Png ? "PNG" : "JPG";
     public static string ActionKind => T("类型", "Type");
     public static string FolderLabel => T("目标文件夹", "Destination folder");
     public static string FolderModeLabel => T("移动还是复制", "Move or copy");
@@ -468,6 +528,7 @@ public static class Strings
     {
         CustomActionKind.Folder => string.IsNullOrWhiteSpace(action.Folder) ? KindFolder : QuickActionService.GetFolderName(action.Folder),
         CustomActionKind.CompressImage => $"≤ {ImageSizeText(action.ImageSizeKb)}",
+        CustomActionKind.ConvertImage => $"→ {ImageFormatName(action.ImageFormat)}",
         _ => string.IsNullOrWhiteSpace(action.ProgramPath) ? KindOpenWith : ShellFileInfo.GetProgramName(action.ProgramPath)
     };
 
@@ -482,6 +543,7 @@ public static class Strings
                 ? T($"复制到“{label}”", $"Copy to {label}")
                 : T($"移动到“{label}”", $"Move to {label}"),
             CustomActionKind.CompressImage => T($"压缩图片到 {ImageSizeText(action.ImageSizeKb)}", $"Compress images to {ImageSizeText(action.ImageSizeKb)}"),
+            CustomActionKind.ConvertImage => T($"图片转成 {ImageFormatName(action.ImageFormat)}", $"Convert images to {ImageFormatName(action.ImageFormat)}"),
             _ => T($"用 {label} 打开", $"Open with {label}")
         };
     }
@@ -493,6 +555,8 @@ public static class Strings
             : T($"移动到 {action.Folder}", $"Moves items to {action.Folder}"),
         CustomActionKind.CompressImage => T($"压缩为不超过 {ImageSizeText(action.ImageSizeKb)} 的 JPG，原图保持不变",
             $"Saves a JPG copy of {ImageSizeText(action.ImageSizeKb)} or less. The original stays unchanged"),
+        CustomActionKind.ConvertImage => T($"另存为 {ImageFormatName(action.ImageFormat)}，原图保持不变",
+            $"Saves a {ImageFormatName(action.ImageFormat)} copy. The original stays unchanged"),
         _ => T($"用 {action.ProgramPath} 打开", $"Opens with {action.ProgramPath}")
     };
 
@@ -500,6 +564,7 @@ public static class Strings
     {
         CustomActionKind.Folder => action.FolderMode == TransferMode.Copy ? T("正在复制…", "Copying…") : T("正在移动…", "Moving…"),
         CustomActionKind.CompressImage => T("正在压缩图片…", "Compressing images…"),
+        CustomActionKind.ConvertImage => T("正在转换图片…", "Converting images…"),
         _ => T("正在打开…", "Opening…")
     };
 
@@ -510,6 +575,11 @@ public static class Strings
         $"Copied {Count(copied, "item", "items")}; {failed} couldn't be copied");
     public static string ImageCompressFailed => T("图片压缩失败，原图没有改变", "Couldn't compress the images. The originals are unchanged");
     public static string NoImagesToCompress => T("没有可压缩的图片", "No images to compress");
+    public static string ImageConvertFailed => T("图片转换失败，原图没有改变", "Couldn't convert the images. The originals are unchanged");
+    public static string NoImagesToConvert => T("没有可转换的图片", "No images to convert");
+    public static string ImagesAlreadyFormat(string format) => T($"图片已经是 {format}，无需转换", $"The images are already {format}");
+    public static string ImagesConverted(int count, string format) => T($"已把 {count} 张图片转成 {format}", $"Converted {Count(count, "image", "images")} to {format}");
+    public static string ImagesSkippedSameFormat(int count, string format) => T($"，{count} 张本来就是 {format}", $", {count} already {format}");
     public static string ImagesAlreadySmall(string size) => T($"图片已小于 {size}，无需压缩", $"The images are already under {size}");
     public static string ImagesCompressed(int count, string size) => T($"已压缩 {count} 张图片到 {size} 以内",
         $"Compressed {Count(count, "image", "images")} to under {size}");

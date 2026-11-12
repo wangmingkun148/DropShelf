@@ -263,7 +263,7 @@ internal static partial class Program
         var viewModel = (SettingsViewModel)window.DataContext;
         var sensitivitySlider = (DropShelf.Views.Controls.DeckSlider)window.FindName("SensitivitySlider")!;
         sensitivitySlider.Value = 20;
-        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 63), "拖动滑块时说明没有立即更新");
+        Assert(viewModel.SensitivityDescription == Strings.SensitivityDetail(5, 75), "拖动滑块时说明没有立即更新");
         Assert(sensitivitySlider.FaceDownCount == 2, "切牌卡越过前两张牌的中线，应正好翻过两张");
         Pump(400);
         var labelScales = new[] { "SteadyLabel", "BalancedLabel", "ResponsiveLabel" }

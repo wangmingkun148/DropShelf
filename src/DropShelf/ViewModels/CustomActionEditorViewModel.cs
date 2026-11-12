@@ -18,6 +18,7 @@ public sealed class CustomActionEditorViewModel : ObservableObject
     private string _folder;
     private TransferMode _folderMode;
     private string _sizeText;
+    private ImageFormat _imageFormat;
     private string _programPath;
     private string _arguments;
     private bool _showErrors;
@@ -32,6 +33,7 @@ public sealed class CustomActionEditorViewModel : ObservableObject
         _folder = action.Folder ?? string.Empty;
         _folderMode = action.FolderMode;
         _sizeText = action.ImageSizeKb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _imageFormat = action.ImageFormat;
         _programPath = action.ProgramPath ?? string.Empty;
         _arguments = action.Arguments ?? string.Empty;
         SaveCommand = new RelayCommand(_ => TrySave());
@@ -52,6 +54,7 @@ public sealed class CustomActionEditorViewModel : ObservableObject
             if (!SetField(ref _kind, value)) return;
             OnPropertyChanged(nameof(IsFolder));
             OnPropertyChanged(nameof(IsCompressImage));
+            OnPropertyChanged(nameof(IsConvertImage));
             OnPropertyChanged(nameof(IsOpenWith));
             OnFieldChanged();
         }
@@ -59,6 +62,7 @@ public sealed class CustomActionEditorViewModel : ObservableObject
 
     public bool IsFolder => Kind == CustomActionKind.Folder;
     public bool IsCompressImage => Kind == CustomActionKind.CompressImage;
+    public bool IsConvertImage => Kind == CustomActionKind.ConvertImage;
     public bool IsOpenWith => Kind == CustomActionKind.OpenWith;
 
     public string Name
@@ -91,6 +95,15 @@ public sealed class CustomActionEditorViewModel : ObservableObject
         set
         {
             if (SetField(ref _sizeText, value)) OnFieldChanged();
+        }
+    }
+
+    public ImageFormat ImageFormat
+    {
+        get => _imageFormat;
+        set
+        {
+            if (SetField(ref _imageFormat, value)) OnFieldChanged();
         }
     }
 
@@ -133,6 +146,7 @@ public sealed class CustomActionEditorViewModel : ObservableObject
         action.Folder = Kind == CustomActionKind.Folder ? Folder.Trim() : null;
         action.FolderMode = FolderMode;
         action.ImageSizeKb = TryParseSize(out var size) ? size : CustomQuickAction.DefaultImageSizeKb;
+        action.ImageFormat = ImageFormat;
         action.ProgramPath = Kind == CustomActionKind.OpenWith ? ProgramPath.Trim().Trim('"') : null;
         action.Arguments = Kind == CustomActionKind.OpenWith && !string.IsNullOrWhiteSpace(Arguments) ? Arguments.Trim() : null;
         return action;

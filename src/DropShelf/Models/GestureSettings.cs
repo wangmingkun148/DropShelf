@@ -20,8 +20,8 @@ public static class ShakeSensitivities
     public static int FromLegacy(GestureSensitivity legacy) => legacy switch
     {
         GestureSensitivity.Responsive => Responsive,
-        // 旧版的稳健档比现在的最稳健容易，约等于 20。
-        GestureSensitivity.Steady => 20,
+        // 旧版的稳健档比现在的最稳健容易，约等于 30（2.8.2 把最稳健调得更难之前是 20）。
+        GestureSensitivity.Steady => 30,
         _ => Balanced
     };
 }

@@ -164,6 +164,38 @@ internal static partial class Program
         Assert(!MessageWindow.SendArguments("DropShelf.Tests.NoSuchWindow", ["x"]), "不存在的实例被误认为已转交");
     }
 
+    private static void TestUpdateChecker()
+    {
+        Assert(UpdateChecker.ParseTag("style-v2.8.5") == new Version(2, 8, 5) && UpdateChecker.ParseTag("Style3.0") == new Version(3, 0, 0), "发布标签没有解析成版本号");
+        Assert(UpdateChecker.ParseTag("v2.8.5") is null && UpdateChecker.ParseTag("stylenext") is null && UpdateChecker.ParseTag("style-v") is null &&
+               UpdateChecker.ParseTag(null) is null, "别的前缀或不是版本号的标签被当成了版本");
+
+        const string releases = """
+            [
+              { "tag_name": "v9.9.9", "html_url": "https://github.com/wangmingkun148/dropshelf/releases/tag/v9.9.9" },
+              { "tag_name": "style-v9.0.0", "draft": true, "html_url": "https://github.com/wangmingkun148/dropshelf/releases/tag/style-v9.0.0" },
+              { "tag_name": "style-v8.0.0", "prerelease": true, "html_url": "https://github.com/wangmingkun148/dropshelf/releases/tag/style-v8.0.0" },
+              { "tag_name": "style-v2.9.1", "draft": false, "prerelease": false, "html_url": "https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.9.1" },
+              { "tag_name": "style-v2.10.0", "html_url": "https://example.com/elsewhere" },
+              { "tag_name": "style-v2.8.0", "html_url": "https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.8.0" },
+              { "name": "没有标签" }
+            ]
+            """;
+        var newer = UpdateChecker.FindNewer(releases, new Version(2, 8, 5));
+        Assert(newer is { Url: UpdateChecker.ReleasesPage } && newer.Version == new Version(2, 10, 0), $"没有找到最新的正式版本：{newer}");
+        var next = UpdateChecker.FindNewer(releases, new Version(2, 9, 0));
+        Assert(next is not null && next.Version == new Version(2, 10, 0), "版本号没有按数字比较");
+        var only = UpdateChecker.FindNewer(releases.Replace("v2.10.0", "v2.1.0"), new Version(2, 8, 5));
+        Assert(only is { Url: "https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.9.1" } && only.Version == new Version(2, 9, 1), "下载页的地址不对");
+        Assert(UpdateChecker.FindNewer(releases, new Version(2, 10, 0)) is null && UpdateChecker.FindNewer("[]", new Version(1, 0, 0)) is null,
+            "已经是最新版本时仍然提示有更新");
+        var rejected = false;
+        try { UpdateChecker.FindNewer("""{ "message": "rate limited" }""", new Version(1, 0, 0)); }
+        catch (FormatException) { rejected = true; }
+        Assert(rejected, "不是发布列表的内容没有报错");
+        Assert(UpdateChecker.CurrentVersion.Revision == -1 && UpdateChecker.CurrentVersion.Major >= 2, "当前版本号不正确");
+    }
+
     private static void TestFailureLogExists()
     {
         var log = Path.Combine(_root, "logs", $"dropshelf-{DateTime.Now:yyyy-MM-dd}.log");

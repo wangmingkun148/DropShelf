@@ -27,6 +27,12 @@ public interface IShelfHost
     void SetDragOutMode(TransferMode mode);
     void Restore(ShelfHistoryEntry entry, ShelfWindow? target);
     void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths);
+
+    /// <summary>打开着的全部置物架：拖着一个置物架经过另一个时用来找合并的对象。</summary>
+    IReadOnlyList<ShelfWindow> OpenShelves { get; }
+
+    /// <summary>在指定位置（屏幕像素，中心）打开一个空置物架，用来放拆出去的项目。</summary>
+    ShelfWindow OpenNew(POINT center);
 }
 
 public enum ShelfEntranceKind
@@ -111,7 +117,7 @@ public partial class ShelfWindow : Window
         viewModel.NewItemsProduced += (_, paths) => _host.OpenBeside(this, paths);
         viewModel.RemoveVisibly = RemoveItems;
 
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
+        _toastTimer = new DispatcherTimer { Interval = ToastDuration };
         _toastTimer.Tick += (_, _) => HideToast();
         _leaveCheck = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _leaveCheck.Tick += OnLeaveCheck;
@@ -181,7 +187,8 @@ public partial class ShelfWindow : Window
         ThemeService.ThemeChanged -= OnThemeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-        var items = ViewModel.Items.ToArray();
+        // 合并到别的置物架之后关闭的：项目已经在那边了，不记进最近关闭。
+        var items = _mergedAway ? [] : ViewModel.Items.ToArray();
         ViewModel.ReleaseResources();
         base.OnClosed(e);
         _host.OnShelfClosed(this, items);
@@ -238,6 +245,8 @@ public partial class ShelfWindow : Window
                 _countChanged = true;
                 goto case nameof(ShelfViewModel.IsExpanded);
             case nameof(ShelfViewModel.IsExpanded):
+                // 展开列表后才可能只拖出一部分：趁空闲把拆分用的小窗口建好，第一次拖出时不用现建。
+                if (ViewModel.IsExpanded) Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(SplitPadWindow.Warm));
                 // 数量变化时项目集合还在通知列表控件的途中；此时改窗口大小会立即重新布局，
                 // 平铺与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
                 if (_layoutPending) break;
@@ -273,8 +282,10 @@ public partial class ShelfWindow : Window
         var landing = _landing;
         // 松手时摊开的牌，先取出来：下面 FinishMotion 会把它清掉。
         var fan = _heldFan;
+        var returning = _returning;
         _countChanged = false;
         _landing = null;
+        _returning = null;
         _shownExpanded = ViewModel.IsExpanded;
         FinishMotion();
         var animate = ShelfMotion.Enabled && IsVisible && ViewModel.HasItems;
@@ -285,6 +296,7 @@ public partial class ShelfWindow : Window
         }
         UpdateViews();
         UpdateWindowSize();
+        if (returning is { } back && animate) PlayReturn(back.Origin, back.Items);
         if (landing is not { } drop || !animate) return;
         if (ViewModel.IsExpanded) PlayGridLanding(drop.Point, drop.Added);
         else PlayLanding(drop.Point, drop.Added, fan);
@@ -340,14 +352,19 @@ public partial class ShelfWindow : Window
             }, DispatcherPriority.Background);
     }
 
-    private (double Width, double Height) TargetSize()
+    private (double Width, double Height) TargetSize() => SizeFor(ViewModel.IsExpanded);
+
+    /// <summary>收起成堆叠时的大小；拆出去的新置物架就是这么大。</summary>
+    private (double Width, double Height) CollapsedSize() => SizeFor(expanded: false);
+
+    private (double Width, double Height) SizeFor(bool expanded)
     {
         // 平铺时窗口按一行的牌数定宽：内容区左右各留 10，列表默认模板四周还有 1，少算这 2 就会少放一列。
-        var width = ViewModel.IsExpanded
+        var width = expanded
             ? CardGridPanel.GridColumns(_size) * CardGridPanel.SlotWidth + 22
             : QuickShelfSizeOptions.ResolveWidth(_size);
         // 平铺最多显示两行，再多就滚动。
-        var body = ViewModel.IsExpanded
+        var body = expanded
             ? CardGridPanel.HeightFor(Math.Clamp(CardGridPanel.RowsFor(ViewModel.Count, width - 22), 1, 2))
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
@@ -544,9 +561,24 @@ public partial class ShelfWindow : Window
 
     // ───────────── 提示 ─────────────
 
-    private void ShowToast(ShelfToast toast)
+    private static readonly TimeSpan ToastDuration = TimeSpan.FromSeconds(2.4);
+    /// <summary>带按钮的提示多停留一会儿，来得及看清和点到。</summary>
+    private static readonly TimeSpan ActionToastDuration = TimeSpan.FromSeconds(5);
+    /// <summary>提示里的按钮按下时要做的事；提示消失或换成别的提示后清空。</summary>
+    private Action? _toastAction;
+
+    /// <summary>显示提示；给了 action 时提示里带一个按钮（文字是 actionLabel），点了就执行。</summary>
+    private void ShowToast(ShelfToast toast, string? actionLabel = null, Action? action = null, string? actionTooltip = null)
     {
         if (IsClosing) return;
+        // 换成别的提示后“撤销”按钮不在了，撤销也随之失效：看得见按钮时才能撤销。
+        _undo = null;
+        _toastAction = action;
+        ToastActionButton.Content = actionLabel;
+        ToastActionButton.ToolTip = actionTooltip;
+        ToastActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
+        Toast.IsHitTestVisible = action is not null;
+        _toastTimer.Interval = action is null ? ToastDuration : ActionToastDuration;
         ToastText.Text = toast.Message;
         ToastGlyph.Text = toast.Success ? "" : "";
         ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
@@ -559,7 +591,79 @@ public partial class ShelfWindow : Window
     private void HideToast()
     {
         _toastTimer.Stop();
+        _undo = null;
+        _toastAction = null;
+        Toast.IsHitTestVisible = false;
         Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))));
+        if (!_closeAfterToast) return;
+        _closeAfterToast = false;
+        if (ViewModel.IsEmpty && !ViewModel.IsBusy && !IsDraggingOut && !_dragInside && _receiving == 0) CloseAnimated();
+    }
+
+    // ───────────── 撤销移除 ─────────────
+
+    /// <summary>刚才手动移除的项目；提示里的“撤销”还在时可以放回。</summary>
+    private ShelfRemoval? _undo;
+    /// <summary>移除前是不是展开着列表：移空之后列表自动收起，撤销时回到列表。</summary>
+    private bool _undoExpanded;
+    /// <summary>移空了、设置为自动关闭空置物架：等“撤销”的提示消失后再关闭，这期间还能反悔。</summary>
+    private bool _closeAfterToast;
+    /// <summary>撤销后放回的项目和“撤销”按钮的位置，下一次刷新时播放放回的动画。</summary>
+    private (WpfPoint Origin, IReadOnlyList<ShelfItem> Items)? _returning;
+
+    /// <summary>手动移除之后显示“已移除 N 项 · 撤销”。</summary>
+    private void OfferUndo(ShelfRemoval removal, bool expanded)
+    {
+        ShowToast(new ShelfToast(Strings.RemovedItems(removal.Entries.Count), true), Strings.Undo, () => UndoRemoval(), Strings.UndoTooltip);
+        _undo = removal;
+        _undoExpanded = expanded && ViewModel.IsEmpty;
+        _closeAfterToast = ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty;
+    }
+
+    private void OnToastActionClick(object sender, RoutedEventArgs e)
+    {
+        // 提示由各个操作自己收起或换掉：撤销要先取消“提示消失后关闭”，不能在这里先收起。
+        _toastAction?.Invoke();
+    }
+
+    /// <summary>
+    /// 文本或链接拖到了不接收文字的地方（比如资源管理器、桌面）：提示可以转成文件，转好后再拖就和别的文件一样。
+    /// </summary>
+    private void OfferConvert(IReadOnlyList<ShelfItem> items) =>
+        ShowToast(new ShelfToast(Strings.TextNotAccepted, false), Strings.MenuConvertToFile, () => ConvertToFiles(items));
+
+    private void ConvertToFiles(IReadOnlyList<ShelfItem> items)
+    {
+        var converted = ViewModel.ConvertToFiles(items);
+        if (converted.Count > 0) ViewModel.Notify(Strings.ConvertedToFiles(converted.Count));
+        else if (_toastAction is not null) HideToast();
+    }
+
+    /// <summary>放回刚才移除的项目：列表里各行从左边滑回来，堆叠里的牌从“撤销”按钮处飞回去。</summary>
+    private bool UndoRemoval()
+    {
+        if (_undo is not { } removal || IsClosing) return false;
+        var origin = ToastActionButton.TranslatePoint(new WpfPoint(ToastActionButton.ActualWidth / 2, ToastActionButton.ActualHeight / 2), this);
+        _closeAfterToast = false;
+        HideToast();
+        FinishMotion();
+        var restored = ViewModel.Restore(removal);
+        if (restored.Count == 0) return true;
+        if (_undoExpanded) ViewModel.IsExpanded = true;
+        _returning = (origin, restored);
+        ViewModel.RefreshAvailabilityInBackground();
+        return true;
+    }
+
+    /// <summary>鼠标停在提示上时不让它消失，移开后重新计时。</summary>
+    private void OnToastMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_toastAction is not null) _toastTimer.Stop();
+    }
+
+    private void OnToastMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_toastAction is not null) _toastTimer.Start();
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

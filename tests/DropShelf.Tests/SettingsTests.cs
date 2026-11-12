@@ -247,6 +247,66 @@ internal static partial class Program
         Assert(LocalizedText.Contains("Overview") && !LocalizedText.Contains("NoSuchText"), "界面文字名称查询不正确");
     }
 
+    private static void TestLanguagePacks()
+    {
+        // 带参数的文字交给 LocalizedFormat 时留着模板和参数，得到的文字和直接写 $"…" 一样。
+        var count = 3;
+        LocalizedFormat plain = "用 {files} 指定";
+        LocalizedFormat counted = $"已添加 {count} 项，{1.25:0.#} MB，{{原样}}";
+        Assert(plain.IsLiteral && plain.Template == "用 {files} 指定" && plain.ToString() == "用 {files} 指定", "没有参数的文字被改动了");
+        Assert(!counted.IsLiteral && counted.Template == "已添加 {0} 项，{1:0.#} MB，{{原样}}" && counted.ToString() == $"已添加 {count} 项，{1.25:0.#} MB，{{原样}}",
+            $"带参数的文字模板不正确：{counted.Template}");
+        Assert(counted.Format("{1:0.0} / {0}") == $"{1.25:0.0} / 3" && counted.Format("{7}") is null, "把参数填进译文的结果不正确");
+
+        var pack = LanguagePack.Parse("ja", """
+            {
+              // 允许写注释
+              "name": "日本語", "from": "zh",
+              "strings": { "置物架": "シェルフ", "已添加 {0} 项": "{0} 件追加しました", "{0} 个项目": "{3} 件", "新建置物架": "" },
+              "reference": { "置物架": "Shelf" },
+            }
+            """);
+        Assert(pack is { Id: "ja", Name: "日本語", FromChinese: true, Count: 3 }, "语言包没有读对");
+        Assert(LanguagePack.Parse("x", "[]") is null && LanguagePack.Parse("x", """{ "strings": { "a": "" } }""") is null, "不是语言包或没有译文的文件被当成了语言包");
+        Assert(SettingsService.Normalize(new AppSettings { LanguagePack = "  " }).LanguagePack is null &&
+               SettingsService.Normalize(new AppSettings { LanguagePack = " ja " }).LanguagePack == "ja", "设置里的语言包名称没有整理");
+
+        var changes = 0;
+        EventHandler onLanguage = (_, _) => changes++;
+        LanguageService.LanguageChanged += onLanguage;
+        try
+        {
+            LanguageService.SetPack(pack);
+            LanguageService.SetPack(pack);
+            Assert(changes == 1 && Strings.Shelf == "シェルフ" && Strings.Added(3) == "3 件追加しました", "选用语言包后没有显示译文");
+            // 没有译文、译文留空或参数位置写错的条目显示原文。
+            Assert(Strings.OpenShelf == "打开置物架" && Strings.NewShelf == "新建置物架" && Strings.ItemCount(5) == "5 个项目", "没有译文的条目没有显示原文");
+            Assert(LocalizedText.Instance["Shelf"] == "シェルフ", "界面绑定没有用上语言包");
+
+            // 对照英文翻译的语言包：没有译文的条目显示英文，不管界面语言设成了什么。
+            var german = LanguagePack.Parse("de", """{ "from": "en", "strings": { "Shelf": "Regal" } }""");
+            LanguageService.SetPack(german);
+            Assert(german is { Name: "de", FromChinese: false } && Strings.Shelf == "Regal" && Strings.OpenShelf == "Open shelf", "对照英文的语言包不正确");
+        }
+        finally
+        {
+            LanguageService.SetPack(null);
+            LanguageService.LanguageChanged -= onLanguage;
+        }
+        Assert(changes == 3 && Strings.Shelf == "置物架", "去掉语言包后没有恢复");
+
+        // 翻译模板：全部文字的原文都在，带参数的是模板；空白的模板本身不算语言包。
+        var pairs = LanguageTemplate.Collect();
+        Assert(Strings.Collector is null && pairs.Count > 300, $"收集到的界面文字太少：{pairs.Count}");
+        Assert(pairs.Contains(("置物架", "Shelf")) && pairs.Any(pair => pair.Chinese == "已添加 {0} 项") &&
+               pairs.Any(pair => pair.Chinese == "{0} 项 · {1}" || pair.Chinese.Contains("{0} 个文件")), "收集到的文字里缺少带参数的模板");
+        Assert(pairs.Distinct().Count() == pairs.Count, "收集到的文字有重复");
+        var template = LanguageTemplate.Build();
+        Assert(template.Contains("\"from\": \"zh\"") && template.Contains("\"置物架\": \"\"") && template.Contains("\"置物架\": \"Shelf\"") &&
+               LanguagePack.Parse("template", template) is null, "导出的翻译模板不正确");
+        Assert(LanguageTemplate.Build(fromChinese: false).Contains("\"Shelf\": \"置物架\""), "对照英文的翻译模板不正确");
+    }
+
     private static void TestLanguageSwitch()
     {
         Assert(LanguageService.ResolveIsChinese(AppLanguage.System, new CultureInfo("zh-CN")) &&

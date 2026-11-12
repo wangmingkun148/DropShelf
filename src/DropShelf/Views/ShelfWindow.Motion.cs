@@ -266,6 +266,40 @@ public partial class ShelfWindow
     }
 
     /// <summary>
+    /// 撤销移除之后放回：平铺里放回的牌从下面一点升回原来的格子、转正并淡入（和移除时相反），看不到时先滚到第一张；
+    /// 堆叠里放回的牌从“撤销”按钮处飞回去，只有放回的正好是最上面几张时才播放。
+    /// </summary>
+    private void PlayReturn(WpfPoint origin, IReadOnlyList<ShelfItem> items)
+    {
+        if (!ViewModel.IsExpanded)
+        {
+            var back = items.ToHashSet();
+            var top = 0;
+            while (top < 3 && top < ViewModel.Count && back.Contains(ViewModel.Items[^(top + 1)])) top++;
+            if (top > 0) PlayLanding(origin, top);
+            return;
+        }
+
+        FinishMotion();
+        ItemsList.UpdateLayout();
+        ItemsList.ScrollIntoView(items[0]);
+        ItemsList.UpdateLayout();
+        var tiles = items.Select(item => ItemsList.ItemContainerGenerator.ContainerFromItem(item)).OfType<ListBoxItem>().ToList();
+        if (tiles.Count == 0) return;
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var (pose, side) = (PoseTile(tiles[i]), i % 2 == 0 ? -1 : 1);
+            Tween(TimeSpan.Zero, CloseUpDuration, t =>
+                pose(new LocalCardPose(0, 10 * (1 - t), side * 6 * (1 - t), 0.7 + 0.3 * t, t)));
+        }
+        _motionCleanup = () =>
+        {
+            foreach (var tile in tiles) ResetTile(tile);
+        };
+        FinishAfter(CloseUpDuration);
+    }
+
+    /// <summary>
     /// 移除牌：要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除。平铺时剩下的牌从原来的格子滑到新的格子补上空位，新露出来的牌淡入；
     /// 堆叠时下面的牌升上来补位，新露出来的从最下面淡入。拖出后移除时从拖动期间变淡的样子接着淡出。
     /// 动画途中被打断（再次移除、拖入、切换视图、关闭等）时立即移除，补位直接到位。关闭了动画效果、看不见或 animate 为 false 时直接移除。

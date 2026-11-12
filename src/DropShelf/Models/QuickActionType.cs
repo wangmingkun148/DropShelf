@@ -40,7 +40,17 @@ public enum CustomActionKind
     CompressImage,
 
     /// <summary>用指定程序打开。</summary>
-    OpenWith
+    OpenWith,
+
+    /// <summary>把图片另存为 JPG 或 PNG。</summary>
+    ConvertImage
+}
+
+/// <summary>“转换图片”的目标格式。</summary>
+public enum ImageFormat
+{
+    Jpeg,
+    Png
 }
 
 /// <summary>用户添加的快速操作。只保存操作本身的设置，名称留空时按内容自动生成。</summary>
@@ -57,6 +67,7 @@ public sealed class CustomQuickAction
     public string? Folder { get; set; }
     public TransferMode FolderMode { get; set; } = TransferMode.Move;
     public int ImageSizeKb { get; set; } = DefaultImageSizeKb;
+    public ImageFormat ImageFormat { get; set; } = ImageFormat.Jpeg;
     public string? ProgramPath { get; set; }
     public string? Arguments { get; set; }
 
@@ -73,7 +84,7 @@ public sealed class CustomQuickAction
     /// <summary>所有设置都相同。</summary>
     public bool SameAs(CustomQuickAction other) =>
         Id == other.Id && Kind == other.Kind && Name == other.Name && Folder == other.Folder && FolderMode == other.FolderMode &&
-        ImageSizeKb == other.ImageSizeKb && ProgramPath == other.ProgramPath && Arguments == other.Arguments;
+        ImageSizeKb == other.ImageSizeKb && ImageFormat == other.ImageFormat && ProgramPath == other.ProgramPath && Arguments == other.Arguments;
 
     /// <summary>两组自定义操作逐项相同；用来判断设置变化后要不要重建操作，不必每次都序列化比较。</summary>
     public static bool SameList(IReadOnlyList<CustomQuickAction>? first, IReadOnlyList<CustomQuickAction>? second)
@@ -86,7 +97,7 @@ public sealed class CustomQuickAction
     }
 
     /// <summary>所有设置连成的一串文字，同样只用来比较。</summary>
-    public string Key => string.Join('\u001F', Id, Kind, Name, Folder, FolderMode, ImageSizeKb, ProgramPath, Arguments);
+    public string Key => string.Join('\u001F', Id, Kind, Name, Folder, FolderMode, ImageSizeKb, ImageFormat, ProgramPath, Arguments);
 
     public static string NewId() => Guid.NewGuid().ToString("N");
 }
@@ -119,7 +130,14 @@ public sealed class QuickActionInfo
 
     /// <summary>可能耗时较长的操作在处理期间显示进度。</summary>
     public bool ShowsProgress => Type is QuickActionType.CompressZip or QuickActionType.MoveTo ||
-                                 Custom?.Kind is CustomActionKind.Folder or CustomActionKind.CompressImage;
+                                 Custom?.Kind is CustomActionKind.Folder or CustomActionKind.CompressImage or CustomActionKind.ConvertImage;
+
+    /// <summary>
+    /// 需要文件才能做的操作（压缩、移动或复制到文件夹、交给程序打开）：置物架上的文本和链接先转成文件再一起处理。
+    /// 只是查看的操作（属性、复制路径、在资源管理器中显示）不动它们。
+    /// </summary>
+    public bool TakesText => Type is QuickActionType.CompressZip or QuickActionType.MoveTo ||
+                             Custom?.Kind is CustomActionKind.Folder or CustomActionKind.OpenWith;
 
     public static QuickActionInfo BuiltIn(QuickActionType type, string glyph) => new(type.ToString(), type, glyph, null);
 
@@ -130,6 +148,7 @@ public sealed class QuickActionInfo
     {
         CustomActionKind.Folder => custom.FolderMode == TransferMode.Copy ? "" : "",
         CustomActionKind.CompressImage => "",
+        CustomActionKind.ConvertImage => "\uE8AB",
         _ => ""
     };
 }
