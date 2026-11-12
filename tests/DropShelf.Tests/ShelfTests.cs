@@ -149,6 +149,54 @@ internal static partial class Program
             "哪些操作把文本当文件处理不正确");
     }
 
+    private static async Task TestAdoptBetweenShelves()
+    {
+        var folder = CreateFolder("adopt");
+        var paths = Enumerable.Range(1, 3).Select(index =>
+        {
+            var path = Path.Combine(folder, $"adopt-{index}.txt");
+            File.WriteAllText(path, index.ToString());
+            return path;
+        }).ToArray();
+        var source = new ShelfViewModel();
+        source.AddFiles(paths);
+        source.AddEntries([new DroppedEntry(ShelfItemKind.Text, "备注"), new DroppedEntry(ShelfItemKind.Link, "https://example.com", "示例")]);
+        var target = new ShelfViewModel();
+        target.AddFiles([paths[0]]);
+
+        // 缩略图跟着项目走：对方接着用，这边移除时不清掉。
+        var thumbnail = new System.Windows.Media.Imaging.WriteableBitmap(4, 4, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+        thumbnail.Freeze();
+        var moving = source.Items.ToArray();
+        moving[2].Thumbnail = thumbnail;
+
+        var added = target.Adopt(moving, source);
+        Assert(added == 4 && target.Items.Count == 5, $"交过来的项目数量不对：{added}");
+        Assert(ReferenceEquals(target.Items[1], moving[1]) && ReferenceEquals(target.Items[^1], moving[4]) && target.Items[^1].Title == "示例",
+            "项目没有原样交过来，或顺序不对");
+        Assert(target.HasInteracted && source.Items.Count == 5, "接收之后对方应该自己移除，这边不替它移除");
+        source.Remove(moving);
+        Assert(source.IsEmpty && target.Items.Count == 5 && ReferenceEquals(moving[2].Thumbnail, thumbnail), "来源移除项目时清掉了已经交出去的缩略图");
+        Assert(target.Adopt(target.Items.ToArray(), target) == 0 && target.Items.Count == 5, "不应该把项目交给自己");
+        source.ReleaseResources();
+        Assert(new ShelfViewModel().Adopt([], source) == 0 && source.Adopt(target.Items.ToArray(), target) == 0, "已关闭的置物架不应该再接收项目");
+
+        // 临时附件：缓存目录由两边共同持有，来源关闭后文件还在，最后一个关闭后才清理。
+        var cache = VirtualFileDropService.CreateCacheDirectory();
+        var file = Path.Combine(cache, "附件.txt");
+        File.WriteAllText(file, "shared");
+        var first = new ShelfViewModel();
+        first.Add(new DropReadResult([new DroppedEntry(ShelfItemKind.File, file, IsTemporary: true)], [cache], 0, null));
+        var second = new ShelfViewModel();
+        Assert(second.Adopt(first.Items.ToArray(), first) == 1 && second.CacheDirectories.Count == 1, "接收临时附件时没有一起持有缓存");
+        first.ReleaseResources();
+        await Task.Delay(300);
+        Assert(File.Exists(file), "来源置物架关闭后，交出去的临时附件被删除");
+        second.ReleaseResources();
+        await Task.Delay(300);
+        Assert(!Directory.Exists(cache), "两个置物架都关闭后临时附件没有清理");
+    }
+
     private static void TestStackSummary()
     {
         var folder = CreateFolder("stack-summary");

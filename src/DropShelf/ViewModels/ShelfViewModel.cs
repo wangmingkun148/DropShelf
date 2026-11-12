@@ -327,6 +327,59 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Clear() => Items.Clear();
 
+    // ───────────── 合并和拆分 ─────────────
+
+    /// <summary>已经交给别的置物架、这边还没移除的项目：不再替它们加载缩略图，也不清掉它们的缩略图（对方接着用）。</summary>
+    private readonly HashSet<ShelfItem> _handedOver = [];
+
+    /// <summary>
+    /// 接收另一个置物架交来的项目（合并、拆分、架子之间拖动）：项目原样过来，文本、链接、缩略图和已经统计好的文件夹信息都保留；
+    /// 这边已经有的相同文件或内容不重复放。临时附件所在的缓存目录由两边共同持有，对方关闭后文件还在。
+    /// 对方随后自己把这些项目移除。返回放进来的数量。
+    /// </summary>
+    public int Adopt(IReadOnlyList<ShelfItem> items, ShelfViewModel from)
+    {
+        if (_released || ReferenceEquals(from, this)) return 0;
+        foreach (var cache in items.Where(item => item.IsTemporaryAttachment).Select(item => VirtualFileDropService.GetCacheDirectory(item.Value))
+                     .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+        {
+            VirtualFileDropService.RetainCache(cache);
+            AdoptCache(cache);
+        }
+        if (from._delayCacheCleanup) _delayCacheCleanup = true;
+        from.HandOver(items);
+
+        var added = 0;
+        Batch(() =>
+        {
+            var paths = Items.Where(item => item.IsFileSystem).Select(item => item.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var values = Items.Where(item => !item.IsFileSystem).Select(item => item.Value).ToHashSet(StringComparer.Ordinal);
+            foreach (var item in items)
+            {
+                if (!(item.IsFileSystem ? paths : values).Add(item.Value)) continue;
+                Items.Add(item);
+                // 对方关闭时会取消还没做完的统计，这边接着做。
+                if (item is { Kind: ShelfItemKind.Folder, ChildCount: null }) _ = MeasureFolderAsync(item);
+                added++;
+            }
+        });
+        if (added > 0) HasInteracted = true;
+        return added;
+    }
+
+    private void HandOver(IReadOnlyList<ShelfItem> items)
+    {
+        foreach (var item in items)
+        {
+            if (!_members.Contains(item)) continue;
+            _handedOver.Add(item);
+            _visibleRows.Remove(item);
+            if (!_thumbnails.Remove(item, out var load)) continue;
+            load.Cancel();
+            load.Dispose();
+        }
+    }
+
     // ───────────── 文本和链接当文件用 ─────────────
 
     private string? _ownCache;
@@ -783,6 +836,7 @@ public sealed class ShelfViewModel : ObservableObject
                 item.PropertyChanged -= OnItemPropertyChanged;
                 _members.Remove(item);
                 _dragFiles.Remove(item);
+                _handedOver.Remove(item);
             }
         if (e.NewItems is not null)
             foreach (ShelfItem item in e.NewItems)
@@ -838,6 +892,7 @@ public sealed class ShelfViewModel : ObservableObject
         var wanted = new HashSet<ShelfItem>(_visibleRows.Where(_members.Contains));
         for (var position = 1; position <= 3; position++)
             if (ItemFromEnd(position) is { } top) wanted.Add(top);
+        wanted.ExceptWith(_handedOver);
 
         foreach (var (item, load) in _thumbnails.ToArray())
         {

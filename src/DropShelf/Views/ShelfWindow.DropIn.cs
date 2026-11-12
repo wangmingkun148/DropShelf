@@ -30,6 +30,7 @@ public partial class ShelfWindow
         {
             _dragInside = true;
             _dragFromSelf = DropDataReader.GetSourceShelfId(e.Data) == ViewModel.Id;
+            _dragSession = _dragFromSelf ? null : ShelfDragSession.From(e.Data);
             _dragKind = _dragFromSelf ? DropContentKind.None : DropDataReader.Classify(e.Data);
             if (!_dragFromSelf && _dragKind != DropContentKind.None && !ViewModel.IsBusy) ShowDropOverlay();
         }
@@ -101,10 +102,14 @@ public partial class ShelfWindow
         else
         {
             e.Effects = PreferredEffect(e.AllowedEffects);
-            SetDescription(e.Data, DropImageType.Label, action?.Label ?? (ViewModel.HasItems ? Strings.AddToShelf : Strings.PutOnShelf));
+            SetDescription(e.Data, DropImageType.Label, action?.Label ??
+                (_dragSession is not null ? Strings.MoveToThisShelf : ViewModel.HasItems ? Strings.AddToShelf : Strings.PutOnShelf));
         }
         _dropHelper.Over(e.Effects);
     }
+
+    /// <summary>拖进来的是另一个置物架上的项目：松手后不读拖放数据，由那个置物架把项目原样交过来，见 ShelfDragSession。</summary>
+    private ShelfDragSession? _dragSession;
 
     /// <summary>拖出了窗口、已经交还拖动图像，但拖入的状态还留着等它回来，见 OnDragLeave。</summary>
     private bool _imageLeft;
@@ -147,6 +152,7 @@ public partial class ShelfWindow
         var action = HitTestTiles(e);
         var fromSelf = _dragFromSelf;
         var kind = _dragKind;
+        var session = _dragSession;
         EndDrag();
 
         if (fromSelf || kind == DropContentKind.None || ViewModel.IsBusy ||
@@ -161,6 +167,12 @@ public partial class ShelfWindow
         e.Effects = PreferredEffect(e.AllowedEffects);
         _dropHelper.Drop(e.Data, e.Effects);
         ViewModel.HasInteracted = true;
+        // 来自另一个置物架：记下放在了这里，拖动结束后那边把项目交过来；放到快速操作上时照常读取文件来处理。
+        if (session is not null && action is null)
+        {
+            session.DropOn(this, dropPoint);
+            return;
+        }
 
         try
         {
@@ -222,7 +234,7 @@ public partial class ShelfWindow
     private void ShowDropOverlay()
     {
         FinishMotion();
-        DropZoneText.Text = ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
+        DropZoneText.Text = _dragSession is not null ? Strings.ReleaseToMoveHere : ViewModel.HasItems ? Strings.ReleaseToAdd : Strings.ReleaseToHold;
         ResetTiles();
         DropOverlay.IsHitTestVisible = true;
         if (DropOverlay.Visibility != Visibility.Visible) DropOverlay.Opacity = 0;
@@ -241,6 +253,7 @@ public partial class ShelfWindow
     {
         _leaveCheck.Stop();
         _dragInside = false;
+        _dragSession = null;
         SetHoveredAction(null);
         Body.Visibility = Visibility.Visible;
         // 淡出期间放置区域不再挡住下面的内容。

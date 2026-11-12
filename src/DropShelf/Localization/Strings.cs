@@ -294,6 +294,12 @@ public static class Strings
     public static string RemoveItemTooltip => T("从置物架移除（不会删除文件）", "Remove from shelf (doesn't delete the file)");
     public static string ReleaseToAdd => T("松开以添加", "Release to add");
     public static string ReleaseToHold => T("松开以暂存", "Release to hold");
+    public static string ReleaseToMoveHere => T("松开以移到这里", "Release to move here");
+    public static string ReleaseToMerge => T("松开以合并", "Release to merge");
+    public static string MoveToThisShelf => T("移到这个置物架", "Move to this shelf");
+    public static string SplitPadLabel => T("新置物架", "New shelf");
+    public static string MenuMoveToNewShelf => T("移到新置物架", "Move to a new shelf");
+    public static string MergedShelves(int count) => T($"已合并 {count} 项", $"Merged {Count(count, "item", "items")}");
     public static string RestoreLastShelf => T("恢复上次的置物架", "Reopen last shelf");
 
     public static string DragOutModeTooltip(TransferMode mode) => mode == TransferMode.Copy

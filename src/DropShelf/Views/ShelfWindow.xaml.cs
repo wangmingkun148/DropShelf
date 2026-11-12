@@ -27,6 +27,12 @@ public interface IShelfHost
     void SetDragOutMode(TransferMode mode);
     void Restore(ShelfHistoryEntry entry, ShelfWindow? target);
     void OpenBeside(ShelfWindow source, IReadOnlyList<string> paths);
+
+    /// <summary>打开着的全部置物架：拖着一个置物架经过另一个时用来找合并的对象。</summary>
+    IReadOnlyList<ShelfWindow> OpenShelves { get; }
+
+    /// <summary>在指定位置（屏幕像素，中心）打开一个空置物架，用来放拆出去的项目。</summary>
+    ShelfWindow OpenNew(POINT center);
 }
 
 public enum ShelfEntranceKind
@@ -178,7 +184,8 @@ public partial class ShelfWindow : Window
         LowPerformance.ModeChanged -= OnPerformanceModeChanged;
         LanguageService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-        var items = ViewModel.Items.ToArray();
+        // 合并到别的置物架之后关闭的：项目已经在那边了，不记进最近关闭。
+        var items = _mergedAway ? [] : ViewModel.Items.ToArray();
         ViewModel.ReleaseResources();
         base.OnClosed(e);
         _host.OnShelfClosed(this, items);
@@ -251,6 +258,8 @@ public partial class ShelfWindow : Window
                 _countChanged = true;
                 goto case nameof(ShelfViewModel.IsExpanded);
             case nameof(ShelfViewModel.IsExpanded):
+                // 展开列表后才可能只拖出一部分：趁空闲把拆分用的小窗口建好，第一次拖出时不用现建。
+                if (ViewModel.IsExpanded) Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(SplitPadWindow.Warm));
                 // 数量变化时项目集合还在通知列表的途中；此时改窗口大小会立即重新布局，
                 // 列表与项目不一致而抛出异常。等通知结束再更新，连续变化只更新一次。
                 if (_layoutPending) break;
@@ -360,12 +369,17 @@ public partial class ShelfWindow : Window
             }, DispatcherPriority.Background);
     }
 
-    private (double Width, double Height) TargetSize()
+    private (double Width, double Height) TargetSize() => SizeFor(ViewModel.IsExpanded);
+
+    /// <summary>收起成堆叠时的大小；拆出去的新置物架就是这么大。</summary>
+    private (double Width, double Height) CollapsedSize() => SizeFor(expanded: false);
+
+    private (double Width, double Height) SizeFor(bool expanded)
     {
-        var width = ViewModel.IsExpanded
+        var width = expanded
             ? QuickShelfSizeOptions.ResolveExpandedWidth(_size)
             : QuickShelfSizeOptions.ResolveWidth(_size);
-        var body = ViewModel.IsExpanded
+        var body = expanded
             ? Math.Min(Math.Max(ViewModel.Count, 2), 6) * RowHeight + 6
             : QuickShelfSizeOptions.ResolveStackHeight(_size) + CaptionHeight;
         var actions = ViewModel.HasActions ? ActionBarHeight : 10;
