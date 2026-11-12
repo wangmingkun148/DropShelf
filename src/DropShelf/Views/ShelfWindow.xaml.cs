@@ -563,19 +563,23 @@ public partial class ShelfWindow : Window
     // ───────────── 提示 ─────────────
 
     private static readonly TimeSpan ToastDuration = TimeSpan.FromSeconds(2.4);
-    /// <summary>带“撤销”的提示多停留一会儿，来得及看清和点到。</summary>
-    private static readonly TimeSpan UndoDuration = TimeSpan.FromSeconds(5);
+    /// <summary>带按钮的提示多停留一会儿，来得及看清和点到。</summary>
+    private static readonly TimeSpan ActionToastDuration = TimeSpan.FromSeconds(5);
+    /// <summary>提示里的按钮按下时要做的事；提示消失或换成别的提示后清空。</summary>
+    private Action? _toastAction;
 
-    private void ShowToast(ShelfToast toast) => ShowToast(toast, undo: false);
-
-    private void ShowToast(ShelfToast toast, bool undo)
+    /// <summary>显示提示；给了 action 时提示里带一个按钮（文字是 actionLabel），点了就执行。</summary>
+    private void ShowToast(ShelfToast toast, string? actionLabel = null, Action? action = null, string? actionTooltip = null)
     {
         if (IsClosing) return;
         // 换成别的提示后“撤销”按钮不在了，撤销也随之失效：看得见按钮时才能撤销。
-        if (!undo) _undo = null;
-        ToastUndoButton.Visibility = undo ? Visibility.Visible : Visibility.Collapsed;
-        Toast.IsHitTestVisible = undo;
-        _toastTimer.Interval = undo ? UndoDuration : ToastDuration;
+        _undo = null;
+        _toastAction = action;
+        ToastActionButton.Content = actionLabel;
+        ToastActionButton.ToolTip = actionTooltip;
+        ToastActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
+        Toast.IsHitTestVisible = action is not null;
+        _toastTimer.Interval = action is null ? ToastDuration : ActionToastDuration;
         ToastText.Text = toast.Message;
         ToastGlyph.Text = toast.Success ? "" : "";
         ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
@@ -589,6 +593,7 @@ public partial class ShelfWindow : Window
     {
         _toastTimer.Stop();
         _undo = null;
+        _toastAction = null;
         Toast.IsHitTestVisible = false;
         Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))));
         if (!_closeAfterToast) return;
@@ -610,19 +615,36 @@ public partial class ShelfWindow : Window
     /// <summary>手动移除之后显示“已移除 N 项 · 撤销”。</summary>
     private void OfferUndo(ShelfRemoval removal, bool expanded)
     {
-        ShowToast(new ShelfToast(Strings.RemovedItems(removal.Entries.Count), true), undo: true);
+        ShowToast(new ShelfToast(Strings.RemovedItems(removal.Entries.Count), true), Strings.Undo, () => UndoRemoval(), Strings.UndoTooltip);
         _undo = removal;
         _undoExpanded = expanded && ViewModel.IsEmpty;
         _closeAfterToast = ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty;
     }
 
-    private void OnUndoClick(object sender, RoutedEventArgs e) => UndoRemoval();
+    private void OnToastActionClick(object sender, RoutedEventArgs e)
+    {
+        // 提示由各个操作自己收起或换掉：撤销要先取消“提示消失后关闭”，不能在这里先收起。
+        _toastAction?.Invoke();
+    }
+
+    /// <summary>
+    /// 文本或链接拖到了不接收文字的地方（比如资源管理器、桌面）：提示可以转成文件，转好后再拖就和别的文件一样。
+    /// </summary>
+    private void OfferConvert(IReadOnlyList<ShelfItem> items) =>
+        ShowToast(new ShelfToast(Strings.TextNotAccepted, false), Strings.MenuConvertToFile, () => ConvertToFiles(items));
+
+    private void ConvertToFiles(IReadOnlyList<ShelfItem> items)
+    {
+        var converted = ViewModel.ConvertToFiles(items);
+        if (converted.Count > 0) ViewModel.Notify(Strings.ConvertedToFiles(converted.Count));
+        else if (_toastAction is not null) HideToast();
+    }
 
     /// <summary>放回刚才移除的项目：列表里各行从左边滑回来，堆叠里的牌从“撤销”按钮处飞回去。</summary>
     private bool UndoRemoval()
     {
         if (_undo is not { } removal || IsClosing) return false;
-        var origin = ToastUndoButton.TranslatePoint(new WpfPoint(ToastUndoButton.ActualWidth / 2, ToastUndoButton.ActualHeight / 2), this);
+        var origin = ToastActionButton.TranslatePoint(new WpfPoint(ToastActionButton.ActualWidth / 2, ToastActionButton.ActualHeight / 2), this);
         _closeAfterToast = false;
         HideToast();
         FinishMotion();
@@ -637,12 +659,12 @@ public partial class ShelfWindow : Window
     /// <summary>鼠标停在提示上时不让它消失，移开后重新计时。</summary>
     private void OnToastMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (_undo is not null) _toastTimer.Stop();
+        if (_toastAction is not null) _toastTimer.Stop();
     }
 
     private void OnToastMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (_undo is not null) _toastTimer.Start();
+        if (_toastAction is not null) _toastTimer.Start();
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

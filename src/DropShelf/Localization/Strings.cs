@@ -339,6 +339,12 @@ public static class Strings
     public static string MenuCopyText => T("复制文本", "Copy text");
     public static string MenuRemove => T("从置物架移除", "Remove from shelf");
     public static string RemovedItems(int count) => T($"已移除 {count} 项", $"Removed {Count(count, "item", "items")}");
+    public static string MenuConvertToFile => T("转成文件", "Turn into a file");
+    public static string ConvertedToFiles(int count) => T($"已转成 {count} 个文件", $"Turned into {Count(count, "file", "files")}");
+    public static string ConvertToFileFailed => T("没能写成文件，请重试", "Couldn't write the file. Please try again");
+    public static string TextNotAccepted => T("这里放不了文字", "Text can't be dropped here");
+    public static string TextFileName => T("文本", "Text");
+    public static string LinkFileName => T("链接", "Link");
     public static string Undo => T("撤销", "Undo");
     public static string UndoTooltip => T("放回刚才移除的项目（Ctrl+Z）", "Put back what you just removed (Ctrl+Z)");
 

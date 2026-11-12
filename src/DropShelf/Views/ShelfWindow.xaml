@@ -339,11 +339,10 @@
                     <TextBlock x:Name="ToastGlyph" Text="{StaticResource Glyph.Completed}" FontFamily="{StaticResource IconFont}"
                                FontSize="14" Margin="0,1,8,0" VerticalAlignment="Top" Foreground="{DynamicResource SuccessBrush}" />
                     <TextBlock x:Name="ToastText" Grid.Column="1" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <!-- 移除之后的“撤销”：只在刚移除过项目的提示里显示，见 OfferUndo -->
-                    <Button x:Name="ToastUndoButton" Grid.Column="2" Style="{StaticResource SubtleButtonStyle}" Height="24" MinHeight="0"
+                    <!-- 提示里的按钮：移除之后的“撤销”、放不了文字时的“转成文件”，只在这些提示里显示，见 ShowToast -->
+                    <Button x:Name="ToastActionButton" Grid.Column="2" Style="{StaticResource SubtleButtonStyle}" Height="24" MinHeight="0"
                             Padding="8,0,8,1" Margin="8,-3,-6,-4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
-                            Foreground="{DynamicResource AccentTextBrush}" Content="{l:Loc Undo}" ToolTip="{l:Loc UndoTooltip}"
-                            Click="OnUndoClick" Visibility="Collapsed" />
+                            Foreground="{DynamicResource AccentTextBrush}" Click="OnToastActionClick" Visibility="Collapsed" />
                 </Grid>
             </Border>
         </Grid>

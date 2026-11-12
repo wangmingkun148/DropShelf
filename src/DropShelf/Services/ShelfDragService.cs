@@ -30,6 +30,12 @@ public sealed class DragOutPayload(IReadOnlyList<ShelfItem> files, IReadOnlyList
     public IReadOnlyList<ShelfItem> Others { get; } = others;
     public IReadOnlyList<IntPtr>? Pidls => pidls;
 
+    /// <summary>有文件要拖出时，替一起选中的文本和链接写好的文件（和 <see cref="Others"/> 一一对应），跟着文件一起交给目标程序。</summary>
+    public IReadOnlyList<string> OtherFiles { get; set; } = [];
+
+    /// <summary>松手的地方没有接收：不是按 Esc 取消的，目标程序也没有接下。只在拖出文本、链接时用来提示可以转成文件。</summary>
+    public bool Refused { get; set; }
+
     public void Dispose()
     {
         if (pidls is null) return;
@@ -93,11 +99,13 @@ public static class ShelfDragService
 
         if (files.Count > 0)
         {
-            data = ShellInterop.CreateFileDataObject(files.Select(item => item.Value).ToArray(), payload.Pidls);
-            allowedEffects = GetAllowedEffects(mode, files.Any(item => item.IsTemporaryAttachment));
+            // 一起选中的文本和链接已经各写成一个文件，跟在后面；它们的路径没有事先解析，这时全部重新解析。
+            var carried = payload.OtherFiles.Count == others.Count ? payload.OtherFiles : [];
+            data = ShellInterop.CreateFileDataObject([.. files.Select(item => item.Value), .. carried], carried.Count == 0 ? payload.Pidls : null);
+            allowedEffects = GetAllowedEffects(mode, carried.Count > 0 || files.Any(item => item.IsTemporaryAttachment));
             // 告诉资源管理器默认移动还是复制（跨磁盘时也一样）；按住 Ctrl 或 Shift 仍可临时切换。
             if (data is not null) ShellInterop.TrySetInt32(data, "Preferred DropEffect", mode == TransferMode.Move ? EffectMove : EffectCopy);
-            dragged = files;
+            dragged = carried.Count == 0 ? files : [.. files, .. others];
         }
         else if (others.Count > 0)
         {
@@ -135,6 +143,8 @@ public static class ShelfDragService
             var performed = ShellInterop.TryGetInt32(data, "Performed DropEffect");
             var logical = ShellInterop.TryGetInt32(data, "Logical Performed DropEffect");
             var sourceMissing = files.Any(item => !item.RefreshAvailability());
+            payload.Refused = result == NativeMethods.DRAGDROP_S_DROP && effect == EffectNone && (performed ?? EffectNone) == EffectNone &&
+                              (logical ?? EffectNone) == EffectNone && !sourceMissing;
             return Resolve(result, effect, performed, logical, sourceMissing);
         }
         catch (Exception exception)

@@ -46,7 +46,8 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Left, right and top screen edges are supported, with a pause of 0.3, 0.6 or 1 s; edges with the taskbar and edges shared between monitors don't trigger.
 
 ### The shelf
-- When collapsed, it shows a thumbnail stack, the item count and the total size. A folder shows how many items it holds and their total size (counted in the background; a folder with a huge number of files shows only the item count). If it holds both files and text, only the files are dragged out.
+- When collapsed, it shows a thumbnail stack, the item count and the total size. A folder shows how many items it holds and their total size (counted in the background; a folder with a huge number of files shows only the item count). Text and links dragged out on their own stay text; dragged out together with files, text goes along as a `.txt` file and a web link as a `.url` shortcut.
+- Right-click text or a link and choose "Turn into a file" to make it a file in place, which you can then drop into File Explorer, onto the desktop or anywhere else. When you drop text somewhere that doesn't take text, the shelf offers the same. The compress, move to, send to folder and open with quick actions treat text and links as files automatically.
 - Dropped files fly from where you let go into the stack, or to the start of their own row when the list is open; when you drop several, up to 3 land one after another.
 - The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.

@@ -72,6 +72,8 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuPaste, "", Paste, "Ctrl+V"));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(targets), enabled: targets.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(targets), enabled: targets.Any(item => item.IsFileSystem)));
+        if (targets.Any(item => !item.IsFileSystem))
+            menu.Items.Add(CreateMenuItem(Strings.MenuConvertToFile, "\uE8A5", () => ConvertToFiles(targets)));
         menu.Items.Add(new Separator());
         if (_host.History is { Latest: { } latest } history)
         {
@@ -97,6 +99,8 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuReveal, "", () => ViewModel.Reveal(items), enabled: items.Any(item => item.IsFileSystem)));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(items), "Ctrl+C"));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(items), enabled: items.Any(item => item.IsFileSystem)));
+        if (items.Any(item => !item.IsFileSystem))
+            menu.Items.Add(CreateMenuItem(Strings.MenuConvertToFile, "\uE8A5", () => ConvertToFiles(items)));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveByUser(items), "Delete"));
         return menu;

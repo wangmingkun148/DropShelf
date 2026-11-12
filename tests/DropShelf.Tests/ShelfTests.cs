@@ -110,6 +110,45 @@ internal static partial class Program
         Assert(viewModel.Items[1].Title == "示例", "链接标题丢失");
     }
 
+    private static void TestTextBecomesFiles()
+    {
+        var text = new ShelfItem { Id = "1", Kind = ShelfItemKind.Text, Value = "会议纪要：a/b?\n第二行" };
+        var link = new ShelfItem { Id = "2", Kind = ShelfItemKind.Link, Value = "https://example.com/路径?q=1", Title = "示例: 首页" };
+        var bare = new ShelfItem { Id = "3", Kind = ShelfItemKind.Link, Value = "https://example.com/a" };
+        var odd = new ShelfItem { Id = "4", Kind = ShelfItemKind.Text, Value = "???" };
+        var reserved = new ShelfItem { Id = "5", Kind = ShelfItemKind.Text, Value = "con" };
+        Assert(ShelfItemFiles.FileName(text) == "会议纪要：a b.txt", $"文本的文件名不正确：{ShelfItemFiles.FileName(text)}");
+        Assert(ShelfItemFiles.FileName(link) == "示例 首页.url" && ShelfItemFiles.FileName(bare) == "example.com.url", "链接的文件名不正确");
+        Assert(ShelfItemFiles.FileName(odd) == "文本.txt" && ShelfItemFiles.FileName(reserved) == "_con.txt", "无法使用的文件名没有换掉");
+
+        var folder = CreateFolder("text-files");
+        var first = ShelfItemFiles.Write(text, folder);
+        var second = ShelfItemFiles.Write(text, folder);
+        Assert(first != second && Path.GetFileName(second) == "会议纪要：a b (2).txt", "同名时覆盖了已有的文件");
+        Assert(File.ReadAllText(first) == text.Value && File.ReadAllBytes(first)[0] == 0xEF, "文本文件的内容或编码不正确");
+        var shortcut = File.ReadAllText(ShelfItemFiles.Write(link, folder));
+        Assert(shortcut.StartsWith("[InternetShortcut]") && shortcut.Contains("URL=https://example.com/%E8%B7%AF%E5%BE%84?q=1"), $"快捷方式的内容不正确：{shortcut}");
+
+        var viewModel = new ShelfViewModel();
+        viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "第一段"), new DroppedEntry(ShelfItemKind.Link, "https://example.com", "示例")]);
+        var carried = viewModel.WriteForDrag(viewModel.Items.ToArray());
+        Assert(carried.Count == 2 && carried.All(File.Exists) && viewModel.Items.All(item => !item.IsFileSystem), "和文件一起拖出时没有替文本写好文件，或改动了置物架上的项目");
+        Assert(viewModel.WriteForDrag(viewModel.Items.ToArray()).SequenceEqual(carried), "再次拖出时没有接着用写好的文件");
+
+        var ids = viewModel.Items.Select(item => item.Id).ToArray();
+        var converted = viewModel.ConvertToFiles(viewModel.Items.ToArray());
+        Assert(converted.Count == 2 && viewModel.Items.All(item => item.Kind == ShelfItemKind.File && item.IsTemporaryAttachment && File.Exists(item.Value)),
+            "文本和链接没有原地转成文件");
+        Assert(viewModel.Items.Select(item => item.Id).SequenceEqual(ids) && Path.GetExtension(viewModel.Items[1].Value) == ".url", "转成文件后位置或类型不对");
+        var cache = viewModel.CacheDirectories.Single();
+        viewModel.ReleaseResources();
+        Assert(PumpUntil(() => !Directory.Exists(cache), 3000), "关闭置物架后没有清理文本转成的文件");
+
+        Assert(QuickActions.Get(QuickActionType.CompressZip).TakesText && QuickActions.Get(QuickActionType.MoveTo).TakesText &&
+               !QuickActions.Get(QuickActionType.Properties).TakesText && !QuickActions.Get(QuickActionType.CopyFullPath).TakesText,
+            "哪些操作把文本当文件处理不正确");
+    }
+
     private static void TestStackSummary()
     {
         var folder = CreateFolder("stack-summary");

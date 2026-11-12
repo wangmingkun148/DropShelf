@@ -327,6 +327,86 @@ public sealed class ShelfViewModel : ObservableObject
 
     public void Clear() => Items.Clear();
 
+    // ───────────── 文本和链接当文件用 ─────────────
+
+    private string? _ownCache;
+    /// <summary>和文件一起拖出时替文本、链接写好的文件；项目还在、文件也还在时下次接着用。</summary>
+    private readonly Dictionary<ShelfItem, string> _dragFiles = [];
+
+    /// <summary>置物架自己的临时目录，放文本和链接转成的文件；和接收的临时附件一样，关闭置物架后清理。</summary>
+    private string OwnCache()
+    {
+        if (_ownCache is not null && Directory.Exists(_ownCache)) return _ownCache;
+        _ownCache = VirtualFileDropService.CreateCacheDirectory();
+        _cacheDirectories.Add(_ownCache);
+        return _ownCache;
+    }
+
+    /// <summary>
+    /// 把文本和链接原地转成文件（文本存成 .txt，网页链接存成 .url），位置不变；之后它们和别的文件一样可以拖到任何地方、交给快速操作。
+    /// 文件放在置物架的临时目录里，拖出或移动时才到了目的地。返回转换前后的项目；写不了时提示并返回已经转好的。
+    /// </summary>
+    public IReadOnlyList<(ShelfItem Original, ShelfItem File)> ConvertToFiles(IReadOnlyList<ShelfItem> items)
+    {
+        var converted = new List<(ShelfItem, ShelfItem)>();
+        if (_released) return converted;
+        try
+        {
+            Batch(() =>
+            {
+                foreach (var item in items)
+                {
+                    if (item.IsFileSystem) continue;
+                    var index = Items.IndexOf(item);
+                    if (index < 0) continue;
+                    var path = ShelfItemFiles.Write(item, OwnCache());
+                    var file = new ShelfItem
+                    {
+                        Id = item.Id,
+                        Kind = ShelfItemKind.File,
+                        Value = path,
+                        IsTemporaryAttachment = true,
+                        SizeBytes = ShellFileInfo.TryGetFileSize(path),
+                        TypeName = ShellFileInfo.GetTypeName(path)
+                    };
+                    Items[index] = file;
+                    converted.Add((item, file));
+                }
+            });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            LogService.Error("把文本或链接转成文件失败", exception);
+            Notify(Strings.ConvertToFileFailed, false);
+        }
+        if (converted.Count > 0) HasInteracted = true;
+        return converted;
+    }
+
+    /// <summary>
+    /// 和文件一起拖出时，替文本和链接各写一个文件跟着走，置物架上的项目不变。写不了时返回空，只拖出文件。
+    /// </summary>
+    public IReadOnlyList<string> WriteForDrag(IReadOnlyList<ShelfItem> items)
+    {
+        var paths = new List<string>(items.Count);
+        try
+        {
+            foreach (var item in items)
+            {
+                if (item.IsFileSystem || !_members.Contains(item)) continue;
+                if (!_dragFiles.TryGetValue(item, out var path) || !File.Exists(path))
+                    _dragFiles[item] = path = ShelfItemFiles.Write(item, OwnCache());
+                paths.Add(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            LogService.Error("替文本或链接准备拖出的文件失败", exception);
+            return [];
+        }
+        return paths;
+    }
+
     /// <summary>拖出之后、以及稍后确认文件已被移走时，交给窗口移除项目，窗口可以先播放移除的动画；没有窗口时直接移除。</summary>
     public Action<IReadOnlyList<ShelfItem>>? RemoveVisibly { get; set; }
 
@@ -428,6 +508,12 @@ public sealed class ShelfViewModel : ObservableObject
     public async Task<QuickActionResult> RunActionAsync(QuickActionInfo action, IReadOnlyList<ShelfItem> targets, IntPtr owner,
         Func<string?>? pickFolder)
     {
+        // 压缩、移动和交给程序打开都要有文件：文本和链接先转成文件，和别的文件一起处理。
+        if (action.TakesText && targets.Any(item => !item.IsFileSystem))
+        {
+            var converted = ConvertToFiles(targets).ToDictionary(pair => pair.Original, pair => pair.File);
+            targets = targets.Select(item => converted.GetValueOrDefault(item, item)).ToArray();
+        }
         var available = targets.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
         if (available.Length == 0)
         {
@@ -696,6 +782,7 @@ public sealed class ShelfViewModel : ObservableObject
             {
                 item.PropertyChanged -= OnItemPropertyChanged;
                 _members.Remove(item);
+                _dragFiles.Remove(item);
             }
         if (e.NewItems is not null)
             foreach (ShelfItem item in e.NewItems)

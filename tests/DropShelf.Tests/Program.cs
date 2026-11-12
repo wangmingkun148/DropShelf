@@ -77,6 +77,7 @@ internal static partial class Program
         Run("清空置物架不影响磁盘文件", TestClearKeepsFiles);
         Run("移除后可以按原位撤销", TestRemoveUndo);
         Run("文本与链接可以暂存并去重", TestTextAndLinkEntries);
+        Run("文本和链接可以转成文件", TestTextBecomesFiles);
         Run("堆叠显示最新项目和汇总", TestStackSummary);
         Run("文件夹显示项目数和大小", TestFolderContents);
         Run("拖出结果按设置移除或保留", TestApplyDragOut);

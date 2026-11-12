@@ -38,6 +38,8 @@ public partial class ShelfWindow
             Mouse.Capture(null);
             payload = await ShelfDragService.PrepareAsync(items);
             if (IsClosing || !NativeMethods.IsButtonPhysicallyDown()) return;
+            // 有文件要拖出时，一起选中的文本和链接各写成一个文件跟着走，不再被落下。
+            if (payload.Files.Count > 0 && payload.Others.Count > 0) payload.OtherFiles = ViewModel.WriteForDrag(payload.Others);
             DimDragged(items);
             result = ShelfDragService.DoDragDrop(this, payload, ViewModel.Id, out dragged, _dragOutMode);
         }
@@ -51,10 +53,11 @@ public partial class ShelfWindow
         if (result != DragOutResult.Cancelled)
         {
             // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
-            if (dragged.Any(item => item.IsTemporaryAttachment)) ViewModel.KeepTemporaryFilesForAWhile();
+            if (dragged.Any(item => item.IsTemporaryAttachment || !item.IsFileSystem)) ViewModel.KeepTemporaryFilesForAWhile();
             // 要移走的项目交给 RemoveItems：先播放移除动画，全部移走且设置为自动关闭时直接关闭置物架。
             ViewModel.ApplyDragOut(dragged, result, removeCopied: _host.Settings.CloseWhenEmpty);
         }
+        else if (payload is { Refused: true } && dragged.Count > 0 && dragged.All(item => !item.IsFileSystem)) OfferConvert(dragged);
         RestoreDimmed();
     }
 

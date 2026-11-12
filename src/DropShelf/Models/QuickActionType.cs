@@ -121,6 +121,13 @@ public sealed class QuickActionInfo
     public bool ShowsProgress => Type is QuickActionType.CompressZip or QuickActionType.MoveTo ||
                                  Custom?.Kind is CustomActionKind.Folder or CustomActionKind.CompressImage;
 
+    /// <summary>
+    /// 需要文件才能做的操作（压缩、移动或复制到文件夹、交给程序打开）：置物架上的文本和链接先转成文件再一起处理。
+    /// 只是查看的操作（属性、复制路径、在资源管理器中显示）不动它们。
+    /// </summary>
+    public bool TakesText => Type is QuickActionType.CompressZip or QuickActionType.MoveTo ||
+                             Custom?.Kind is CustomActionKind.Folder or CustomActionKind.OpenWith;
+
     public static QuickActionInfo BuiltIn(QuickActionType type, string glyph) => new(type.ToString(), type, glyph, null);
 
     public static QuickActionInfo ForCustom(CustomQuickAction custom) =>
