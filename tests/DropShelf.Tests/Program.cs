@@ -85,6 +85,7 @@ internal static partial class Program
         Run("拖出结果按设置移除或保留", TestApplyDragOut);
         Run("拖出结果判定（含资源管理器优化移动）", TestResolveDragOut);
         Run("移动后更新置物架中的路径", TestApplyMoves);
+        Run("文件在别处改名或移动后跟着更新路径", TestFollowsRenamedFiles);
         Run("最近关闭的置物架只记录路径和名称", TestShelfHistory);
         Run("拖出时按设置移动或复制", TestDragOutEffects);
 

@@ -201,8 +201,8 @@ public sealed class ShelfViewModel : ObservableObject
         }
     }
 
-    /// <summary>文件是不是文件夹、有多大。</summary>
-    public readonly record struct FileFacts(bool IsFolder, long? SizeBytes);
+    /// <summary>文件是不是文件夹、有多大，以及它在磁盘上的标识（取不到时为 null）。</summary>
+    public readonly record struct FileFacts(bool IsFolder, long? SizeBytes, FileIdentity? Identity = null);
 
     /// <summary>读取文件夹标记和文件大小；已删除、无权限等读不到时返回 null。</summary>
     private static FileFacts? ReadFacts(string path)
@@ -219,7 +219,7 @@ public sealed class ShelfViewModel : ObservableObject
             return null;
         }
         var isFolder = attributes.HasFlag(FileAttributes.Directory);
-        return new FileFacts(isFolder, isFolder ? null : ShellFileInfo.TryGetFileSize(path));
+        return new FileFacts(isFolder, isFolder ? null : ShellFileInfo.TryGetFileSize(path), FileIdentity.TryGet(path));
     }
 
     private ShelfAddSummary AddEntriesCore(IEnumerable<DroppedEntry> entries, IReadOnlyDictionary<string, FileFacts?>? known)
@@ -263,7 +263,8 @@ public sealed class ShelfViewModel : ObservableObject
                 Id = NewId(),
                 Kind = facts.IsFolder ? ShelfItemKind.Folder : ShelfItemKind.File,
                 Value = entry.Value,
-                IsTemporaryAttachment = entry.IsTemporary
+                IsTemporaryAttachment = entry.IsTemporary,
+                Identity = facts.Identity
             };
             if (!facts.IsFolder)
             {
@@ -497,10 +498,19 @@ public sealed class ShelfViewModel : ObservableObject
         try
         {
             var present = new bool[items.Length];
-            await Task.Run(() => Parallel.For(0, items.Length, new ParallelOptions { MaxDegreeOfParallelism = 4 },
-                index => present[index] = items[index].ExistsOnDisk()));
+            var moved = new string?[items.Length];
+            await Task.Run(() => Parallel.For(0, items.Length, new ParallelOptions { MaxDegreeOfParallelism = 4 }, index =>
+            {
+                present[index] = items[index].ExistsOnDisk();
+                // 原来的路径找不到了：看看是不是在别处被改名或移动了。
+                if (!present[index]) moved[index] = FindMoved(items[index]);
+            }));
             if (_released) return;
-            for (var index = 0; index < items.Length; index++) items[index].IsAvailable = present[index];
+            for (var index = 0; index < items.Length; index++)
+            {
+                if (moved[index] is { } path && CanFollow(items[index], path)) items[index].Relocate(path);
+                else items[index].IsAvailable = present[index];
+            }
         }
         catch (Exception exception)
         {
@@ -512,6 +522,42 @@ public sealed class ShelfViewModel : ObservableObject
         }
     }
 
+    // ───────────── 跟着改名和移动 ─────────────
+
+    /// <summary>正在拖出：这期间文件不见了多半是被目标程序移走的，不去跟。</summary>
+    public bool IsDraggingOut { get; set; }
+
+    /// <summary>拖出后正等着确认已被移走的项目：它们要从置物架上移除，不跟到新的位置去。</summary>
+    private readonly HashSet<ShelfItem> _leaving = [];
+
+    /// <summary>
+    /// 项目原来的路径找不到时，按文件标识找它现在的路径（在别处被改名，或在同一个磁盘里被移动）；
+    /// 路径还在、没有标识、进了回收站或找不到时返回 null。可以在后台线程上调用。
+    /// </summary>
+    private static string? FindMoved(ShelfItem item)
+    {
+        if (!item.IsFileSystem || item.Identity is not { } identity || item.ExistsOnDisk()) return null;
+        var path = identity.Resolve(item.Value, item.Kind == ShelfItemKind.Folder);
+        return string.Equals(path, item.Value, StringComparison.OrdinalIgnoreCase) ? null : path;
+    }
+
+    /// <summary>可以把项目换成新的路径：项目还在置物架上、不是正要移走的，新路径也没有别的项目占着。</summary>
+    private bool CanFollow(ShelfItem item, string path) =>
+        !IsDraggingOut && _members.Contains(item) && !_leaving.Contains(item) && IndexOfPath(path) < 0;
+
+    /// <summary>
+    /// 拖出、打开或交给快速操作之前：这几个项目里路径找不到的，当场按文件标识找回来，免得刚在别处改了名就拖不出去。
+    /// 只在项目不多时用，多了交给后台的检查。
+    /// </summary>
+    public void Relink(IReadOnlyList<ShelfItem> items)
+    {
+        if (_released || items.Count > RelinkLimit) return;
+        foreach (var item in items)
+            if (FindMoved(item) is { } path && CanFollow(item, path)) item.Relocate(path);
+    }
+
+    private const int RelinkLimit = 16;
+
     /// <summary>处理拖出结果；返回置物架内容是否发生变化。</summary>
     public bool ApplyDragOut(IReadOnlyList<ShelfItem> dragged, DragOutResult result, bool removeCopied)
     {
@@ -521,7 +567,11 @@ public sealed class ShelfViewModel : ObservableObject
                 var pending = dragged.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToList();
                 RemoveShown(dragged.Except(pending));
                 // 资源管理器可能在后台继续移动大文件，稍后再确认一次。
-                if (pending.Count > 0) _ = RemoveWhenGoneAsync(pending);
+                if (pending.Count > 0)
+                {
+                    _leaving.UnionWith(pending);
+                    _ = RemoveWhenGoneAsync(pending);
+                }
                 return pending.Count < dragged.Count;
 
             case DragOutResult.Copied:
@@ -550,7 +600,8 @@ public sealed class ShelfViewModel : ObservableObject
                 SizeBytes = old.SizeBytes,
                 ChildCount = old.ChildCount,
                 TypeName = old.TypeName,
-                Thumbnail = old.Thumbnail
+                Thumbnail = old.Thumbnail,
+                Identity = FileIdentity.TryGet(destination)
             };
             // 已有的缩略图跟着新项目，之后照常按是否显示来保留或释放。
             if (old.Thumbnail is not null && _thumbnails.Remove(old, out var load)) _thumbnails[replacement] = load;
@@ -561,6 +612,7 @@ public sealed class ShelfViewModel : ObservableObject
     public async Task<QuickActionResult> RunActionAsync(QuickActionInfo action, IReadOnlyList<ShelfItem> targets, IntPtr owner,
         Func<string?>? pickFolder)
     {
+        Relink(targets);
         // 压缩、移动和交给程序打开都要有文件：文本和链接先转成文件，和别的文件一起处理。
         if (action.TakesText && targets.Any(item => !item.IsFileSystem))
         {
@@ -670,7 +722,8 @@ public sealed class ShelfViewModel : ObservableObject
                 Kind = ShelfItemKind.File,
                 Value = output,
                 SizeBytes = ShellFileInfo.TryGetFileSize(output),
-                TypeName = ShellFileInfo.GetTypeName(output)
+                TypeName = ShellFileInfo.GetTypeName(output),
+                Identity = FileIdentity.TryGet(output)
             };
             Items[index] = item;
         }
@@ -724,6 +777,7 @@ public sealed class ShelfViewModel : ObservableObject
                     Process.Start(new ProcessStartInfo(item.Value) { UseShellExecute = true });
                     break;
                 default:
+                    Relink([item]);
                     if (!item.RefreshAvailability())
                     {
                         Notify(Strings.ItemMissing, false);
@@ -783,6 +837,7 @@ public sealed class ShelfViewModel : ObservableObject
     private async Task RemoveWhenGoneAsync(IReadOnlyList<ShelfItem> items)
     {
         await Task.Delay(TimeSpan.FromSeconds(2.5));
+        _leaving.ExceptWith(items);
         RemoveShown(items.Where(item => _members.Contains(item) && !item.RefreshAvailability()));
     }
 
@@ -837,6 +892,7 @@ public sealed class ShelfViewModel : ObservableObject
                 _members.Remove(item);
                 _dragFiles.Remove(item);
                 _handedOver.Remove(item);
+                _leaving.Remove(item);
             }
         if (e.NewItems is not null)
             foreach (ShelfItem item in e.NewItems)
@@ -917,6 +973,8 @@ public sealed class ShelfViewModel : ObservableObject
         if (_batchDepth > 0) return;
         if (e.PropertyName is nameof(ShelfItem.Detail) or nameof(ShelfItem.SizeBytes))
             OnPropertyChanged(nameof(StackDetail));
+        // 文件在别处改了名：只有一个项目时堆叠下面显示的就是它的名称。
+        else if (e.PropertyName is nameof(ShelfItem.DisplayName)) OnPropertyChanged(nameof(StackCaption));
     }
 
     /// <summary>同时统计的文件夹不超过两个：一次拖入很多文件夹时不把磁盘占满。</summary>

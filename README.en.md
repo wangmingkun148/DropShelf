@@ -56,6 +56,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.
 - Chat app support: temporary images and files deleted right after the drop are saved; PNG, JPG, GIF and DIB image data and older QQ versions are supported; temporary attachments dragged or copied to chat apps are kept for 10 more minutes.
 - Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu. You can also drag a card out of the Overview page to reopen the shelf where you let go, or drop it back anywhere in the stack, where the other cards make room for it.
+- If a file on a shelf is renamed elsewhere, or moved to another folder on the same disk, the shelf follows it instead of showing "Moved or deleted". Files sent to the Recycle Bin or moved to another disk or a network location aren't followed. This works for files on NTFS disks.
 - Several shelves can be open at once, in Small, Medium or Large.
 - Merge: drag one shelf by its title bar onto another. The other shelf shows "Release to merge"; let go and the items fly into it while the shelf you dragged closes. Dragging items from one shelf onto another moves them, and text, links and temporary attachments go along as they are.
 - Split: when you drag only some of the items out of the open list, a "New shelf" strip slides out below the shelf. Drop on it to split those items into a new shelf right there. You can also right-click selected items and choose "Move to a new shelf". A new shelf summoned by shaking mid-drag catches them too.
@@ -87,7 +88,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 
 ## Privacy and data safety
 
-- Files are recorded by path only and their contents are never read; for a folder, only the number and sizes of the items inside are counted, and none of them is opened; removing items or clearing a shelf doesn't affect files on disk.
+- Files are recorded by path and by their ID number on the disk only, and their contents are never read; for a folder, only the number and sizes of the items inside are counted, and none of them is opened; removing items or clearing a shelf doesn't affect files on disk.
 - Temporary attachments and dropped images are cached in the system temp folder and cleaned up after the shelf closes.
 - "Recently closed shelves" records only paths and names of files and folders, and can be cleared in settings.
 - Mouse positions are only used to detect gestures and are never saved.

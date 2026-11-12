@@ -35,10 +35,14 @@ public partial class ShelfWindow
         DragOutPayload? payload = null;
         var session = new ShelfDragSession(this, items);
         (RECT Rect, bool Below)? seed = null;
+        var dropped = false;
         try
         {
             // 准备期间列表不再跟着鼠标改变选中的项目。
             Mouse.Capture(null);
+            // 刚在别处改了名或挪了位置的文件先找回来，再检查还在不在。
+            ViewModel.Relink(items);
+            ViewModel.IsDraggingOut = true;
             payload = await ShelfDragService.PrepareAsync(items);
             if (IsClosing || !NativeMethods.IsButtonPhysicallyDown()) return;
             // 有文件要拖出时，一起选中的文本和链接各写成一个文件跟着走，不再被落下。
@@ -52,6 +56,7 @@ public partial class ShelfWindow
             }
             ShelfDragSession.Current = session;
             result = ShelfDragService.DoDragDrop(this, payload, ViewModel.Id, out dragged, _dragOutMode);
+            dropped = true;
         }
         finally
         {
@@ -59,6 +64,8 @@ public partial class ShelfWindow
             seed = SplitPadWindow.Dismiss();
             payload?.Dispose();
             IsDraggingOut = false;
+            // 没拖成（准备期间松手了）就到此为止；拖成了的等下面处理完结果再放开，见 ShelfViewModel.IsDraggingOut。
+            if (!dropped) ViewModel.IsDraggingOut = false;
         }
 
         ViewModel.HasInteracted = true;
@@ -81,6 +88,7 @@ public partial class ShelfWindow
         }
         else if (payload is { Refused: true } && dragged.Count > 0 && dragged.All(item => !item.IsFileSystem) && !IsCursorOnShelf())
             OfferConvert(dragged);
+        ViewModel.IsDraggingOut = false;
         RestoreDimmed();
     }
 

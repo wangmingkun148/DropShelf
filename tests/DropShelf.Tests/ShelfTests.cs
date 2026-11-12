@@ -197,6 +197,63 @@ internal static partial class Program
         Assert(!Directory.Exists(cache), "两个置物架都关闭后临时附件没有清理");
     }
 
+    private static void TestFollowsRenamedFiles()
+    {
+        var folder = CreateStableFolder("follow-rename");
+        var path = Path.Combine(folder, "before.txt");
+        File.WriteAllText(path, "x");
+        if (FileIdentity.TryGet(path) is not { } identity)
+        {
+            // 只有 NTFS 上的文件有稳定的标识；测试目录在别的文件系统上时没法验证。
+            Console.WriteLine("    （测试目录不在 NTFS 上，跳过）");
+            return;
+        }
+        Assert(FileIdentity.TryGet(Path.Combine(folder, "missing.txt")) is null && FileIdentity.TryGet(@"\\server\share\a.txt") is null,
+            "不存在的文件或网络路径取到了标识");
+
+        var sub = Directory.CreateDirectory(Path.Combine(folder, "sub")).FullName;
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles([path, sub]);
+        var (file, directory) = (viewModel.Items[0], viewModel.Items[1]);
+        Assert(file.Identity == identity && directory.Identity is not null && directory.Identity != identity, "放进置物架时没有记下文件标识");
+
+        // 改名并挪进另一个文件夹：原来的路径没了，按标识找到现在的位置；项目还是原来那个，名称和类型跟着变。
+        var inner = Directory.CreateDirectory(Path.Combine(folder, "inner")).FullName;
+        File.Move(path, Path.Combine(inner, "after.md"));
+        Directory.Move(sub, Path.Combine(folder, "renamed"));
+        var captions = 0;
+        viewModel.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ShelfViewModel.StackCaption)) captions++; };
+        viewModel.Relink(viewModel.Items.ToArray());
+        Assert(ReferenceEquals(viewModel.Items[0], file) && file.DisplayName == "after.md" && File.Exists(file.Value) && file.IsAvailable,
+            $"改名并移动后的文件没有跟上：{file.Value}");
+        Assert(Path.GetFileName(Path.GetDirectoryName(file.Value)) == "inner" && captions > 0, "文件的新位置不对，或名称变了没有通知");
+        Assert(directory.DisplayName == "renamed" && Directory.Exists(directory.Value), $"改名后的文件夹没有跟上：{directory.Value}");
+
+        // 正在拖出时文件不见了，是被目标程序移走的，不跟过去。
+        var away = Path.Combine(folder, "away.md");
+        File.Move(file.Value, away);
+        var before = file.Value;
+        viewModel.IsDraggingOut = true;
+        viewModel.Relink([file]);
+        Assert(file.Value == before, "拖出期间不应该跟着文件走");
+        viewModel.IsDraggingOut = false;
+        viewModel.Relink([file]);
+        Assert(file.DisplayName == "away.md" && File.Exists(file.Value), "拖出结束后没有再跟上");
+
+        // 置物架上已经有这个路径时不重复；真的删除了就照旧显示找不到。
+        var twin = Path.Combine(folder, "twin.md");
+        File.WriteAllText(twin, "y");
+        viewModel.AddFiles([twin]);
+        File.Delete(twin);
+        File.Move(file.Value, twin);
+        viewModel.Relink([file]);
+        Assert(file.DisplayName == "away.md" && viewModel.Items.Count(item => item.DisplayName == "twin.md") == 1, "跟过去之后和置物架上已有的项目重复了");
+        File.Delete(twin);
+        viewModel.Relink(viewModel.Items.ToArray());
+        Assert(!file.RefreshAvailability() && file.DisplayName == "away.md", "已经删除的文件不应该再有路径");
+        Assert(identity.Resolve(path, isFolder: false) is null, "已经删除的文件按标识还能找到");
+    }
+
     private static void TestStackSummary()
     {
         var folder = CreateFolder("stack-summary");
