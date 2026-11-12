@@ -125,10 +125,10 @@ public static class ImageCompressor
     }
 
     /// <summary>
-    /// 读取图片：按拍摄方向转正，透明部分铺白色背景（JPG 不支持透明）。
+    /// 读取图片：按拍摄方向转正；flatten 时透明部分铺白色背景（JPG 不支持透明），否则保留透明。
     /// 先只读尺寸和方向，超大的图片在解码时就缩小到处理上限以内，不会先完整解码再缩小。
     /// </summary>
-    public static BitmapSource Load(string path)
+    public static BitmapSource Load(string path, bool flatten = true, long maximumPixels = MaximumWorkingPixels)
     {
         int width, height, orientation;
         using (var stream = OpenRead(path))
@@ -145,11 +145,12 @@ public static class ImageCompressor
         image.CacheOption = BitmapCacheOption.OnLoad;
         image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
         var pixels = (long)width * height;
-        if (pixels > MaximumWorkingPixels)
-            image.DecodePixelWidth = Math.Max(1, (int)(width * Math.Sqrt((double)MaximumWorkingPixels / pixels)));
+        if (pixels > maximumPixels)
+            image.DecodePixelWidth = Math.Max(1, (int)(width * Math.Sqrt((double)maximumPixels / pixels)));
         image.EndInit();
         image.Freeze();
-        return Flatten(ApplyOrientation(image, orientation));
+        var oriented = ApplyOrientation(image, orientation);
+        return flatten ? Flatten(oriented) : oriented;
     }
 
     private static FileStream OpenRead(string path) =>

@@ -432,7 +432,12 @@ public static class Strings
 
     public static string KindFolder => T("发送到文件夹", "Send to folder");
     public static string KindCompressImage => T("压缩图片", "Compress images");
+    public static string KindConvertImage => T("转换图片", "Convert images");
     public static string KindOpenWith => T("用程序打开", "Open with app");
+    public static string ImageFormatLabel => T("转成什么格式", "Convert to");
+    public static string ImageFormatHint => T("另存为新文件，原图保持不变。转成 PNG 保留透明，转成 JPG 时透明的部分变成白色",
+        "Saves a new file and leaves the original unchanged. PNG keeps transparency; in a JPG, transparent areas turn white");
+    public static string ImageFormatName(ImageFormat format) => format == ImageFormat.Png ? "PNG" : "JPG";
     public static string ActionKind => T("类型", "Type");
     public static string FolderLabel => T("目标文件夹", "Destination folder");
     public static string FolderModeLabel => T("移动还是复制", "Move or copy");
@@ -465,6 +470,7 @@ public static class Strings
     {
         CustomActionKind.Folder => string.IsNullOrWhiteSpace(action.Folder) ? KindFolder : QuickActionService.GetFolderName(action.Folder),
         CustomActionKind.CompressImage => $"≤ {ImageSizeText(action.ImageSizeKb)}",
+        CustomActionKind.ConvertImage => $"→ {ImageFormatName(action.ImageFormat)}",
         _ => string.IsNullOrWhiteSpace(action.ProgramPath) ? KindOpenWith : ShellFileInfo.GetProgramName(action.ProgramPath)
     };
 
@@ -479,6 +485,7 @@ public static class Strings
                 ? T($"复制到“{label}”", $"Copy to {label}")
                 : T($"移动到“{label}”", $"Move to {label}"),
             CustomActionKind.CompressImage => T($"压缩图片到 {ImageSizeText(action.ImageSizeKb)}", $"Compress images to {ImageSizeText(action.ImageSizeKb)}"),
+            CustomActionKind.ConvertImage => T($"图片转成 {ImageFormatName(action.ImageFormat)}", $"Convert images to {ImageFormatName(action.ImageFormat)}"),
             _ => T($"用 {label} 打开", $"Open with {label}")
         };
     }
@@ -490,6 +497,8 @@ public static class Strings
             : T($"移动到 {action.Folder}", $"Moves items to {action.Folder}"),
         CustomActionKind.CompressImage => T($"压缩为不超过 {ImageSizeText(action.ImageSizeKb)} 的 JPG，原图保持不变",
             $"Saves a JPG copy of {ImageSizeText(action.ImageSizeKb)} or less. The original stays unchanged"),
+        CustomActionKind.ConvertImage => T($"另存为 {ImageFormatName(action.ImageFormat)}，原图保持不变",
+            $"Saves a {ImageFormatName(action.ImageFormat)} copy. The original stays unchanged"),
         _ => T($"用 {action.ProgramPath} 打开", $"Opens with {action.ProgramPath}")
     };
 
@@ -497,6 +506,7 @@ public static class Strings
     {
         CustomActionKind.Folder => action.FolderMode == TransferMode.Copy ? T("正在复制…", "Copying…") : T("正在移动…", "Moving…"),
         CustomActionKind.CompressImage => T("正在压缩图片…", "Compressing images…"),
+        CustomActionKind.ConvertImage => T("正在转换图片…", "Converting images…"),
         _ => T("正在打开…", "Opening…")
     };
 
@@ -507,6 +517,11 @@ public static class Strings
         $"Copied {Count(copied, "item", "items")}; {failed} couldn't be copied");
     public static string ImageCompressFailed => T("图片压缩失败，原图没有改变", "Couldn't compress the images. The originals are unchanged");
     public static string NoImagesToCompress => T("没有可压缩的图片", "No images to compress");
+    public static string ImageConvertFailed => T("图片转换失败，原图没有改变", "Couldn't convert the images. The originals are unchanged");
+    public static string NoImagesToConvert => T("没有可转换的图片", "No images to convert");
+    public static string ImagesAlreadyFormat(string format) => T($"图片已经是 {format}，无需转换", $"The images are already {format}");
+    public static string ImagesConverted(int count, string format) => T($"已把 {count} 张图片转成 {format}", $"Converted {Count(count, "image", "images")} to {format}");
+    public static string ImagesSkippedSameFormat(int count, string format) => T($"，{count} 张本来就是 {format}", $", {count} already {format}");
     public static string ImagesAlreadySmall(string size) => T($"图片已小于 {size}，无需压缩", $"The images are already under {size}");
     public static string ImagesCompressed(int count, string size) => T($"已压缩 {count} 张图片到 {size} 以内",
         $"Compressed {Count(count, "image", "images")} to under {size}");

@@ -65,6 +65,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Custom actions:
   - Send to folder: move or copy to a fixed folder with one click.
   - Compress image: compress to a JPG no larger than a given size (e.g. 200 KB), replacing the image on the shelf while the original file stays unchanged.
+  - Convert image: save HEIC, WebP, AVIF, BMP and other images as JPG or PNG, replacing the image on the shelf while the original file stays unchanged. PNG keeps transparency.
   - Open with app: hand files to a chosen program; use `{files}` to place them in the arguments.
   - To delete one, drag it to the red area at the bottom of the settings window and confirm.
 - Click a button to process the items on the shelf, or only the selected ones when the list is expanded.

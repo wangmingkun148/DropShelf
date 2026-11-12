@@ -1170,7 +1170,7 @@
         <!-- 添加或编辑自定义操作（Windows 11 对话框样式） -->
         <Grid x:Name="EditorOverlay" Grid.RowSpan="2" Background="{DynamicResource SmokeBrush}"
               Visibility="{Binding IsEditorOpen, Converter={StaticResource BoolToVisibility}}">
-            <Grid Width="480" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+            <Grid Width="560" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
                 <Control Style="{StaticResource DialogShadowStyle}" />
                 <Border x:Name="EditorDialog" DataContext="{Binding Editor}" Background="{DynamicResource FlyoutBrush}"
                         BorderBrush="{DynamicResource FlyoutBorderBrush}" BorderThickness="1" CornerRadius="8">
@@ -1187,6 +1187,7 @@
                                      SelectedValuePath="Tag" SelectedValue="{Binding Kind}">
                                 <ListBoxItem Content="{l:Loc KindFolder}" Tag="{x:Static models:CustomActionKind.Folder}" />
                                 <ListBoxItem Content="{l:Loc KindCompressImage}" Tag="{x:Static models:CustomActionKind.CompressImage}" />
+                                <ListBoxItem Content="{l:Loc KindConvertImage}" Tag="{x:Static models:CustomActionKind.ConvertImage}" />
                                 <ListBoxItem Content="{l:Loc KindOpenWith}" Tag="{x:Static models:CustomActionKind.OpenWith}" />
                             </ListBox>
 
@@ -1217,6 +1218,17 @@
                                     <TextBlock Text="KB" Margin="10,0,0,1" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <TextBlock Text="{l:Loc ImageSizeHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+
+                            <!-- 转换图片 -->
+                            <StackPanel Visibility="{Binding IsConvertImage, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{l:Loc ImageFormatLabel}" Style="{StaticResource FieldLabelStyle}" />
+                                <ListBox x:Name="EditorFormatSelector" Style="{StaticResource SegmentedStyle}" HorizontalAlignment="Left"
+                                         SelectedValuePath="Tag" SelectedValue="{Binding ImageFormat}">
+                                    <ListBoxItem Content="JPG" Tag="{x:Static models:ImageFormat.Jpeg}" />
+                                    <ListBoxItem Content="PNG" Tag="{x:Static models:ImageFormat.Png}" />
+                                </ListBox>
+                                <TextBlock Text="{l:Loc ImageFormatHint}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" TextWrapping="Wrap" />
                             </StackPanel>
 
                             <!-- 用程序打开 -->

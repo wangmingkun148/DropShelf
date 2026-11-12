@@ -113,6 +113,7 @@ internal static partial class Program
         Run("自定义操作：复制或移动到文件夹", TestCustomFolderAction);
         Run("自定义操作：压缩图片到指定大小", TestImageCompression);
         Run("压缩后的图片替换置物架中的原图", TestCompressImageReplacesItems);
+        Run("自定义操作：图片转成 JPG 或 PNG", TestImageConversion);
         Run("自定义操作：用程序打开的参数", TestOpenWithArguments);
 
         // 系统集成

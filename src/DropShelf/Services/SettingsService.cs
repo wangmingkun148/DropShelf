@@ -259,6 +259,7 @@ public sealed class SettingsService
                 : name.Length > CustomQuickAction.MaximumNameLength ? name[..CustomQuickAction.MaximumNameLength] : name;
             if (!Enum.IsDefined(action.FolderMode)) action.FolderMode = TransferMode.Move;
             action.ImageSizeKb = Math.Clamp(action.ImageSizeKb, CustomQuickAction.MinimumImageSizeKb, CustomQuickAction.MaximumImageSizeKb);
+            if (!Enum.IsDefined(action.ImageFormat)) action.ImageFormat = ImageFormat.Jpeg;
             action.Folder = action.Folder?.Trim();
             action.ProgramPath = action.ProgramPath?.Trim().Trim('"');
             action.Arguments = string.IsNullOrWhiteSpace(action.Arguments) ? null : action.Arguments.Trim();
