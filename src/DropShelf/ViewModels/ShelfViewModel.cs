@@ -28,6 +28,9 @@ public sealed record ShelfAddSummary(int Added, int Duplicates, int Unavailable)
     }
 }
 
+/// <summary>一次移除的记录：移除的项目和它们原来的位置（从前到后），撤销时按原位放回。</summary>
+public sealed record ShelfRemoval(IReadOnlyList<(ShelfItem Item, int Index)> Entries);
+
 public sealed class ShelfViewModel : ObservableObject
 {
     private readonly HashSet<string> _cacheDirectories = new(StringComparer.OrdinalIgnoreCase);
@@ -276,10 +279,14 @@ public sealed class ShelfViewModel : ObservableObject
         return new ShelfAddSummary(added, duplicates, unavailable);
     }
 
-    public void Remove(IEnumerable<ShelfItem> items)
+    /// <summary>移除项目，返回这次移除的记录（供撤销）；一个也没移除时返回 null。</summary>
+    public ShelfRemoval? Remove(IEnumerable<ShelfItem> items)
     {
         var removing = items.Where(_members.Contains).ToHashSet();
-        if (removing.Count == 0) return;
+        if (removing.Count == 0) return null;
+        var entries = new List<(ShelfItem, int)>(removing.Count);
+        for (var index = 0; index < Items.Count; index++)
+            if (removing.Contains(Items[index])) entries.Add((Items[index], index));
         Batch(() =>
         {
             // 全部移除时一次清空，列表只刷新一次；否则从后往前找，每个项目只经过一遍，后面的项目也不用反复前移。
@@ -291,6 +298,30 @@ public sealed class ShelfViewModel : ObservableObject
             for (var index = Items.Count - 1; index >= 0 && removing.Count > 0; index--)
                 if (removing.Remove(Items[index])) Items.RemoveAt(index);
         });
+        return new ShelfRemoval(entries);
+    }
+
+    /// <summary>
+    /// 撤销移除：按原来的位置放回去，这期间置物架没有别的变化时顺序和移除前一样。
+    /// 这期间又放上来的相同文件或内容不重复放回。返回放回的项目。
+    /// </summary>
+    public IReadOnlyList<ShelfItem> Restore(ShelfRemoval removal)
+    {
+        var restored = new List<ShelfItem>();
+        if (_released) return restored;
+        Batch(() =>
+        {
+            var paths = Items.Where(item => item.IsFileSystem).Select(item => item.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var values = Items.Where(item => !item.IsFileSystem).Select(item => item.Value).ToHashSet(StringComparer.Ordinal);
+            foreach (var (item, index) in removal.Entries)
+            {
+                if (!(item.IsFileSystem ? paths : values).Add(item.Value)) continue;
+                Items.Insert(Math.Min(index, Items.Count), item);
+                restored.Add(item);
+            }
+        });
+        if (restored.Count > 0) HasInteracted = true;
+        return restored;
     }
 
     public void Clear() => Items.Clear();

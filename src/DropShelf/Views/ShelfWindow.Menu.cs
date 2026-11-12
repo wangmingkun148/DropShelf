@@ -78,7 +78,7 @@ public partial class ShelfWindow
             menu.Items.Add(CreateMenuItem(Strings.RestoreLastShelf, "", () => Restore(latest)));
             menu.Items.Add(HistoryMenu.Create(history.Entries, Restore, history.Clear));
         }
-        menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveItems(ViewModel.Items.ToArray()), enabled: hasItems));
+        menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveByUser(ViewModel.Items.ToArray()), enabled: hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, "Esc"));
@@ -98,7 +98,7 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuCopy, "", () => ViewModel.CopyToClipboard(items), "Ctrl+C"));
         menu.Items.Add(CreateMenuItem(Strings.MenuCopyPath, "", () => ViewModel.CopyPaths(items), enabled: items.Any(item => item.IsFileSystem)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveItems(items), "Delete"));
+        menu.Items.Add(CreateMenuItem(Strings.MenuRemove, "", () => RemoveByUser(items), "Delete"));
         return menu;
     }
 
@@ -167,8 +167,11 @@ public partial class ShelfWindow
                 e.Handled = true;
                 break;
             case Key.Delete when ViewModel.IsExpanded && ItemsList.SelectedItems.Count > 0:
-                RemoveItems(GetSelectedItems());
+                RemoveByUser(GetSelectedItems());
                 e.Handled = true;
+                break;
+            case Key.Z when control:
+                if (UndoRemoval()) e.Handled = true;
                 break;
             case Key.Enter when ViewModel.IsExpanded && ItemsList.SelectedItems.Count == 1:
                 ViewModel.Open(GetSelectedItems()[0]);

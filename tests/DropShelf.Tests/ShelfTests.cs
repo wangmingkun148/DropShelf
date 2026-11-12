@@ -69,6 +69,35 @@ internal static partial class Program
         Assert(File.ReadAllText(path) == "keep me", "清空置物架改变了磁盘文件");
     }
 
+    private static void TestRemoveUndo()
+    {
+        var folder = CreateFolder("remove-undo");
+        var paths = Enumerable.Range(1, 5).Select(index =>
+        {
+            var path = Path.Combine(folder, $"undo-{index}.txt");
+            File.WriteAllText(path, index.ToString());
+            return path;
+        }).ToArray();
+        var viewModel = new ShelfViewModel();
+        viewModel.AddFiles(paths);
+        var order = viewModel.Items.ToArray();
+
+        var removal = viewModel.Remove([order[3], order[1]]);
+        Assert(removal is { Entries.Count: 2 } && viewModel.Items.Count == 3, "移除没有返回可撤销的记录");
+        Assert(removal!.Entries[0].Index == 1 && removal.Entries[1].Index == 3, "移除记录里的位置不是从前到后");
+        var restored = viewModel.Restore(removal);
+        Assert(restored.Count == 2 && viewModel.Items.SequenceEqual(order), "撤销后项目没有回到原来的位置");
+        Assert(viewModel.Remove([order[0]]) is not null && viewModel.Remove([order[0]]) is null, "移除不在置物架上的项目也返回了记录");
+        viewModel.Restore(new ShelfRemoval([(order[0], 0)]));
+
+        // 清空后又放上来一个相同的文件，撤销时不重复放回。
+        var all = viewModel.Remove(viewModel.Items.ToArray());
+        viewModel.AddFiles([paths[0]]);
+        var back = viewModel.Restore(all!);
+        Assert(back.Count == 4 && viewModel.Items.Count == 5, "撤销时重复放回了已经在置物架上的文件");
+        Assert(viewModel.Items.Select(item => item.Value).SequenceEqual(paths), "清空后撤销的顺序不对");
+    }
+
     private static void TestTextAndLinkEntries()
     {
         var viewModel = new ShelfViewModel();

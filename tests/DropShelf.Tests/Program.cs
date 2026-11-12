@@ -75,6 +75,7 @@ internal static partial class Program
         Run("100 个文件与重复路径", TestOneHundredFilesAndDuplicates);
         Run("拖入文件只读取路径属性", TestAddingLockedFileReadsNoContent);
         Run("清空置物架不影响磁盘文件", TestClearKeepsFiles);
+        Run("移除后可以按原位撤销", TestRemoveUndo);
         Run("文本与链接可以暂存并去重", TestTextAndLinkEntries);
         Run("堆叠显示最新项目和汇总", TestStackSummary);
         Run("拖出结果按设置移除或保留", TestApplyDragOut);

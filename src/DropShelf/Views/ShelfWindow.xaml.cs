@@ -106,7 +106,7 @@ public partial class ShelfWindow : Window
         viewModel.NewItemsProduced += (_, paths) => _host.OpenBeside(this, paths);
         viewModel.RemoveVisibly = RemoveItems;
 
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
+        _toastTimer = new DispatcherTimer { Interval = ToastDuration };
         _toastTimer.Tick += (_, _) => HideToast();
         _leaveCheck = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _leaveCheck.Tick += OnLeaveCheck;
@@ -286,8 +286,10 @@ public partial class ShelfWindow : Window
     {
         var switched = !_countChanged && _shownExpanded != ViewModel.IsExpanded;
         var landing = _landing;
+        var returning = _returning;
         _countChanged = false;
         _landing = null;
+        _returning = null;
         _shownExpanded = ViewModel.IsExpanded;
         FinishMotion();
         var animate = ShelfMotion.Enabled && IsVisible && ViewModel.HasItems;
@@ -299,6 +301,7 @@ public partial class ShelfWindow : Window
         UpdateViews();
         // 列表里移除之后先补位，窗口等补完再变小，见 CloseUpRows。
         if (!_holdSize) UpdateWindowSize();
+        if (returning is { } back && animate) PlayReturn(back.Origin, back.Items);
         if (landing is not { } drop || !animate) return;
         if (ViewModel.IsExpanded) PlayListLanding(drop.Point, drop.Added);
         else PlayLanding(drop.Point, drop.Added);
@@ -559,9 +562,20 @@ public partial class ShelfWindow : Window
 
     // ───────────── 提示 ─────────────
 
-    private void ShowToast(ShelfToast toast)
+    private static readonly TimeSpan ToastDuration = TimeSpan.FromSeconds(2.4);
+    /// <summary>带“撤销”的提示多停留一会儿，来得及看清和点到。</summary>
+    private static readonly TimeSpan UndoDuration = TimeSpan.FromSeconds(5);
+
+    private void ShowToast(ShelfToast toast) => ShowToast(toast, undo: false);
+
+    private void ShowToast(ShelfToast toast, bool undo)
     {
         if (IsClosing) return;
+        // 换成别的提示后“撤销”按钮不在了，撤销也随之失效：看得见按钮时才能撤销。
+        if (!undo) _undo = null;
+        ToastUndoButton.Visibility = undo ? Visibility.Visible : Visibility.Collapsed;
+        Toast.IsHitTestVisible = undo;
+        _toastTimer.Interval = undo ? UndoDuration : ToastDuration;
         ToastText.Text = toast.Message;
         ToastGlyph.Text = toast.Success ? "" : "";
         ToastGlyph.SetResourceReference(TextBlock.ForegroundProperty, toast.Success ? "SuccessBrush" : "CautionBrush");
@@ -574,7 +588,61 @@ public partial class ShelfWindow : Window
     private void HideToast()
     {
         _toastTimer.Stop();
+        _undo = null;
+        Toast.IsHitTestVisible = false;
         Toast.BeginAnimation(OpacityProperty, ShelfMotion.Gate(new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))));
+        if (!_closeAfterToast) return;
+        _closeAfterToast = false;
+        if (ViewModel.IsEmpty && !ViewModel.IsBusy && !IsDraggingOut && !_dragInside && _receiving == 0) CloseAnimated();
+    }
+
+    // ───────────── 撤销移除 ─────────────
+
+    /// <summary>刚才手动移除的项目；提示里的“撤销”还在时可以放回。</summary>
+    private ShelfRemoval? _undo;
+    /// <summary>移除前是不是展开着列表：移空之后列表自动收起，撤销时回到列表。</summary>
+    private bool _undoExpanded;
+    /// <summary>移空了、设置为自动关闭空置物架：等“撤销”的提示消失后再关闭，这期间还能反悔。</summary>
+    private bool _closeAfterToast;
+    /// <summary>撤销后放回的项目和“撤销”按钮的位置，下一次刷新时播放放回的动画。</summary>
+    private (WpfPoint Origin, IReadOnlyList<ShelfItem> Items)? _returning;
+
+    /// <summary>手动移除之后显示“已移除 N 项 · 撤销”。</summary>
+    private void OfferUndo(ShelfRemoval removal, bool expanded)
+    {
+        ShowToast(new ShelfToast(Strings.RemovedItems(removal.Entries.Count), true), undo: true);
+        _undo = removal;
+        _undoExpanded = expanded && ViewModel.IsEmpty;
+        _closeAfterToast = ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty;
+    }
+
+    private void OnUndoClick(object sender, RoutedEventArgs e) => UndoRemoval();
+
+    /// <summary>放回刚才移除的项目：列表里各行从左边滑回来，堆叠里的牌从“撤销”按钮处飞回去。</summary>
+    private bool UndoRemoval()
+    {
+        if (_undo is not { } removal || IsClosing) return false;
+        var origin = ToastUndoButton.TranslatePoint(new WpfPoint(ToastUndoButton.ActualWidth / 2, ToastUndoButton.ActualHeight / 2), this);
+        _closeAfterToast = false;
+        HideToast();
+        FinishMotion();
+        var restored = ViewModel.Restore(removal);
+        if (restored.Count == 0) return true;
+        if (_undoExpanded) ViewModel.IsExpanded = true;
+        _returning = (origin, restored);
+        ViewModel.RefreshAvailabilityInBackground();
+        return true;
+    }
+
+    /// <summary>鼠标停在提示上时不让它消失，移开后重新计时。</summary>
+    private void OnToastMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_undo is not null) _toastTimer.Stop();
+    }
+
+    private void OnToastMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_undo is not null) _toastTimer.Start();
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

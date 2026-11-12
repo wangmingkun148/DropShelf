@@ -338,6 +338,9 @@ public static class Strings
     public static string MenuOpen => T("打开", "Open");
     public static string MenuCopyText => T("复制文本", "Copy text");
     public static string MenuRemove => T("从置物架移除", "Remove from shelf");
+    public static string RemovedItems(int count) => T($"已移除 {count} 项", $"Removed {Count(count, "item", "items")}");
+    public static string Undo => T("撤销", "Undo");
+    public static string UndoTooltip => T("放回刚才移除的项目（Ctrl+Z）", "Put back what you just removed (Ctrl+Z)");
 
     public static string AlreadyOnShelf => T("这些项目已在置物架中", "These items are already on the shelf");
     public static string ItemsUnavailable => T("项目无法访问，未能添加", "The items couldn't be accessed and weren't added");

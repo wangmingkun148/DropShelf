@@ -207,10 +207,10 @@ public partial class ShelfWindow
     private void OnRemoveItemClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ShelfItem item) return;
-        RemoveItems([item]);
+        RemoveByUser([item]);
     }
 
-    /// <summary>移除项目并播放移除动画；全部移走且设置为自动关闭时不播放，直接关闭置物架。</summary>
+    /// <summary>移除项目并播放移除动画；全部移走且设置为自动关闭时不播放，直接关闭置物架。用于拖出之后。</summary>
     private void RemoveItems(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return;
@@ -221,6 +221,21 @@ public partial class ShelfWindow
             ViewModel.Remove(items);
             if (ViewModel.IsEmpty && _host.Settings.CloseWhenEmpty) CloseAnimated();
         }, animate: !closes);
+    }
+
+    /// <summary>
+    /// 手动移除（行尾的按钮、Delete、菜单里的移除和清空）：移除后提示“已移除 N 项”，几秒内可以撤销。
+    /// 移空了且设置为自动关闭时，等提示消失再关闭，这期间同样可以撤销。
+    /// </summary>
+    private void RemoveByUser(IReadOnlyList<ShelfItem> items)
+    {
+        if (items.Count == 0) return;
+        ViewModel.HasInteracted = true;
+        var expanded = ViewModel.IsExpanded;
+        RemoveWithMotion(items, () =>
+        {
+            if (ViewModel.Remove(items) is { } removal && !IsClosing) OfferUndo(removal, expanded);
+        });
     }
 
     /// <summary>选中的项目，按在置物架里的顺序：顺着列表走一遍挑出来，不用给每个选中项各找一次位置再排序。</summary>

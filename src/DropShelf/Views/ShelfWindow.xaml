@@ -326,7 +326,7 @@
             <!-- 结果提示 -->
             <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" Margin="10,0,10,10" Padding="10,7,12,8"
                     CornerRadius="8" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutBorderBrush}"
-                    BorderThickness="1" Opacity="0" IsHitTestVisible="False">
+                    BorderThickness="1" Opacity="0" IsHitTestVisible="False" MouseEnter="OnToastMouseEnter" MouseLeave="OnToastMouseLeave">
                 <Border.RenderTransform>
                     <TranslateTransform x:Name="ToastOffset" />
                 </Border.RenderTransform>
@@ -334,10 +334,16 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="ToastGlyph" Text="{StaticResource Glyph.Completed}" FontFamily="{StaticResource IconFont}"
                                FontSize="14" Margin="0,1,8,0" VerticalAlignment="Top" Foreground="{DynamicResource SuccessBrush}" />
-                    <TextBlock x:Name="ToastText" Grid.Column="1" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock x:Name="ToastText" Grid.Column="1" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <!-- 移除之后的“撤销”：只在刚移除过项目的提示里显示，见 OfferUndo -->
+                    <Button x:Name="ToastUndoButton" Grid.Column="2" Style="{StaticResource SubtleButtonStyle}" Height="24" MinHeight="0"
+                            Padding="8,0,8,1" Margin="8,-3,-6,-4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                            Foreground="{DynamicResource AccentTextBrush}" Content="{l:Loc Undo}" ToolTip="{l:Loc UndoTooltip}"
+                            Click="OnUndoClick" Visibility="Collapsed" />
                 </Grid>
             </Border>
         </Grid>

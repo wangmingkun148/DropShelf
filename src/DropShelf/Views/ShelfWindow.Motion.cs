@@ -237,6 +237,48 @@ public partial class ShelfWindow
     }
 
     /// <summary>
+    /// 撤销移除之后放回：列表里放回的行从左边滑回来（移除时是向左滑出去的），看不到时先滚到第一行；
+    /// 堆叠里放回的牌从“撤销”按钮处飞回去，只有放回的正好是最上面几张时才播放。
+    /// </summary>
+    private void PlayReturn(WpfPoint origin, IReadOnlyList<ShelfItem> items)
+    {
+        if (!ViewModel.IsExpanded)
+        {
+            var back = items.ToHashSet();
+            var top = 0;
+            while (top < 3 && top < ViewModel.Count && back.Contains(ViewModel.Items[^(top + 1)])) top++;
+            if (top > 0) PlayLanding(origin, top);
+            return;
+        }
+
+        FinishMotion();
+        ItemsList.UpdateLayout();
+        ItemsList.ScrollIntoView(items[0]);
+        ItemsList.UpdateLayout();
+        var rows = items.Select(item => ItemsList.ItemContainerGenerator.ContainerFromItem(item)).OfType<ListBoxItem>().ToList();
+        if (rows.Count == 0) return;
+        foreach (var row in rows)
+        {
+            var shift = new TranslateTransform();
+            row.RenderTransform = shift;
+            Tween(TimeSpan.Zero, RowFadeDuration, t =>
+            {
+                row.Opacity = t;
+                shift.X = -12 * (1 - t);
+            });
+        }
+        _motionCleanup = () =>
+        {
+            foreach (var row in rows)
+            {
+                row.ClearValue(OpacityProperty);
+                row.ClearValue(RenderTransformProperty);
+            }
+        };
+        FinishAfter(RowFadeDuration);
+    }
+
+    /// <summary>
     /// 移除项目：列表里要移除的行向左滑出并淡出，堆叠里要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除。
     /// 之后列表里下面的行滑上来补位，窗口再平滑变小；堆叠里下面的牌升上来补位，新露出来的从最下面淡入。
     /// 动画途中被打断（再次移除、拖入、切换视图、关闭等）时立即移除。关闭了动画效果、看不见或 animate 为 false 时直接移除。
