@@ -331,7 +331,8 @@ internal static partial class Program
 
             var viewModel = new ShelfViewModel();
             viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "a"), new DroppedEntry(ShelfItemKind.Text, "b")]);
-            Assert(viewModel.Title == "2 items" && viewModel.StackDetail == "2 snippets", $"英文汇总不正确：{viewModel.StackDetail}");
+            Assert(viewModel.Title == "2 items" && viewModel.StackCaption == "2 snippets" && viewModel.StackDetail.Length == 0,
+                $"英文汇总不正确：{viewModel.StackCaption} / {viewModel.StackDetail}");
             Assert(new ShelfAddSummary(1, 2, 0).Message == "Added 1 item, skipped 2 duplicates", "英文添加结果不正确");
             Assert(QuickActions.Get(QuickActionType.CompressZip).Label == "Compress", "快速操作名称没有切换");
             Assert(ShellFileInfo.GetTypeName("noextension") == "File", "文件类型备用名称没有切换");
