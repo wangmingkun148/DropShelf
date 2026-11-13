@@ -328,13 +328,14 @@ public static class Strings
     public static string MergedShelves(int count) => T($"已合并 {count} 项", $"Merged {Count(count, "item", "items")}");
     public static string RestoreLastShelf => T("恢复上次的置物架", "Reopen last shelf");
 
+    /// <summary>标题栏“移动/复制”的说明：这是全局设置，点一下所有置物架都跟着变，和设置页里的是同一项。</summary>
     public static string DragOutModeTooltip(TransferMode mode) => mode == TransferMode.Copy
-        ? T("拖出时复制文件，点按改为移动", "Dragging out copies files. Click to move instead")
-        : T("拖出时移动文件，点按改为复制", "Dragging out moves files. Click to copy instead");
+        ? T("所有置物架拖出时复制文件，点按改为移动", "All shelves copy files when dragged out. Click to move instead")
+        : T("所有置物架拖出时移动文件，点按改为复制", "All shelves move files when dragged out. Click to copy instead");
 
     public static string DragOutModeChanged(TransferMode mode) => mode == TransferMode.Copy
-        ? T("拖出时将复制文件", "Dragging out now copies files")
-        : T("拖出时将移动文件", "Dragging out now moves files");
+        ? T("所有置物架拖出时都将复制文件", "All shelves now copy files when dragged out")
+        : T("所有置物架拖出时都将移动文件", "All shelves now move files when dragged out");
 
     public static string Restored(int added, int unavailable) => T(
         $"已恢复 {added} 项{(unavailable > 0 ? $"，{unavailable} 项已删除或移动" : null)}",
@@ -428,7 +429,7 @@ public static class Strings
     // ───────────── 快速操作 ─────────────
 
     public static string ActionCompress => T("压缩", "Compress");
-    public static string ActionCopyPath => T("路径", "Copy path");
+    public static string ActionCopyPath => T("复制路径", "Copy path");
     public static string ActionMoveTo => T("移动到", "Move to");
     public static string ActionProperties => T("属性", "Properties");
     public static string ActionReveal => T("显示位置", "Locate");

@@ -444,10 +444,16 @@ public partial class ShelfWindow : Window
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 8)
             };
+            // 四个操作时卡片很窄：名称最多折成两行，比如“Copy / path”，还放不下才截断。
             var label = new TextBlock
             {
                 Text = info.Label,
                 FontSize = 12,
+                LineHeight = 15,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                MaxHeight = 30,
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };

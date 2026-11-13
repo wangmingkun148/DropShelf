@@ -40,15 +40,18 @@
             </Setter>
         </Style>
 
-        <!-- 标题栏中的“移动/复制”切换 -->
-        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-            <Setter Property="Height" Value="26" />
+        <!--
+            标题栏中的“移动/复制”切换：和普通按钮一样有底色和边框，一眼看出能点，不像一个标签；
+            它改的是全局设置，提示里写明对所有置物架生效。
+        -->
+        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource ButtonStyle}">
+            <Setter Property="Height" Value="24" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="Padding" Value="6,0,8,1" />
             <Setter Property="Margin" Value="2,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
         <!--
