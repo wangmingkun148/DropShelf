@@ -20,6 +20,6 @@ public static class QuickShelfSizeOptions
     /// <summary>缩略图堆叠区域的高度，按宽度等比计算，三档保持相同比例。</summary>
     public static double ResolveStackHeight(QuickShelfSize size) => Math.Round(ResolveWidth(size) * 0.66);
 
-    /// <summary>展开列表时的宽度，保证文件名有足够空间。</summary>
-    public static double ResolveExpandedWidth(QuickShelfSize size) => Math.Max(ResolveWidth(size), 300);
+    /// <summary>展开列表时的宽度：比收起时宽 80，给文件名留出空间，并和收起时一样随三档尺寸变化（264、300、344）。</summary>
+    public static double ResolveExpandedWidth(QuickShelfSize size) => ResolveWidth(size) + 80;
 }

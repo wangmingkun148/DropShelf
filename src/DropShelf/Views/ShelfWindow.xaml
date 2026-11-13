@@ -40,15 +40,18 @@
             </Setter>
         </Style>
 
-        <!-- 标题栏中的“移动/复制”切换 -->
-        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-            <Setter Property="Height" Value="26" />
+        <!--
+            标题栏中的“移动/复制”切换：和普通按钮一样有底色和边框，一眼看出能点，不像一个标签；
+            它改的是全局设置，提示里写明对所有置物架生效。
+        -->
+        <Style x:Key="ModeChipStyle" TargetType="Button" BasedOn="{StaticResource ButtonStyle}">
+            <Setter Property="Height" Value="24" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="Padding" Value="6,0,8,1" />
             <Setter Property="Margin" Value="2,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-            <Setter Property="Background" Value="{DynamicResource ControlAltBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
         <!--
@@ -90,8 +93,9 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 已删除或移动的项目和列表里的行一样变淡；只淡化牌上的内容，牌本身的透明度留给动画用 -->
         <DataTemplate x:Key="CardContentTemplate">
-            <Grid Margin="9">
+            <Grid x:Name="CardContent" Margin="9">
                 <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                 <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="34"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}">
@@ -107,6 +111,11 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsAvailable}" Value="False">
+                    <Setter TargetName="CardContent" Property="Opacity" Value="0.5" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
 
@@ -298,10 +307,20 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid x:Name="ShelfDropZone" Margin="10,2,10,6">
+                <Grid x:Name="ShelfDropZone" Margin="10,2,10,6" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="DropZoneScale" />
+                    </Grid.RenderTransform>
+                    <!-- 合并前的蓄力：拖着别的置物架停在这里时，底色从中间涨满，停够了松手才合并，见 ShowMergeHint -->
+                    <Border x:Name="MergeCharge" CornerRadius="10" Background="{DynamicResource AccentSubtleBrush}" Opacity="0"
+                            IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="MergeChargeScale" />
+                        </Border.RenderTransform>
+                    </Border>
                     <Rectangle x:Name="ShelfDropFrame" RadiusX="10" RadiusY="10" StrokeThickness="1.6" StrokeDashArray="4 3"
                                Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentFaintBrush}" />
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel x:Name="DropZoneLabel" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBlock Text="{StaticResource Glyph.Download}" FontFamily="{StaticResource IconFont}" FontSize="22"
                                    HorizontalAlignment="Center" Foreground="{DynamicResource AccentTextBrush}" />
                         <TextBlock x:Name="DropZoneText" Text="{l:Loc ReleaseToAdd}" Margin="0,6,0,0" FontSize="12" HorizontalAlignment="Center"

@@ -80,14 +80,19 @@ public sealed class ShelfViewModel : ObservableObject
     public ShelfItem? Stack1 => ItemFromEnd(2);
     public ShelfItem? Stack2 => ItemFromEnd(3);
 
+    /// <summary>
+    /// 堆叠下面的第一行：一项时是它的名称；多项时按类别列出各有几项（如“2 个文件 · 1 个文件夹”），
+    /// 总数已经显示在堆叠右上角的角标上，这里不再重复写“N 项”。
+    /// </summary>
     public string StackCaption => Items.Count switch
     {
         0 => string.Empty,
         1 => Items[0].DisplayName,
-        _ => Strings.ItemCount(Items.Count)
+        _ => BuildKinds()
     };
 
-    public string StackDetail => Items.Count == 1 ? Items[0].Detail : BuildSummary();
+    /// <summary>堆叠下面的第二行：一项时是它的说明；多项时是文件和文件夹的总大小，只有文本和链接时为空。</summary>
+    public string StackDetail => Items.Count == 1 ? Items[0].Detail : BuildTotalSize();
 
     public bool IsExpanded
     {
@@ -745,11 +750,20 @@ public sealed class ShelfViewModel : ObservableObject
     public bool CopyToClipboard(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return false;
+        // 刚在别处改了名或挪了位置的文件先找回来，和拖出、打开时一样。
+        Relink(items);
         var available = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
         var files = available.Select(item => item.Value).ToArray();
+        // 没有文件可复制时只复制文本和链接；已删除或移动的文件不能当成文字把旧路径复制出去。
+        var texts = items.Where(item => !item.IsFileSystem).Select(item => item.Value).ToArray();
+        if (files.Length == 0 && texts.Length == 0)
+        {
+            Notify(items.Count == 1 ? Strings.ItemMissing : Strings.ItemsMissing, false);
+            return false;
+        }
         var copied = files.Length > 0
             ? ClipboardService.TrySetFiles(files)
-            : ClipboardService.TrySetText(string.Join(Environment.NewLine, items.Select(item => item.Value)));
+            : ClipboardService.TrySetText(string.Join(Environment.NewLine, texts));
         // 剪贴板里只有临时附件的路径，关闭置物架后可能才去粘贴。
         if (copied && available.Any(item => item.IsTemporaryAttachment)) KeepTemporaryFilesForAWhile();
         Notify(copied ? (files.Length > 0 ? Strings.CopiedFiles(files.Length) : Strings.CopiedText) : Strings.ClipboardBusy, copied);
@@ -862,34 +876,35 @@ public sealed class ShelfViewModel : ObservableObject
 
     private ShelfItem? ItemFromEnd(int position) => Items.Count >= position ? Items[^position] : null;
 
-    private string BuildSummary()
+    /// <summary>各类项目各有几项，如“2 个文件 · 1 个文件夹 · 3 段文本”。</summary>
+    private string BuildKinds()
     {
-        if (Items.Count == 0) return string.Empty;
         int files = 0, folders = 0, texts = 0, links = 0;
-        long total = 0;
         foreach (var item in Items)
         {
             switch (item.Kind)
             {
-                case ShelfItemKind.File:
-                    files++;
-                    total += item.SizeBytes ?? 0;
-                    break;
-                case ShelfItemKind.Folder:
-                    folders++;
-                    total += item.SizeBytes ?? 0;
-                    break;
+                case ShelfItemKind.File: files++; break;
+                case ShelfItemKind.Folder: folders++; break;
                 case ShelfItemKind.Text: texts++; break;
                 case ShelfItemKind.Link: links++; break;
             }
         }
-        var parts = new List<string>();
+        var parts = new List<string>(4);
         if (files > 0) parts.Add(Strings.FileCount(files));
         if (folders > 0) parts.Add(Strings.FolderCount(folders));
         if (texts > 0) parts.Add(Strings.TextCount(texts));
         if (links > 0) parts.Add(Strings.LinkCount(links));
-        if (total > 0) parts.Add(ShelfItem.FormatSize(total));
         return string.Join(" · ", parts);
+    }
+
+    /// <summary>文件和文件夹（统计好的）一共多大；没有可算的大小时为空。</summary>
+    private string BuildTotalSize()
+    {
+        long total = 0;
+        foreach (var item in Items)
+            if (item.Kind is ShelfItemKind.File or ShelfItemKind.Folder) total += item.SizeBytes ?? 0;
+        return total > 0 ? ShelfItem.FormatSize(total) : string.Empty;
     }
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)

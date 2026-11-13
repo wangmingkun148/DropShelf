@@ -193,7 +193,7 @@ internal static partial class Program
         Assert(QuickActions.Normalize(null).Count == 0, "空列表处理不正确");
         Assert(QuickActions.All.All(info => info.Glyph.Length == 1 && info.Label.Length > 0), "快速操作缺少图标或名称");
         var copyPath = QuickActions.Get(QuickActionType.CopyFullPath);
-        Assert(copyPath.Label == "路径" && copyPath.Title == "复制路径", "复制路径的按钮名称应简写为“路径”");
+        Assert(copyPath.Label == "复制路径" && copyPath.Title == "复制路径", "复制路径的按钮名称应写全，只写“路径”看不出是做什么");
 
         var custom = new CustomQuickAction { Kind = CustomActionKind.CompressImage, ImageSizeKb = 200 };
         var slots = QuickActions.NormalizeSlots(["Reveal", "Reveal", "nope", custom.Id], [custom]);
@@ -329,7 +329,8 @@ internal static partial class Program
 
             var viewModel = new ShelfViewModel();
             viewModel.AddEntries([new DroppedEntry(ShelfItemKind.Text, "a"), new DroppedEntry(ShelfItemKind.Text, "b")]);
-            Assert(viewModel.Title == "2 items" && viewModel.StackDetail == "2 snippets", $"英文汇总不正确：{viewModel.StackDetail}");
+            Assert(viewModel.Title == "2 items" && viewModel.StackCaption == "2 snippets" && viewModel.StackDetail.Length == 0,
+                $"英文汇总不正确：{viewModel.StackCaption} / {viewModel.StackDetail}");
             Assert(new ShelfAddSummary(1, 2, 0).Message == "Added 1 item, skipped 2 duplicates", "英文添加结果不正确");
             Assert(QuickActions.Get(QuickActionType.CompressZip).Label == "Compress", "快速操作名称没有切换");
             Assert(ShellFileInfo.GetTypeName("noextension") == "File", "文件类型备用名称没有切换");
@@ -368,8 +369,10 @@ internal static partial class Program
         {
             var ratio = QuickShelfSizeOptions.ResolveStackHeight(size) / QuickShelfSizeOptions.ResolveWidth(size);
             Assert(Math.Abs(ratio - 0.66) < 0.01, "堆叠区域比例不一致");
-            Assert(QuickShelfSizeOptions.ResolveExpandedWidth(size) >= 300, "展开列表过窄");
+            Assert(QuickShelfSizeOptions.ResolveExpandedWidth(size) >= QuickShelfSizeOptions.ResolveWidth(size) + 60, "展开列表过窄");
         }
+        var expanded = Enum.GetValues<QuickShelfSize>().Select(QuickShelfSizeOptions.ResolveExpandedWidth).ToArray();
+        Assert(expanded[0] < expanded[1] && expanded[1] < expanded[2] && expanded[1] == 300, "展开后的宽度没有随三档尺寸变化");
     }
 
     private static void TestQuickShelfPositioning()
