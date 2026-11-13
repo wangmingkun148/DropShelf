@@ -104,8 +104,9 @@ public partial class ShelfWindow
         else
         {
             e.Effects = PreferredEffect(e.AllowedEffects);
-            SetDescription(e.Data, DropImageType.Label, action?.Label ??
-                (_dragSession is not null ? Strings.MoveToThisShelf : ViewModel.HasItems ? Strings.AddToShelf : Strings.PutOnShelf));
+            // 在快速操作上时光标旁写操作名称；在放置区域上不写，放置区域里已经写着“松开以添加”等，不重复说一遍。
+            if (action is not null) SetDescription(e.Data, DropImageType.Label, action.Label);
+            else SetDescription(e.Data, DropImageType.Invalid, string.Empty);
         }
         _dropHelper.Over(e.Effects);
     }

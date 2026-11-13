@@ -104,7 +104,8 @@ public partial class ShelfWindow
         menu.Items.Add(CreateMenuItem(Strings.MenuClear, "", () => RemoveByUser(ViewModel.Items.ToArray()), enabled: hasItems));
         menu.Items.Add(CreateMenuItem(Strings.MenuSettings, "", _host.ShowSettings));
         menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, "Esc"));
+        // 展开着列表时 Esc 是收起，只在“收起”上标出来；收起后 Esc 才是关闭。
+        menu.Items.Add(CreateMenuItem(Strings.CloseShelf, "", CloseAnimated, ViewModel.IsExpanded ? null : "Esc"));
         return menu;
     }
 
