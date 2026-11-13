@@ -33,7 +33,7 @@ internal static partial class Program
         var countNotifications = 0;
         viewModel.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ShelfViewModel.Count)) countNotifications++; };
         var first = viewModel.AddFiles(paths);
-        Assert(countNotifications == 1 && viewModel.StackDetail.StartsWith(Strings.FileCount(100)), "批量添加时数量通知没有合并或汇总不正确");
+        Assert(countNotifications == 1 && viewModel.StackCaption == Strings.FileCount(100), "批量添加时数量通知没有合并或汇总不正确");
         var second = viewModel.AddFiles(paths);
         Assert(viewModel.Items.Count == 100, $"预期 100 项，实际 {viewModel.Items.Count} 项");
         Assert(first.Added == 100 && second.Duplicates == 100 && second.Message == "这些项目已在置物架中", "添加结果统计不正确");
@@ -41,7 +41,7 @@ internal static partial class Program
         Assert(missing.Unavailable == 1 && viewModel.Items.Count == 100, "不存在的文件被添加");
         countNotifications = 0;
         viewModel.Remove(viewModel.Items.Take(60));
-        Assert(countNotifications == 1 && viewModel.Items.Count == 40 && viewModel.StackDetail.StartsWith(Strings.FileCount(40)), "批量移除时数量通知没有合并或汇总不正确");
+        Assert(countNotifications == 1 && viewModel.Items.Count == 40 && viewModel.StackCaption == Strings.FileCount(40), "批量移除时数量通知没有合并或汇总不正确");
     }
 
     private static void TestAddingLockedFileReadsNoContent()
@@ -267,7 +267,9 @@ internal static partial class Program
         viewModel.AddFiles([b, folder]);
         Assert(ReferenceEquals(viewModel.Stack0, viewModel.Items[^1]), "堆叠最上面不是最新项目");
         Assert(viewModel.Stack2 is not null && viewModel.HasMultiple, "三张堆叠卡片不完整");
-        Assert(viewModel.StackCaption == "3 个项目" && viewModel.StackDetail == "2 个文件 · 1 个文件夹 · 3 KB", $"汇总不正确：{viewModel.StackDetail}");
+        // 总数在角标上，说明里按类别列出，第二行是总大小。
+        Assert(viewModel.StackCaption == "2 个文件 · 1 个文件夹" && viewModel.StackDetail == "3 KB",
+            $"汇总不正确：{viewModel.StackCaption} / {viewModel.StackDetail}");
         Assert(viewModel.Title == "3 个项目", "标题不正确");
     }
 
