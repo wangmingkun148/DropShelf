@@ -178,7 +178,16 @@ public partial class ShelfWindow
         {
             if (action is not null)
             {
-                var files = await Receive(DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token));
+                DropReadResult files;
+                ViewModel.ShowReceiving(Strings.ReadingDrop);
+                try
+                {
+                    files = await Receive(DropDataReader.ReadAsync(e.Data, filesOnly: true, _lifetime.Token));
+                }
+                finally
+                {
+                    ViewModel.ShowReceiving(null);
+                }
                 if (IsClosing)
                 {
                     foreach (var cache in files.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
@@ -189,8 +198,20 @@ public partial class ShelfWindow
             }
             else
             {
-                var read = await Receive(DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token));
-                var facts = await Receive(ShelfViewModel.ReadFactsAsync(read));
+                // 文件很多、在网络盘上，或磁盘很久没用时，读取可能要好几秒：这期间显示正在读取，不要看起来像什么都没放进去。
+                DropReadResult read;
+                IReadOnlyDictionary<string, ShelfViewModel.FileFacts?>? facts;
+                ViewModel.ShowReceiving(Strings.ReadingDrop);
+                try
+                {
+                    read = await Receive(DropDataReader.ReadAsync(e.Data, cancellationToken: _lifetime.Token));
+                    if (read.FilePaths.Count > 1) ViewModel.ShowReceiving(Strings.ReadingFiles(read.FilePaths.Count));
+                    facts = await Receive(ShelfViewModel.ReadFactsAsync(read));
+                }
+                finally
+                {
+                    ViewModel.ShowReceiving(null);
+                }
                 if (IsClosing)
                 {
                     foreach (var cache in read.CacheDirectories) _ = VirtualFileDropService.ReleaseCacheAsync(cache);
