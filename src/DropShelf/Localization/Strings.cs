@@ -322,7 +322,6 @@ public static class Strings
     public static string ReleaseToHold => T("松开以暂存", "Release to hold");
     public static string ReleaseToMoveHere => T("松开以移到这里", "Release to move here");
     public static string ReleaseToMerge => T("松开以合并", "Release to merge");
-    public static string MoveToThisShelf => T("移到这个置物架", "Move to this shelf");
     public static string SplitPadLabel => T("新置物架", "New shelf");
     public static string MenuMoveToNewShelf => T("移到新置物架", "Move to a new shelf");
     public static string MergedShelves(int count) => T($"已合并 {count} 项", $"Merged {Count(count, "item", "items")}");
@@ -362,8 +361,6 @@ public static class Strings
     public static string ReadingFiles(int count) => T($"正在读取 {count} 个文件…", $"Reading {count} files…");
     public static string UnsupportedContent => T("不支持此内容", "Not supported");
     public static string FilesOnlyAction => T("此操作只支持文件", "Files only");
-    public static string AddToShelf => T("添加到置物架", "Add to shelf");
-    public static string PutOnShelf => T("放入置物架", "Put on shelf");
     public static string DropFailed => T("拖入没有完成，来源内容未受影响", "The drop didn't finish. The source content is unaffected");
     public static string ChooseMoveFolder => T("选择要移动到的文件夹", "Choose a folder to move to");
     public static string ClipboardEmpty => T("剪贴板是空的", "The clipboard is empty");
