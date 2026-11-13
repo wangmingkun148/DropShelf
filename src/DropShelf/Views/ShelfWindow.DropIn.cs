@@ -264,6 +264,8 @@ public partial class ShelfWindow
         IncomingText.Text = $"+{incoming}";
         IncomingBadge.Visibility = incoming > 0 ? Visibility.Visible : Visibility.Collapsed;
         FanOutStack();
+        // 平常拖入时不带合并的蓄力底色；合并的提示自己接着设置，见 ArmMerge。
+        if (_mergeHint == MergeHint.None) ResetMergeCharge();
         ResetTiles();
         DropOverlay.IsHitTestVisible = true;
         if (DropOverlay.Visibility != Visibility.Visible) DropOverlay.Opacity = 0;
@@ -342,7 +344,11 @@ public partial class ShelfWindow
         // 淡出期间放置区域不再挡住下面的内容。
         DropOverlay.IsHitTestVisible = false;
         Fade(Body, 1, instant ? TimeSpan.Zero : OverlayFadeIn);
-        Fade(DropOverlay, 0, instant ? TimeSpan.Zero : OverlayFadeOut, () => DropOverlay.Visibility = Visibility.Collapsed);
+        Fade(DropOverlay, 0, instant ? TimeSpan.Zero : OverlayFadeOut, () =>
+        {
+            DropOverlay.Visibility = Visibility.Collapsed;
+            ResetMergeCharge();
+        });
         ResetTiles();
         WindowEffects.SetBorderColor(this, null);
     }
@@ -429,10 +435,20 @@ public partial class ShelfWindow
         return WpfDragDropEffects.Copy;
     }
 
+    /// <summary>
+    /// 处理完置物架仍是空的（直接放到了快速操作上，或者什么也没放进来）：设置为自动关闭空置物架时才关闭，关闭了这一项就留着。
+    /// 正显示着结果提示时等提示消失再关，提示能完整看完，这期间又放进了东西就不关，见 HideToast；没有提示时稍等一会儿再关。
+    /// </summary>
     private async Task CloseIfStillEmptyAsync()
     {
-        if (!ViewModel.IsEmpty) return;
+        if (!ViewModel.IsEmpty || IsClosing || !_host.Settings.CloseWhenEmpty) return;
+        if (_toastTimer.IsEnabled)
+        {
+            _closeAfterToast = true;
+            return;
+        }
         await Task.Delay(1500);
-        if (ViewModel.IsEmpty && !ViewModel.IsBusy && !IsDraggingOut) CloseAnimated();
+        if (ViewModel.IsEmpty && !ViewModel.IsBusy && !IsDraggingOut && !_dragInside && _receiving == 0 && _host.Settings.CloseWhenEmpty)
+            CloseAnimated();
     }
 }

@@ -349,21 +349,70 @@ public partial class ShelfWindow
         NativeMethods.GetWindowRect(new System.Windows.Interop.WindowInteropHelper(this).Handle, out var rect) &&
         point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;
 
-    /// <summary>拖着标题栏移动时光标下面的另一个置物架：松手就合并进去。</summary>
+    /// <summary>拖着标题栏移动时光标下面的另一个置物架，已经停够了：松手就合并进去。</summary>
     private ShelfWindow? _mergeTarget;
-    /// <summary>正被另一个置物架拖到上面，显示着“松开以合并”。</summary>
-    private bool _mergeHint;
+    /// <summary>光标刚到上面、还在蓄力的另一个置物架：停够 MergeDwell 才成为合并的对象。</summary>
+    private ShelfWindow? _mergeCandidate;
+    private DispatcherTimer? _mergeDwellTimer;
+    /// <summary>被另一个置物架拖到上面时这边显示的提示。</summary>
+    private MergeHint _mergeHint;
     /// <summary>已经合并到别的置物架，正在关闭。</summary>
     private bool _mergedAway;
+
+    /// <summary>
+    /// 在另一个置物架上停这么久才可以合并：只是挪窗口时从别的置物架上经过、或者想把两个叠在一起，松手不会误合并。
+    /// 这段时间里对方的底色从中间涨满，涨满了才显示“松开以合并”。
+    /// </summary>
+    private static readonly TimeSpan MergeDwell = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>被拖到上面时的提示：没有、正在蓄力（松手不合并）、可以合并。</summary>
+    private enum MergeHint
+    {
+        None,
+        Charging,
+        Armed
+    }
 
     /// <summary>可以接收合并：显示着、没在关闭或处理，也没有别的内容正在拖进来。</summary>
     private bool CanReceiveMerge => IsVisible && !IsClosing && !ViewModel.IsBusy && !_dragInside;
 
-    /// <summary>拖着标题栏移动的途中：光标到了另一个置物架上就把它标成合并的对象。</summary>
+    /// <summary>
+    /// 拖着标题栏移动的途中：光标到了另一个置物架上先开始蓄力，停够了才把它标成合并的对象；
+    /// 离开已经可以合并的置物架时两边都恢复，到了别的置物架上重新蓄力。光标不动时由计时器接着判断，见 OnMergeDwell。
+    /// </summary>
     private void OnMovedByHand(object? sender, EventArgs e)
     {
         var cursor = WindowPlacement.GetCursor();
-        SetMergeTarget(_host.OpenShelves.FirstOrDefault(shelf => !ReferenceEquals(shelf, this) && shelf.CanReceiveMerge && shelf.ContainsScreenPoint(cursor)));
+        var under = _host.OpenShelves.FirstOrDefault(shelf => !ReferenceEquals(shelf, this) && shelf.CanReceiveMerge && shelf.ContainsScreenPoint(cursor));
+        if (under is not null && ReferenceEquals(under, _mergeTarget)) return;
+        SetMergeTarget(null);
+        if (!ReferenceEquals(under, _mergeCandidate)) SetMergeCandidate(under);
+    }
+
+    /// <summary>换蓄力的对象：原来的那个收起提示，新的开始蓄力并计时。</summary>
+    private void SetMergeCandidate(ShelfWindow? candidate)
+    {
+        _mergeDwellTimer?.Stop();
+        if (_mergeCandidate is { } previous && !ReferenceEquals(previous, _mergeTarget)) previous.ShowMergeHint(MergeHint.None);
+        _mergeCandidate = candidate;
+        if (candidate is null) return;
+        candidate.ShowMergeHint(MergeHint.Charging);
+        if (_mergeDwellTimer is null)
+        {
+            _mergeDwellTimer = new DispatcherTimer { Interval = MergeDwell };
+            _mergeDwellTimer.Tick += OnMergeDwell;
+        }
+        _mergeDwellTimer.Start();
+    }
+
+    /// <summary>蓄满了：光标还在那个置物架上、它也还能接收，就成为合并的对象；否则收起提示。</summary>
+    private void OnMergeDwell(object? sender, EventArgs e)
+    {
+        _mergeDwellTimer?.Stop();
+        if (_mergeCandidate is not { } candidate) return;
+        _mergeCandidate = null;
+        if (candidate.CanReceiveMerge && candidate.ContainsScreenPoint(WindowPlacement.GetCursor())) SetMergeTarget(candidate);
+        else candidate.ShowMergeHint(MergeHint.None);
     }
 
     /// <summary>
@@ -373,9 +422,9 @@ public partial class ShelfWindow
     private void SetMergeTarget(ShelfWindow? target)
     {
         if (ReferenceEquals(target, _mergeTarget)) return;
-        _mergeTarget?.ShowMergeHint(false);
+        _mergeTarget?.ShowMergeHint(MergeHint.None);
         _mergeTarget = target;
-        target?.ShowMergeHint(true, ViewModel.Count);
+        target?.ShowMergeHint(MergeHint.Armed, ViewModel.Count);
         Fade(Surface, target is null ? 1 : MergeDim, DimDuration);
         WindowEffects.SetBorderColor(this, target is null ? null : ThemeService.AccentFill);
         if (target is not null) ShowToast(new ShelfToast(Strings.ReleaseToMerge, true));
@@ -385,16 +434,73 @@ public partial class ShelfWindow
     /// <summary>拖到另一个置物架上、松手就合并时，这边内容的透明度。</summary>
     private const double MergeDim = 0.62;
 
-    private void ShowMergeHint(bool show, int incoming = 0)
+    private void ShowMergeHint(MergeHint hint, int incoming = 0)
     {
-        if (show == _mergeHint || IsClosing) return;
-        _mergeHint = show;
-        if (show)
+        if (hint == _mergeHint || IsClosing && hint != MergeHint.None) return;
+        _mergeHint = hint;
+        switch (hint)
         {
-            ShowDropOverlay(null, incoming);
-            DropZoneText.Text = Strings.ReleaseToMerge;
+            case MergeHint.Charging:
+                BeginMergeCharge();
+                break;
+            case MergeHint.Armed:
+                ArmMerge(incoming);
+                break;
+            default:
+                if (!_dragInside) EndDrag();
+                break;
         }
-        else if (!_dragInside) EndDrag();
+    }
+
+    private static readonly IEasingFunction ChargeEase = new SineEase { EasingMode = EasingMode.EaseInOut };
+
+    /// <summary>
+    /// 蓄力：只摊开牌，后面的底色在 MergeDwell 内从中间涨满，还不写“松开以合并”、不标张数，这时松手只是挪了窗口。
+    /// 内容照常显示：只是路过时不会把内容整个换掉又换回来。只改透明度和缩放，不重新排版。
+    /// </summary>
+    private void BeginMergeCharge()
+    {
+        FinishMotion();
+        ResetTiles();
+        DropOverlay.IsHitTestVisible = false;
+        if (DropOverlay.Visibility != Visibility.Visible) DropOverlay.Opacity = 0;
+        DropOverlay.Visibility = Visibility.Visible;
+        Fade(DropOverlay, 1, OverlayFadeIn);
+        IncomingBadge.Visibility = Visibility.Collapsed;
+        Fade(DropZoneLabel, 0, TimeSpan.Zero);
+        Fade(MergeCharge, 1, OverlayFadeIn);
+        var grow = ShelfMotion.Gate(new DoubleAnimation(0.4, 1, MergeDwell) { EasingFunction = ChargeEase });
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+    }
+
+    /// <summary>停够了：内容淡出，写上“松开以合并”并标出带过来几张，涨满的放置区域轻轻弹一下，表示可以松手了。</summary>
+    private void ArmMerge(int incoming)
+    {
+        ShowDropOverlay(null, incoming);
+        DropZoneText.Text = Strings.ReleaseToMerge;
+        DropOverlay.IsHitTestVisible = false;
+        Fade(DropZoneLabel, 1, OverlayFadeIn);
+        Fade(MergeCharge, 1, TimeSpan.Zero);
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        var pulse = new DoubleAnimationUsingKeyFrames { FillBehavior = FillBehavior.Stop };
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.035, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(90)), new SineEase { EasingMode = EasingMode.EaseOut }));
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(260)), ChargeEase));
+        if (!ShelfMotion.Enabled) return;
+        DropZoneScale.BeginAnimation(ScaleTransform.ScaleXProperty, LowPerformance.Pace(pulse));
+        DropZoneScale.BeginAnimation(ScaleTransform.ScaleYProperty, LowPerformance.Pace(pulse));
+    }
+
+    /// <summary>放置区域收起后回到平常拖入时的样子：没有蓄力的底色，写着字。</summary>
+    private void ResetMergeCharge()
+    {
+        Fade(MergeCharge, 0, TimeSpan.Zero);
+        Fade(DropZoneLabel, 1, TimeSpan.Zero);
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        MergeChargeScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        DropZoneScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        DropZoneScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
 
     /// <summary>

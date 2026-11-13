@@ -501,7 +501,10 @@
         </Border>
 
         <!-- 说明文字 -->
-        <StackPanel Grid.Row="2" Margin="34,26,34,0">
+        <StackPanel x:Name="StepText" Grid.Row="2" Margin="34,26,34,0">
+            <StackPanel.RenderTransform>
+                <TranslateTransform x:Name="StepTextShift" />
+            </StackPanel.RenderTransform>
             <TextBlock x:Name="StepTitleText" Style="{StaticResource SubtitleTextStyle}" FontSize="22" />
             <TextBlock x:Name="StepBodyText" Margin="0,10,0,0" FontSize="14" LineHeight="22" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextSecondaryBrush}" />

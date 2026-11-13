@@ -107,8 +107,9 @@
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
         </Style>
 
+        <!-- 已删除或移动的项目和平铺里的牌一样变淡；只淡化牌上的内容，牌本身的透明度留给动画用 -->
         <DataTemplate x:Key="CardContentTemplate">
-            <Grid Margin="7,20,7,16">
+            <Grid x:Name="CardContent" Margin="7,20,7,16">
                 <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                 <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="26"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}">
@@ -124,6 +125,11 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsAvailable}" Value="False">
+                    <Setter TargetName="CardContent" Property="Opacity" Value="0.5" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- 牌右上角的移除：墨色小圆里一个叉，悬停时变红 -->
@@ -233,8 +239,9 @@
                                 <Setter TargetName="TileFace" Property="BorderThickness" Value="2" />
                                 <Setter TargetName="TileName" Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
                             </Trigger>
+                            <!-- 牌上的内容由 CardContentTemplate 变淡，这里只淡化名字，不再整张叠一层 -->
                             <DataTrigger Binding="{Binding IsAvailable}" Value="False">
-                                <Setter TargetName="Tile" Property="Opacity" Value="0.5" />
+                                <Setter TargetName="TileName" Property="Opacity" Value="0.5" />
                             </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -411,50 +418,62 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid x:Name="ShelfDropZone" Margin="10,2,10,6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <!-- 拖进来时原来那一摞最上面两张摊成小扇形，中间露出一个虚线空位；拖到快速操作上时整组变淡。静止角度和位移即摊开后的样子，没有那一项的牌由样式藏起 -->
-                    <Viewbox x:Name="ShelfDropFrame" Stretch="Uniform" MaxHeight="104">
-                        <Canvas Width="176" Height="108">
-                            <ContentControl x:Name="FanRight" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
-                                            DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}"
-                                            Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
-                                <ContentControl.RenderTransform>
-                                    <TransformGroup>
-                                        <RotateTransform x:Name="FanRightTurn" Angle="12" />
-                                        <TranslateTransform x:Name="FanRightShift" X="34" Y="4" />
-                                    </TransformGroup>
-                                </ContentControl.RenderTransform>
-                            </ContentControl>
-                            <ContentControl x:Name="FanLeft" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
-                                            DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}">
-                                <ContentControl.RenderTransform>
-                                    <TransformGroup>
-                                        <RotateTransform x:Name="FanLeftTurn" Angle="-13" />
-                                        <TranslateTransform x:Name="FanLeftShift" X="-34" Y="4" />
-                                    </TransformGroup>
-                                </ContentControl.RenderTransform>
-                            </ContentControl>
-                            <Rectangle x:Name="FanSlot" Style="{StaticResource GhostCardStyle}" Canvas.Left="56" Canvas.Top="10">
-                                <Rectangle.RenderTransform>
-                                    <TransformGroup>
-                                        <ScaleTransform x:Name="FanSlotScale" />
-                                        <TranslateTransform x:Name="FanSlotShift" Y="-3" />
-                                    </TransformGroup>
-                                </Rectangle.RenderTransform>
-                            </Rectangle>
-                            <Border x:Name="IncomingBadge" Canvas.Left="132" Canvas.Top="0" Height="20" Padding="7,0" CornerRadius="10"
-                                    Background="{DynamicResource AccentBrush}" Visibility="Collapsed">
-                                <TextBlock x:Name="IncomingText" FontFamily="{StaticResource NumberFont}" FontSize="12" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource TextOnAccentBrush}" />
-                            </Border>
-                        </Canvas>
-                    </Viewbox>
-                    <TextBlock x:Name="DropZoneText" Grid.Row="1" Text="{l:Loc ReleaseToAdd}" Margin="0,4,0,0" FontSize="12" FontWeight="SemiBold"
-                               HorizontalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}" />
+                <Grid x:Name="ShelfDropZone" Margin="10,2,10,6" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="DropZoneScale" />
+                    </Grid.RenderTransform>
+                    <!-- 合并前的蓄力：拖着别的置物架停在这里时，强调色的底从中间涨满，停够了才摊开牌、写上“松开以合并”，见 ShowMergeHint -->
+                    <Border x:Name="MergeCharge" CornerRadius="{StaticResource CardCornerRadius}" Background="{DynamicResource AccentSubtleBrush}"
+                            Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="MergeChargeScale" />
+                        </Border.RenderTransform>
+                    </Border>
+                    <Grid x:Name="DropZoneLabel">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <!-- 拖进来时原来那一摞最上面两张摊成小扇形，中间露出一个虚线空位；拖到快速操作上时整组变淡。静止角度和位移即摊开后的样子，没有那一项的牌由样式藏起 -->
+                        <Viewbox x:Name="ShelfDropFrame" Stretch="Uniform" MaxHeight="104">
+                            <Canvas Width="176" Height="108">
+                                <ContentControl x:Name="FanRight" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
+                                                DataContext="{Binding Stack1}" ContentTemplate="{StaticResource CardContentTemplate}"
+                                                Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource ShelfUnderCardBorderBrush}">
+                                    <ContentControl.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform x:Name="FanRightTurn" Angle="12" />
+                                            <TranslateTransform x:Name="FanRightShift" X="34" Y="4" />
+                                        </TransformGroup>
+                                    </ContentControl.RenderTransform>
+                                </ContentControl>
+                                <ContentControl x:Name="FanLeft" Style="{StaticResource StackCardStyle}" Canvas.Left="56" Canvas.Top="10"
+                                                DataContext="{Binding Stack0}" ContentTemplate="{StaticResource CardContentTemplate}">
+                                    <ContentControl.RenderTransform>
+                                        <TransformGroup>
+                                            <RotateTransform x:Name="FanLeftTurn" Angle="-13" />
+                                            <TranslateTransform x:Name="FanLeftShift" X="-34" Y="4" />
+                                        </TransformGroup>
+                                    </ContentControl.RenderTransform>
+                                </ContentControl>
+                                <Rectangle x:Name="FanSlot" Style="{StaticResource GhostCardStyle}" Canvas.Left="56" Canvas.Top="10">
+                                    <Rectangle.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform x:Name="FanSlotScale" />
+                                            <TranslateTransform x:Name="FanSlotShift" Y="-3" />
+                                        </TransformGroup>
+                                    </Rectangle.RenderTransform>
+                                </Rectangle>
+                                <Border x:Name="IncomingBadge" Canvas.Left="132" Canvas.Top="0" Height="20" Padding="7,0" CornerRadius="10"
+                                        Background="{DynamicResource AccentBrush}" Visibility="Collapsed">
+                                    <TextBlock x:Name="IncomingText" FontFamily="{StaticResource NumberFont}" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextOnAccentBrush}" />
+                                </Border>
+                            </Canvas>
+                        </Viewbox>
+                        <TextBlock x:Name="DropZoneText" Grid.Row="1" Text="{l:Loc ReleaseToAdd}" Margin="0,4,0,0" FontSize="12" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    </Grid>
                 </Grid>
                 <Border x:Name="ActionTilesHost" Grid.Row="1" ClipToBounds="True">
                     <UniformGrid x:Name="ActionTiles" Rows="1" Margin="8,0,8,7" VerticalAlignment="Bottom" />

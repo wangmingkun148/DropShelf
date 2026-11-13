@@ -71,6 +71,8 @@ public partial class ShelfWindow
         // 晃动和边缘呼出由一张牌替置物架出场：置物架先隐身，照常显示和绘制，牌落定时直接现身。
         var dealt = !wasVisible && ShelfMotion.Enabled && entrance.Kind != ShelfEntranceKind.Plain;
         if (dealt) WindowEffects.SetCloaked(this, true);
+        var handle = WindowEffects.Handle(this);
+        RECT? before = wasVisible && NativeMethods.GetWindowRect(handle, out var shownAt) ? shownAt : null;
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
         trace?.Mark("show", started);
@@ -80,7 +82,11 @@ public partial class ShelfWindow
             Activate();
             Focus();
         }
-        if (wasVisible) return;
+        // 复用的空置物架挪到了别处（比如快捷键打开的空置物架，又在别处晃动呼出）：重播出场动画，不直接瞬移过去。
+        // 已经显示着的窗口不再隐身改为发牌，直接升起；本来就在光标附近时不重播，免得在原处闪一下。
+        var moved = before is { } old && NativeMethods.GetWindowRect(handle, out var now) &&
+                    Math.Abs(now.Left - old.Left) + Math.Abs(now.Top - old.Top) > 24 * DpiScale();
+        if (wasVisible && !moved) return;
         _entrance = entrance;
         _openTrace = trace;
         var animating = Stopwatch.GetTimestamp();

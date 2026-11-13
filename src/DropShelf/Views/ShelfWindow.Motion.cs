@@ -457,6 +457,12 @@ public partial class ShelfWindow
         StackView.IsHitTestVisible = false;
         ItemsList.IsHitTestVisible = false;
         Body.UpdateLayout();
+        // 展开时平铺滚到最后：堆叠最上面几张是最新放进来的，在平铺末尾，这样发出去的牌里一定有它们，项目再多也一样。
+        if (toGrid && ViewModel.HasItems)
+        {
+            ItemsList.ScrollIntoView(ViewModel.Items[^1]);
+            ItemsList.UpdateLayout();
+        }
 
         var cards = StackCards;
         var stackScale = StackCanvas.TransformToVisual(Body).TransformBounds(new Rect(0, 0, 1, 1)).Width;
@@ -609,7 +615,12 @@ public partial class ShelfWindow
         if (_tweens.Count == 0) StopMotion();
     }
 
-    /// <summary>窗口大小逐帧过渡到目标大小，左上角不动；只改大小不改位置，和滑入动画互不影响。跳到终点时由收尾的 UpdateWindowSize 变到位。</summary>
+    /// <summary>
+    /// 窗口大小逐帧过渡到目标大小。贴着工作区右边的一直贴着（往左长、往右缩），其余情况左上角不动；
+    /// 终点放不下时位置随大小一起朝工作区里移，不会先长出屏幕、播完再跳回来，见 WindowPlacement.FitResized。
+    /// 位置和大小在同一次 SetWindowPos 里改，不比只改大小多花时间。正在滑入或退出时只改大小，不和滑入动画抢位置，
+    /// 滑入结束时会再推回工作区。跳到终点时由收尾的 UpdateWindowSize 变到位。
+    /// </summary>
     private void TweenWindowSize(TimeSpan delay)
     {
         var handle = new WindowInteropHelper(this).Handle;
@@ -622,15 +633,24 @@ public partial class ShelfWindow
         var (width, height) = TargetSize();
         var dpi = VisualTreeHelper.GetDpi(this);
         var (toWidth, toHeight) = ((int)Math.Round(width * dpi.DpiScaleX), (int)Math.Round(height * dpi.DpiScaleY));
-        var (fromWidth, fromHeight) = (rect.Width, rect.Height);
-        var shown = (fromWidth, fromHeight);
+        var (toLeft, toTop) = WindowPlacement.FitResized(rect, toWidth, toHeight);
+        var from = rect;
+        var shown = (from.Left, from.Top, from.Width, from.Height);
         Tween(delay, ResizeDuration, t =>
         {
-            var w = (int)Math.Round(fromWidth + (toWidth - fromWidth) * t);
-            var h = (int)Math.Round(fromHeight + (toHeight - fromHeight) * t);
-            if ((w, h) == shown) return;
-            shown = (w, h);
-            NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0, w, h, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+            var w = (int)Math.Round(from.Width + (toWidth - from.Width) * t);
+            var h = (int)Math.Round(from.Height + (toHeight - from.Height) * t);
+            var x = (int)Math.Round(from.Left + (toLeft - from.Left) * t);
+            var y = (int)Math.Round(from.Top + (toTop - from.Top) * t);
+            var flags = NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE;
+            if (IsSliding || (x, y) == (shown.Left, shown.Top))
+            {
+                flags |= NativeMethods.SWP_NOMOVE;
+                (x, y) = (shown.Left, shown.Top);
+            }
+            if ((x, y, w, h) == shown) return;
+            shown = (x, y, w, h);
+            NativeMethods.SetWindowPos(handle, IntPtr.Zero, x, y, w, h, flags);
         }, UpdateWindowSize);
     }
 

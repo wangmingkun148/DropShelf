@@ -748,11 +748,20 @@ public sealed class ShelfViewModel : ObservableObject
     public bool CopyToClipboard(IReadOnlyList<ShelfItem> items)
     {
         if (items.Count == 0) return false;
+        // 刚在别处改了名或挪了位置的文件先找回来，和拖出、打开时一样。
+        Relink(items);
         var available = items.Where(item => item.IsFileSystem && item.RefreshAvailability()).ToArray();
         var files = available.Select(item => item.Value).ToArray();
+        // 没有文件可复制时只复制文本和链接；已删除或移动的文件不能当成文字把旧路径复制出去。
+        var texts = items.Where(item => !item.IsFileSystem).Select(item => item.Value).ToArray();
+        if (files.Length == 0 && texts.Length == 0)
+        {
+            Notify(items.Count == 1 ? Strings.ItemMissing : Strings.ItemsMissing, false);
+            return false;
+        }
         var copied = files.Length > 0
             ? ClipboardService.TrySetFiles(files)
-            : ClipboardService.TrySetText(string.Join(Environment.NewLine, items.Select(item => item.Value)));
+            : ClipboardService.TrySetText(string.Join(Environment.NewLine, texts));
         // 剪贴板里只有临时附件的路径，关闭置物架后可能才去粘贴。
         if (copied && available.Any(item => item.IsTemporaryAttachment)) KeepTemporaryFilesForAWhile();
         Notify(copied ? (files.Length > 0 ? Strings.CopiedFiles(files.Length) : Strings.CopiedText) : Strings.ClipboardBusy, copied);

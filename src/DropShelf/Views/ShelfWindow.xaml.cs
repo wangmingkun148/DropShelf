@@ -296,6 +296,8 @@ public partial class ShelfWindow : Window
         }
         UpdateViews();
         UpdateWindowSize();
+        // 不播动画时展开平铺也停在最新的项目上，和播动画时一样，见 AnimateViewSwitch。
+        if (switched && ViewModel.IsExpanded && ViewModel.HasItems) ItemsList.ScrollIntoView(ViewModel.Items[^1]);
         if (returning is { } back && animate) PlayReturn(back.Origin, back.Items);
         if (landing is not { } drop || !animate) return;
         if (ViewModel.IsExpanded) PlayGridLanding(drop.Point, drop.Added);

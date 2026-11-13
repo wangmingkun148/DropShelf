@@ -66,15 +66,17 @@ public partial class ShelfWindow
             LocationChanged -= OnMovedByHand;
         }
 
-        // 松手时还在那个置物架上就合并：对方收起放置区域，这边不恢复原样，直接带着变淡的样子并过去。
+        // 松手时还在那个置物架上、并且已经停够了就合并：对方收起放置区域，这边不恢复原样，直接带着变淡的样子并过去。
+        // 还在蓄力时松手只是挪了窗口，对方收起提示。
         if (_mergeTarget is { IsClosing: false } target && !target.ViewModel.IsBusy && target.ContainsScreenPoint(WindowPlacement.GetCursor()))
         {
             _mergeTarget = null;
-            target.ShowMergeHint(false);
+            target.ShowMergeHint(MergeHint.None);
             HideToast();
             MergeInto(target);
         }
         else SetMergeTarget(null);
+        SetMergeCandidate(null);
     }
 
     private ContextMenu BuildShelfMenu()
@@ -172,6 +174,12 @@ public partial class ShelfWindow
                 return;
             }
             var summary = ViewModel.Add(read, facts);
+            // 和拖进来的一样落进堆叠或列表：从光标那里飞进来，光标在窗口外时从离它最近的窗口边上飞进来。
+            if (summary.Added > 0 && IsVisible)
+            {
+                var cursor = WindowPlacement.GetCursor();
+                _landing = (ClampInside(PointFromScreen(new WpfPoint(cursor.X, cursor.Y))), summary.Added);
+            }
             ViewModel.Notify(summary.Added == 0 ? read.ErrorMessage ?? summary.Message : summary.Message, summary.Added > 0);
         }
         catch (Exception exception)

@@ -425,6 +425,7 @@ public static class Strings
     public static string CopiedPath => T("已复制路径", "Copied path");
     public static string CopiedPaths(int count) => T($"已复制 {count} 个路径", $"Copied {count} paths");
     public static string ItemMissing => T("项目已删除或移动", "The item was moved or deleted");
+    public static string ItemsMissing => T("这些项目已删除或移动", "These items were moved or deleted");
     public static string CannotOpenItem => T("无法打开这个项目", "Couldn't open this item");
     public static string CannotOpenFolder => T("无法打开所在文件夹", "Couldn't open the containing folder");
 
