@@ -221,6 +221,20 @@ internal static class WindowPlacement
                 NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
     }
 
+    /// <summary>
+    /// 窗口从 rect 变成 width × height（屏幕像素）之后的左上角，大小过渡的每一帧按它插值，窗口不会先长出屏幕再跳回来：
+    /// 贴着工作区右边的继续贴着（往左长、往右缩，右上角的按钮留在原处），其余情况左边不动；
+    /// 顶边尽量不动（标题栏的按钮和列表里的行留在原处），下面放不下时才往上移到正好放下。
+    /// 显示器的选法和 KeepInWorkArea 相同。
+    /// </summary>
+    public static (int Left, int Top) FitResized(RECT rect, int width, int height)
+    {
+        var (work, _) = GetMonitor(new POINT(rect.Left + rect.Width / 2, rect.Top + Math.Min(rect.Height / 2, 40)));
+        var left = rect.Right >= work.Right - 1 && rect.Left > work.Left ? rect.Right - width : rect.Left;
+        return (Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - width)),
+            Math.Clamp(rect.Top, work.Top, Math.Max(work.Top, work.Bottom - height)));
+    }
+
     private static void Move(IntPtr handle, POINT center, RECT work, int width, int height)
     {
         var placement = QuickShelfPositioner.Calculate(center.X, center.Y, work.Left, work.Top, work.Right, work.Bottom, width, height);

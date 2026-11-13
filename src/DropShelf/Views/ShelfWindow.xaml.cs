@@ -290,10 +290,14 @@ public partial class ShelfWindow : Window
         if (((FrameworkElement)sender).DataContext is ShelfItem item) ViewModel.SetRowVisible(item, false);
     }
 
-    /// <summary>数量或视图变化后更新界面：只是切换了堆叠和列表时播放切换动画，刚拖入文件时播放落下的动画。</summary>
+    /// <summary>
+    /// 数量或视图变化后更新界面：只是切换了堆叠和列表时播放切换动画，刚拖入文件时播放落下的动画。
+    /// 列表里多了几行、窗口要变高时先平滑长高再落下，见 GrowForRows；列表里移除之后先补位，窗口等补完再变小，见 CloseUpRows。
+    /// </summary>
     private void RefreshViews()
     {
         var switched = !_countChanged && _shownExpanded != ViewModel.IsExpanded;
+        var counted = _countChanged;
         var landing = _landing;
         var returning = _returning;
         _countChanged = false;
@@ -308,12 +312,15 @@ public partial class ShelfWindow : Window
             return;
         }
         UpdateViews();
-        // 列表里移除之后先补位，窗口等补完再变小，见 CloseUpRows。
-        if (!_holdSize) UpdateWindowSize();
-        if (returning is { } back && animate) PlayReturn(back.Origin, back.Items);
-        if (landing is not { } drop || !animate) return;
-        if (ViewModel.IsExpanded) PlayListLanding(drop.Point, drop.Added);
-        else PlayLanding(drop.Point, drop.Added);
+        var lead = counted && animate && ViewModel.IsExpanded && !_holdSize ? GrowForRows() : TimeSpan.Zero;
+        if (!_holdSize && lead == TimeSpan.Zero) UpdateWindowSize();
+        // 不播动画时展开列表也停在最新的项目上，和播动画时一样，见 AnimateViewSwitch。
+        if (switched && ViewModel.IsExpanded && ViewModel.HasItems) ItemsList.ScrollIntoView(ViewModel.Items[^1]);
+        var played = false;
+        if (returning is { } back && animate) played |= PlayReturn(back.Origin, back.Items, lead);
+        if (landing is { } drop && animate)
+            played |= ViewModel.IsExpanded ? PlayListLanding(drop.Point, drop.Added, lead) : PlayLanding(drop.Point, drop.Added);
+        if (lead > TimeSpan.Zero && !played) FinishAfter(lead);
     }
 
     /// <summary>堆叠上的数量角标；切换视图时和说明文字一起淡出淡入。</summary>

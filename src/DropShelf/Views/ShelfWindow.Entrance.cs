@@ -56,6 +56,8 @@ public partial class ShelfWindow
         // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
         if (wasVisible) StopSlide();
         else ApplyMaterial();
+        var handle = WindowEffects.Handle(this);
+        RECT? before = wasVisible && NativeMethods.GetWindowRect(handle, out var shownAt) ? shownAt : null;
         WindowPlacement.CenterOn(this, center, Width, Height);
         if (!wasVisible) Show();
         trace?.Mark("show", started);
@@ -65,7 +67,11 @@ public partial class ShelfWindow
             Activate();
             Focus();
         }
-        if (!wasVisible)
+        // 复用的空置物架挪到了别处（比如快捷键打开的空置物架，又在别处晃动呼出）：和新打开的一样播放出场动画，不直接瞬移过去。
+        // 本来就在光标附近时不重播，免得在原处闪一下。
+        var moved = before is { } old && NativeMethods.GetWindowRect(handle, out var now) &&
+                    Math.Abs(now.Left - old.Left) + Math.Abs(now.Top - old.Top) > 24 * DpiScale();
+        if (!wasVisible || moved)
         {
             _entrance = entrance;
             _openTrace = trace;

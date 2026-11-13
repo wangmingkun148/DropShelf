@@ -467,13 +467,13 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
 
-        <!-- 自定义操作的编辑、删除按钮，悬停在卡片上时显示 -->
+        <!-- 自定义操作的编辑、删除按钮，悬停在卡片上时显示；删除和拖到删除区域一样先确认 -->
         <DataTemplate x:Key="CustomActionButtons">
             <StackPanel Orientation="Horizontal">
                 <Button Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Edit}" FontSize="14"
                         ToolTip="{l:Loc EditTooltip}" Command="{Binding EditCommand}" />
                 <Button Style="{StaticResource IconButtonStyle}" Content="{StaticResource Glyph.Delete}" FontSize="14"
-                        Margin="4,0,0,0" ToolTip="{l:Loc DeleteTooltip}" Command="{Binding DeleteCommand}" />
+                        Margin="4,0,0,0" ToolTip="{l:Loc DeleteTooltip}" Click="OnDeleteCustomActionClick" />
             </StackPanel>
         </DataTemplate>
 

@@ -106,6 +106,12 @@ public partial class MainWindow
         ConfirmCancelButton.Focus();
     }
 
+    /// <summary>卡片上的删除按钮：和拖到删除区域一样先确认，删除后无法撤销。</summary>
+    private void OnDeleteCustomActionClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ActionCardViewModel { IsCustom: true } card) ConfirmDeleteCustomAction(card);
+    }
+
     private void OnConfirmDeleteClick(object sender, RoutedEventArgs e)
     {
         if (_pendingDelete?.Action.Custom is { } custom) ViewModel.DeleteCustomAction(custom);

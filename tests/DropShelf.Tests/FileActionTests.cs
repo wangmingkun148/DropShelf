@@ -232,6 +232,12 @@ internal static partial class Program
         Assert(viewModel.CopyToClipboard(viewModel.Items.ToArray()), "复制文件失败");
         var list = System.Windows.Clipboard.GetFileDropList();
         Assert(list.Count == 1 && list[0] == file, "剪贴板中没有文件");
+
+        // 文件已删除时不能把旧路径当成文字复制出去，提示项目已删除或移动。
+        File.Delete(file);
+        ShelfToast? toast = null;
+        viewModel.ToastRequested += (_, shown) => toast = shown;
+        Assert(!viewModel.CopyToClipboard(viewModel.Items.ToArray()) && toast is { Success: false }, "已删除的文件被当成文字复制");
     }
 
     private static async Task TestCustomFolderAction()
