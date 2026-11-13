@@ -371,6 +371,8 @@ public static class Strings
     }
 
     public static string PleaseWait => T("请稍候", "Please wait");
+    public static string ReadingDrop => T("正在读取…", "Reading…");
+    public static string ReadingFiles(int count) => T($"正在读取 {count} 个文件…", $"Reading {count} files…");
     public static string UnsupportedContent => T("不支持此内容", "Not supported");
     public static string FilesOnlyAction => T("此操作只支持文件", "Files only");
     public static string AddToShelf => T("添加到置物架", "Add to shelf");

@@ -123,6 +123,15 @@ public sealed class ShelfViewModel : ObservableObject
         private set => SetField(ref _busyText, value);
     }
 
+    /// <summary>
+    /// 读取拖入的内容期间算作忙碌：读得慢时显示处理中的遮罩（很快读完时不显示），这期间也不接收新的拖入。text 为 null 时结束。
+    /// </summary>
+    public void ShowReceiving(string? text)
+    {
+        if (text is not null) BusyText = text;
+        IsBusy = text is not null;
+    }
+
     /// <summary>通过晃动手势打开，松开鼠标时若仍为空就自动关闭。</summary>
     public bool OpenedByGesture { get; set; }
 

@@ -17,6 +17,9 @@ public sealed class ShelfManager : IShelfHost
     private readonly Dispatcher _dispatcher;
     private readonly List<ShelfWindow> _open = [];
     private ShelfWindow? _spare;
+    /// <summary>备用窗口画好第一帧的时间（墙上时间，睡眠期间也在走）。</summary>
+    private DateTime _spareReadyAt;
+    private DispatcherTimer? _spareTimer;
     /// <summary>正在屏幕外画第一帧的备用窗口，画完才成为 _spare；这期间要用置物架就照旧新建一个。</summary>
     private ShelfWindow? _warming;
     private DispatcherTimer? _idleTimer;
@@ -57,7 +60,41 @@ public sealed class ShelfManager : IShelfHost
         WaitForIdle();
     }
 
-    private bool NeedsSpare => _spare is null && _warming is null;
+    /// <summary>
+    /// 备用窗口隐藏着待命超过这么久就换一个新的。期间可能息屏、锁屏、睡眠或显卡重置，隐藏的窗口错过重画的时机，
+    /// 再显示时画面可能不再更新：放进去的文件看不到，置物架看起来还是空的。
+    /// </summary>
+    private static readonly TimeSpan SpareLifetime = TimeSpan.FromMinutes(10);
+
+    private bool SpareStale => _spare is not null && DateTime.UtcNow - _spareReadyAt > SpareLifetime;
+
+    private bool NeedsSpare => (_spare is null || SpareStale) && _warming is null;
+
+    /// <summary>扔掉放太久的备用窗口；之后要用时新建一个。</summary>
+    private void DiscardStaleSpare()
+    {
+        if (!SpareStale) return;
+        var stale = _spare!;
+        _spare = null;
+        stale.Close();
+    }
+
+    /// <summary>备用窗口到期后在空闲时换一个；计时器没赶上的（比如正在睡眠），打开置物架时按时间再查一次，见 OpenAt。</summary>
+    private void ScheduleSpareRenewal()
+    {
+        if (_spareTimer is null)
+        {
+            _spareTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher);
+            _spareTimer.Tick += (_, _) =>
+            {
+                _spareTimer.Stop();
+                Prewarm();
+            };
+        }
+        _spareTimer.Stop();
+        _spareTimer.Interval = SpareLifetime + TimeSpan.FromSeconds(1);
+        _spareTimer.Start();
+    }
 
     private void WaitForIdle()
     {
@@ -85,12 +122,15 @@ public sealed class ShelfManager : IShelfHost
             _open.Any(shelf => shelf.IsAnimating || shelf.ViewModel.OpenedByGesture && shelf.IsReusable)) return;
         if (NeedsSpare)
         {
+            DiscardStaleSpare();
             var window = _warming = CreateWindow();
             window.Prewarm(() =>
             {
                 if (!ReferenceEquals(_warming, window)) return;
                 _warming = null;
                 _spare = window;
+                _spareReadyAt = DateTime.UtcNow;
+                ScheduleSpareRenewal();
             });
             // 替置物架出场的那张牌也先备好。
             ShelfCardWindow.Prewarm();
@@ -110,6 +150,8 @@ public sealed class ShelfManager : IShelfHost
         var shelf = _open.FirstOrDefault(window => window.IsReusable && window.IsVisible);
         if (shelf is null)
         {
+            // 计时器没来得及换掉（比如刚从睡眠中醒来）的旧备用窗口不再用，当场新建一个。
+            DiscardStaleSpare();
             shelf = _spare ?? CreateWindow();
             _spare = null;
             _open.Add(shelf);
@@ -186,6 +228,7 @@ public sealed class ShelfManager : IShelfHost
     {
         _shuttingDown = true;
         _idleTimer?.Stop();
+        _spareTimer?.Stop();
         foreach (var shelf in _open.ToArray()) shelf.Close();
         _open.Clear();
         _spare?.Close();

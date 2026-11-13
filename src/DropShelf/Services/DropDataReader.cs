@@ -164,9 +164,12 @@ public static class DropDataReader
         // 从另一个置物架拖来的临时附件仍是临时附件，读取时就一起持有它所在的缓存，
         // 原置物架在读取完成、放进置物架之前关闭也不会删掉它。
         var shared = new List<string>();
-        var entries = paths.Select(path =>
+        // 是不是文件夹要逐个查磁盘：文件很多、磁盘很久没用或在网络上时很慢，这里还在松手的回调里，界面和来源程序都在等。
+        // 只有来源程序的临时文件必须当场打开（见 OpenVolatileFiles），当场查；其余的先记为文件，到后台再查。
+        var volatilePaths = paths.Select(ChatAppCompatibility.IsVolatilePath).ToArray();
+        var entries = paths.Select((path, index) =>
         {
-            var kind = Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File;
+            var kind = volatilePaths[index] && Directory.Exists(path) ? ShelfItemKind.Folder : ShelfItemKind.File;
             if (VirtualFileDropService.GetCacheDirectory(path) is not { } cache) return new DroppedEntry(kind, path);
             if (!shared.Contains(cache, StringComparer.OrdinalIgnoreCase))
             {
@@ -175,12 +178,13 @@ public static class DropDataReader
             }
             return new DroppedEntry(kind, path, IsTemporary: true);
         }).ToArray();
-        var snapshots = OpenVolatileFiles(entries);
-        if (snapshots.Count == 0) return new DropReadResult(entries, shared, 0, null);
-
-        var cacheDirectory = VirtualFileDropService.CreateCacheDirectory();
+        var snapshots = OpenVolatileFiles(entries, volatilePaths);
+        var cacheDirectory = snapshots.Count > 0 ? VirtualFileDropService.CreateCacheDirectory() : null;
         await Task.Run(() =>
         {
+            for (var index = 0; index < entries.Length; index++)
+                if (!volatilePaths[index] && Directory.Exists(entries[index].Value)) entries[index] = entries[index] with { Kind = ShelfItemKind.Folder };
+            if (cacheDirectory is null) return;
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (index, stream, zone) in snapshots)
             {
@@ -213,17 +217,17 @@ public static class DropDataReader
                 }
             }
         });
-        return new DropReadResult(entries, [.. shared, cacheDirectory], 0, null);
+        return new DropReadResult(entries, cacheDirectory is null ? shared : [.. shared, cacheDirectory], 0, null);
     }
 
     /// <summary>打开文件的同时读出下载来源标记，另存的副本带上同样的标记。</summary>
-    private static List<(int Index, FileStream Stream, string? Zone)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries)
+    private static List<(int Index, FileStream Stream, string? Zone)> OpenVolatileFiles(IReadOnlyList<DroppedEntry> entries, bool[] volatilePaths)
     {
         var opened = new List<(int, FileStream, string?)>();
         for (var index = 0; index < entries.Count; index++)
         {
             var path = entries[index].Value;
-            if (entries[index].Kind != ShelfItemKind.File || !ChatAppCompatibility.IsVolatilePath(path)) continue;
+            if (entries[index].Kind != ShelfItemKind.File || !volatilePaths[index]) continue;
             try
             {
                 if (new FileInfo(path).Length > ChatAppCompatibility.MaximumSnapshotBytes) continue;
