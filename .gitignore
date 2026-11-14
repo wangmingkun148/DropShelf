@@ -7,3 +7,6 @@ obj/
 artifacts/
 # 安装包发布在 GitHub Releases，不放进仓库。
 installer/*.exe
+
+# C 版的编译输出。
+native/build/
