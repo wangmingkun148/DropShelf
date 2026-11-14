@@ -1,0 +1,121 @@
+// 图形层：把 Direct2D、DirectWrite、DirectComposition 包成 C 函数。
+// 这三套接口的头文件只能在 C++ 里用，所以实现放在 gfx.cpp（整个项目唯一的 C++ 文件，不用 STL 和异常）。
+// 坐标都是与设备无关的像素（DIP，96 分之一英寸），由图形层按窗口的 DPI 换算。
+#pragma once
+
+#include "theme.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct GfxRect
+{
+    float left, top, right, bottom;
+} GfxRect;
+
+typedef struct GfxSize
+{
+    float width, height;
+} GfxSize;
+
+/// 2D 仿射变换：x' = x*m11 + y*m21 + dx，y' = x*m12 + y*m22 + dy。
+typedef struct GfxMatrix
+{
+    float m11, m12, m21, m22, dx, dy;
+} GfxMatrix;
+
+GfxMatrix gfx_matrix_identity(void);
+GfxMatrix gfx_matrix_translate(float x, float y);
+
+/// 以 (center_x, center_y) 为中心缩放。
+GfxMatrix gfx_matrix_scale(float scale_x, float scale_y, float center_x, float center_y);
+GfxMatrix gfx_matrix_multiply(GfxMatrix first, GfxMatrix second);   // 先做 first 再做 second
+
+/// 创建显卡设备和各个工厂；失败时返回 false（已记入日志），界面无法显示。可以重复调用。
+bool gfx_initialize(void);
+void gfx_shutdown(void);
+
+// ───────────── 窗口的画面 ─────────────
+// 每个窗口一份：一个带透明度的交换链，经 DirectComposition 显示在窗口上，没画到的地方透出窗口背后的系统材质或桌面。
+// 窗口需要带 WS_EX_NOREDIRECTIONBITMAP。
+
+typedef struct GfxSurface GfxSurface;
+
+GfxSurface *gfx_surface_create(HWND window);
+void gfx_surface_destroy(GfxSurface *surface);
+
+/// 开始画一帧：width、height 是窗口客户区的大小（屏幕像素），dpi 是窗口的 DPI。
+/// 返回 false 时这一帧画不了（窗口大小为 0，或显卡设备暂时不可用），不要调用绘制函数和 gfx_end。
+bool gfx_begin(GfxSurface *surface, int width, int height, float dpi);
+
+/// 结束并显示这一帧。显卡设备丢失（驱动更新、远程桌面切换）时返回 false，已经重建设备，调用方应当重画一次。
+bool gfx_end(GfxSurface *surface);
+
+/// 诊断和测试用：不画到窗口上，而是画进一张图片。用法与 gfx_begin、gfx_end 相同，结束时存成 PNG 文件。
+bool gfx_begin_image(int width, int height, float dpi);
+bool gfx_end_image(const wchar_t *path);
+
+// ───────────── 绘制（在 gfx_begin 和 gfx_end 之间调用） ─────────────
+
+/// 整个画面清成一种颜色；全透明就是什么都不画，露出系统材质。
+void gfx_clear(Color color);
+
+void gfx_fill_rect(GfxRect rect, Color color);
+void gfx_fill_rounded(GfxRect rect, float radius, Color color);
+
+/// 画在矩形边缘以内的边框（与 WPF 的 Border 一样，边框不超出矩形）。
+void gfx_stroke_rounded(GfxRect rect, float radius, Color color, float width);
+void gfx_fill_ellipse(float center_x, float center_y, float radius_x, float radius_y, Color color);
+void gfx_stroke_ellipse(float center_x, float center_y, float radius_x, float radius_y, Color color, float width);
+void gfx_line(float x1, float y1, float x2, float y2, Color color, float width);
+
+/// 圆角矩形投下的阴影：blur 是模糊半径，color 的透明度是阴影的浓度。
+void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float offset_y, Color color);
+
+/// 之后的内容只画在 rect 以内，直到 gfx_pop_clip。
+void gfx_push_clip(GfxRect rect);
+void gfx_pop_clip(void);
+
+/// 之后的内容裁成圆角矩形并整体乘以 opacity，直到 gfx_pop_layer。radius 为 0 且 rect 为空时只调整透明度。
+void gfx_push_layer(GfxRect rect, float radius, float opacity);
+void gfx_push_opacity(float opacity);
+void gfx_pop_layer(void);
+
+/// 之后的内容先做 matrix 变换（叠加在已有的变换上），直到 gfx_pop_transform。
+void gfx_push_transform(GfxMatrix matrix);
+void gfx_pop_transform(void);
+
+// ───────────── 文字 ─────────────
+
+typedef enum GfxFont
+{
+    GFX_FONT_TEXT,      // Segoe UI，中文等由系统回退到相应字体（微软雅黑 UI）
+    GFX_FONT_ICON       // Segoe Fluent Icons，没有时用 Segoe MDL2 Assets
+} GfxFont;
+
+typedef enum GfxAlign
+{
+    GFX_ALIGN_START,
+    GFX_ALIGN_CENTER,
+    GFX_ALIGN_END
+} GfxAlign;
+
+typedef struct GfxTextStyle
+{
+    GfxFont font;
+    float size;             // DIP
+    int weight;             // 400 常规，600 半粗
+    bool wrap;              // 超出宽度时换行，否则只有一行
+    bool ellipsis;          // 放不下时末尾显示省略号
+    GfxAlign align;         // 水平方向
+    GfxAlign vertical;      // 垂直方向
+} GfxTextStyle;
+
+/// 文字占多大；max_width 是可用的宽度（换行或省略时用），不限制时传 0。
+GfxSize gfx_text_measure(const wchar_t *text, const GfxTextStyle *style, float max_width);
+void gfx_text_draw(const wchar_t *text, GfxRect rect, const GfxTextStyle *style, Color color);
+
+#ifdef __cplusplus
+}
+#endif
