@@ -228,19 +228,29 @@ static GfxSize sensitivity_labels_measure(UiElement *element, float available)
     return (GfxSize){ available, 20 };
 }
 
+/// 第 index 个字离滑钮多近：0 是 50 以外，1 是正对着。
+static double sensitivity_label_weight(int index)
+{
+    const int stops[3] = { SHAKE_STEADY, SHAKE_BALANCED, SHAKE_RESPONSIVE };
+    double distance = P.label_value.value - stops[index];
+    return fabs(distance) >= 50 ? 0 : 0.5 + 0.5 * cos(3.14159265358979 * distance / 50);
+}
+
+float pages_sensitivity_label_scale(int index)
+{
+    return (float)(0.85 + 0.35 * sensitivity_label_weight(index));
+}
+
 static void sensitivity_labels_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
-    double value = P.label_value.value;
     const StringId names[3] = { STR_SensitivitySteady, STR_SensitivityBalanced, STR_SensitivityResponsive };
-    const int stops[3] = { SHAKE_STEADY, SHAKE_BALANCED, SHAKE_RESPONSIVE };
     const GfxAlign aligns[3] = { GFX_ALIGN_START, GFX_ALIGN_CENTER, GFX_ALIGN_END };
     for (int index = 0; index < 3; index++)
     {
-        double distance = value - stops[index];
-        double weight = fabs(distance) >= 50 ? 0 : 0.5 + 0.5 * cos(3.14159265358979 * distance / 50);
-        float scale = (float)(0.85 + 0.35 * weight);
+        double weight = sensitivity_label_weight(index);
+        float scale = pages_sensitivity_label_scale(index);
         float opacity = (float)(0.5 + 0.5 * weight);
         GfxTextStyle style = { GFX_FONT_TEXT, 12, 400, false, false, aligns[index], GFX_ALIGN_START };
         float width = gfx_text_measure(S(names[index]), &style, 0).width;
@@ -1225,4 +1235,47 @@ void pages_close(void)
     // 关掉之后还在等的保存计时不再起作用。
     P.sensitivity_generation = generation;
     P.pending_sensitivity = -1;
+}
+
+// ───────────── 测试用 ─────────────
+
+UiElement *pages_control(PagesControl control)
+{
+    switch (control)
+    {
+        case PAGES_GETTING_STARTED: return P.getting_started;
+        case PAGES_LANGUAGE: return P.language;
+        case PAGES_PERFORMANCE: return P.performance;
+        case PAGES_PERFORMANCE_DESCRIPTION: return P.performance_description;
+        case PAGES_TRIGGER: return P.trigger;
+        case PAGES_SENSITIVITY_CARD: return P.sensitivity_card;
+        case PAGES_SENSITIVITY_SLIDER: return P.sensitivity_slider;
+        case PAGES_SENSITIVITY_DESCRIPTION: return P.sensitivity_description;
+        case PAGES_EDGE_DWELL_CARD: return P.edge_dwell_card;
+        case PAGES_EDGE_DWELL: return P.edge_dwell;
+        case PAGES_SHELF_SIZE: return P.shelf_size;
+        case PAGES_DRAG_OUT_MODE: return P.drag_out_mode;
+        case PAGES_CLOSE_WHEN_EMPTY: return P.close_when_empty;
+        case PAGES_LAYOUT: return P.layout;
+        case PAGES_THEME_SYSTEM: return P.theme_tiles[THEME_SYSTEM];
+        case PAGES_THEME_LIGHT: return P.theme_tiles[THEME_LIGHT];
+        case PAGES_THEME_DARK: return P.theme_tiles[THEME_DARK];
+        case PAGES_SWATCHES: return P.swatches;
+    }
+    return NULL;
+}
+
+const wchar_t *pages_tile_summary(int page)
+{
+    return page >= 0 && page < PAGE_COUNT && M->tiles[page] ? ((PageTile *)M->tiles[page])->summary : NULL;
+}
+
+bool pages_tile_is_tall(int page)
+{
+    return page >= 0 && page < PAGE_COUNT && M->tiles[page] && ((PageTile *)M->tiles[page])->tall;
+}
+
+float pages_card_height(void)
+{
+    return (float)P.card_height.value;
 }

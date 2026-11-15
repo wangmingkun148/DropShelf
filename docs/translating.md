@@ -2,7 +2,7 @@
 
 [English below](#english)
 
-DropShelf 的中文和英文写在程序里（`src/DropShelf/Localization/Strings.cs`），其他语言用**语言包**：一个 JSON 文件，放进文件夹就能用，不用改程序、不用重新编译。
+DropShelf 的中文和英文写在程序里（`native/src/strings.c`；C# 版是 `src/DropShelf/Localization/Strings.cs`），其他语言用**语言包**：一个 JSON 文件，放进文件夹就能用，不用改程序、不用重新编译。
 
 ## 做一个语言包
 
@@ -42,7 +42,7 @@ DropShelf 的中文和英文写在程序里（`src/DropShelf/Localization/String
 
 ## English
 
-DropShelf's Chinese and English text lives in the program (`src/DropShelf/Localization/Strings.cs`). Any other language comes from a **language pack**: a JSON file you drop into a folder. No code changes, no rebuild.
+DropShelf's Chinese and English text lives in the program (`native/src/strings.c`; in the C# version, `src/DropShelf/Localization/Strings.cs`). Any other language comes from a **language pack**: a JSON file you drop into a folder. No code changes, no rebuild.
 
 ### Make a language pack
 

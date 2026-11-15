@@ -11,6 +11,7 @@
 #include "main_window.h"
 #include "anim.h"
 #include "app.h"
+#include "gesture.h"
 #include "settings.h"
 #include "strings.h"
 #include "ui.h"
@@ -226,3 +227,71 @@ void dialogs_animate(double time);
 /// 窗口的鼠标事件：校准练习区按住拖动。
 bool dialogs_mouse(const UiMouseEvent *event);
 void dialogs_close(void);
+
+// ───────────── 测试用 ─────────────
+// 测试按用户看到的样子检查各部分：只读出现在的状态，或拿到控件后像用户一样操作它。
+
+typedef enum PagesControl
+{
+    PAGES_GETTING_STARTED,
+    PAGES_LANGUAGE,
+    PAGES_PERFORMANCE,
+    PAGES_PERFORMANCE_DESCRIPTION,
+    PAGES_TRIGGER,
+    PAGES_SENSITIVITY_CARD,
+    PAGES_SENSITIVITY_SLIDER,
+    PAGES_SENSITIVITY_DESCRIPTION,
+    PAGES_EDGE_DWELL_CARD,
+    PAGES_EDGE_DWELL,
+    PAGES_SHELF_SIZE,
+    PAGES_DRAG_OUT_MODE,
+    PAGES_CLOSE_WHEN_EMPTY,
+    PAGES_LAYOUT,
+    PAGES_THEME_SYSTEM,
+    PAGES_THEME_LIGHT,
+    PAGES_THEME_DARK,
+    PAGES_SWATCHES,
+} PagesControl;
+
+UiElement *pages_control(PagesControl control);
+/// 概览页卡片上的摘要、是不是大卡片的样式。
+const wchar_t *pages_tile_summary(int page);
+bool pages_tile_is_tall(int page);
+/// 概览页卡片现在的高度。
+float pages_card_height(void);
+/// 灵敏度滑块下三个字（稳健、均衡、灵敏）现在的大小比例。
+float pages_sensitivity_label_scale(int index);
+
+/// 快速操作页：置物架上第 index 个位置的操作和位置名称，更多操作里的操作。
+int actions_slot_count(void);
+const wchar_t *actions_slot_id(int index);
+StringId actions_slot_position(int index);
+int actions_more_count(void);
+const wchar_t *actions_more_id(int index);
+
+typedef enum DialogPart
+{
+    DIALOG_PART_EDITOR_KIND,
+    DIALOG_PART_EDITOR_SIZE,
+    DIALOG_PART_EDITOR_NAME,
+    DIALOG_PART_EDITOR_SAVE,
+    DIALOG_PART_EDITOR_ERROR,       // 错误提示那一行
+    DIALOG_PART_CALIBRATION_STATUS,
+    DIALOG_PART_CALIBRATION_APPLY,
+    DIALOG_PART_CALIBRATION_RETRY,
+} DialogPart;
+
+UiElement *dialogs_part(DialogPart part);
+/// 校准：交上一次示范（和在练习区里拖着晃一次一样），返回是否记下了。
+bool dialogs_calibration_submit(const ShakeSample *samples, int count);
+int dialogs_calibration_done(void);
+int dialogs_calibration_recommended(void);
+
+/// 最近关闭的一手牌：牌数、每张牌对应的记录、牌上的缩略图数、叠放次序、是否被选出；
+/// identity 在牌沿用时保持不变，重新生成时换新。
+int fan_card_count(void);
+const struct ShelfHistoryEntry *fan_card_entry(int index);
+int fan_card_thumbs(int index);
+int fan_card_z(int index);
+bool fan_card_hot(int index);
+const void *fan_card_identity(int index);
