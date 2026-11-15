@@ -342,6 +342,8 @@ typedef void (*UiClickHandler)(void *context);
 
 UiElement *ui_button(UiButtonKind kind, UiText text, UiClickHandler clicked, void *context);
 void ui_button_set_text(UiElement *button, UiText text);
+/// 按钮上现在显示的文字（按当前的语言）。
+const wchar_t *ui_button_text(UiElement *button);
 
 /// 文字左边加一个图标字形（如“＋ 打开置物架”）。
 void ui_button_set_glyph(UiElement *button, const wchar_t *glyph, float size);
@@ -370,6 +372,9 @@ typedef void (*UiSelectHandler)(int index, void *context);
 
 UiElement *ui_segmented(const UiText *items, int count, int selected, UiSelectHandler changed, void *context);
 void ui_segmented_set_selected(UiElement *segmented, int selected);
+/// 和点了第 selected 项一样：选中并触发 changed（已经选中时什么也不做）。
+void ui_segmented_choose(UiElement *segmented, int selected);
+int ui_segmented_selected(UiElement *segmented);
 
 // ───────────── 设置卡片 ─────────────
 
@@ -425,7 +430,11 @@ typedef void (*UiTextHandler)(const wchar_t *text, void *context);
 UiElement *ui_textbox(const wchar_t *text, UiText placeholder, int max_length, UiTextHandler changed, UiClickHandler submitted, void *context);
 const wchar_t *ui_textbox_text(UiElement *textbox);
 void ui_textbox_set_text(UiElement *textbox, const wchar_t *text);
+/// 和用户把内容改成 text 一样：换掉文字并触发 changed。
+void ui_textbox_type(UiElement *textbox, const wchar_t *text);
 void ui_textbox_set_placeholder(UiElement *textbox, UiText placeholder);
+/// 空白时显示的提示文字（按当前的语言）。
+const wchar_t *ui_textbox_placeholder(UiElement *textbox);
 
 // ───────────── 快捷键输入框 ─────────────
 

@@ -39,6 +39,21 @@ int onboarding_window_step(void)
     return window ? step : -1;
 }
 
+const wchar_t *onboarding_window_title_text(void)
+{
+    return window ? ui_label_text(title_label) : NULL;
+}
+
+const wchar_t *onboarding_window_body_text(void)
+{
+    return window ? ui_label_text(body_label) : NULL;
+}
+
+const wchar_t *onboarding_window_next_text(void)
+{
+    return window ? ui_button_text(next_button) : NULL;
+}
+
 // ───────────── 关键帧 ─────────────
 
 typedef enum FrameKind { FRAME_DISCRETE, FRAME_LINEAR, FRAME_EASE } FrameKind;

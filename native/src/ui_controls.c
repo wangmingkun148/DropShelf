@@ -716,6 +716,11 @@ void ui_button_set_text(UiElement *element, UiText text)
     ui_invalidate(element);
 }
 
+const wchar_t *ui_button_text(UiElement *element)
+{
+    return text_get(&((UiButton *)element)->text);
+}
+
 // ───────────── 开关 ─────────────
 // 左边是“开/关”的文字，右边是 40×20 的滑轨；圆钮切换时滑过去（0.16 秒）。
 
@@ -966,6 +971,19 @@ void ui_segmented_set_selected(UiElement *element, int selected)
     else anim_set(&segmented->slide, 1);
     ui_window_request_frame(element->window);
     ui_window_repaint(element->window);
+}
+
+void ui_segmented_choose(UiElement *element, int selected)
+{
+    UiSegmented *segmented = (UiSegmented *)element;
+    if (selected == segmented->selected || selected < 0 || selected >= segmented->count) return;
+    ui_segmented_set_selected(element, selected);
+    if (segmented->changed) segmented->changed(selected, segmented->context);
+}
+
+int ui_segmented_selected(UiElement *element)
+{
+    return ((UiSegmented *)element)->selected;
 }
 
 // ───────────── 设置卡片 ─────────────

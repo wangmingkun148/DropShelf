@@ -1,5 +1,6 @@
 # 推送 v 或 style 开头的标签（或在 Releases 页面用新标签发布）时，编译安装包和便携版并附加到对应的 Release。
 # 也可以手动运行，给已有的 Release 补上文件。
+# 发布的是 C 版（native 目录）：构建机自带的 Visual Studio 里有 MSVC、CMake 和 Ninja，不用另外安装。
 name: Release
 
 on:
@@ -25,10 +26,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
-
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
 
       - name: 安装 Inno Setup
         shell: pwsh

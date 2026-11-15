@@ -1054,3 +1054,38 @@ void fan_close(void)
     fan = NULL;
     panel_width = 0;
 }
+
+// ───────────── 测试用 ─────────────
+
+int fan_card_count(void)
+{
+    return card_count;
+}
+
+const ShelfHistoryEntry *fan_card_entry(int index)
+{
+    return index >= 0 && index < card_count ? cards[index].entry : NULL;
+}
+
+int fan_card_thumbs(int index)
+{
+    int thumbs = 0;
+    for (int slot = 0; index >= 0 && index < card_count && slot < 3; slot++) thumbs += cards[index].stack[slot] != NULL;
+    return thumbs;
+}
+
+int fan_card_z(int index)
+{
+    return index >= 0 && index < card_count ? cards[index].z : 0;
+}
+
+bool fan_card_hot(int index)
+{
+    return index >= 0 && index == hot;
+}
+
+const void *fan_card_identity(int index)
+{
+    // 沿用的牌原样搬过去，标题的字符串还是原来那一份；重新生成的牌是新的字符串。
+    return index >= 0 && index < card_count ? cards[index].title : NULL;
+}

@@ -210,6 +210,7 @@ static struct
     UiElement *folder_section, *size_section, *format_section, *program_section;
     UiElement *folder, *folder_mode, *size, *format, *program, *arguments, *name;
     UiElement *error_row, *error_text;
+    UiElement *save;
 } E;
 
 static const int kind_order[4] = { CUSTOM_ACTION_FOLDER, CUSTOM_ACTION_COMPRESS_IMAGE, CUSTOM_ACTION_CONVERT_IMAGE, CUSTOM_ACTION_OPEN_WITH };
@@ -517,7 +518,8 @@ static void build_editor(void)
     ui_add(body, E.error_row);
 
     UiElement *buttons = footer_buttons(overlay->dialog, 260, 2);
-    ui_add(buttons, ui_button(UI_BUTTON_ACCENT, UI_STR(STR_Save), on_save, NULL));
+    E.save = ui_button(UI_BUTTON_ACCENT, UI_STR(STR_Save), on_save, NULL);
+    ui_add(buttons, E.save);
     ui_add(buttons, ui_button(UI_BUTTON_STANDARD, UI_STR(STR_Cancel), on_cancel_editor, NULL));
 }
 
@@ -684,6 +686,17 @@ static void add_sample(void)
     C.stroke[C.stroke_count++] = (ShakeSample){ cursor.x, cursor.y, now_milliseconds() };
 }
 
+bool dialogs_calibration_submit(const ShakeSample *samples, int count)
+{
+    // 晃得太轻、最灵敏也触发不了时不算数。
+    if (calibration_complete()) return false;
+    int level = shake_calibration_steadiest_level(samples, count);
+    C.too_weak = level < 0;
+    if (level >= 0) C.levels[C.done++] = level;
+    calibration_refresh();
+    return level >= 0;
+}
+
 static void end_stroke(void)
 {
     if (!C.stroking) return;
@@ -694,13 +707,8 @@ static void end_stroke(void)
     anim_start(&C.chip_x, 0, 0.26, EASE_BACK_OF(0.4));
     anim_start(&C.chip_y, 0, 0.26, EASE_BACK_OF(0.4));
     main_request_frame();
-    // 晃得太轻、最灵敏也触发不了时不算数。
-    if (calibration_complete()) return;
-    int level = shake_calibration_steadiest_level(C.stroke, C.stroke_count);
-    C.too_weak = level < 0;
-    if (level >= 0) C.levels[C.done++] = level;
+    dialogs_calibration_submit(C.stroke, C.stroke_count);
     C.stroke_count = 0;
-    calibration_refresh();
 }
 
 static GfxSize pad_measure(UiElement *element, float available)
@@ -977,4 +985,32 @@ void dialogs_close(void)
     layer = NULL;
     memset(overlays, 0, sizeof(overlays));
     open_kind = DIALOG_NONE;
+}
+
+// ───────────── 测试用 ─────────────
+
+UiElement *dialogs_part(DialogPart part)
+{
+    switch (part)
+    {
+        case DIALOG_PART_EDITOR_KIND: return E.kind;
+        case DIALOG_PART_EDITOR_SIZE: return E.size;
+        case DIALOG_PART_EDITOR_NAME: return E.name;
+        case DIALOG_PART_EDITOR_SAVE: return E.save;
+        case DIALOG_PART_EDITOR_ERROR: return E.error_row;
+        case DIALOG_PART_CALIBRATION_STATUS: return C.status;
+        case DIALOG_PART_CALIBRATION_APPLY: return C.apply;
+        case DIALOG_PART_CALIBRATION_RETRY: return C.retry;
+    }
+    return NULL;
+}
+
+int dialogs_calibration_done(void)
+{
+    return C.done;
+}
+
+int dialogs_calibration_recommended(void)
+{
+    return calibration_recommended();
 }

@@ -120,17 +120,10 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 
 ## 从源码构建
 
-需要 .NET 10 SDK。
+发布的程序是 `native` 文件夹里的 C 版。需要 Visual Studio 2022 或 Build Tools 的“使用 C++ 的桌面开发”（自带 MSVC、CMake 和 Ninja）。下面的命令编译并运行测试，生成 `native\build\Release\DropShelf.exe`；加 `-NoTests` 只编译，加 `-Debug` 编译调试版：
 
 ```powershell
-dotnet build .\DropShelf.sln -c Release
-dotnet run --project .\src\DropShelf\DropShelf.csproj
-```
-
-运行测试：
-
-```powershell
-dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
+.\native\build.ps1
 ```
 
 生成便携版和安装包（需要 Inno Setup 6 或 7），输出到 `artifacts` 文件夹：
@@ -139,9 +132,21 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 .\installer\Build-Installer.ps1
 ```
 
+原来的 C# 版还在 `src` 里，需要 .NET 10 SDK：
+
+```powershell
+dotnet build .\DropShelf.sln -c Release
+dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
+.\installer\Build-Installer.ps1 -DotNet
+```
+
 调试时可设置环境变量 `DROPSHELF_INSTANCE` 运行独立实例，`DROPSHELF_SETTINGS_PATH` 和 `DROPSHELF_LOG_DIRECTORY` 指定设置和日志位置。
 
 ## 项目结构
+
+- `native`：C 版（发布的就是它）。`native/src` 是程序，`native/tests` 是测试；大多数文件开头写着对应 C# 版的哪一部分。
+
+以下是 C# 版：
 
 - `src/DropShelf/AppController.cs`：应用总控。
 - `src/DropShelf/Services/Gestures`：晃动识别与屏幕边缘停留。
@@ -158,7 +163,7 @@ dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
 
 1. 修改 `DropShelf.csproj`、`app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
 2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.9`，须与版本号一致）并发布。
-3. GitHub Actions 会自动编译安装包和便携版，几分钟后附加到这个 Release 上；`v` 开头的标签还会附带一份 Scoop 清单 `dropshelf.json`。
+3. GitHub Actions 会自动编译 C 版的安装包和便携版，几分钟后附加到这个 Release 上；`v` 开头的标签还会附带一份 Scoop 清单 `dropshelf.json`。改动 `native` 里的代码时，Actions 还会编译并运行 C 版的测试（`.github/workflows/build.yml`）。
 
 代码签名和提交到 winget 是可选的，配置好之后发布时自动进行，做法见 [docs/publishing.md](docs/publishing.md)。
 

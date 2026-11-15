@@ -645,3 +645,30 @@ void actions_close(void)
     ghost_visible = ghost_bouncing = false;
     anim_set(&zone_opacity, 0);
 }
+
+// ───────────── 测试用 ─────────────
+
+int actions_slot_count(void)
+{
+    return slots_grid && !slots_section->hidden ? slots_grid->child_count : 0;
+}
+
+const wchar_t *actions_slot_id(int index)
+{
+    return index >= 0 && index < actions_slot_count() ? ((ActionCard *)slots_grid->children[index])->action.id : NULL;
+}
+
+StringId actions_slot_position(int index)
+{
+    return index >= 0 && index < actions_slot_count() ? ((ActionCard *)slots_grid->children[index])->position : STR_COUNT;
+}
+
+int actions_more_count(void)
+{
+    return more_list ? more_list->child_count : 0;
+}
+
+const wchar_t *actions_more_id(int index)
+{
+    return index >= 0 && index < actions_more_count() ? ((ActionCard *)more_list->children[index])->action.id : NULL;
+}

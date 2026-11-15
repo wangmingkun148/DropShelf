@@ -863,12 +863,25 @@ void ui_textbox_set_text(UiElement *element, const wchar_t *text)
     ui_window_repaint(element->window);
 }
 
+void ui_textbox_type(UiElement *element, const wchar_t *text)
+{
+    UiTextbox *box = (UiTextbox *)element;
+    if (wcs_equal(textbox_chars(box), text ? text : L"")) return;
+    ui_textbox_set_text(element, text);
+    textbox_notify(box);
+}
+
 void ui_textbox_set_placeholder(UiElement *element, UiText placeholder)
 {
     UiTextbox *box = (UiTextbox *)element;
     ui_text_free(&box->placeholder);
     box->placeholder = ui_text_store(placeholder);
     ui_window_repaint(element->window);
+}
+
+const wchar_t *ui_textbox_placeholder(UiElement *element)
+{
+    return ui_text_get(&((UiTextbox *)element)->placeholder);
 }
 
 // ───────────── 快捷键输入框 ─────────────

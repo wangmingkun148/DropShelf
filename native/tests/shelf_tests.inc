@@ -24,6 +24,28 @@ static void pump_for(int milliseconds)
     pump_until(&never, milliseconds);
 }
 
+/// 处理消息直到 done() 成立或超时，返回 done() 是否成立。机器忙时动画会慢一些：等的是结果，不是固定的时间。
+static bool pump_until_done(bool (*done)(void), int milliseconds)
+{
+    ULONGLONG end = GetTickCount64() + (ULONGLONG)milliseconds;
+    MSG message;
+    while (!done() && GetTickCount64() < end)
+    {
+        while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        if (!done()) MsgWaitForMultipleObjects(0, NULL, FALSE, 10, QS_ALLINPUT);
+    }
+    return done();
+}
+
+static bool no_shelves_open(void)
+{
+    return shelves_open_count() == 0;
+}
+
 /// 等到文件或文件夹不在了（后台删除）；超时返回 false。
 static bool wait_gone(const wchar_t *path, int milliseconds)
 {
@@ -697,8 +719,7 @@ static void test_shelf_window(void)
         pump_for(1200);
         CHECK(shelves_open_count() == 1, "松开鼠标后空的置物架没有自动关闭");
         if (handle) SendMessageW(handle, WM_KEYDOWN, VK_ESCAPE, 0);
-        pump_for(800);
-        CHECK(shelves_open_count() == 0, "按 Esc 没有关闭置物架");
+        CHECK(pump_until_done(no_shelves_open, 3000), "按 Esc 没有关闭置物架");
     }
     shelves_close_all();
     pump_for(100);

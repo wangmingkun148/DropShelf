@@ -922,7 +922,15 @@ void ui_window_show_with(UiWindow *window, bool activate)
 void ui_window_set_topmost(UiWindow *window, bool topmost)
 {
     if (!window || !window->handle) return;
-    SetWindowPos(window->handle, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    SetWindowPos(window->handle, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+    // 系统有时把这次调整当成次序没变，返回成功却没有置顶（程序不在前台、刚显示过不抢焦点的窗口之后会遇到）：
+    // 先排到普通窗口的最前面，再置顶一次。
+    if (topmost && !(GetWindowLongW(window->handle, GWL_EXSTYLE) & WS_EX_TOPMOST))
+    {
+        SetWindowPos(window->handle, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+        SetWindowPos(window->handle, HWND_TOPMOST, 0, 0, 0, 0, flags);
+    }
 }
 
 void ui_window_set_border_color(UiWindow *window, const Color *color)

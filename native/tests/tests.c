@@ -29,6 +29,7 @@
 #include "startup.h"
 #include "strings.h"
 #include "theme.h"
+#include "thumbnail.h"
 #include "ui.h"
 #include "../src/shelf_window_internal.h"
 #include "../src/main_window_internal.h"
@@ -364,6 +365,50 @@ static void test_quick_action_slots(void)
     CHECK(list_is(&slots, 4, L"Reveal", custom.id, L"CompressZip", L"CopyFullPath"), "快速操作位置没有去重或补齐");
     CHECK(quick_action_is_builtin_id(L"MoveTo") && !quick_action_is_builtin_id(L"moveto") && !quick_action_is_builtin_id(L"ConvertPng"), "内置操作的标识不正确");
     strlist_clear(&slots);
+
+    // 已删除的自定义操作换成默认操作。
+    strlist_add(&slots, custom.id);
+    quick_action_normalize_slots(&slots, NULL, 0);
+    CHECK(list_is(&slots, 4, L"CompressZip", L"CopyFullPath", L"MoveTo", L"Properties"), "已删除的自定义操作没有被替换");
+    strlist_clear(&slots);
+
+    // 每个操作都有图标和名称；复制路径写全，只写“路径”看不出是做什么。
+    language_set_mode(LANGUAGE_CHINESE);
+    AppSettings settings;
+    settings_init(&settings);
+    custom.image_size_kb = 200;
+    settings.custom_actions = xalloc(sizeof(CustomAction));
+    custom_action_clone(&settings.custom_actions[0], &custom);
+    settings.custom_action_count = 1;
+    QuickActionList available = quick_actions_available(&settings);
+    CHECK(available.count == quick_action_builtin_count() + 1, "可选操作列表不完整");
+    bool complete = true;
+    for (int index = 0; index < available.count; index++)
+    {
+        wchar_t *label = quick_action_label(&available.items[index]);
+        const wchar_t *glyph = quick_action_glyph(&available.items[index]);
+        if (!glyph || wcslen(glyph) != 1 || !label || !*label) complete = false;
+        free(label);
+    }
+    CHECK(complete, "快速操作缺少图标或名称");
+    quick_action_list_free(&available);
+    QuickAction action;
+    CHECK(quick_action_find(L"CopyFullPath", &settings, &action), "没有找到复制路径");
+    wchar_t *label = quick_action_label(&action), *title = quick_action_title(&action);
+    CHECK(wcscmp(label, L"复制路径") == 0 && wcscmp(title, L"复制路径") == 0, "复制路径的按钮名称应写全，只写“路径”看不出是做什么");
+    free(label);
+    free(title);
+    quick_action_free(&action);
+    CHECK(quick_action_find(custom.id, &settings, &action), "没有找到自定义操作");
+    label = quick_action_label(&action);
+    title = quick_action_title(&action);
+    CHECK(action.is_custom && wcscmp(label, L"≤ 200 KB") == 0 && wcscmp(title, L"压缩图片到 200 KB") == 0 && quick_action_shows_progress(&action),
+        "自定义操作名称不正确");
+    free(label);
+    free(title);
+    quick_action_free(&action);
+    CHECK(!quick_action_find(L"nope", &settings, &action), "未知的操作不应找到");
+    settings_free(&settings);
     custom_action_free(&custom);
 }
 
@@ -510,19 +555,42 @@ static void test_language_switch(void)
     CHECK(wcscmp(S(STR_Overview), L"Overview") == 0 && wcscmp(one, L"Added 1 item") == 0 && wcscmp(many, L"Added 3 items") == 0, "英文文字不正确");
     free(one);
     free(many);
+    AppSettings settings;
+    settings_init(&settings);
+    QuickAction compress;
+    CHECK(quick_action_find(L"CompressZip", &settings, &compress), "没有找到压缩");
+    wchar_t *label = quick_action_label(&compress);
+    CHECK(wcscmp(label, L"Compress") == 0, "快速操作名称没有切换");
+    free(label);
+    quick_action_free(&compress);
+    settings_free(&settings);
+    wchar_t *type = file_type_name(L"C:\\x\\noextension");
+    CHECK(wcscmp(type, L"File") == 0, "文件类型备用名称没有切换");
+    free(type);
     language_set_mode(LANGUAGE_CHINESE);
+    type = file_type_name(L"C:\\x\\noextension");
+    CHECK(wcscmp(type, L"文件") == 0, "无扩展名文件类型不正确");
+    free(type);
     CHECK(language_changes == 2 && wcscmp(S(STR_Overview), L"概览") == 0, "切换回中文不正确");
     language_remove_listener(on_language_changed, NULL);
 
-    // 文字表完整：每一条都有中文和英文。
-    int empty = 0;
+    // 文字表完整：每一条都有中文和英文，英文里没有中文。
+    int empty = 0, mixed = 0;
     for (int id = 0; id < STR_COUNT; id++)
     {
         const wchar_t *chinese, *english;
         string_sources((StringId)id, &chinese, &english);
         if (!chinese || !*chinese || !english || !*english) empty++;
+        for (const wchar_t *c = english; c && *c; c++)
+            if (*c >= 0x4E00 && *c <= 0x9FFF)
+            {
+                printf("  英文界面文字中含有中文：%d\n", id);
+                mixed++;
+                break;
+            }
     }
     CHECK(STR_COUNT > 300 && empty == 0, "文字表不完整");
+    CHECK(mixed == 0, "英文界面文字中含有中文");
 }
 
 // ───────────── 系统 ─────────────
@@ -1358,20 +1426,30 @@ static void test_drop_classify(void)
 }
 
 #include "shelf_tests.inc"
+#include "system_tests.inc"
 #include "action_tests.inc"
 #include "merge_tests.inc"
 #include "main_tests.inc"
 
+/// 命令行给了名字时只跑名字里含有其中之一的测试，方便单独排查。
+static char **only_tests;
+static int only_test_count;
+
 static void run(const char *name, void (*test)(void))
 {
+    bool selected = only_test_count == 0;
+    for (int index = 0; index < only_test_count && !selected; index++) selected = strstr(name, only_tests[index]) != NULL;
+    if (!selected) return;
     current_test = name;
     int before = failures;
     test();
     printf("%s %s\n", failures == before ? "ok    " : "FAILED", name);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    only_tests = argv + 1;
+    only_test_count = argc - 1;
     // 设置、日志和实例名称都换成测试专用的，不碰正在使用的 DropShelf。
     wchar_t base[MAX_PATH];
     GetTempPathW(MAX_PATH, base);
@@ -1384,6 +1462,8 @@ int main(void)
     SetEnvironmentVariableW(L"DROPSHELF_SETTINGS_PATH", settings_file);
     SetEnvironmentVariableW(L"DROPSHELF_LOG_DIRECTORY", logs);
     SetEnvironmentVariableW(L"DROPSHELF_INSTANCE", L"ctest");
+    // 和程序启动时一样先读一次设置（测试文件夹里还没有设置文件，得到的是默认值）。
+    settings_load((AppSettings *)app_settings());
 
     run("json", test_json);
     run("paths", test_paths);
@@ -1397,6 +1477,8 @@ int main(void)
     run("language switch", test_language_switch);
     run("startup command", test_startup_command);
     run("single instance", test_single_instance);
+    run("argument forwarding", test_argument_forwarding);
+    run("program resources", test_program_resources);
     run("log", test_log);
     run("theme", test_theme);
     run("animation", test_animation);
@@ -1405,6 +1487,7 @@ int main(void)
     run("shake raw samples", test_shake_raw_samples);
     run("shake calibration", test_shake_calibration);
     run("edge dwell", test_edge_dwell);
+    run("probe window", test_probe_window);
     run("gesture service", test_gesture_service);
     run("foreground watcher", test_foreground_watcher);
     run("drop classify", test_drop_classify);
@@ -1413,7 +1496,11 @@ int main(void)
     run("drag out rules", test_drag_out_rules);
     run("attachment cache", test_attachment_cache);
     run("drop read", test_drop_read);
+    run("shelf sizes", test_shelf_sizes);
     run("shelf window", test_shelf_window);
+    run("shelf window actions", test_shelf_window_actions);
+    run("spare shelf receives paths", test_spare_shelf_receives_paths);
+    run("shell thumbnail and imaging thread", test_shell_thumbnail);
     run("file operations", test_file_operations);
     run("archive", test_archive);
     run("image tools", test_image_tools);
@@ -1428,6 +1515,8 @@ int main(void)
     run("language template", test_language_template);
     run("matrix invert", test_matrix_invert);
     run("main window", test_main_window);
+    run("main window settings", test_main_window_settings);
+    run("calibration dialog", test_calibration_dialog);
     run("about and onboarding", test_about_and_onboarding);
 
     // 清理临时文件夹。

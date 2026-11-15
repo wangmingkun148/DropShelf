@@ -110,4 +110,6 @@ target_link_options(DropShelf PRIVATE "/MANIFESTDEPENDENCY:type='win32' name='Mi
 enable_testing()
 add_executable(DropShelfTests tests/tests.c)
 target_link_libraries(DropShelfTests PRIVATE dropshelf_core)
+# 测试要读仓库里的清单和安装脚本，核对四处版本号是否一致。
+target_compile_definitions(DropShelfTests PRIVATE DROPSHELF_REPOSITORY_DIR=L"${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME DropShelfTests COMMAND DropShelfTests)

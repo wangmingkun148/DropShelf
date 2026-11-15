@@ -1,6 +1,10 @@
-﻿param(
+﻿# 生成便携版 artifacts\win-x64\DropShelf.exe 和安装包 artifacts\installer\DropShelf-Setup-<版本号>.exe。
+# 默认用 C 版（native 目录，见 native\build.ps1）；加 -DotNet 改用原来的 C# 版。
+# 这里只编译不跑测试，测试用 .\native\build.ps1 单独运行。
+param(
     [string]$DotnetPath = "dotnet",
-    [string]$InnoCompilerPath = ""
+    [string]$InnoCompilerPath = "",
+    [switch]$DotNet
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,17 +28,25 @@ $portableOutput = Join-Path $projectRoot "artifacts\win-x64"
 $installerScript = Join-Path $PSScriptRoot "DropShelf.iss"
 $uninstallLauncherScript = Join-Path $PSScriptRoot "UninstallLauncher.iss"
 
-& $DotnetPath restore $appProject -r win-x64 -p:PublishReadyToRun=true -p:NuGetAudit=false
-if ($LASTEXITCODE -ne 0) { throw "无法准备发布文件。" }
+if ($DotNet) {
+    & $DotnetPath restore $appProject -r win-x64 -p:PublishReadyToRun=true -p:NuGetAudit=false
+    if ($LASTEXITCODE -ne 0) { throw "无法准备发布文件。" }
 
-# 自包含单文件：目标电脑无需安装 .NET。
-# 预编译（ReadyToRun）让启动和第一次弹出置物架时不必等待即时编译；
-# 不压缩单文件，程序集可直接从文件映射而不必解压到内存，占用更少。安装包本身仍会压缩。
-& $DotnetPath publish $appProject -c Release -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:PublishReadyToRun=true -p:DebugType=none `
-    --no-restore -o $portableOutput
-if ($LASTEXITCODE -ne 0) { throw "无法生成 DropShelf.exe。" }
+    # 自包含单文件：目标电脑无需安装 .NET。
+    # 预编译（ReadyToRun）让启动和第一次弹出置物架时不必等待即时编译；
+    # 不压缩单文件，程序集可直接从文件映射而不必解压到内存，占用更少。安装包本身仍会压缩。
+    & $DotnetPath publish $appProject -c Release -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:PublishReadyToRun=true -p:DebugType=none `
+        --no-restore -o $portableOutput
+    if ($LASTEXITCODE -ne 0) { throw "无法生成 DropShelf.exe。" }
+} else {
+    # C 版只有一个 DropShelf.exe：运行库静态链接，不依赖 .NET 或另外安装的 VC++ 运行库。
+    # 版本号由 CMake 从 DropShelf.csproj 读出，和安装包的一致。
+    & (Join-Path $projectRoot "native\build.ps1") -NoTests
+    New-Item -ItemType Directory -Force -Path $portableOutput | Out-Null
+    Copy-Item -LiteralPath (Join-Path $projectRoot "native\build\Release\DropShelf.exe") -Destination (Join-Path $portableOutput "DropShelf.exe") -Force
+}
 Invoke-Sign (Join-Path $portableOutput "DropShelf.exe")
 
 if ([string]::IsNullOrWhiteSpace($InnoCompilerPath)) {
