@@ -3,6 +3,7 @@
 #include "shelf_window_internal.h"
 #include "attachment_cache.h"
 #include "clipboard.h"
+#include "history_menu.h"
 #include "log.h"
 #include "task.h"
 #include "theme.h"
@@ -19,6 +20,9 @@
 #define OVERLAY_FADE_IN 0.120
 #define OVERLAY_FADE_OUT 0.100
 #define DRAG_OVER_INTERVAL 0.008        // 两次处理拖动悬停之间至少隔这么久（秒）
+#define TILES_EXPAND_DURATION 0.180
+#define TILES_COLLAPSE_DURATION 0.240
+#define HOVER_DURATION 0.140
 
 enum
 {
@@ -34,8 +38,16 @@ enum
     MENU_SETTINGS,
     MENU_CLOSE,
     MENU_OPEN,
-    MENU_REMOVE
+    MENU_REMOVE,
+    MENU_RESTORE_LAST,
+    MENU_RECENT,
+    MENU_CLEAR_HISTORY,
+    MENU_MOVE_TO_NEW_SHELF,
+    MENU_HISTORY_FIRST = 100
 };
+
+/// “最近关闭的置物架”子菜单打开期间拿着的记录。
+static HistoryMenu history_menu;
 
 static bool close_when_empty(void)
 {
@@ -335,7 +347,46 @@ typedef struct Receive
     float x, y;
     bool paste;
     bool paths;
+    bool restore;               // 恢复最近关闭的置物架：读完提示恢复了几项
+    bool for_action;            // 直接拖到了快速操作上：读到的文件交给这个操作
+    QuickAction action;
 } Receive;
+
+// ───────────── 快速操作 ─────────────
+
+void shelf_produced(void *context, const StrList *paths)
+{
+    shelves_open_beside(context, paths);
+}
+
+static void action_finished(ShelfModel *model, const QuickActionResult *result, void *context)
+{
+    ShelfWindow *shelf = context;
+    // 置物架已在处理途中关闭：生成的文件放进新的置物架。
+    if (model->released)
+    {
+        const StrList *produced = result->produced_new_items ? &result->outputs : &result->replaced_outputs;
+        if (produced->count > 0) shelves_open_beside(NULL, produced);
+    }
+    shelf_window_release(shelf);
+}
+
+static void dropped_action_finished(ShelfModel *model, const QuickActionResult *result, void *context)
+{
+    ShelfWindow *shelf = context;
+    if (!model->released && result->succeeded && !shelf->closing) shelf_close_if_still_empty(shelf);
+    action_finished(model, result, context);
+}
+
+static void run_action(ShelfWindow *shelf, int index)
+{
+    ShelfModel *model = shelf->model;
+    if (model->busy || index < 0 || index >= shelf->actions.count || shelf->closing) return;
+    int count;
+    ShelfItem **targets = target_items(shelf, &count);
+    shelf_model_run_action(model, &shelf->actions.items[index], targets, count, shelf->handle, action_finished, shelf_window_retain(shelf));
+    free(targets);
+}
 
 static void show_receiving(ShelfWindow *shelf, const wchar_t *text)
 {
@@ -361,6 +412,16 @@ static void received(DropReadResult *result, void *context)
     {
         drop_result_release_caches(result);
         drop_result_free(result);
+        quick_action_free(&receive->action);
+        shelf_window_release(shelf);
+        free(receive);
+        return;
+    }
+    if (receive->for_action)
+    {
+        shelf_model_run_action_on_dropped(shelf->model, &receive->action, result, shelf->handle, dropped_action_finished, shelf_window_retain(shelf));
+        drop_result_free(result);
+        quick_action_free(&receive->action);
         shelf_window_release(shelf);
         free(receive);
         return;
@@ -370,7 +431,13 @@ static void received(DropReadResult *result, void *context)
     wchar_t *error_copy = wcs_dup(error);
     ShelfAddSummary summary = shelf_model_add(shelf->model, result);
     wchar_t *message = shelf_add_summary_message(summary);
-    if (receive->paths)
+    if (receive->restore)
+    {
+        wchar_t *restored = summary.added > 0 ? str_restored(summary.added, summary.unavailable) : wcs_dup(S(STR_RestoreUnavailable));
+        shelf_notify(shelf, restored, summary.added > 0);
+        free(restored);
+    }
+    else if (receive->paths)
     {
         // 命令行传来的文件：有重复或读不到的才提示。
         if (summary.duplicates > 0 || summary.unavailable > 0) shelf_notify(shelf, message, summary.added > 0);
@@ -430,6 +497,20 @@ void shelf_add_paths(ShelfWindow *shelf, const StrList *paths)
     drop_read_paths(paths, received, receive);
 }
 
+void shelf_restore_paths(ShelfWindow *shelf, const StrList *paths)
+{
+    Receive *receive = xcalloc(1, sizeof(Receive));
+    receive->shelf = shelf_window_retain(shelf);
+    receive->paths = true;
+    receive->restore = true;
+    if (paths->count > 0) drop_read_paths(paths, received, receive);
+    else
+    {
+        DropReadResult *empty = xcalloc(1, sizeof(DropReadResult));
+        received(empty, receive);
+    }
+}
+
 static void paste(ShelfWindow *shelf)
 {
     IDataObject *data = clipboard_get_data();
@@ -466,11 +547,72 @@ static void set_description(ShelfWindow *shelf, DropImageType type, const wchar_
     if (shelf->drag_data) drop_set_description(shelf->drag_data, type, message);
 }
 
-/// 拖进来时内容区淡出，放置区域淡入；只改透明度，不重新排版。
-static void show_drop_overlay(ShelfWindow *shelf)
+static void ease_to(Anim *anim, double to, double duration, bool animate)
+{
+    if (!animate || duration <= 0) anim_set(anim, to);
+    else if (anim->value != to || anim->running) anim_start(anim, to, duration, EASE_OF(EASE_CUBIC_OUT));
+}
+
+/// 展开时快速操作从按钮栏向上长高并淡入，按钮栏同时淡出。
+static void apply_tiles(ShelfWindow *shelf, bool expanded, double duration)
+{
+    bool has_actions = shelf->actions.count > 0;
+    double collapsed = has_actions ? SHELF_ACTION_BAR_HEIGHT : 0;
+    // 卡片 94，上下外边距各 3，下面再留 7。
+    double full = SHELF_ACTION_TILE_HEIGHT + 6 + 7;
+    bool animate = duration > 0 && anim_enabled();
+    ease_to(&shelf->tiles_height, expanded && has_actions ? full : collapsed, duration, animate);
+    ease_to(&shelf->tiles_opacity, expanded ? 1 : 0, duration, animate);
+    ease_to(&shelf->bar_opacity, expanded ? 0 : 1, duration, animate);
+    request_frame(shelf);
+    shelf_repaint(shelf);
+}
+
+void shelf_reset_tiles(ShelfWindow *shelf)
+{
+    shelf->tiles_expanded = false;
+    apply_tiles(shelf, false, 0);
+}
+
+static void set_tiles_expanded(ShelfWindow *shelf, bool expanded)
+{
+    if (expanded == shelf->tiles_expanded) return;
+    shelf->tiles_expanded = expanded;
+    apply_tiles(shelf, expanded, expanded ? TILES_EXPAND_DURATION : TILES_COLLAPSE_DURATION);
+}
+
+void shelf_set_hovered_action(ShelfWindow *shelf, int action, bool force)
+{
+    if (!force && action == shelf->hovered_action) return;
+    shelf->hovered_action = action;
+    bool animate = !force && anim_enabled();
+    for (int index = 0; index < SHELF_MAX_ACTIONS; index++) ease_to(&shelf->tile_highlight[index], index == action ? 1 : 0, HOVER_DURATION, animate);
+    ease_to(&shelf->frame_opacity, action < 0 ? 1 : 0.45, HOVER_DURATION, animate);
+    request_frame(shelf);
+    shelf_repaint(shelf);
+}
+
+/// 拖到哪张卡片上（四周多留 3）；卡片没展开时是 -1。
+static int hit_test_tiles(ShelfWindow *shelf, float x, float y)
+{
+    if (!shelf->tiles_expanded) return -1;
+    shelf_layout(shelf);
+    for (int index = 0; index < shelf->actions.count; index++)
+    {
+        GfxRect tile = shelf->layout.tiles[index];
+        if (x >= tile.left - 3 && y >= tile.top - 3 && x <= tile.right + 3 && y <= tile.bottom + 3) return index;
+    }
+    return -1;
+}
+
+void shelf_show_drop_overlay(ShelfWindow *shelf)
 {
     shelf_finish_motion(shelf);
-    shelf->drop_zone_text = shelf->model->count > 0 ? STR_ReleaseToAdd : STR_ReleaseToHold;
+    if (shelf->ui) ui_window_set_tooltip(shelf->ui, NULL);
+    shelf->drop_zone_text = shelf->drag_from_shelf ? STR_ReleaseToMoveHere : shelf->model->count > 0 ? STR_ReleaseToAdd : STR_ReleaseToHold;
+    // 平常拖入时不带合并的蓄力底色；合并的提示自己接着设置。
+    if (shelf->merge_hint == MERGE_HINT_NONE) shelf_reset_merge_charge(shelf);
+    shelf_reset_tiles(shelf);
     shelf->overlay_hit = true;
     if (!shelf->overlay_visible) anim_set(&shelf->overlay_opacity, 0);
     shelf->overlay_visible = true;
@@ -495,11 +637,14 @@ void shelf_end_drag(ShelfWindow *shelf)
 {
     if (shelf->handle) KillTimer(shelf->handle, SHELF_TIMER_LEAVE);
     shelf->drag_inside = false;
+    shelf->drag_from_shelf = false;
     if (shelf->drag_data) IDataObject_Release(shelf->drag_data);
     shelf->drag_data = NULL;
     shelf->overlay_hit = false;
+    shelf_set_hovered_action(shelf, -1, false);
     fade(&shelf->body_opacity, 1, OVERLAY_FADE_IN);
     fade(&shelf->overlay_opacity, 0, OVERLAY_FADE_OUT);
+    shelf_reset_tiles(shelf);
     if (shelf->ui) ui_window_set_border_color(shelf->ui, NULL);
     request_frame(shelf);
 }
@@ -509,7 +654,17 @@ static ShelfWindow *target_shelf(IDropTarget *self)
     return ((struct ShelfDropTarget *)self)->shelf;
 }
 
-static void apply_drag(ShelfWindow *shelf, DWORD *effect)
+/// 屏幕上的点换成窗口里的位置（DIP）。
+static void client_point(ShelfWindow *shelf, POINTL point, float *x, float *y)
+{
+    POINT client = { point.x, point.y };
+    ScreenToClient(shelf->handle, &client);
+    float scale = shelf_scale(shelf);
+    *x = client.x / scale;
+    *y = client.y / scale;
+}
+
+static void apply_drag(ShelfWindow *shelf, POINTL point, DWORD *effect)
 {
     ShelfModel *model = shelf->model;
     if (shelf->drag_from_self)
@@ -523,16 +678,36 @@ static void apply_drag(ShelfWindow *shelf, DWORD *effect)
     }
     else
     {
-        *effect = preferred_effect(*effect);
-        // 放置区域里已经写着“松开以添加”等，光标旁不重复说一遍。
-        set_description(shelf, DROP_IMAGE_INVALID, L"");
+        float x, y;
+        client_point(shelf, point, &x, &y);
+        // 拖到底部按钮区域时展开快速操作；展开后区域变高，移回上方的放置区域再收起。
+        // 出场动画期间先不展开：晃动呼出时光标还在来回甩，播完后下一次移动再判断。
+        if (shelf->actions.count > 0 && !shelf->popping)
+        {
+            shelf_layout(shelf);
+            set_tiles_expanded(shelf, y >= shelf->layout.tiles_host.top);
+        }
+        int action = hit_test_tiles(shelf, x, y);
+        shelf_set_hovered_action(shelf, action, false);
+        if (action >= 0 && !drop_can_provide_files(shelf->drag_kind))
+        {
+            *effect = DROPEFFECT_NONE;
+            set_description(shelf, DROP_IMAGE_WARNING, S(STR_FilesOnlyAction));
+        }
+        else
+        {
+            *effect = preferred_effect(*effect);
+            // 在快速操作上时光标旁写操作名称；在放置区域上不写，放置区域里已经写着“松开以添加”等。
+            if (action >= 0) set_description(shelf, DROP_IMAGE_LABEL, shelf->action_labels[action]);
+            else set_description(shelf, DROP_IMAGE_INVALID, L"");
+        }
     }
     drop_helper_over(shelf->drop_helper, *effect);
 }
 
-static void update_drag(ShelfWindow *shelf, DWORD *effect)
+static void update_drag(ShelfWindow *shelf, POINTL point, DWORD *effect)
 {
-    apply_drag(shelf, effect);
+    apply_drag(shelf, point, effect);
     shelf->drag_effects = *effect;
     QueryPerformanceCounter(&shelf->drag_over_handled);
 }
@@ -554,7 +729,7 @@ static ULONG STDMETHODCALLTYPE target_release(IDropTarget *self) { (void)self; r
 
 static HRESULT STDMETHODCALLTYPE target_drag_enter(IDropTarget *self, IDataObject *data, DWORD keys, POINTL point, DWORD *effect)
 {
-    (void)keys, (void)point;
+    (void)keys;
     ShelfWindow *shelf = target_shelf(self);
     if (shelf->closing)
     {
@@ -572,8 +747,10 @@ static HRESULT STDMETHODCALLTYPE target_drag_enter(IDropTarget *self, IDataObjec
         wchar_t *source = drop_source_shelf_id(data);
         shelf->drag_from_self = source && wcs_equal(source, shelf->model->id);
         free(source);
+        // 另一个置物架上的项目：松手后由那个置物架交过来。
+        shelf->drag_from_shelf = !shelf->drag_from_self && shelf_drag_session_from(data) != NULL;
         shelf->drag_kind = shelf->drag_from_self ? DROP_NONE : drop_classify(data);
-        if (!shelf->drag_from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) show_drop_overlay(shelf);
+        if (!shelf->drag_from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf);
     }
     // 出场期间拖出窗口又回来时，拖入的状态还留着，只需要重新接上拖动图像和说明。
     if (fresh || shelf->image_left)
@@ -582,18 +759,18 @@ static HRESULT STDMETHODCALLTYPE target_drag_enter(IDropTarget *self, IDataObjec
         shelf->has_last_description = false;
         drop_helper_enter(shelf->drop_helper, shelf->handle, data, *effect & preferred_effect(*effect));
     }
-    update_drag(shelf, effect);
+    update_drag(shelf, point, effect);
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE target_drag_over(IDropTarget *self, DWORD keys, POINTL point, DWORD *effect)
 {
-    (void)keys, (void)point;
+    (void)keys;
     ShelfWindow *shelf = target_shelf(self);
     shelf->last_drag_over = GetTickCount64();
     // 光标每动一下来源程序就问一次，间隔内的询问直接给出上次的结果。
     if (seconds_since(shelf->drag_over_handled) < DRAG_OVER_INTERVAL) *effect = shelf->drag_effects;
-    else update_drag(shelf, effect);
+    else update_drag(shelf, point, effect);
     return S_OK;
 }
 
@@ -623,15 +800,16 @@ static HRESULT STDMETHODCALLTYPE target_drop(IDropTarget *self, IDataObject *dat
 {
     (void)keys;
     ShelfWindow *shelf = target_shelf(self);
-    POINT client = { point.x, point.y };
-    ScreenToClient(shelf->handle, &client);
-    float scale = shelf_scale(shelf);
-    float x = client.x / scale, y = client.y / scale;
+    float x, y;
+    client_point(shelf, point, &x, &y);
+    // 悬停的处理有间隔，松手时按松手的位置再判断一次落在哪张快速操作卡片上。
+    int action = hit_test_tiles(shelf, x, y);
     bool from_self = shelf->drag_from_self;
     DropContentKind kind = shelf->drag_kind;
+    ShelfDragSession *session = from_self ? NULL : shelf_drag_session_from(data);
     shelf_end_drag(shelf);
 
-    if (from_self || kind == DROP_NONE || shelf->model->busy || shelf->closing)
+    if (from_self || kind == DROP_NONE || shelf->model->busy || shelf->closing || (action >= 0 && !drop_can_provide_files(kind)))
     {
         *effect = DROPEFFECT_NONE;
         drop_helper_drop(shelf->drop_helper, data, *effect);
@@ -641,6 +819,25 @@ static HRESULT STDMETHODCALLTYPE target_drop(IDropTarget *self, IDataObject *dat
     *effect = preferred_effect(*effect);
     drop_helper_drop(shelf->drop_helper, data, *effect);
     shelf->model->has_interacted = true;
+    // 来自另一个置物架：记下放在了这里，拖动结束后那边把项目交过来；放到快速操作上时照常读取文件来处理。
+    if (session && action < 0)
+    {
+        shelf_drag_session_drop_on(session, shelf, x, y);
+        return S_OK;
+    }
+
+    if (action >= 0 && action < shelf->actions.count)
+    {
+        // 直接放到快速操作上：只要文件，读好后交给这个操作。
+        Receive *receive = xcalloc(1, sizeof(Receive));
+        receive->shelf = shelf_window_retain(shelf);
+        receive->for_action = true;
+        quick_action_clone(&receive->action, &shelf->actions.items[action]);
+        shelf->receiving++;
+        show_receiving(shelf, S(STR_ReadingDrop));
+        drop_read(data, true, false, &shelf->model->lifetime_over, received, receive);
+        return S_OK;
+    }
 
     // 文件很多、在网络盘上，或磁盘很久没用时，读取可能要好几秒：这期间显示正在读取。
     Receive *receive = xcalloc(1, sizeof(Receive));
@@ -690,9 +887,12 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     ShelfModel *model = shelf->model;
     if (count == 0 || model->busy || shelf->dragging_out) return;
     shelf_window_retain(shelf);
+    // 刚在别处改了名或挪了位置的文件先找回来，再检查还在不在；之后拖出期间不再跟着改名走。
+    shelf_model_relink(model, items, count);
     shelf->dragging_out = true;
     model->dragging_out = true;
     ReleaseCapture();
+    ui_window_set_tooltip(shelf->ui, NULL);
 
     ShelfItem **files = xalloc((size_t)count * sizeof(ShelfItem *));
     ShelfItem **others = xalloc((size_t)count * sizeof(ShelfItem *));
@@ -728,14 +928,33 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     for (int index = 0; index < dragged_count; index++) shelf_item_retain(dragged[index]);
 
     shelf_dim_dragged(shelf, items, count);
+    // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。
+    if (model->expanded && count < model->count) split_pad_show_for(shelf);
+    ShelfDragSession session = { shelf, NULL, 0, 0, false };
+    shelf_drag_session_begin(&session);
     DragOutRequest request = { shelf->handle, dragged, dragged_count, carried ? &extra : NULL, model->id, shelf->move_mode, shelf_scale(shelf) };
     DragOutOutcome outcome = dragged_count > 0 ? drag_out(&request) : (DragOutOutcome){ DRAG_OUT_CANCELLED, false };
+    shelf_drag_session_end();
+    SplitPlace place;
+    bool has_place = split_pad_dismiss(&place);
     shelf->dragging_out = false;
     model->has_interacted = true;
 
     if (!shelf->closed)
     {
-        if (outcome.result != DRAG_OUT_CANCELLED)
+        if (session.target && !session.target->closing && !session.target->closed && session.target != shelf)
+        {
+            // 放到了另一个置物架上：项目交过去，这边按移走处理。
+            shelf_receive(session.target, items, count, model, session.drop_x, session.drop_y);
+            shelf_let_go(shelf, items, count);
+        }
+        else if (session.split && has_place)
+        {
+            POINT cursor;
+            GetCursorPos(&cursor);
+            shelf_split_off(shelf, items, count, &place, &cursor);
+        }
+        else if (outcome.result != DRAG_OUT_CANCELLED)
         {
             // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
             for (int index = 0; index < dragged_count; index++)
@@ -753,6 +972,7 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     }
     model->dragging_out = false;
     shelf_restore_dimmed(shelf);
+    if (session.target) shelf_window_release(session.target);
     for (int index = 0; index < dragged_count; index++) shelf_item_release(dragged[index]);
     free(dragged);
     free(files);
@@ -805,6 +1025,16 @@ static void on_menu(int id, void *context)
         case MENU_CLOSE: shelf_window_close_animated(shelf); break;
         case MENU_OPEN: if (count == 1) shelf_model_open(model, items[0]); break;
         case MENU_REMOVE: remove_by_user(shelf, items, count); break;
+        case MENU_MOVE_TO_NEW_SHELF: if (count > 0 && count < model->count) shelf_split_off_from_menu(shelf, items, count); break;
+        case MENU_CLEAR_HISTORY: shelf_history_clear(); break;
+        // 恢复的项目放进当前的空置物架；当前置物架已有内容时另开一个。
+        case MENU_RESTORE_LAST: shelves_restore(history_menu_entry(&history_menu, MENU_HISTORY_FIRST), model->count == 0 ? shelf : NULL); break;
+        default:
+        {
+            ShelfHistoryEntry *entry = history_menu_entry(&history_menu, id);
+            if (entry) shelves_restore(entry, model->count == 0 ? shelf : NULL);
+            break;
+        }
     }
     free(items);
 }
@@ -853,7 +1083,7 @@ static void open_shelf_menu(ShelfWindow *shelf)
         if (shelf_item_is_file_system(shelf->menu_items[index])) file_system = true;
         else text = true;
     }
-    UiMenuItem items[14];
+    UiMenuItem items[16];
     int n = 0;
     if (model->expanded) items[n++] = menu_item(MENU_COLLAPSE, STR_MenuCollapse, L"\xE81E", L"Esc", true);
     else if (has_items) items[n++] = menu_item(MENU_EXPAND, STR_MenuExpand, L"\xE8FD", NULL, true);
@@ -864,13 +1094,20 @@ static void open_shelf_menu(ShelfWindow *shelf)
     items[n++] = menu_item(MENU_REVEAL, STR_MenuReveal, L"\xE838", NULL, file_system);
     if (text) items[n++] = menu_item(MENU_CONVERT, STR_MenuConvertToFile, L"\xE8A5", NULL, true);
     items[n++] = separator();
-    // 最近关闭的置物架在第 6 步接进来。
+    history_menu_build(&history_menu, MENU_HISTORY_FIRST, MENU_CLEAR_HISTORY);
+    if (history_menu.count > 0)
+    {
+        items[n++] = menu_item(MENU_RESTORE_LAST, STR_RestoreLastShelf, L"\xE81C", NULL, true);
+        items[n] = history_menu_root(&history_menu);
+        items[n++].id = MENU_RECENT;
+    }
     items[n++] = menu_item(MENU_CLEAR, STR_MenuClear, L"\xE894", NULL, has_items);
     items[n++] = menu_item(MENU_SETTINGS, STR_MenuSettings, L"\xE713", NULL, true);
     items[n++] = separator();
     // 展开着列表时 Esc 是收起，只在“收起”上标出来；收起后 Esc 才是关闭。
     items[n++] = menu_item(MENU_CLOSE, STR_CloseShelf, L"\xE711", model->expanded ? NULL : L"Esc", true);
     show_menu(shelf, items, n);
+    history_menu_free_texts(&history_menu);
 }
 
 static void open_item_menu(ShelfWindow *shelf)
@@ -893,7 +1130,7 @@ static void open_item_menu(ShelfWindow *shelf)
     items[n++] = menu_item(MENU_COPY, STR_MenuCopy, L"\xE8C8", L"Ctrl+C", true);
     items[n++] = menu_item(MENU_COPY_PATH, STR_MenuCopyPath, L"\xE71B", NULL, file_system);
     if (text) items[n++] = menu_item(MENU_CONVERT, STR_MenuConvertToFile, L"\xE8A5", NULL, true);
-    // “移到新置物架”在第 6 步接进来。
+    if (count < shelf->model->count) items[n++] = menu_item(MENU_MOVE_TO_NEW_SHELF, STR_MenuMoveToNewShelf, L"\xE78B", NULL, true);
     items[n++] = separator();
     items[n++] = menu_item(MENU_REMOVE, STR_MenuRemove, L"\xE711", L"Delete", true);
     show_menu(shelf, items, n);
@@ -921,6 +1158,12 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row)
     if (in_rect(layout->more, x, y)) return TARGET_MORE;
     if (in_rect(layout->close, x, y)) return TARGET_CLOSE;
     if (y >= 4 && y < SHELF_HEADER_HEIGHT && x >= 4 && x < layout->width - 4) return TARGET_HEADER;
+    for (int index = 0; index < shelf->actions.count; index++)
+    {
+        if (!in_rect(layout->action_buttons[index], x, y)) continue;
+        *row = index;
+        return TARGET_ACTION;
+    }
     if (!in_rect(layout->body, x, y)) return TARGET_NONE;
     if (shelf->model->count == 0) return TARGET_EMPTY;
     if (shelf->switching) return TARGET_NONE;
@@ -934,6 +1177,27 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row)
     *row = index;
     GfxRect remove = { rect.right - 6 - 26, rect.top + 8, rect.right - 6, rect.top + 34 };
     return in_rect(remove, x, y) ? TARGET_ROW_REMOVE : TARGET_ROW;
+}
+
+/// 光标下的按钮的提示，和 C# 版各个按钮的 ToolTip 相同。
+static const wchar_t *tooltip_for(ShelfWindow *shelf, ShelfTarget target, int row)
+{
+    switch (target)
+    {
+        case TARGET_PIN: return S(STR_PinTooltip);
+        case TARGET_MODE: return S(shelf->move_mode ? STR_DragOutModeTooltipMove : STR_DragOutModeTooltipCopy);
+        case TARGET_VIEW: return S(shelf->model->expanded ? STR_MenuCollapse : STR_MenuExpand);
+        case TARGET_MORE: return S(STR_MoreTooltip);
+        case TARGET_CLOSE: return S(STR_CloseShelfTooltip);
+        case TARGET_ROW_REMOVE: return S(STR_RemoveItemTooltip);
+        case TARGET_ACTION: return row >= 0 && row < SHELF_MAX_ACTIONS ? shelf->action_tooltips[row] : NULL;
+        default: return NULL;
+    }
+}
+
+static void update_tooltip(ShelfWindow *shelf)
+{
+    if (shelf->ui) ui_window_set_tooltip(shelf->ui, shelf->dragging_out ? NULL : tooltip_for(shelf, shelf->hovered, shelf->hovered_row));
 }
 
 static void set_hovered(ShelfWindow *shelf, ShelfTarget target, int row, bool scroll)
@@ -950,6 +1214,7 @@ static void set_hovered(ShelfWindow *shelf, ShelfTarget target, int row, bool sc
         if (is_toast && !was_toast) stop_toast_timer(shelf);
         else if (!is_toast && was_toast) start_toast_timer(shelf);
     }
+    update_tooltip(shelf);
     shelf_repaint(shelf);
 }
 
@@ -1049,9 +1314,14 @@ static void click(ShelfWindow *shelf, ShelfTarget target, int row)
         case TARGET_TOAST_ACTION:
             on_toast_action(shelf);
             break;
+        case TARGET_ACTION:
+            run_action(shelf, row);
+            break;
         default:
             break;
     }
+    // 切换了视图或移动/复制，按钮的提示跟着变。
+    update_tooltip(shelf);
 }
 
 bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
@@ -1132,11 +1402,11 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
             shelf->pressed_row = row;
             if (target == TARGET_HEADER || target == TARGET_EMPTY)
             {
-                // 拖动标题栏（或空置物架）移动窗口；合并到别的置物架在第 6 步接进来。
+                // 拖动标题栏（或空置物架）移动窗口；拖到别的置物架上停一下再松手就合并进去。
                 shelf->pressed = TARGET_NONE;
                 shelf_stop_slide(shelf);
                 model->has_interacted = true;
-                ui_window_begin_move(shelf->ui);
+                shelf_move_by_hand(shelf);
                 break;
             }
             if (target == TARGET_STACK)
@@ -1234,6 +1504,7 @@ LPCWSTR shelf_on_cursor(UiWindow *window, void *context, float x, float y)
         case TARGET_STACK:
         case TARGET_ROW_REMOVE:
         case TARGET_TOAST_ACTION:
+        case TARGET_ACTION:
             return IDC_HAND;
         default:
             return IDC_ARROW;
@@ -1302,6 +1573,8 @@ bool shelf_on_message(UiWindow *window, void *context, UINT message, WPARAM wpar
     (void)window, (void)lparam;
     ShelfWindow *shelf = context;
     if (message == WM_LBUTTONDBLCLK) shelf->double_click = true;
+    // 拖着标题栏移动的途中：光标到了另一个置物架上先蓄力，停够了才可以合并。
+    if (message == WM_MOVING && shelf->merge_watch) shelf_merge_on_moved(shelf);
     if (message != WM_TIMER) return false;
     *result = 0;
     switch (wparam)
@@ -1317,6 +1590,9 @@ bool shelf_on_message(UiWindow *window, void *context, UINT message, WPARAM wpar
             return true;
         case SHELF_TIMER_BUSY:
             shelf_update_busy_overlay(shelf, true);
+            return true;
+        case SHELF_TIMER_MERGE:
+            shelf_merge_on_dwell(shelf);
             return true;
         case SHELF_TIMER_CLOSE_EMPTY:
         {

@@ -289,6 +289,7 @@ ShelfAddSummary shelf_model_add(ShelfModel *model, DropReadResult *result)
             continue;
         }
         ShelfItem *item = shelf_item_new(facts.is_folder ? ITEM_FOLDER : ITEM_FILE, entry->value, NULL, entry->temporary);
+        item->identity = facts.identity;
         if (!facts.is_folder)
         {
             item->has_size = facts.has_size;
@@ -329,6 +330,61 @@ wchar_t *shelf_add_summary_message(ShelfAddSummary summary)
         free(part);
     }
     return wstr_take(&message);
+}
+
+ShelfAddSummary shelf_model_add_files(ShelfModel *model, const StrList *paths)
+{
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc((size_t)(paths->count ? paths->count : 1), sizeof(DroppedEntry));
+    for (int index = 0; index < paths->count; index++)
+    {
+        result->entries[result->count].kind = ITEM_FILE;
+        result->entries[result->count++].value = wcs_dup(paths->items[index]);
+    }
+    ShelfAddSummary summary = shelf_model_add(model, result);
+    drop_result_free(result);
+    return summary;
+}
+
+// ───────────── 合并和拆分 ─────────────
+
+int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, ShelfModel *from)
+{
+    if (model->released || from == model) return 0;
+    // 临时附件所在的缓存这边也持有一次：对方关闭后文件还在。
+    StrList caches = {0};
+    for (int index = 0; index < count; index++)
+    {
+        if (!items[index]->temporary) continue;
+        wchar_t *directory = attachment_cache_directory_of(items[index]->value);
+        if (directory && strlist_index_of(&caches, directory, true) < 0) strlist_add(&caches, directory);
+        free(directory);
+    }
+    for (int index = 0; index < caches.count; index++)
+    {
+        attachment_cache_retain(caches.items[index]);
+        adopt_cache(model, caches.items[index]);
+    }
+    strlist_clear(&caches);
+    if (from && from->delay_cache_cleanup) model->delay_cache_cleanup = true;
+
+    int added = 0;
+    for (int index = 0; index < count; index++)
+    {
+        ShelfItem *item = items[index];
+        if (has_value(model, NULL, item->value, shelf_item_is_file_system(item))) continue;
+        ShelfItem *copy = shelf_item_copy(item);
+        insert_item(model, -1, copy);
+        // 对方关闭时会取消还没做完的统计，这边接着做。
+        if (copy->kind == ITEM_FOLDER && copy->child_count < 0) measure_folder(model, copy);
+        added++;
+    }
+    if (added > 0)
+    {
+        model->has_interacted = true;
+        items_changed(model);
+    }
+    return added;
 }
 
 // ───────────── 移除和撤销 ─────────────
@@ -706,6 +762,8 @@ void shelf_model_keep_temporary_files(ShelfModel *model)
 bool shelf_model_copy(ShelfModel *model, ShelfItem *const *items, int count)
 {
     if (count == 0) return false;
+    // 刚在别处改了名或挪了位置的文件先找回来，和拖出、打开时一样。
+    shelf_model_relink(model, items, count);
     StrList files = {0};
     WStr texts = {0};
     bool temporary = false, has_text = false;
@@ -806,6 +864,7 @@ void shelf_model_open(ShelfModel *model, ShelfItem *item)
         }
         return;
     }
+    shelf_model_relink(model, &item, 1);
     if (!shelf_item_refresh_availability(item))
     {
         changed(model, SHELF_CHANGED_ITEM_TEXT);
@@ -821,54 +880,277 @@ void shelf_model_open(ShelfModel *model, ShelfItem *item)
     }
 }
 
-/// 所在文件夹，和 Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path)) 相同；没有时返回 path 本身。
-static wchar_t *parent_of(const wchar_t *path)
-{
-    wchar_t *trimmed = wcs_dup(path);
-    size_t length = wcslen(trimmed);
-    while (length > 3 && (trimmed[length - 1] == L'\\' || trimmed[length - 1] == L'/')) trimmed[--length] = 0;
-    wchar_t *parent = path_directory(trimmed);
-    free(trimmed);
-    return parent ? parent : wcs_dup(path);
-}
-
 void shelf_model_reveal(ShelfModel *model, ShelfItem *const *items, int count)
 {
-    StrList folders = {0};
-    bool opened = false;
+    StrList paths = {0};
+    for (int index = 0; index < count; index++)
+        if (shelf_item_is_file_system(items[index])) strlist_add(&paths, items[index]->value);
+    bool opened = shell_open_folder_and_select(&paths);
+    strlist_clear(&paths);
+    if (!opened) notify(model, S(STR_CannotOpenFolder), false);
+}
+
+// ───────────── 快速操作 ─────────────
+
+static int index_of_path(const ShelfModel *model, const wchar_t *path)
+{
+    for (int index = 0; index < model->count; index++)
+        if (shelf_item_is_file_system(model->items[index]) && wcs_equal_ignore_case(model->items[index]->value, path)) return index;
+    return -1;
+}
+
+// ───────────── 跟着改名和移动 ─────────────
+
+/// 原来的路径找不到时，按文件标识找它现在的路径（在别处被改名，或在同一个磁盘里被移动）；
+/// 没有标识、进了回收站或找不到时返回 NULL。可以在后台线程上调用。
+static wchar_t *find_moved_path(ShelfItemKind kind, const wchar_t *path, const FileIdentity *identity)
+{
+    if ((kind != ITEM_FILE && kind != ITEM_FOLDER) || !file_identity_valid(identity)) return NULL;
+    wchar_t *found = file_identity_resolve(identity, path, kind == ITEM_FOLDER);
+    if (found && wcs_equal_ignore_case(found, path))
+    {
+        free(found);
+        return NULL;
+    }
+    return found;
+}
+
+static bool is_leaving(const ShelfModel *model, const ShelfItem *item)
+{
+    for (int index = 0; index < model->leaving_count; index++)
+        if (model->leaving[index] == item) return true;
+    return false;
+}
+
+/// 可以把项目换成新的路径：不在拖出途中（这期间不见了多半是被目标程序移走的）、项目还在置物架上、
+/// 不是拖出后正要移走的，新路径也没有别的项目占着。
+static bool can_follow(const ShelfModel *model, const ShelfItem *item, const wchar_t *path)
+{
+    return !model->dragging_out && shelf_model_contains(model, item) && !is_leaving(model, item) && index_of_path(model, path) < 0;
+}
+
+void shelf_model_relink(ShelfModel *model, ShelfItem *const *items, int count)
+{
+    if (model->released || count > SHELF_RELINK_LIMIT) return;
+    bool any = false;
     for (int index = 0; index < count; index++)
     {
-        if (!shelf_item_is_file_system(items[index]) || !path_exists(items[index]->value)) continue;
-        wchar_t *parent = parent_of(items[index]->value);
-        if (strlist_index_of(&folders, parent, true) < 0 && folders.count < 6) strlist_add(&folders, parent);
-        free(parent);
+        ShelfItem *item = items[index];
+        if (!shelf_item_is_file_system(item) || shelf_item_exists_on_disk(item->kind, item->value)) continue;
+        wchar_t *path = find_moved_path(item->kind, item->value, &item->identity);
+        if (path && can_follow(model, item, path))
+        {
+            shelf_item_relocate(item, path);
+            any = true;
+        }
+        free(path);
     }
-    for (int group = 0; group < folders.count; group++)
+    if (any) changed(model, SHELF_CHANGED_ITEM_TEXT);
+}
+
+/// 移动之后，置物架上的项目跟着指向新位置；缩略图、大小这些不变。
+static void apply_moves(ShelfModel *model, const StrList *sources, const StrList *destinations)
+{
+    bool any = false;
+    for (int index = 0; index < sources->count && index < destinations->count; index++)
     {
-        PIDLIST_ABSOLUTE folder = NULL;
-        if (FAILED(SHParseDisplayName(folders.items[group], NULL, &folder, 0, NULL)) || !folder) continue;
-        PIDLIST_ABSOLUTE *children = xcalloc((size_t)count, sizeof(PIDLIST_ABSOLUTE));
-        PCUITEMID_CHILD *relative = xcalloc((size_t)count, sizeof(PCUITEMID_CHILD));
-        int child_count = 0;
+        int at = index_of_path(model, sources->items[index]);
+        if (at < 0) continue;
+        ShelfItem *item = model->items[at];
+        free(item->value);
+        item->value = wcs_dup(destinations->items[index]);
+        // 移出了临时文件夹，不再是临时附件。
+        item->temporary = false;
+        item->available = true;
+        file_identity_get(item->value, &item->identity);
+        shelf_item_text_changed(item);
+        any = true;
+    }
+    if (any) changed(model, SHELF_CHANGED_ITEM_TEXT);
+}
+
+/// 用处理后的文件替换置物架中的原项目；原项目不在置物架上时（直接拖到按钮上）把新文件放进来。
+static void apply_replacements(ShelfModel *model, const StrList *sources, const StrList *outputs)
+{
+    StrList additions = {0};
+    bool replaced = false;
+    for (int index = 0; index < sources->count && index < outputs->count; index++)
+    {
+        int at = index_of_path(model, sources->items[index]);
+        if (at < 0 || index_of_path(model, outputs->items[index]) >= 0)
+        {
+            strlist_add(&additions, outputs->items[index]);
+            continue;
+        }
+        ShelfItem *old = model->items[at];
+        ShelfItem *item = shelf_item_new(ITEM_FILE, outputs->items[index], NULL, false);
+        free(item->id);
+        item->id = wcs_dup(old->id);
+        item->has_size = file_size_of(item->value, &item->size_bytes);
+        free(item->type_name);
+        item->type_name = file_type_name(item->value);
+        file_identity_get(item->value, &item->identity);
+        item->selected = old->selected;
+        forget_item(model, old);
+        model->items[at] = item;
+        shelf_item_release(old);
+        replaced = true;
+    }
+    if (replaced) items_changed(model);
+    if (additions.count > 0) shelf_model_add_files(model, &additions);
+    strlist_clear(&additions);
+}
+
+typedef struct ActionRun
+{
+    ShelfModel *model;
+    StrList held;               // 操作自己再持有一次的缓存
+    bool busy;
+    ShelfActionFinished finished;
+    void *context;
+} ActionRun;
+
+static void action_done(QuickActionResult *result, void *context)
+{
+    ActionRun *run = context;
+    ShelfModel *model = run->model;
+    if (run->busy) shelf_model_set_busy(model, NULL);
+    unsigned delay = result->keeps_temporary_files ? TEMPORARY_FILE_GRACE : 0;
+    for (int index = 0; index < run->held.count; index++) attachment_cache_release_later(run->held.items[index], delay);
+    // 置物架已在处理途中关闭时不再更新它，生成的文件由窗口放进新的置物架。
+    if (!model->released)
+    {
+        if (result->keeps_temporary_files) model->delay_cache_cleanup = true;
+        if (result->move_sources.count > 0) apply_moves(model, &result->move_sources, &result->move_destinations);
+        if (result->replaced_sources.count > 0) apply_replacements(model, &result->replaced_sources, &result->replaced_outputs);
+        if (result->produced_new_items && result->outputs.count > 0)
+        {
+            // 空置物架直接放入；已有内容时放进新的置物架，不和原来的项目混在一起。
+            if (model->count == 0) shelf_model_add_files(model, &result->outputs);
+            else if (model->events.produced) model->events.produced(model->events.context, &result->outputs);
+        }
+        if (!result->cancelled) notify(model, result->message, result->succeeded);
+    }
+    if (run->finished) run->finished(model, result, run->context);
+    strlist_clear(&run->held);
+    shelf_model_release(model);
+    free(run);
+}
+
+static void run_core(ShelfModel *model, const QuickAction *action, StrList *paths, bool temporary, HWND owner,
+    ShelfActionFinished finished, void *context)
+{
+    model->has_interacted = true;
+    ActionRun *run = xcalloc(1, sizeof(ActionRun));
+    run->model = shelf_model_retain(model);
+    run->finished = finished;
+    run->context = context;
+    // 操作自己再持有一次输入所在的缓存，处理途中关闭置物架也不会删掉正在使用的文件。
+    strlist_clone(&run->held, &model->caches);
+    for (int index = 0; index < run->held.count; index++) attachment_cache_retain(run->held.items[index]);
+
+    QuickActionRequest request = {0};
+    quick_action_clone(&request.action, action);
+    request.paths = *paths;
+    *paths = (StrList){0};
+    request.has_temporary_files = temporary;
+    request.owner = owner;
+    // “移动到”先弹出文件夹选择，选好后才显示进度。
+    // 选文件夹时界面线程在对话框里，这期间设置可能变了：之后只用自己的副本。
+    bool asks = quick_action_asks_for_folder(&request.action);
+    if (asks) request.folder = pick_folder(owner, S(STR_ChooseMoveFolder));
+    if (quick_action_shows_progress(&request.action) && (!asks || request.folder) && !model->released)
+    {
+        wchar_t *text = quick_action_busy_text(&request.action);
+        shelf_model_set_busy(model, text);
+        free(text);
+        run->busy = true;
+    }
+    quick_action_execute(&request, action_done, run);
+}
+
+static void finish_without_running(ShelfModel *model, StringId message, ShelfActionFinished finished, void *context)
+{
+    notify(model, S(message), false);
+    QuickActionResult result = {0};
+    quick_action_result_fail(&result, message);
+    if (finished) finished(model, &result, context);
+    quick_action_result_free(&result);
+}
+
+void shelf_model_run_action(ShelfModel *model, const QuickAction *action, ShelfItem *const *targets, int count, HWND owner,
+    ShelfActionFinished finished, void *context)
+{
+    shelf_model_relink(model, targets, count);
+    // 转成文件时原来的项目会被换掉：先拿住，再按标识找到换上来的文件。
+    ShelfItem **items = xalloc((size_t)(count ? count : 1) * sizeof(ShelfItem *));
+    for (int index = 0; index < count; index++) items[index] = shelf_item_retain(targets[index]);
+    bool has_text = false;
+    for (int index = 0; index < count; index++) has_text |= !shelf_item_is_file_system(items[index]);
+    if (quick_action_takes_text(action) && has_text)
+    {
+        shelf_model_convert_to_files(model, items, count);
         for (int index = 0; index < count; index++)
         {
-            if (!shelf_item_is_file_system(items[index]) || !path_exists(items[index]->value)) continue;
-            wchar_t *parent = parent_of(items[index]->value);
-            bool here = wcs_equal_ignore_case(parent, folders.items[group]);
-            free(parent);
-            PIDLIST_ABSOLUTE child = NULL;
-            if (!here || FAILED(SHParseDisplayName(items[index]->value, NULL, &child, 0, NULL)) || !child) continue;
-            children[child_count] = child;
-            relative[child_count++] = ILFindLastID((PCUIDLIST_RELATIVE)child);
+            if (shelf_item_is_file_system(items[index]) || shelf_model_contains(model, items[index])) continue;
+            for (int at = 0; at < model->count; at++)
+            {
+                if (!wcs_equal(model->items[at]->id, items[index]->id)) continue;
+                shelf_item_release(items[index]);
+                items[index] = shelf_item_retain(model->items[at]);
+                break;
+            }
         }
-        if (SUCCEEDED(SHOpenFolderAndSelectItems(folder, (UINT)child_count, relative, 0))) opened = true;
-        for (int index = 0; index < child_count; index++) CoTaskMemFree(children[index]);
-        free(children);
-        free(relative);
-        CoTaskMemFree(folder);
     }
-    strlist_clear(&folders);
-    if (!opened) notify(model, S(STR_CannotOpenFolder), false);
+    StrList paths = {0};
+    bool temporary = false;
+    for (int index = 0; index < count; index++)
+    {
+        ShelfItem *item = items[index];
+        if (!shelf_item_is_file_system(item) || !shelf_item_refresh_availability(item)) continue;
+        strlist_add(&paths, item->value);
+        temporary |= item->temporary;
+    }
+    for (int index = 0; index < count; index++) shelf_item_release(items[index]);
+    free(items);
+    if (paths.count == 0)
+    {
+        changed(model, SHELF_CHANGED_ITEM_TEXT);
+        finish_without_running(model, model->count == 0 ? STR_AddFilesFirst : STR_FilesAndFoldersOnly, finished, context);
+        return;
+    }
+    run_core(model, action, &paths, temporary, owner, finished, context);
+}
+
+void shelf_model_run_action_on_dropped(ShelfModel *model, const QuickAction *action, DropReadResult *result, HWND owner,
+    ShelfActionFinished finished, void *context)
+{
+    for (int index = 0; index < result->caches.count; index++) adopt_cache(model, result->caches.items[index]);
+    strlist_clear(&result->caches);
+    StrList paths = {0};
+    bool temporary = false;
+    for (int index = 0; index < result->count; index++)
+    {
+        const DroppedEntry *entry = &result->entries[index];
+        if (entry->kind != ITEM_FILE && entry->kind != ITEM_FOLDER) continue;
+        if (wcs_is_blank(entry->value)) continue;
+        strlist_add(&paths, entry->value);
+        temporary |= entry->temporary;
+    }
+    if (paths.count == 0)
+    {
+        if (result->error)
+        {
+            notify(model, result->error, false);
+            QuickActionResult failed = {0};
+            quick_action_result_set(&failed, false, wcs_dup(result->error));
+            if (finished) finished(model, &failed, context);
+            quick_action_result_free(&failed);
+        }
+        else finish_without_running(model, STR_FilesAndFoldersOnly, finished, context);
+        return;
+    }
+    run_core(model, action, &paths, temporary, owner, finished, context);
 }
 
 // ───────────── 检查是否还在 ─────────────
@@ -879,14 +1161,21 @@ typedef struct AvailabilityCheck
     ShelfItem **items;
     ShelfItemKind *kinds;
     wchar_t **paths;
+    FileIdentity *identities;
     bool *present;
+    wchar_t **moved;            // 原来的路径找不到时，按标识找到的现在的路径
     int count;
 } AvailabilityCheck;
 
 static void availability_work(void *data)
 {
     AvailabilityCheck *check = data;
-    for (int index = 0; index < check->count; index++) check->present[index] = shelf_item_exists_on_disk(check->kinds[index], check->paths[index]);
+    for (int index = 0; index < check->count; index++)
+    {
+        check->present[index] = shelf_item_exists_on_disk(check->kinds[index], check->paths[index]);
+        // 原来的路径找不到了：看看是不是在别处被改名或移动了。
+        if (!check->present[index]) check->moved[index] = find_moved_path(check->kinds[index], check->paths[index], &check->identities[index]);
+    }
 }
 
 static void availability_done(void *data)
@@ -899,19 +1188,30 @@ static void availability_done(void *data)
     {
         ShelfItem *item = check->items[index];
         // 检查期间换了路径（转成了文件、被替换）的不按旧路径的结果更新。
-        if (!model->released && wcs_equal(item->value, check->paths[index]) && item->available != check->present[index])
+        if (!model->released && wcs_equal(item->value, check->paths[index]))
         {
-            item->available = check->present[index];
-            shelf_item_text_changed(item);
-            any = true;
+            if (check->moved[index] && can_follow(model, item, check->moved[index]))
+            {
+                shelf_item_relocate(item, check->moved[index]);
+                any = true;
+            }
+            else if (item->available != check->present[index])
+            {
+                item->available = check->present[index];
+                shelf_item_text_changed(item);
+                any = true;
+            }
         }
         shelf_item_release(item);
         free(check->paths[index]);
+        free(check->moved[index]);
     }
     if (any) changed(model, SHELF_CHANGED_ITEM_TEXT);
     free(check->items);
     free(check->kinds);
     free(check->paths);
+    free(check->identities);
+    free(check->moved);
     free(check->present);
     shelf_model_release(model);
     free(check);
@@ -930,11 +1230,14 @@ void shelf_model_refresh_availability_in_background(ShelfModel *model)
     check->kinds = xalloc((size_t)count * sizeof(ShelfItemKind));
     check->paths = xalloc((size_t)count * sizeof(wchar_t *));
     check->present = xcalloc((size_t)count, sizeof(bool));
+    check->identities = xalloc((size_t)count * sizeof(FileIdentity));
+    check->moved = xcalloc((size_t)count, sizeof(wchar_t *));
     for (int index = 0; index < model->count; index++)
     {
         ShelfItem *item = model->items[index];
         if (!shelf_item_is_file_system(item)) continue;
         check->items[check->count] = shelf_item_retain(item);
+        check->identities[check->count] = item->identity;
         check->kinds[check->count] = item->kind;
         check->paths[check->count++] = wcs_dup(item->value);
     }

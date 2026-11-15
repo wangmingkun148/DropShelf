@@ -1151,9 +1151,25 @@ void shelf_animate(UiWindow *window, void *context, double time)
     running |= update_anim(&shelf->busy_opacity, time);
     running |= update_anim(&shelf->toast_opacity, time);
     running |= update_anim(&shelf->toast_offset, time);
-    // 放置区域淡出后才真正收起。
-    if (!shelf->overlay_opacity.running && shelf->overlay_opacity.value <= 0 && shelf->overlay_visible && !shelf->drag_inside)
+    running |= update_anim(&shelf->tiles_height, time);
+    running |= update_anim(&shelf->tiles_opacity, time);
+    running |= update_anim(&shelf->bar_opacity, time);
+    running |= update_anim(&shelf->frame_opacity, time);
+    for (int index = 0; index < SHELF_MAX_ACTIONS; index++) running |= update_anim(&shelf->tile_highlight[index], time);
+    running |= update_anim(&shelf->merge_dim, time);
+    running |= update_anim(&shelf->merge_charge_opacity, time);
+    running |= update_anim(&shelf->merge_charge_scale, time);
+    running |= update_anim(&shelf->drop_label_opacity, time);
+    running |= update_anim(&shelf->drop_zone_scale, time);
+    shelf_update_merge_pulse(shelf);
+    running |= shelf->drop_zone_scale.running;
+    // 放置区域淡出后才真正收起，合并的蓄力底色也在这时去掉。
+    if (!shelf->overlay_opacity.running && shelf->overlay_opacity.value <= 0 && shelf->overlay_visible && !shelf->drag_inside &&
+        shelf->merge_hint == MERGE_HINT_NONE)
+    {
         shelf->overlay_visible = false;
+        shelf_reset_merge_charge(shelf);
+    }
     for (int index = 0; index < shelf->model->count; index++) running |= update_anim(&shelf->model->items[index]->dim, time);
     if (running) request_frame(shelf);
 }

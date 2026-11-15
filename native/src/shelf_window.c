@@ -1,5 +1,6 @@
 #include "shelf_window_internal.h"
 #include "log.h"
+#include "shelf_history.h"
 #include "power.h"
 #include "probe.h"
 #include "task.h"
@@ -30,6 +31,11 @@ static float resolve_width(int size)
     return size == SHELF_SIZE_SMALL ? 184.0f : size == SHELF_SIZE_LARGE ? 264.0f : 220.0f;
 }
 
+float shelf_width_for(int size)
+{
+    return resolve_width(size);
+}
+
 /// 缩略图堆叠区域的高度，按宽度等比计算（Math.Round 恰好一半时取偶数）。
 static float resolve_stack_height(int size)
 {
@@ -42,8 +48,10 @@ void shelf_target_size(ShelfWindow *shelf, bool expanded, float *width, float *h
     int count = shelf->model->count;
     int rows = count < 2 ? 2 : count > 6 ? 6 : count;
     float body = expanded ? rows * SHELF_ROW_HEIGHT + 6 : resolve_stack_height(shelf->size) + SHELF_CAPTION_HEIGHT;
-    // 快速操作在第 5 步加进来；没有操作时底部留 10，拖入时上方的放置区域至少 66。
-    float actions = 10, tiles = 8;
+    bool has_actions = shelf->actions.count > 0;
+    float actions = has_actions ? SHELF_ACTION_BAR_HEIGHT : 10;
+    // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
+    float tiles = has_actions ? SHELF_ACTION_TILE_HEIGHT + 14 : 8;
     if (body < 66 + tiles - actions) body = 66 + tiles - actions;
     *height = SHELF_HEADER_HEIGHT + body + actions;
 }
@@ -117,6 +125,15 @@ void shelf_window_apply_settings(ShelfWindow *shelf)
     const AppSettings *settings = app_settings();
     bool resized = shelf->size != settings->quick_shelf_size;
     shelf->size = settings->quick_shelf_size;
+    QuickActionList actions = quick_actions_visible(settings);
+    if (!quick_action_list_same(&actions, &shelf->actions))
+    {
+        quick_action_list_free(&shelf->actions);
+        shelf->actions = actions;
+        shelf_rebuild_actions(shelf);
+        resized = true;
+    }
+    else quick_action_list_free(&actions);
     shelf->move_mode = settings->drag_out_mode == TRANSFER_MOVE;
     update_thumbnail_size(shelf);
     if (resized || !IsWindowVisible(shelf->handle)) shelf_update_window_size(shelf);
@@ -130,6 +147,28 @@ void shelf_update_title(ShelfWindow *shelf)
     SetWindowTextW(shelf->handle, window_title);
     free(window_title);
     free(title);
+}
+
+void shelf_rebuild_actions(ShelfWindow *shelf)
+{
+    for (int index = 0; index < SHELF_MAX_ACTIONS; index++)
+    {
+        free(shelf->action_labels[index]);
+        free(shelf->action_tooltips[index]);
+        shelf->action_labels[index] = shelf->action_tooltips[index] = NULL;
+        if (index >= shelf->actions.count) continue;
+        shelf->action_labels[index] = quick_action_label(&shelf->actions.items[index]);
+        shelf->action_tooltips[index] = quick_action_tooltip(&shelf->actions.items[index]);
+    }
+    // 正在拖入时操作换了：卡片收起，下一次移动再按新的判断。
+    shelf_reset_tiles(shelf);
+    shelf_set_hovered_action(shelf, -1, true);
+    if (shelf->hovered == TARGET_ACTION)
+    {
+        shelf->hovered = TARGET_NONE;
+        if (shelf->ui) ui_window_set_tooltip(shelf->ui, NULL);
+    }
+    shelf_repaint(shelf);
 }
 
 void shelf_repaint(ShelfWindow *shelf)
@@ -267,7 +306,9 @@ void shelf_layout(ShelfWindow *shelf)
     float right = has_items ? layout->view.left : layout->more.left;
     layout->title = (GfxRect){ layout->mode.right + 4, 4, right - 4, 40 };
 
-    layout->body = (GfxRect){ 10, SHELF_HEADER_HEIGHT + 2, width - 10, height - 10 };
+    // 有快速操作时内容区下面是按钮栏（外边距 8,6,8,8，按钮高 36，上面还有 2）。
+    int action_count = shelf->actions.count;
+    layout->body = (GfxRect){ 10, SHELF_HEADER_HEIGHT + 2, width - 10, action_count > 0 ? height - 52 : height - 10 };
     layout->stack = layout->body;
     if (shelf->stack_pinned) layout->stack = rect_of(layout->body.left, layout->body.top, shelf->stack_pin.width, shelf->stack_pin.height);
     layout->list = layout->body;
@@ -317,7 +358,25 @@ void shelf_layout(ShelfWindow *shelf)
         layout->scroll_thumb = (GfxRect){ center - thumb / 2, top, center + thumb / 2, top + length };
     }
 
-    layout->drop_zone = (GfxRect){ 10, SHELF_HEADER_HEIGHT + 2, width - 10, height - 6 };
+    // 快速操作按钮均分宽度，各留 2 的外边距；按钮栏上方有一条分隔线。
+    float cell = action_count > 0 ? (width - 16) / (float)action_count : 0;
+    layout->action_divider = (GfxRect){ 10, height - 50, width - 10, height - 49 };
+    for (int index = 0; index < SHELF_MAX_ACTIONS; index++)
+    {
+        if (index >= action_count)
+        {
+            layout->action_buttons[index] = layout->tiles[index] = (GfxRect){ 0, 0, 0, 0 };
+            continue;
+        }
+        float cell_left = 8 + cell * (float)index, cell_right = 8 + cell * (float)(index + 1);
+        layout->action_buttons[index] = (GfxRect){ cell_left + 2, height - 44, cell_right - 2, height - 8 };
+        // 拖入时展开的卡片和按钮一一对齐，底边离窗口底部 7 + 3。
+        layout->tiles[index] = (GfxRect){ cell_left + 2, height - 10 - SHELF_ACTION_TILE_HEIGHT, cell_right - 2, height - 10 };
+    }
+    // 放置区域在卡片那一行上面；那一行收起时和按钮栏一样高，展开时长高。
+    float tiles_height = action_count > 0 ? (float)shelf->tiles_height.value : 0;
+    layout->tiles_host = (GfxRect){ 0, height - tiles_height, width, height };
+    layout->drop_zone = (GfxRect){ 10, SHELF_HEADER_HEIGHT + 2, width - 10, height - tiles_height - 6 };
 
     // 提示：底部，外边距 10，内边距 10,7,12,8；带按钮时右边是按钮。
     if (shelf->toast_text)
@@ -585,19 +644,119 @@ static void paint_list(ShelfWindow *shelf, float opacity)
     gfx_pop_clip();
 }
 
+/// 快速操作按钮栏：上面一条分隔线；只有两个操作时按钮上写名称，四个时只有图标。
+static void paint_action_bar(ShelfWindow *shelf, float opacity)
+{
+    int count = shelf->actions.count;
+    if (count == 0 || opacity <= 0.001f) return;
+    const ShelfLayout *layout = &shelf->layout;
+    gfx_fill_rect(layout->action_divider, faded(theme_color(THEME_DIVIDER), opacity));
+    bool large = count <= 2;
+    for (int index = 0; index < count; index++)
+    {
+        GfxRect button = layout->action_buttons[index];
+        bool hovered = shelf->hovered == TARGET_ACTION && shelf->hovered_row == index;
+        bool pressed = hovered && shelf->pressed == TARGET_ACTION && shelf->pressed_row == index;
+        gfx_fill_rounded(button, 4, faded(theme_color(pressed ? THEME_SUBTLE_PRESSED : hovered ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT), opacity));
+        Color text = faded(theme_color(pressed ? THEME_TEXT_SECONDARY : THEME_TEXT_PRIMARY), opacity);
+        const wchar_t *glyph = quick_action_glyph(&shelf->actions.items[index]);
+        if (!large)
+        {
+            GfxTextStyle icon = glyph_style(16);
+            gfx_text_draw(glyph, button, &icon, text);
+            continue;
+        }
+        // 图标和名称作为一组居中，放不下时名称末尾省略。
+        const wchar_t *label = shelf->action_labels[index] ? shelf->action_labels[index] : L"";
+        float glyph_width = text_width(glyph, 15, 400, GFX_FONT_ICON);
+        float available = button.right - button.left - 8 - glyph_width - 6;
+        float label_width = fminf(text_width(label, 12, 400, GFX_FONT_TEXT), available > 0 ? available : 0);
+        float left = (button.left + button.right - glyph_width - 6 - label_width) / 2;
+        GfxTextStyle icon = glyph_style(15);
+        gfx_text_draw(glyph, (GfxRect){ left, button.top + 1, left + glyph_width, button.bottom + 1 }, &icon, text);
+        GfxTextStyle style = text_style(12, 400, GFX_ALIGN_START);
+        gfx_text_draw(label, (GfxRect){ left + glyph_width + 6, button.top, left + glyph_width + 6 + label_width + 1, button.bottom }, &style, text);
+    }
+}
+
+/// 拖入时展开的快速操作卡片：图标在上，名称在下（最多两行）；拖到上面的那张铺上强调色、略微放大。
+static void paint_tiles(ShelfWindow *shelf, float opacity)
+{
+    int count = shelf->actions.count;
+    if (count == 0 || opacity <= 0.001f) return;
+    const ShelfLayout *layout = &shelf->layout;
+    bool large = count <= 2;
+    gfx_push_clip(layout->tiles_host);
+    gfx_push_opacity(opacity);
+    for (int index = 0; index < count; index++)
+    {
+        GfxRect tile = layout->tiles[index];
+        float active = (float)shelf->tile_highlight[index].value;
+        float scale = 1 + 0.04f * active;
+        float cx = (tile.left + tile.right) / 2, cy = (tile.top + tile.bottom) / 2;
+        gfx_push_transform(gfx_matrix_scale(scale, scale, cx, cy));
+        gfx_fill_rounded(tile, 10, theme_color(THEME_CARD));
+        gfx_stroke_rounded(tile, 10, theme_color(THEME_CARD_BORDER), 1);
+        if (active > 0.001f)
+        {
+            // 强调色的一层连边框一起盖住。
+            GfxRect cover = { tile.left - 0.5f, tile.top - 0.5f, tile.right + 0.5f, tile.bottom + 0.5f };
+            gfx_fill_rounded(cover, 10.5f, faded(theme_color(THEME_ACCENT), active));
+        }
+        Color text = color_lerp(theme_color(THEME_TEXT_PRIMARY), theme_color(THEME_TEXT_ON_ACCENT), active);
+        const wchar_t *glyph = quick_action_glyph(&shelf->actions.items[index]);
+        const wchar_t *label = shelf->action_labels[index] ? shelf->action_labels[index] : L"";
+        GfxTextStyle icon = glyph_style(large ? 22.0f : 20.0f);
+        float glyph_height = gfx_text_measure(glyph, &icon, 0).height;
+        float padding = large ? 6.0f : 2.0f;
+        float label_width = tile.right - tile.left - 2 - padding * 2;
+        GfxTextStyle wrap = { GFX_FONT_TEXT, 12, 400, true, true, GFX_ALIGN_CENTER, GFX_ALIGN_START, 15 };
+        float label_height = fminf(gfx_text_measure(label, &wrap, label_width > 1 ? label_width : 1).height, 30);
+        float top = cy - (glyph_height + 8 + label_height) / 2;
+        gfx_text_draw(glyph, (GfxRect){ tile.left, top, tile.right, top + glyph_height }, &icon, text);
+        top += glyph_height + 8;
+        gfx_text_draw(label, (GfxRect){ tile.left + 1 + padding, top, tile.right - 1 - padding, top + label_height }, &wrap, text);
+        gfx_pop_transform();
+    }
+    gfx_pop_layer();
+    gfx_pop_clip();
+}
+
 static void paint_drop_overlay(ShelfWindow *shelf, float opacity)
 {
     GfxRect zone = shelf->layout.drop_zone;
-    gfx_fill_rounded(zone, 10, faded(theme_color(THEME_ACCENT_FAINT), opacity));
-    gfx_stroke_rounded_dashed(zone, 10, faded(theme_color(THEME_ACCENT), opacity), 1.6f, 4, 3);
-    GfxTextStyle icon = glyph_style(22);
-    float glyph = gfx_text_measure(GLYPH_DOWNLOAD, &icon, 0).height;
-    float text = line_height(12, 400);
-    float top = (zone.top + zone.bottom - glyph - 6 - text) / 2;
-    Color color = faded(theme_color(THEME_ACCENT_TEXT), opacity);
-    gfx_text_draw(GLYPH_DOWNLOAD, (GfxRect){ zone.left, top, zone.right, top + glyph }, &icon, color);
-    GfxTextStyle style = text_style(12, 400, GFX_ALIGN_CENTER);
-    gfx_text_draw(S(shelf->drop_zone_text), (GfxRect){ zone.left, top + glyph + 6, zone.right, top + glyph + 6 + text }, &style, color);
+    float cx = (zone.left + zone.right) / 2, cy = (zone.top + zone.bottom) / 2;
+    // 可以合并时整个放置区域轻轻弹一下。
+    float pulse = (float)shelf->drop_zone_scale.value;
+    bool pulsing = fabsf(pulse - 1) > 0.0005f;
+    if (pulsing) gfx_push_transform(gfx_matrix_scale(pulse, pulse, cx, cy));
+    // 合并前的蓄力：拖着别的置物架停在这里时，底色从中间涨满。
+    float charge = opacity * (float)shelf->merge_charge_opacity.value;
+    if (charge > 0.001f)
+    {
+        float scale = (float)shelf->merge_charge_scale.value;
+        float half_width = (zone.right - zone.left) / 2 * scale, half_height = (zone.bottom - zone.top) / 2 * scale;
+        gfx_fill_rounded((GfxRect){ cx - half_width, cy - half_height, cx + half_width, cy + half_height }, 10 * scale,
+            faded(theme_color(THEME_ACCENT_SUBTLE), charge));
+    }
+    // 拖到快速操作上时虚线框和底色变淡，文字不变。
+    float frame = opacity * (float)shelf->frame_opacity.value;
+    gfx_fill_rounded(zone, 10, faded(theme_color(THEME_ACCENT_FAINT), frame));
+    gfx_stroke_rounded_dashed(zone, 10, faded(theme_color(THEME_ACCENT), frame), 1.6f, 4, 3);
+    float label = opacity * (float)shelf->drop_label_opacity.value;
+    if (label > 0.001f)
+    {
+        GfxTextStyle icon = glyph_style(22);
+        float glyph = gfx_text_measure(GLYPH_DOWNLOAD, &icon, 0).height;
+        float text = line_height(12, 400);
+        float top = (zone.top + zone.bottom - glyph - 6 - text) / 2;
+        Color color = faded(theme_color(THEME_ACCENT_TEXT), label);
+        gfx_text_draw(GLYPH_DOWNLOAD, (GfxRect){ zone.left, top, zone.right, top + glyph }, &icon, color);
+        GfxTextStyle style = text_style(12, 400, GFX_ALIGN_CENTER);
+        gfx_text_draw(S(shelf->drop_zone_text), (GfxRect){ zone.left, top + glyph + 6, zone.right, top + glyph + 6 + text }, &style, color);
+    }
+    if (pulsing) gfx_pop_transform();
+    paint_tiles(shelf, opacity * (float)shelf->tiles_opacity.value);
 }
 
 static void paint_busy(ShelfWindow *shelf, double time)
@@ -663,8 +822,10 @@ static void paint(UiWindow *window, void *context, double time)
     GfxMatrix surface = gfx_matrix_scale(shelf->surface_scale, shelf->surface_scale, origin_x, origin_y);
     surface = gfx_matrix_multiply(surface, gfx_matrix_translate(shelf->surface_dx, shelf->surface_dy));
     gfx_push_transform(surface);
-    bool layered = shelf->surface_opacity < 0.999f;
-    if (layered) gfx_push_opacity(shelf->surface_opacity);
+    // 拖到别的置物架上、松手就合并时内容变淡。
+    float surface_opacity = shelf->surface_opacity * (float)shelf->merge_dim.value;
+    bool layered = surface_opacity < 0.999f;
+    if (layered) gfx_push_opacity(surface_opacity);
 
     paint_header(shelf);
     float body = (float)shelf->body_opacity.value;
@@ -676,6 +837,7 @@ static void paint(UiWindow *window, void *context, double time)
         if (show_list) paint_list(shelf, body);
         if (show_stack) paint_stack(shelf, body);
     }
+    paint_action_bar(shelf, (float)shelf->bar_opacity.value);
     float overlay = (float)shelf->overlay_opacity.value;
     if (shelf->overlay_visible && overlay > 0.001f) paint_drop_overlay(shelf, overlay);
     paint_busy(shelf, time);
@@ -797,9 +959,12 @@ static void on_closed(UiWindow *window, void *context)
     shelf->closing = true;
     shelf_stop_slide(shelf);
     shelf_stop_pop(shelf);
-    // 没播完的动画在这里收尾：待移除的项目先移除。
+    shelf_merge_forget(shelf);
+    // 没播完的动画在这里收尾：待移除的项目先移除，不会记进最近关闭。
     shelf_finish_motion(shelf);
     shelf_revoke_drop_target(shelf);
+    // 关闭时仍有文件的置物架记入最近关闭，误关或退出后可以恢复；合并到别的置物架之后关闭的不记，项目已经在那边了。
+    if (!shelf->merged_away && shelf->model->count > 0) shelf_history_record(shelf->model->items, shelf->model->count);
     power_hold(shelf, false);
     shelf->ui = NULL;
     shelf->handle = NULL;
@@ -814,9 +979,15 @@ ShelfWindow *shelf_window_create(void)
 {
     ShelfWindow *shelf = xcalloc(1, sizeof(ShelfWindow));
     shelf->references = 1;
-    ShelfModelEvents events = { shelf, on_model_changed, shelf_notify, shelf_remove_visibly };
+    ShelfModelEvents events = { shelf, on_model_changed, shelf_notify, shelf_remove_visibly, shelf_produced };
     shelf->model = shelf_model_new(&events);
     const AppSettings *settings = app_settings();
+    shelf->actions = quick_actions_visible(settings);
+    shelf->hovered_action = -1;
+    anim_set(&shelf->bar_opacity, 1);
+    anim_set(&shelf->frame_opacity, 1);
+    anim_set(&shelf->tiles_opacity, 0);
+    anim_set(&shelf->tiles_height, shelf->actions.count > 0 ? SHELF_ACTION_BAR_HEIGHT : 0);
     shelf->size = settings->quick_shelf_size;
     shelf->move_mode = settings->drag_out_mode == TRANSFER_MOVE;
     shelf->surface_opacity = 0;
@@ -833,6 +1004,8 @@ ShelfWindow *shelf_window_create(void)
     anim_set(&shelf->busy_opacity, 0);
     anim_set(&shelf->toast_opacity, 0);
     anim_set(&shelf->toast_offset, 0);
+    anim_set(&shelf->merge_dim, 1);
+    shelf_reset_merge_charge(shelf);
 
     float width, height;
     shelf_target_size(shelf, false, &width, &height);
@@ -863,6 +1036,7 @@ ShelfWindow *shelf_window_create(void)
     shelf->handle = ui_window_handle(shelf->ui);
     // 窗口关闭时 on_closed 放掉这一份。
     shelf_window_retain(shelf);
+    shelf_rebuild_actions(shelf);
     shelf_update_title(shelf);
     update_thumbnail_size(shelf);
     shelf_register_drop_target(shelf);
@@ -891,6 +1065,12 @@ void shelf_window_release(ShelfWindow *shelf)
     for (int index = 0; index < shelf->menu_count; index++) shelf_item_release(shelf->menu_items[index]);
     free(shelf->menu_items);
     for (int index = 0; index < shelf->dimmed_count; index++) shelf_item_release(shelf->dimmed[index]);
+    for (int index = 0; index < SHELF_MAX_ACTIONS; index++)
+    {
+        free(shelf->action_labels[index]);
+        free(shelf->action_tooltips[index]);
+    }
+    quick_action_list_free(&shelf->actions);
     drop_helper_destroy(shelf->drop_helper);
     free(shelf);
 }

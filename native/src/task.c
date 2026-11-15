@@ -100,27 +100,36 @@ void task_delay(unsigned milliseconds, TaskDone done, void *data)
 
 // ───────────── 图片处理线程 ─────────────
 
-static INIT_ONCE imaging_once = INIT_ONCE_STATIC_INIT;
-static CRITICAL_SECTION imaging_lock;
-static CONDITION_VARIABLE imaging_ready;
-static Task *imaging_head, *imaging_tail;
-static HANDLE imaging_thread;
-
-static DWORD WINAPI imaging_main(void *parameter)
+/// 一个单线程套间的工作线程和它的队列，按顺序做完排进来的工作。
+typedef struct Worker
 {
-    (void)parameter;
+    INIT_ONCE once;
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE ready;
+    Task *head, *tail;
+    HANDLE thread;
+    const wchar_t *name;
+} Worker;
+
+/// 取缩略图（晚一点出现不影响操作）；压缩、转换图片（用户在等结果，可能要好几秒）另用一个，不和缩略图互相耽误。
+static Worker imaging = { INIT_ONCE_STATIC_INIT, {0}, {0}, NULL, NULL, NULL, L"图片处理线程" };
+static Worker long_imaging = { INIT_ONCE_STATIC_INIT, {0}, {0}, NULL, NULL, NULL, L"图片转换线程" };
+
+static DWORD WINAPI worker_main(void *parameter)
+{
+    Worker *worker = parameter;
     HRESULT initialized = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     for (;;)
     {
-        EnterCriticalSection(&imaging_lock);
-        while (!imaging_head && !shutting_down) SleepConditionVariableCS(&imaging_ready, &imaging_lock, INFINITE);
-        Task *task = imaging_head;
+        EnterCriticalSection(&worker->lock);
+        while (!worker->head && !shutting_down) SleepConditionVariableCS(&worker->ready, &worker->lock, INFINITE);
+        Task *task = worker->head;
         if (task)
         {
-            imaging_head = task->next;
-            if (!imaging_head) imaging_tail = NULL;
+            worker->head = task->next;
+            if (!worker->head) worker->tail = NULL;
         }
-        LeaveCriticalSection(&imaging_lock);
+        LeaveCriticalSection(&worker->lock);
         if (!task) break;
         if (task->work && !shutting_down) task->work(task->data);
         finish(task);
@@ -129,49 +138,64 @@ static DWORD WINAPI imaging_main(void *parameter)
     return 0;
 }
 
-static BOOL CALLBACK start_imaging(INIT_ONCE *once, void *parameter, void **context)
+static BOOL CALLBACK start_worker(INIT_ONCE *once, void *parameter, void **context)
 {
-    (void)once, (void)parameter, (void)context;
-    InitializeCriticalSection(&imaging_lock);
-    InitializeConditionVariable(&imaging_ready);
-    imaging_thread = CreateThread(NULL, 0, imaging_main, NULL, 0, NULL);
-    if (!imaging_thread) log_win32_error(L"图片处理线程启动失败", GetLastError());
+    (void)once, (void)context;
+    Worker *worker = parameter;
+    InitializeCriticalSection(&worker->lock);
+    InitializeConditionVariable(&worker->ready);
+    worker->thread = CreateThread(NULL, 0, worker_main, worker, 0, NULL);
+    if (!worker->thread) log_win32_error(worker->name, GetLastError());
     return TRUE;
 }
 
-void task_run_imaging(TaskWork work, TaskDone done, void *data)
+static void worker_run(Worker *worker, TaskWork work, TaskDone done, void *data)
 {
-    InitOnceExecuteOnce(&imaging_once, start_imaging, NULL, NULL);
+    InitOnceExecuteOnce(&worker->once, start_worker, worker, NULL);
     Task *task = xcalloc(1, sizeof(Task));
     task->work = work;
     task->done = done;
     task->data = data;
-    if (!imaging_thread)
+    if (!worker->thread)
     {
         run_task(task);
         return;
     }
-    EnterCriticalSection(&imaging_lock);
-    if (imaging_tail) imaging_tail->next = task;
-    else imaging_head = task;
-    imaging_tail = task;
-    LeaveCriticalSection(&imaging_lock);
-    WakeConditionVariable(&imaging_ready);
+    EnterCriticalSection(&worker->lock);
+    if (worker->tail) worker->tail->next = task;
+    else worker->head = task;
+    worker->tail = task;
+    LeaveCriticalSection(&worker->lock);
+    WakeConditionVariable(&worker->ready);
+}
+
+void task_run_imaging(TaskWork work, TaskDone done, void *data)
+{
+    worker_run(&imaging, work, done, data);
+}
+
+void task_run_long_imaging(TaskWork work, TaskDone done, void *data)
+{
+    worker_run(&long_imaging, work, done, data);
+}
+
+static void worker_stop(Worker *worker)
+{
+    if (!worker->thread) return;
+    EnterCriticalSection(&worker->lock);
+    LeaveCriticalSection(&worker->lock);
+    WakeAllConditionVariable(&worker->ready);
+    // 正在做的最多再等一会儿，等不到就不管了，进程退出时一起结束。
+    WaitForSingleObject(worker->thread, 1000);
+    CloseHandle(worker->thread);
+    worker->thread = NULL;
 }
 
 void task_shutdown(void)
 {
     InterlockedExchange(&shutting_down, 1);
-    if (imaging_thread)
-    {
-        EnterCriticalSection(&imaging_lock);
-        LeaveCriticalSection(&imaging_lock);
-        WakeAllConditionVariable(&imaging_ready);
-        // 正在取的缩略图最多再等一会儿，等不到就不管了，进程退出时一起结束。
-        WaitForSingleObject(imaging_thread, 1000);
-        CloseHandle(imaging_thread);
-        imaging_thread = NULL;
-    }
+    worker_stop(&imaging);
+    worker_stop(&long_imaging);
     if (task_window) DestroyWindow(task_window);
     task_window = NULL;
 }

@@ -122,6 +122,9 @@ void ui_window_set_border_color(UiWindow *window, const Color *color);
 /// 按住鼠标后调用：由系统接着拖动窗口，直到松开鼠标才返回（和 WPF 的 DragMove 相同）。
 void ui_window_begin_move(UiWindow *window);
 
+/// 光标停在窗口上时显示的提示；NULL 表示不显示。换了文字时先收起旧的。
+void ui_window_set_tooltip(UiWindow *window, const wchar_t *text);
+
 /// 所有窗口都关掉（退出时用）。
 void ui_close_all_windows(void);
 
@@ -294,6 +297,10 @@ typedef struct UiMenuItem
     bool separator;
     bool disabled;
     bool checked;               // 显示对勾（代替图标）
+    const wchar_t *tooltip;     // 停住时显示的提示，可以是 NULL
+    float max_width;            // 文字最多这么宽（DIP），放不下时末尾显示省略号；0 表示不限
+    const struct UiMenuItem *children;  // 子菜单（只有一层）：悬停一会儿或点按时在旁边展开，选中的项同样交给 chosen
+    int child_count;
 } UiMenuItem;
 
 typedef void (*UiMenuHandler)(int id, void *context);

@@ -6,6 +6,7 @@
 #include "gesture.h"
 
 typedef struct ShelfWindow ShelfWindow;
+typedef struct ShelfHistoryEntry ShelfHistoryEntry;
 
 /// 在 center（屏幕像素）打开置物架。by_gesture：由拖动手势呼出，edge 不是 EDGE_NONE 时从那条屏幕边缘滑入。
 /// activate：成为当前窗口（快捷键、托盘菜单打开时）。返回打开的置物架；创建失败时返回 NULL。
@@ -14,6 +15,10 @@ ShelfWindow *shelves_open_at_cursor(bool activate);
 
 /// 把这些文件放进置物架（命令行传来的路径）；有重复或读不到的会提示。
 void shelf_window_add_paths(ShelfWindow *shelf, const StrList *paths);
+
+/// 重新打开最近关闭的置物架：放进 target（为 NULL 或正在关闭时在光标处打开一个）。已删除或移动的文件会跳过。
+/// 文件信息在后台读取，置物架先打开，读完再一次放入。
+void shelves_restore(ShelfHistoryEntry *entry, ShelfWindow *target);
 
 /// 拖动手势之后松开了鼠标：由手势打开、什么都没放进来的置物架稍后自动关闭。
 void shelves_drag_released(void);

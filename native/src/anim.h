@@ -13,7 +13,9 @@ typedef enum EaseKind
     EASE_CUBIC_OUT,
     EASE_QUINTIC_OUT,
     EASE_BACK_OUT,      // 略带回弹，amplitude 越大弹得越远
-    EASE_BEZIER         // 与 CSS 的 cubic-bezier 相同
+    EASE_BEZIER,        // 与 CSS 的 cubic-bezier 相同
+    EASE_SINE_OUT,
+    EASE_SINE_IN_OUT
 } EaseKind;
 
 typedef struct Ease

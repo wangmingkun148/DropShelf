@@ -32,6 +32,9 @@ double ease_apply(Ease ease, double t)
     if (t >= 1) return 1;
     switch (ease.kind)
     {
+        // 与 WPF 的 SineEase 相同。
+        case EASE_SINE_OUT: return sin(t * 1.5707963267948966);
+        case EASE_SINE_IN_OUT: return (1 - cos(t * 3.141592653589793)) / 2;
         case EASE_CUBIC_IN: return t * t * t;
         case EASE_CUBIC_OUT:
         {

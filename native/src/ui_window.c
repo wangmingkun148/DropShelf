@@ -3,6 +3,7 @@
 #include "lang.h"
 #include "log.h"
 
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,8 @@ struct UiWindow
     bool animating;             // 正在调用 animate 回调（它可能改窗口大小，引起嵌套的重画）
     int message_depth;          // 正在处理的窗口消息有几层
     bool destroyed;             // 窗口已经销毁，等消息都处理完再释放这块内存
+    HWND tooltip;               // 提示框（第一次需要时创建）
+    wchar_t *tooltip_text;
     UiWindow *next;
 };
 
@@ -361,6 +364,10 @@ static LRESULT hit_test(UiWindow *window, LPARAM lparam)
 
 static void destroy_window_state(UiWindow *window)
 {
+    // 提示框属于这个窗口，系统随窗口一起销毁。
+    window->tooltip = NULL;
+    free(window->tooltip_text);
+    window->tooltip_text = NULL;
     if (window->subscribed) frames_unsubscribe(on_frame, window);
     window->subscribed = false;
     for (UiWindow **link = &windows; *link; link = &(*link)->next)
@@ -695,6 +702,7 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
         // 带标题栏样式系统才画圆角和阴影；WM_NCCALCSIZE 里把整个窗口都算作客户区，标题栏并不显示。
         style = WS_OVERLAPPED | WS_CAPTION;
         extended |= WS_EX_TOOLWINDOW;
+        if (options->no_activate) extended |= WS_EX_NOACTIVATE;
     }
     else
     {
@@ -807,6 +815,57 @@ void ui_window_begin_move(UiWindow *window)
     }
     ReleaseCapture();
     SendMessageW(window->handle, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
+}
+
+// ───────────── 提示 ─────────────
+
+/// 整个窗口作为一个提示区域：光标停住一会儿就显示当前的文字，文字换了先收起，光标再停住时显示新的。
+static bool ensure_tooltip(UiWindow *window)
+{
+    if (window->tooltip) return true;
+    static bool initialized;
+    if (!initialized)
+    {
+        INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_WIN95_CLASSES };
+        InitCommonControlsEx(&controls);
+        initialized = true;
+    }
+    window->tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, window->handle, NULL, GetModuleHandleW(NULL), NULL);
+    if (!window->tooltip) return false;
+    TTTOOLINFOW tool = { sizeof(tool) };
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = window->handle;
+    tool.uId = (UINT_PTR)window->handle;
+    tool.lpszText = L"";
+    SendMessageW(window->tooltip, TTM_ADDTOOLW, 0, (LPARAM)&tool);
+    // 长的说明折成几行，宽度和 WPF 的提示差不多。
+    SendMessageW(window->tooltip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)(int)(320 * ui_window_scale(window)));
+    return true;
+}
+
+void ui_window_set_tooltip(UiWindow *window, const wchar_t *text)
+{
+    if (!window || !window->handle || wcs_equal(window->tooltip_text, text)) return;
+    free(window->tooltip_text);
+    window->tooltip_text = wcs_dup(text);
+    if (!text || !*text)
+    {
+        if (window->tooltip)
+        {
+            SendMessageW(window->tooltip, TTM_POP, 0, 0);
+            SendMessageW(window->tooltip, TTM_ACTIVATE, FALSE, 0);
+        }
+        return;
+    }
+    if (!ensure_tooltip(window)) return;
+    SendMessageW(window->tooltip, TTM_POP, 0, 0);
+    TTTOOLINFOW tool = { sizeof(tool) };
+    tool.hwnd = window->handle;
+    tool.uId = (UINT_PTR)window->handle;
+    tool.lpszText = window->tooltip_text;
+    SendMessageW(window->tooltip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&tool);
+    SendMessageW(window->tooltip, TTM_ACTIVATE, TRUE, 0);
 }
 
 void ui_window_close(UiWindow *window)

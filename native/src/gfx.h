@@ -140,6 +140,7 @@ typedef struct GfxTextStyle
     bool ellipsis;          // 放不下时末尾显示省略号
     GfxAlign align;         // 水平方向
     GfxAlign vertical;      // 垂直方向
+    float line_height;      // 固定的行高（DIP），0 表示按字体自己的行高
 } GfxTextStyle;
 
 /// 文字占多大；max_width 是可用的宽度（换行或省略时用），不限制时传 0。

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "drop_read.h"
+#include "quick_action.h"
 #include "shelf_drag.h"
 #include "shelf_item.h"
 
@@ -24,6 +25,8 @@ typedef struct ShelfModelEvents
     void (*notify)(void *context, const wchar_t *message, bool success);
     /// 拖出之后、以及稍后确认文件已被移走时，交给窗口移除项目（窗口先播放移除的动画）。为 NULL 时直接移除。
     void (*remove_visibly)(void *context, ShelfItem **items, int count);
+    /// 快速操作生成了新文件（如压缩包），而这个置物架上已经有东西：交给窗口放进旁边的新置物架。
+    void (*produced)(void *context, const StrList *paths);
 } ShelfModelEvents;
 
 struct ShelfModel
@@ -83,6 +86,38 @@ ShelfAddSummary shelf_model_add(ShelfModel *model, DropReadResult *result);
 /// 放入后的说明，例如“已添加 3 项，忽略 1 个重复项”。调用方负责 free。
 wchar_t *shelf_add_summary_message(ShelfAddSummary summary);
 
+/// 当场放入磁盘上的文件（快速操作刚生成的），在界面线程上读文件信息。
+ShelfAddSummary shelf_model_add_files(ShelfModel *model, const StrList *paths);
+
+// ───────────── 快速操作 ─────────────
+
+/// 快速操作做完（置物架可能已经关闭，model->released 为 true）。result 在回调之后释放。
+typedef void (*ShelfActionFinished)(ShelfModel *model, const QuickActionResult *result, void *context);
+
+/// 对置物架上的项目执行快速操作：需要文件的操作先把文本和链接转成文件；耗时的操作显示进度，“移动到”先选文件夹。
+/// 做完后更新项目（移动后的新位置、处理后的新文件）、提示结果，再调用 finished。
+void shelf_model_run_action(ShelfModel *model, const QuickAction *action, ShelfItem *const *targets, int count, HWND owner,
+    ShelfActionFinished finished, void *context);
+
+/// 对直接拖到快速操作上的内容执行。读取结果里的缓存由置物架接管，result 由调用方释放。
+void shelf_model_run_action_on_dropped(ShelfModel *model, const QuickAction *action, DropReadResult *result, HWND owner,
+    ShelfActionFinished finished, void *context);
+
+// ───────────── 合并和拆分 ─────────────
+
+/// 接收另一个置物架交来的项目（合并、拆分、架子之间拖动）：放进来的是副本，文本、链接、缩略图和已经统计好的文件夹信息都保留；
+/// 这边已经有的相同文件或内容不重复放。临时附件所在的缓存由两边共同持有，对方关闭后文件还在。
+/// 对方随后自己把原来的项目移除。返回放进来的数量（放在最后）。
+int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, ShelfModel *from);
+
+// ───────────── 跟着改名和移动 ─────────────
+
+/// 当场找回的项目最多这么多，多了交给后台的检查。
+#define SHELF_RELINK_LIMIT 16
+
+/// 拖出、打开、复制或交给快速操作之前：这几个项目里路径找不到的，当场按文件标识找回来，免得刚在别处改了名就拖不出去。
+void shelf_model_relink(ShelfModel *model, ShelfItem *const *items, int count);
+
 // ───────────── 移除和撤销 ─────────────
 
 /// 一次移除的记录：移除的项目和它们原来的位置（从前到后），撤销时按原位放回。
@@ -124,7 +159,7 @@ bool shelf_model_copy_paths(ShelfModel *model, ShelfItem *const *items, int coun
 void shelf_model_open(ShelfModel *model, ShelfItem *item);
 void shelf_model_reveal(ShelfModel *model, ShelfItem *const *items, int count);
 
-/// 在后台检查磁盘上的项目是否还在，查完回到界面线程更新。上一次还没查完时跳过。
+/// 在后台检查磁盘上的项目是否还在，找不到的按文件标识找它现在的位置，查完回到界面线程更新。上一次还没查完时跳过。
 void shelf_model_refresh_availability_in_background(ShelfModel *model);
 
 // ───────────── 显示 ─────────────

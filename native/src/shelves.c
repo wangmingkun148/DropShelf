@@ -1,9 +1,12 @@
 // 管理同时打开的多个置物架，并预先准备一个隐藏的窗口，让晃动后能立即弹出。和 C# 版的 ShelfManager 对应。
 #include "shelf_window_internal.h"
 #include "lang.h"
+#include "shelf_history.h"
 #include "log.h"
 #include "task.h"
 
+#include <math.h>
+#include <shellscalingapi.h>
 #include <stdlib.h>
 
 static ShelfWindow *open_shelves;   // 打开着的置物架
@@ -17,7 +20,13 @@ static void on_language_changed(void *context)
     (void)context;
     // 项目的说明文字跟着语言走，下次画的时候重新生成；窗口本身由界面底座重画。
     shelf_items_language_changed();
-    for (ShelfWindow *shelf = open_shelves; shelf; shelf = shelf->next) shelf_update_title(shelf);
+    for (ShelfWindow *shelf = open_shelves; shelf; shelf = shelf->next)
+    {
+        shelf_update_title(shelf);
+        // 快速操作的名称和提示是生成好的；正在拖入时换掉卡片的文字也没关系，排版不变。
+        shelf_rebuild_actions(shelf);
+    }
+    if (spare) shelf_rebuild_actions(spare);
 }
 
 static void ensure_listener(void)
@@ -25,6 +34,11 @@ static void ensure_listener(void)
     if (listener_added) return;
     listener_added = true;
     language_add_listener(on_language_changed, NULL);
+}
+
+ShelfWindow *shelves_first(void)
+{
+    return open_shelves;
 }
 
 int shelves_open_count(void)
@@ -126,6 +140,49 @@ ShelfWindow *shelves_open_at_cursor(bool activate)
     return shelves_open_at(cursor, false, activate, EDGE_NONE);
 }
 
+void shelves_open_beside(ShelfWindow *source, const StrList *paths)
+{
+    if (shutting_down || paths->count == 0) return;
+    POINT center = {0};
+    RECT rect;
+    if (source && !source->closed && source->handle && GetWindowRect(source->handle, &rect))
+    {
+        // 放在右边，右边放不下就放左边，两边都不行时叠在它右侧靠里一点。
+        POINT middle = { rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2 };
+        HMONITOR monitor = MonitorFromPoint(middle, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info = { .cbSize = sizeof(info) };
+        GetMonitorInfoW(monitor, &info);
+        UINT dpi_x = 96, dpi_y = 96;
+        double scale = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y) == S_OK && dpi_x > 0 ? dpi_x / 96.0 : 1.0;
+        RECT work = info.rcWork;
+        int width = (int)lround(shelf_width_for(app_settings()->quick_shelf_size) * scale);
+        int gap = (int)lround(12 * scale);
+        center.x = rect.right + gap + width <= work.right ? rect.right + gap + width / 2
+                 : rect.left - gap - width >= work.left ? rect.left - gap - width / 2
+                 : rect.right - gap - width / 2;
+        center.y = middle.y;
+    }
+    else GetCursorPos(&center);
+    ShelfWindow *shelf = shelves_open_at(center, false, false, EDGE_NONE);
+    if (shelf) shelf_model_add_files(shelf->model, paths);
+}
+
+void shelves_restore(ShelfHistoryEntry *entry, ShelfWindow *target)
+{
+    if (shutting_down || !entry) return;
+    ShelfWindow *shelf = target && !target->closing && !target->closed ? target : shelves_open_at_cursor(true);
+    if (!shelf) return;
+    // 先移出历史并标记为已使用：读取期间再次点击不会重复恢复，空置物架也不会被自动关闭或复用。
+    shelf_history_entry_retain(entry);
+    shelf_history_remove(entry);
+    shelf->model->has_interacted = true;
+    StrList paths = {0};
+    for (int index = 0; index < entry->count; index++) strlist_add(&paths, entry->items[index].path);
+    shelf_restore_paths(shelf, &paths);
+    strlist_clear(&paths);
+    shelf_history_entry_release(entry);
+}
+
 static void close_unused(void *data)
 {
     (void)data;
@@ -172,4 +229,7 @@ void shelves_close_all(void)
         shelf_window_release(spare);
         spare = NULL;
     }
+    split_pad_close_shared();
+    // 关完了：之后（测试里，或者退出前又有人要打开）照常可以打开。
+    shutting_down = false;
 }

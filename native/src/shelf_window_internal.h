@@ -19,12 +19,16 @@
 #define SHELF_CANVAS_WIDTH 160.0f
 #define SHELF_CANVAS_HEIGHT 116.0f
 #define SHELF_CARD_SIZE 84.0f
+#define SHELF_ACTION_BAR_HEIGHT 50.0f   // 底部快速操作按钮栏（估算窗口大小用）
+#define SHELF_ACTION_TILE_HEIGHT 94.0f  // 拖入时展开的快速操作卡片
+#define SHELF_MAX_ACTIONS 4
 
 // 计时器
 #define SHELF_TIMER_LEAVE 1             // 拖动离开后稍等再确认
 #define SHELF_TIMER_TOAST 2
 #define SHELF_TIMER_BUSY 3
 #define SHELF_TIMER_CLOSE_EMPTY 4
+#define SHELF_TIMER_MERGE 5             // 拖着标题栏停在另一个置物架上：停够了才可以合并
 
 typedef enum ShelfEntranceKind
 {
@@ -94,6 +98,14 @@ typedef enum ToastAction
     TOAST_ACTION_CONVERT
 } ToastAction;
 
+/// 被另一个置物架拖到上面时这边显示的提示：没有、正在蓄力（松手不合并）、可以合并。
+typedef enum MergeHint
+{
+    MERGE_HINT_NONE,
+    MERGE_HINT_CHARGING,
+    MERGE_HINT_ARMED
+} MergeHint;
+
 /// 鼠标能点到的地方。
 typedef enum ShelfTarget
 {
@@ -111,6 +123,7 @@ typedef enum ShelfTarget
     TARGET_SCROLLBAR,
     TARGET_TOAST,
     TARGET_TOAST_ACTION,
+    TARGET_ACTION,              // 底部的快速操作按钮（序号放在 row 里）
     TARGET_BLOCKED              // 正在处理的遮罩
 } ShelfTarget;
 
@@ -127,6 +140,10 @@ typedef struct ShelfLayout
     GfxRect toast, toast_glyph, toast_text, toast_action;
     bool scrollable;
     GfxRect scroll_track, scroll_thumb;
+    GfxRect action_divider;
+    GfxRect action_buttons[SHELF_MAX_ACTIONS];
+    GfxRect tiles_host;         // 拖入时快速操作卡片那一行（随动画长高），卡片在里面显示
+    GfxRect tiles[SHELF_MAX_ACTIONS];
 } ShelfLayout;
 
 struct ShelfWindow
@@ -271,6 +288,32 @@ struct ShelfWindow
     int convert_count;
     bool toast_timer_running;
 
+    // 快速操作
+    QuickActionList actions;
+    wchar_t *action_labels[SHELF_MAX_ACTIONS];
+    wchar_t *action_tooltips[SHELF_MAX_ACTIONS];
+    bool tiles_expanded;        // 拖到底部时快速操作展开成卡片
+    Anim tiles_height;          // 卡片那一行的高度：收起时和按钮栏一样高
+    Anim tiles_opacity;
+    Anim bar_opacity;           // 按钮栏：卡片展开时淡出
+    Anim tile_highlight[SHELF_MAX_ACTIONS];     // 拖到这张卡片上：强调色的底、略微放大、文字变色（0–1）
+    Anim frame_opacity;         // 放置区域的虚线框和底色：拖到快速操作上时变淡
+    int hovered_action;         // 拖到了哪张卡片上，-1 是没有
+
+    // 合并和拆分
+    bool merged_away;           // 项目已经全部交给别的置物架，正在关闭：不记进最近关闭
+    bool drag_from_shelf;       // 拖进来的是另一个置物架上的项目：松手后由那个置物架交过来，不读拖放数据
+    bool merge_watch;           // 正拖着标题栏移动：留意光标下面是不是别的置物架
+    ShelfWindow *merge_target;  // 光标下面的另一个置物架，已经停够了：松手就合并进去（拿着引用）
+    ShelfWindow *merge_candidate;   // 光标刚到上面、还在蓄力的另一个置物架（拿着引用）
+    MergeHint merge_hint;       // 被别的置物架拖到上面时这边的提示
+    Anim merge_dim;             // 松手就合并时这边内容的透明度
+    Anim merge_charge_opacity;  // 蓄力的底色：从中间涨满
+    Anim merge_charge_scale;
+    Anim drop_label_opacity;    // 放置区域里的图标和文字（蓄力时先不显示）
+    Anim drop_zone_scale;       // 可以合并时放置区域轻轻弹一下
+    int pulse_phase;            // 弹一下的两段：1 放大，2 回到原样
+
     // 拖入的数据（拖动经过期间拿着引用）和右键菜单针对的项目
     IDataObject *drag_data;
     ShelfItem **menu_items;
@@ -311,6 +354,10 @@ GfxRect shelf_row_thumb_rect(ShelfWindow *shelf, int index);
 CardPose shelf_card_home(int card);
 /// 窗口里的点换到堆叠画布上，或者反过来。
 void shelf_to_canvas(ShelfWindow *shelf, float x, float y, float *cx, float *cy);
+/// 按设置的尺寸，收起时置物架有多宽。
+float shelf_width_for(int size);
+/// 重新生成快速操作的名称和提示（换了操作或界面语言）。
+void shelf_rebuild_actions(ShelfWindow *shelf);
 
 // ───────────── shelf_input.c ─────────────
 
@@ -329,6 +376,67 @@ void shelf_close_if_still_empty(ShelfWindow *shelf);
 void shelf_notify(void *context, const wchar_t *message, bool success);
 void shelf_remove_visibly(void *context, ShelfItem **items, int count);
 void shelf_add_paths(ShelfWindow *shelf, const StrList *paths);
+/// 恢复最近关闭的置物架：在后台读文件信息，读完放入并提示恢复了几项。
+void shelf_restore_paths(ShelfWindow *shelf, const StrList *paths);
+/// 快速操作收起成按钮栏的高度（立即到位）。
+void shelf_reset_tiles(ShelfWindow *shelf);
+/// 拖到哪张快速操作卡片上（-1 是没有）：那张卡片铺上强调色、略微放大，放置区域变淡。force 时直接到位。
+void shelf_set_hovered_action(ShelfWindow *shelf, int action, bool force);
+/// 快速操作的按钮按下或执行完：生成的新文件交给旁边的新置物架等。
+void shelf_produced(void *context, const StrList *paths);
+
+/// 拖进来时内容区淡出，放置区域淡入；只改透明度，不重新排版。
+void shelf_show_drop_overlay(ShelfWindow *shelf);
+
+// ───────────── shelf_merge.c ─────────────
+
+/// 正在从某个置物架拖出的项目。放到另一个置物架或“新置物架”上时，对方不去读拖放数据，只在这里记下自己；
+/// 拖动结束后由来源置物架把项目交过去：文本、链接、缩略图和临时附件都跟着走，是移动而不是再复制一份。同一时刻只有一次。
+typedef struct ShelfDragSession
+{
+    ShelfWindow *source;
+    ShelfWindow *target;        // 放到了这个置物架上（拿着引用）
+    float drop_x, drop_y;       // 松手的位置（相对那个窗口，DIP）
+    bool split;                 // 放到了“新置物架”上：拆成一个新的置物架
+} ShelfDragSession;
+
+void shelf_drag_session_begin(ShelfDragSession *session);
+void shelf_drag_session_end(void);
+/// 拖动数据是不是这一次拖出的（按来源置物架的标识判断）；不是时返回 NULL。
+ShelfDragSession *shelf_drag_session_from(IDataObject *data);
+void shelf_drag_session_drop_on(ShelfDragSession *session, ShelfWindow *target, float x, float y);
+
+/// 新置物架出现的位置（屏幕像素）：贴着来源置物架的下边、左边对齐、宽度是收起时的宽度；下面放不下时放到上边。
+typedef struct SplitPlace
+{
+    RECT rect;
+    bool below;
+} SplitPlace;
+
+bool shelf_split_place(ShelfWindow *source, SplitPlace *place);
+/// “新置物架”小窗口：从列表里只拖出一部分时贴着来源置物架伸出来，拖动结束就收起。收起时返回它刚才所在的位置。
+void split_pad_show_for(ShelfWindow *source);
+bool split_pad_dismiss(SplitPlace *place);
+bool split_pad_is_shown(void);
+void split_pad_close_shared(void);
+
+/// 接收另一个置物架交来的项目，从 (x, y)（相对本窗口）飞进堆叠或列表。这边已经有的不重复放；一个也没放进来时提示。
+int shelf_receive(ShelfWindow *shelf, ShelfItem **items, int count, ShelfModel *from, float x, float y);
+/// 项目已经交给别的置物架，这边放手：全部交出去且设置为自动关闭时直接淡出关闭，否则播放移除动画。
+void shelf_let_go(ShelfWindow *shelf, ShelfItem **items, int count);
+/// 把一部分项目拆到 place 处的新置物架；from 是项目飞出的位置（屏幕像素），NULL 时从新置物架靠近这边的一侧。
+void shelf_split_off(ShelfWindow *shelf, ShelfItem **items, int count, const SplitPlace *place, const POINT *from);
+/// 右键菜单里的“移到新置物架”。
+void shelf_split_off_from_menu(ShelfWindow *shelf, ShelfItem **items, int count);
+
+/// 按住标题栏（或空置物架）拖动窗口，松开后才返回；途中拖到别的置物架上停一下再松手就合并进去。
+void shelf_move_by_hand(ShelfWindow *shelf);
+void shelf_merge_on_moved(ShelfWindow *shelf);
+void shelf_merge_on_dwell(ShelfWindow *shelf);
+void shelf_update_merge_pulse(ShelfWindow *shelf);
+void shelf_reset_merge_charge(ShelfWindow *shelf);
+/// 窗口关闭：放掉合并途中拿着的别的置物架。
+void shelf_merge_forget(ShelfWindow *shelf);
 
 // ───────────── shelf_motion.c ─────────────
 
@@ -357,5 +465,11 @@ void shelf_perform_remove(ShelfWindow *shelf, ShelfItem **items, int count, Remo
 
 void shelves_on_closed(ShelfWindow *shelf);
 
+/// 打开着的置物架，顺着 next 往下走。
+ShelfWindow *shelves_first(void);
+
 /// 光标是不是在某个置物架上（屏幕像素）。
 bool shelves_contain_point(POINT point);
+
+/// 在 source 旁边打开一个新置物架放这些文件（快速操作生成的）；source 为 NULL 或已关闭时在光标处打开。
+void shelves_open_beside(ShelfWindow *source, const StrList *paths);
