@@ -1,10 +1,18 @@
 // C 版的测试：对应 C# 版测试里设置、快捷键、语言、系统、手势和拖放判断几部分的逻辑。
 // 设置和日志都写到临时文件夹（通过环境变量），不碰真实的设置。
+#define COBJMACROS
+#include "archive.h"
 #include "drop_data.h"
 #include "attachment_cache.h"
+#include "file_identity.h"
+#include "file_ops.h"
+#include "image_tools.h"
+#include "miniz.h"
+#include "quick_action.h"
 #include "base.h"
 #include "drop_read.h"
 #include "shelf_drag.h"
+#include "shelf_history.h"
 #include "shelf_model.h"
 #include "shelf_window.h"
 #include "task.h"
@@ -22,6 +30,7 @@
 #include "strings.h"
 #include "theme.h"
 #include "ui.h"
+#include "../src/shelf_window_internal.h"
 
 #include <limits.h>
 #include <math.h>
@@ -30,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wincodec.h>
 
 static int failures;
 static const char *current_test;
@@ -1344,6 +1354,8 @@ static void test_drop_classify(void)
 }
 
 #include "shelf_tests.inc"
+#include "action_tests.inc"
+#include "merge_tests.inc"
 
 static void run(const char *name, void (*test)(void))
 {
@@ -1397,6 +1409,15 @@ int main(void)
     run("attachment cache", test_attachment_cache);
     run("drop read", test_drop_read);
     run("shelf window", test_shelf_window);
+    run("file operations", test_file_operations);
+    run("archive", test_archive);
+    run("image tools", test_image_tools);
+    run("quick actions", test_quick_actions);
+    run("shelf actions", test_shelf_actions);
+    run("follow renamed", test_follow_renamed);
+    run("adopt between shelves", test_adopt_between_shelves);
+    run("merge and split", test_merge_and_split);
+    run("shelf history", test_shelf_history);
 
     // 清理临时文件夹。
     settings_flush();

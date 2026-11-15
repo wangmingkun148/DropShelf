@@ -49,6 +49,43 @@ void shelf_item_release(ShelfItem *item)
     free(item);
 }
 
+void shelf_item_relocate(ShelfItem *item, const wchar_t *path)
+{
+    if (!shelf_item_is_file_system(item) || wcs_equal(item->value, path)) return;
+    bool same_extension = _wcsicmp(path_extension(item->value), path_extension(path)) == 0;
+    free(item->value);
+    item->value = wcs_dup(path);
+    item->available = true;
+    if (item->kind == ITEM_FILE && !same_extension)
+    {
+        free(item->type_name);
+        item->type_name = file_type_name(path);
+        if (!item->type_name) item->type_name = wcs_dup(L"");
+    }
+    shelf_item_text_changed(item);
+}
+
+ShelfItem *shelf_item_copy(const ShelfItem *item)
+{
+    ShelfItem *copy = shelf_item_new(item->kind, item->value, item->title, item->temporary);
+    free(copy->id);
+    copy->id = wcs_dup(item->id);
+    copy->available = item->available;
+    copy->has_size = item->has_size;
+    copy->size_bytes = item->size_bytes;
+    copy->child_count = item->child_count;
+    free(copy->type_name);
+    copy->type_name = wcs_dup(item->type_name ? item->type_name : L"");
+    copy->identity = item->identity;
+    // 已有的缩略图跟着过去，算作已经要过：之后不在顶部三张或显示的行里时照常释放。
+    if (item->thumbnail)
+    {
+        copy->thumbnail = gfx_image_retain(item->thumbnail);
+        copy->thumbnail_wanted = true;
+    }
+    return copy;
+}
+
 bool shelf_item_is_file_system(const ShelfItem *item)
 {
     return item->kind == ITEM_FILE || item->kind == ITEM_FOLDER;
@@ -388,6 +425,7 @@ bool file_facts_read(const wchar_t *path, FileFacts *facts)
         facts->has_size = true;
         facts->size_bytes = ((long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
     }
+    file_identity_get(path, &facts->identity);
     return true;
 }
 

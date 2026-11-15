@@ -4,6 +4,7 @@
 
 #include "anim.h"
 #include "base.h"
+#include "file_identity.h"
 #include "gfx.h"
 
 /// 项目在列表里那一行的动画状态：整行、行首图标和文字各自的偏移和透明度。平时都是原样（偏移 0，透明度和缩放 1）。
@@ -36,6 +37,7 @@ typedef struct ShelfItem
     int child_count;            // 文件夹第一层有几项，-1 表示还没统计出来
     wchar_t *type_name;         // Windows 显示的文件类型，例如“PDF 文件”
     GfxImage *thumbnail;
+    FileIdentity identity;      // 在别处被改名或移动后按它找到现在的路径，见 shelf_item_relocate；取不到时为空
 
     // 显示用的文字，按需生成，内容或语言变了就重新生成。
     wchar_t *display_name;
@@ -70,6 +72,12 @@ void shelf_items_language_changed(void);
 
 void shelf_item_set_thumbnail(ShelfItem *item, GfxImage *image);   // 收下 image 的引用
 
+/// 文件在别处被改名或移动了：换成现在的路径，名称和说明随之更新；选中状态、缩略图都留着。
+void shelf_item_relocate(ShelfItem *item, const wchar_t *path);
+
+/// 交给另一个置物架时用的副本：内容、缩略图、文件夹统计和标识都带过去，选中状态和动画是新的。
+ShelfItem *shelf_item_copy(const ShelfItem *item);
+
 /// 只检查不修改，可以在后台线程上调用。文本和链接始终算存在。
 bool shelf_item_exists_on_disk(ShelfItemKind kind, const wchar_t *value);
 
@@ -95,12 +103,13 @@ const wchar_t *path_extension(const wchar_t *path);
 
 // ───────────── 文件信息 ─────────────
 
-/// 文件是不是文件夹、有多大；读不到（已删除、没有权限）时返回 false。可以在后台线程上调用。
+/// 文件是不是文件夹、有多大，以及它在磁盘上的标识；读不到（已删除、没有权限）时返回 false。可以在后台线程上调用。
 typedef struct FileFacts
 {
     bool is_folder;
     bool has_size;
     long long size_bytes;
+    FileIdentity identity;
 } FileFacts;
 
 bool file_facts_read(const wchar_t *path, FileFacts *facts);

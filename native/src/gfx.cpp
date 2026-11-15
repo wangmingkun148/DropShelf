@@ -754,7 +754,9 @@ static IDWriteTextLayout *text_layout(const wchar_t *text, const GfxTextStyle *s
     if (!format) return nullptr;
     IDWriteTextLayout *layout = nullptr;
     if (FAILED(dwrite_factory->CreateTextLayout(text, (UINT32)wcslen(text), format, width, height, &layout))) return nullptr;
-    layout->SetWordWrapping(style->wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    // 和 WPF 一样，一个词比整行还长时在词中间折行。
+    layout->SetWordWrapping(style->wrap ? DWRITE_WORD_WRAPPING_EMERGENCY_BREAK : DWRITE_WORD_WRAPPING_NO_WRAP);
+    if (style->line_height > 0) layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, style->line_height, style->line_height * 0.8f);
     layout->SetTextAlignment(text_alignment(style->align));
     layout->SetParagraphAlignment(paragraph_alignment(style->vertical));
     if (style->ellipsis)

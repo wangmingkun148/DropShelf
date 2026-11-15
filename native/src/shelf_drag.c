@@ -63,8 +63,7 @@ static IDataObject *create_empty_data(void)
     return data;
 }
 
-/// 资源管理器同款的数据对象；解析不了的路径（个别文件刚被删）时返回 NULL，由调用方退回文件列表。
-static IDataObject *create_shell_data(const StrList *paths)
+IDataObject *shell_data_object_create(const StrList *paths)
 {
     PIDLIST_ABSOLUTE *pidls = xcalloc((size_t)paths->count, sizeof(PIDLIST_ABSOLUTE));
     int parsed = 0;
@@ -88,7 +87,7 @@ static IDataObject *create_shell_data(const StrList *paths)
 
 static IDataObject *create_file_data(const StrList *paths)
 {
-    IDataObject *shell = create_shell_data(paths);
+    IDataObject *shell = shell_data_object_create(paths);
     if (shell) return shell;
     IDataObject *data = create_empty_data();
     if (!data) return NULL;

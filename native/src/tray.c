@@ -1,5 +1,7 @@
 #include "tray.h"
+#include "history_menu.h"
 #include "log.h"
+#include "shelf_window.h"
 #include "strings.h"
 #include "ui.h"
 
@@ -16,8 +18,12 @@ enum
     MENU_NEW_SHELF = 1,
     MENU_RECENT,
     MENU_SETTINGS,
-    MENU_QUIT
+    MENU_QUIT,
+    MENU_CLEAR_HISTORY,
+    MENU_HISTORY_FIRST = 100
 };
+
+static HistoryMenu history_menu;
 
 static HWND tray_window;
 static TrayActions tray_actions;
@@ -112,22 +118,33 @@ static void on_menu_chosen(int id, void *context)
         case MENU_NEW_SHELF: if (tray_actions.new_shelf) tray_actions.new_shelf(); break;
         case MENU_SETTINGS: if (tray_actions.show_window) tray_actions.show_window(); break;
         case MENU_QUIT: if (tray_actions.quit) tray_actions.quit(); break;
+        case MENU_CLEAR_HISTORY: shelf_history_clear(); break;
+        default:
+        {
+            ShelfHistoryEntry *entry = history_menu_entry(&history_menu, id);
+            if (entry) shelves_restore(entry, NULL);
+            break;
+        }
     }
 }
 
-/// “最近关闭的置物架”在第 6 步接上，现在先是灰的。
+/// 没有最近关闭的置物架时“最近关闭的置物架”是灰的。
 static void show_menu(int x, int y)
 {
     if (ui_menu_is_open()) return;
     wchar_t *hotkey = tray_actions.hotkey_text ? tray_actions.hotkey_text() : NULL;
+    history_menu_build(&history_menu, MENU_HISTORY_FIRST, MENU_CLEAR_HISTORY);
+    UiMenuItem recent = history_menu_root(&history_menu);
+    recent.id = MENU_RECENT;
     UiMenuItem items[] = {
         { .id = MENU_NEW_SHELF, .text = S(STR_NewShelf), .glyph = L"\uE710", .gesture = hotkey },
-        { .id = MENU_RECENT, .text = S(STR_RecentShelves), .glyph = L"\uE81C", .disabled = true },
+        recent,
         { .separator = true },
         { .id = MENU_SETTINGS, .text = S(STR_OpenSettings), .glyph = L"\uE713" },
         { .id = MENU_QUIT, .text = S(STR_QuitApp), .glyph = L"\uE7E8" },
     };
     ui_menu_show(items, ARRAYSIZE(items), x, y, on_menu_chosen, NULL);
+    history_menu_free_texts(&history_menu);
     free(hotkey);
 }
 

@@ -39,3 +39,43 @@ wchar_t *str_copied_files(int count);                   // 已复制 3 个文件
 wchar_t *str_copied_paths(int count);                   // 已复制 3 个路径
 wchar_t *str_reading_files(int count);                  // 正在读取 30 个文件…
 wchar_t *str_with_failed_attachments(const wchar_t *message, int failed);
+
+// 快速操作
+wchar_t *str_quick_action_tooltip(const wchar_t *label, const wchar_t *description);   // 压缩：压缩为 ZIP…
+wchar_t *str_image_size_text(int kilobytes);                    // 500 KB / 2 MB（不分语言）
+wchar_t *str_copy_to_folder_title(const wchar_t *folder);       // 复制到“截图”
+wchar_t *str_move_to_folder_title(const wchar_t *folder);
+wchar_t *str_compress_images_title(const wchar_t *size);
+wchar_t *str_convert_images_title(const wchar_t *format);
+wchar_t *str_open_with_title(const wchar_t *program);
+wchar_t *str_copy_to_folder_description(const wchar_t *folder);
+wchar_t *str_move_to_folder_description(const wchar_t *folder);
+wchar_t *str_compress_images_description(const wchar_t *size);
+wchar_t *str_convert_images_description(const wchar_t *format);
+wchar_t *str_open_with_description(const wchar_t *program);
+wchar_t *str_folder_missing(const wchar_t *name);
+wchar_t *str_program_missing(const wchar_t *name);
+wchar_t *str_open_with_failed(const wchar_t *name);
+wchar_t *str_created(const wchar_t *name);                      // 已创建 资料.zip
+wchar_t *str_extracted_to(const wchar_t *name);
+wchar_t *str_images_already_format(const wchar_t *format);
+wchar_t *str_images_already_small(const wchar_t *size);
+wchar_t *str_copied_to(int count, const wchar_t *folder);       // 已复制 3 项到 截图
+wchar_t *str_moved_to(int count, const wchar_t *folder);
+wchar_t *str_copied_partially(int copied, int failed);
+wchar_t *str_moved_partially(int moved, int failed);
+wchar_t *str_images_converted(int count, const wchar_t *format);
+wchar_t *str_images_compressed(int count, const wchar_t *size);
+wchar_t *str_images_skipped_same_format(int count, const wchar_t *format);  // ，2 张本来就是 PNG
+wchar_t *str_images_skipped_small(int count);                   // ，2 张本来就符合
+wchar_t *str_images_failed(int count);                          // ，1 张无法读取
+wchar_t *str_opened_with(int count, const wchar_t *name);       // 已用 画图 打开 2 项
+wchar_t *str_opened_properties_for(int count);
+wchar_t *str_saved_to_downloads(int count);
+
+// 最近关闭的置物架、合并
+wchar_t *str_history_entry_title(const wchar_t *first, int count);   // 报告.pdf 等 3 项
+wchar_t *str_history_yesterday(const wchar_t *time);                // 昨天 14:05
+wchar_t *str_history_date(int month, int day);                      // 11月5日、Nov 5
+wchar_t *str_restored(int added, int unavailable);                  // 已恢复 3 项，1 项已删除或移动
+wchar_t *str_merged_shelves(int count);                             // 已合并 3 项

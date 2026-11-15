@@ -24,3 +24,6 @@ void task_delay(unsigned milliseconds, TaskDone done, void *data);
 /// 在专门的图片处理线程上（单线程套间，COM 已初始化）按顺序调用 work，做完回到界面线程调用 done。
 /// 取缩略图、编码图片都在这里做：外壳的缩略图组件要求单线程套间，排成一队也不会同时占满处理器。
 void task_run_imaging(TaskWork work, TaskDone done, void *data);
+
+/// 和 task_run_imaging 一样，但在另一个线程上：压缩、转换图片可能要好几秒，不让缩略图排在后面等。
+void task_run_long_imaging(TaskWork work, TaskDone done, void *data);

@@ -11,6 +11,7 @@
 #include "lang.h"
 #include "log.h"
 #include "probe.h"
+#include "shelf_history.h"
 #include "shelf_window.h"
 #include "single_instance.h"
 #include "startup.h"
@@ -77,6 +78,17 @@ static wchar_t *language_pack_directory(void)
 }
 
 /// 设置变化后让各部分立即生效。置物架外观在后面的步骤接进来。
+/// 快速操作的布局、四个位置和自定义操作都没变。
+static bool quick_actions_settings_equal(const AppSettings *first, const AppSettings *second)
+{
+    if (first->quick_action_layout != second->quick_action_layout || !strlist_equal(&first->quick_action_slots, &second->quick_action_slots, false) ||
+        first->custom_action_count != second->custom_action_count)
+        return false;
+    for (int index = 0; index < first->custom_action_count; index++)
+        if (!custom_action_same(&first->custom_actions[index], &second->custom_actions[index])) return false;
+    return true;
+}
+
 static void apply_settings(const AppSettings *previous, const AppSettings *current)
 {
     if (previous->theme != current->theme || !wcs_equal(previous->accent_color, current->accent_color))
@@ -99,8 +111,9 @@ static void apply_settings(const AppSettings *previous, const AppSettings *curre
         hotkey_registered = hotkey_service_register(settings_hotkey(current));
     if (!strlist_equal(&previous->blocked_apps, &current->blocked_apps, true))
         foreground_watcher_set_blocked_apps(&current->blocked_apps);
-    // 尺寸、拖出方式变化时，已打开的置物架需要立即更新。
-    if (previous->quick_shelf_size != current->quick_shelf_size || previous->drag_out_mode != current->drag_out_mode)
+    // 尺寸、拖出方式、快速操作变化时，已打开的置物架需要立即更新。
+    if (previous->quick_shelf_size != current->quick_shelf_size || previous->drag_out_mode != current->drag_out_mode ||
+        !quick_actions_settings_equal(previous, current))
         shelves_apply_settings();
 }
 
@@ -196,7 +209,9 @@ void app_prepare_for_shutdown(void)
     foreground_watcher_stop();
     gesture_service_stop();
     probe_destroy();
+    // 关闭时仍有文件的置物架记入最近关闭，等记录写完再退出。
     shelves_close_all();
+    shelf_history_flush();
     ui_close_all_windows();
     hotkey_service_stop();
     tray_destroy();
@@ -390,6 +405,7 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     low_performance_set_mode(settings.performance_mode);
     log_cleanup_old();
     attachment_cache_cleanup_stale();
+    shelf_history_load(NULL);
     restore_startup_registration();
 
     message_window = create_message_window(instance);

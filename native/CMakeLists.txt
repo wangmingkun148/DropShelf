@@ -18,29 +18,43 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # 静态链接运行库：发布的程序不依赖另外安装的 VC++ 运行库。
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+# 第三方：miniz 处理 ZIP（MIT 许可，原样放在 third_party/miniz）。只用到压缩包读写，警告不归我们管。
+add_library(miniz STATIC third_party/miniz/miniz.c)
+target_include_directories(miniz PUBLIC third_party/miniz)
+target_compile_definitions(miniz PUBLIC MINIZ_NO_STDIO MINIZ_NO_ZLIB_COMPATIBLE_NAMES _CRT_SECURE_NO_WARNINGS)
+target_compile_options(miniz PRIVATE /W0 /utf-8)
+
 add_library(dropshelf_core STATIC
     src/anim.c
     src/app.c
+    src/archive.c
     src/attachment_cache.c
     src/base.c
     src/clipboard.c
     src/drop_data.c
     src/drop_read.c
+    src/file_ops.c
+    src/file_identity.c
     src/foreground.c
     src/gesture.c
     src/gesture_service.c
     src/gfx.cpp
     src/hotkey.c
+    src/history_menu.c
+    src/image_tools.c
     src/json.c
     src/lang.c
     src/log.c
     src/main_window.c
     src/power.c
     src/probe.c
+    src/quick_action.c
     src/settings.c
     src/shelf_drag.c
+    src/shelf_history.c
     src/shelf_input.c
     src/shelf_item.c
+    src/shelf_merge.c
     src/shelf_model.c
     src/shelf_motion.c
     src/shelf_window.c
@@ -65,7 +79,7 @@ target_compile_definitions(dropshelf_core PUBLIC
 target_compile_options(dropshelf_core PUBLIC /utf-8 /W4 /wd4100)
 string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 string(REPLACE "/GR" "/GR-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-target_link_libraries(dropshelf_core PUBLIC user32 gdi32 shell32 advapi32 ole32 dwmapi shcore shlwapi windowscodecs d2d1 d3d11 dxgi dwrite dcomp dxguid)
+target_link_libraries(dropshelf_core PUBLIC miniz user32 gdi32 comctl32 version shell32 advapi32 ole32 dwmapi shcore shlwapi windowscodecs d2d1 d3d11 dxgi dwrite dcomp dxguid)
 
 configure_file(res/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
 
@@ -79,6 +93,8 @@ target_include_directories(DropShelf PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/genera
 target_link_libraries(DropShelf PRIVATE dropshelf_core)
 # 清单里已经写了权限级别，不让链接器再生成一份。
 target_link_options(DropShelf PRIVATE /MANIFESTUAC:NO)
+# 提示框等系统控件用新版的样式（C# 版不需要这一项，所以没有写在共用的清单里）。
+target_link_options(DropShelf PRIVATE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'")
 
 enable_testing()
 add_executable(DropShelfTests tests/tests.c)
