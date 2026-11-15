@@ -21,18 +21,36 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(dropshelf_core STATIC
     src/anim.c
     src/app.c
+    src/attachment_cache.c
     src/base.c
+    src/clipboard.c
+    src/drop_data.c
+    src/drop_read.c
+    src/foreground.c
+    src/gesture.c
+    src/gesture_service.c
     src/gfx.cpp
     src/hotkey.c
     src/json.c
     src/lang.c
     src/log.c
     src/main_window.c
+    src/power.c
+    src/probe.c
     src/settings.c
+    src/shelf_drag.c
+    src/shelf_input.c
+    src/shelf_item.c
+    src/shelf_model.c
+    src/shelf_motion.c
+    src/shelf_window.c
+    src/shelves.c
     src/single_instance.c
     src/startup.c
     src/strings.c
+    src/task.c
     src/theme.c
+    src/thumbnail.c
     src/tray.c
     src/ui_controls.c
     src/ui_menu.c
@@ -47,7 +65,7 @@ target_compile_definitions(dropshelf_core PUBLIC
 target_compile_options(dropshelf_core PUBLIC /utf-8 /W4 /wd4100)
 string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 string(REPLACE "/GR" "/GR-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-target_link_libraries(dropshelf_core PUBLIC user32 gdi32 shell32 advapi32 ole32 dwmapi d2d1 d3d11 dxgi dwrite dcomp dxguid)
+target_link_libraries(dropshelf_core PUBLIC user32 gdi32 shell32 advapi32 ole32 dwmapi shcore shlwapi windowscodecs d2d1 d3d11 dxgi dwrite dcomp dxguid)
 
 configure_file(res/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
 

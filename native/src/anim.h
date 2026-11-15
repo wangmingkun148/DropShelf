@@ -9,6 +9,7 @@
 typedef enum EaseKind
 {
     EASE_LINEAR,
+    EASE_CUBIC_IN,
     EASE_CUBIC_OUT,
     EASE_QUINTIC_OUT,
     EASE_BACK_OUT,      // 略带回弹，amplitude 越大弹得越远

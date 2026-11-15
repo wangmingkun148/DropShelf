@@ -1,10 +1,10 @@
-// 程序总控：持有设置并协调托盘、快捷键和各个窗口（手势、置物架、主窗口在后面的步骤接进来）。
+// 程序总控：持有设置并协调手势、置物架、托盘、快捷键和各个窗口。
 #pragma once
 
 #include "base.h"
 #include "settings.h"
 
-/// 读取设置，创建消息窗口、托盘图标并注册快捷键。start_in_background 为 false 时随后打开主窗口。
+/// 读取设置，创建消息窗口、托盘图标，注册快捷键并开始识别手势。start_in_background 为 false 时随后打开主窗口。
 bool app_start(HINSTANCE instance, bool start_in_background);
 
 /// 处理消息直到退出，返回退出码。
@@ -15,9 +15,13 @@ void app_handle_arguments(const StrList *arguments);
 
 const AppSettings *app_settings(void);
 bool app_is_hotkey_registered(void);
+bool app_is_gesture_running(void);
 
 /// 修改设置并立即生效、自动保存。change 在设置的副本上修改。
 void app_update_settings(void (*change)(AppSettings *settings, void *context), void *context);
+
+/// 改所有置物架拖出时移动还是复制（TransferMode）。
+void app_update_drag_out_mode(int mode);
 
 /// 修改开机启动；写入注册表失败时保持原值并返回 false。
 bool app_set_start_with_windows(bool enabled);

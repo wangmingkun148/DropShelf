@@ -21,6 +21,9 @@ wchar_t *wcs_dup(const wchar_t *text);                  // text 为 NULL 时返�
 wchar_t *wcs_dup_n(const wchar_t *text, size_t length);
 wchar_t *wcs_trim_dup(const wchar_t *text);             // 去掉首尾空白后的副本
 bool wcs_is_blank(const wchar_t *text);                 // NULL、空或全是空白
+bool wchar_is_white_space(wchar_t character);           // 与 C# 的 char.IsWhiteSpace 相同
+/// 不分大小写（与 C# 的 OrdinalIgnoreCase 相同）查找 part，找不到时返回 NULL。
+const wchar_t *wcs_find_ignore_case(const wchar_t *text, const wchar_t *part);
 bool wcs_equal(const wchar_t *first, const wchar_t *second);        // 两个都是 NULL 也算相同
 bool wcs_equal_ignore_case(const wchar_t *first, const wchar_t *second);
 

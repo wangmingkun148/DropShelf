@@ -32,6 +32,7 @@ double ease_apply(Ease ease, double t)
     if (t >= 1) return 1;
     switch (ease.kind)
     {
+        case EASE_CUBIC_IN: return t * t * t;
         case EASE_CUBIC_OUT:
         {
             double s = 1 - t;

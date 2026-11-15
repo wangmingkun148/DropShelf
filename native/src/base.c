@@ -46,12 +46,20 @@ wchar_t *wcs_dup(const wchar_t *text)
     return text ? wcs_dup_n(text, wcslen(text)) : NULL;
 }
 
+bool wchar_is_white_space(wchar_t character)
+{
+    if (character == L' ' || (character >= 0x09 && character <= 0x0D)) return true;
+    if (character < 0x85) return false;
+    return character == 0x85 || character == 0xA0 || character == 0x1680 || (character >= 0x2000 && character <= 0x200A) ||
+           character == 0x2028 || character == 0x2029 || character == 0x202F || character == 0x205F || character == 0x3000;
+}
+
 wchar_t *wcs_trim_dup(const wchar_t *text)
 {
     if (!text) return NULL;
-    while (*text && iswspace(*text)) text++;
+    while (*text && wchar_is_white_space(*text)) text++;
     size_t length = wcslen(text);
-    while (length > 0 && iswspace(text[length - 1])) length--;
+    while (length > 0 && wchar_is_white_space(text[length - 1])) length--;
     return wcs_dup_n(text, length);
 }
 
@@ -59,8 +67,16 @@ bool wcs_is_blank(const wchar_t *text)
 {
     if (!text) return true;
     for (; *text; text++)
-        if (!iswspace(*text)) return false;
+        if (!wchar_is_white_space(*text)) return false;
     return true;
+}
+
+const wchar_t *wcs_find_ignore_case(const wchar_t *text, const wchar_t *part)
+{
+    int length = (int)wcslen(part);
+    for (; *text; text++)
+        if (CompareStringOrdinal(text, (int)wcsnlen(text, (size_t)length), part, length, TRUE) == CSTR_EQUAL) return text;
+    return length == 0 ? text : NULL;
 }
 
 bool wcs_equal(const wchar_t *first, const wchar_t *second)

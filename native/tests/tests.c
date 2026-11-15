@@ -1,10 +1,21 @@
-// C 版的测试：对应 C# 版测试里设置、快捷键、语言和系统几部分的逻辑。
+// C 版的测试：对应 C# 版测试里设置、快捷键、语言、系统、手势和拖放判断几部分的逻辑。
 // 设置和日志都写到临时文件夹（通过环境变量），不碰真实的设置。
+#include "drop_data.h"
+#include "attachment_cache.h"
 #include "base.h"
+#include "drop_read.h"
+#include "shelf_drag.h"
+#include "shelf_model.h"
+#include "shelf_window.h"
+#include "task.h"
+#include "foreground.h"
+#include "gesture.h"
+#include "gesture_service.h"
 #include "hotkey.h"
 #include "json.h"
 #include "lang.h"
 #include "log.h"
+#include "probe.h"
 #include "settings.h"
 #include "single_instance.h"
 #include "startup.h"
@@ -12,7 +23,10 @@
 #include "theme.h"
 #include "ui.h"
 
+#include <limits.h>
 #include <math.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -808,6 +822,529 @@ static void test_layout(void)
     gfx_shutdown();
 }
 
+// ───────────── 手势识别 ─────────────
+// 与 C# 版 GestureTests.cs 的各项一一对应。
+
+/// C# 的 new Random(seed)（.NET 5 之前的算法，带种子时 .NET 仍沿用），让带随机抖动的测试和 C# 版用同一串数。
+typedef struct DotnetRandom
+{
+    int seeds[56];
+    int next;
+    int next_p;
+} DotnetRandom;
+
+static void dotnet_random_init(DotnetRandom *random, int seed)
+{
+    int subtraction = seed == INT_MIN ? INT_MAX : abs(seed);
+    int mj = 161803398 - subtraction;
+    random->seeds[55] = mj;
+    int mk = 1, ii = 0;
+    for (int i = 1; i < 55; i++)
+    {
+        if ((ii += 21) >= 55) ii -= 55;
+        random->seeds[ii] = mk;
+        mk = mj - mk;
+        if (mk < 0) mk += INT_MAX;
+        mj = random->seeds[ii];
+    }
+    for (int k = 1; k < 5; k++)
+    {
+        for (int i = 1; i < 56; i++)
+        {
+            int n = i + 30;
+            if (n >= 55) n -= 55;
+            random->seeds[i] -= random->seeds[1 + n];
+            if (random->seeds[i] < 0) random->seeds[i] += INT_MAX;
+        }
+    }
+    random->next = 0;
+    random->next_p = 21;
+}
+
+static int dotnet_random_next(DotnetRandom *random, int minimum, int maximum)
+{
+    int next = random->next, next_p = random->next_p;
+    if (++next >= 56) next = 1;
+    if (++next_p >= 56) next_p = 1;
+    int value = random->seeds[next] - random->seeds[next_p];
+    if (value == INT_MAX) value--;
+    if (value < 0) value += INT_MAX;
+    random->seeds[next] = value;
+    random->next = next;
+    random->next_p = next_p;
+    double sample = value * (1.0 / INT_MAX);
+    return (int)(sample * ((long long)maximum - minimum)) + minimum;
+}
+
+typedef struct GesturePoint
+{
+    int x;
+    int y;
+    long long time;
+} GesturePoint;
+
+static bool any_sample(int sensitivity, const GesturePoint *points, int count, bool edge)
+{
+    ShakeDetector detector;
+    shake_detector_init(&detector, sensitivity);
+    bool triggered = false;
+    for (int index = 0; index < count && !triggered; index++)
+        triggered = shake_detector_add_sample(&detector, points[index].x, points[index].y, points[index].time, edge);
+    shake_detector_free(&detector);
+    return triggered;
+}
+
+/// 横向来回：x 依次取 xs，y 固定为 100，每隔 interval 毫秒一个采样。
+static bool shake_x(int sensitivity, const int *xs, int count, long long interval)
+{
+    GesturePoint points[64];
+    for (int index = 0; index < count; index++) points[index] = (GesturePoint){ xs[index], 100, index * interval };
+    return any_sample(sensitivity, points, count, false);
+}
+
+#define SHAKE_X(sensitivity, interval, ...) \
+    shake_x((sensitivity), (const int[]){ __VA_ARGS__ }, (int)(sizeof((int[]){ __VA_ARGS__ }) / sizeof(int)), (interval))
+
+static void test_shake_detection(void)
+{
+    const GesturePoint balanced[] = { { 100, 100, 0 }, { 150, 101, 60 }, { 95, 100, 120 }, { 155, 101, 180 }, { 90, 100, 240 } };
+    CHECK(any_sample(SHAKE_BALANCED, balanced, 5, false), "快速左右晃动未被识别");
+
+    CHECK(SHAKE_X(SHAKE_RESPONSIVE, 70, 100, 134, 100, 134), "灵敏档无法通过短距离两次来回触发");
+    CHECK(SHAKE_X(SHAKE_BALANCED, 70, 100, 143, 100, 143, 100), "均衡档无法通过正常幅度晃动触发");
+    CHECK(SHAKE_X(SHAKE_STEADY, 100, 100, 210, 100, 210, 100, 210, 100, 210, 100), "稳健档无法通过明确晃动触发");
+    CHECK(!SHAKE_X(SHAKE_STEADY, 70, 100, 165, 100, 165, 100, 165, 100), "最稳健时被 2.5.7 的稳健档晃动触发");
+    CHECK(!SHAKE_X(SHAKE_STEADY, 100, 100, 185, 100, 185, 100, 185, 100, 185), "最稳健时被 2.8.1 的最稳健晃动触发");
+    CHECK(SHAKE_X(SHAKE_RESPONSIVE, 70, 100, 125, 100, 125), "灵敏档无法通过轻晃触发");
+    CHECK(!SHAKE_X(SHAKE_STEADY, 70, 100, 150, 100, 150, 100, 150, 100), "稳健档被中等幅度晃动触发");
+    CHECK(!SHAKE_X(SHAKE_STEADY, 70, 100, 165, 100, 165, 100), "稳健档只来回两次就被触发");
+    CHECK(!SHAKE_X(SHAKE_RESPONSIVE, 70, 100, 120, 100, 120), "灵敏档被小幅来回误触发");
+    CHECK(!SHAKE_X(SHAKE_BALANCED, 70, 100, 125, 100, 125, 100), "均衡档被小幅晃动误触发");
+    CHECK(!SHAKE_X(SHAKE_STEADY, 70, 100, 135, 100, 135, 100, 135), "稳健档被小幅晃动误触发");
+
+    // 无级调节：同样的晃动，灵敏度越高只会越容易触发，中途不会突然变难。
+    bool monotonic = true;
+    for (int amplitude = 10; amplitude <= 80; amplitude += 2)
+    {
+        int xs[8];
+        for (int index = 0; index < 8; index++) xs[index] = index % 2 == 0 ? 100 : 100 + amplitude;
+        bool previous = false;
+        for (int level = SHAKE_STEADY; level <= SHAKE_RESPONSIVE; level++)
+        {
+            bool triggered = shake_x(level, xs, 8, 70);
+            if (!triggered && previous) monotonic = false;
+            previous = triggered;
+        }
+    }
+    CHECK(monotonic, "灵敏度高的反而更难触发");
+
+    // 设置页的说明：两端和中间与原来的三档一致，拖向灵敏时幅度和次数只减不增，且照说明晃动一定能触发。
+    int reversals[101], distances[101];
+    for (int level = 0; level <= 100; level++) shake_describe(level, &reversals[level], &distances[level]);
+    CHECK(reversals[0] == 6 && distances[0] == 100 && reversals[50] == 3 && distances[50] == 38 && reversals[100] == 2 && distances[100] == 23,
+        "灵敏度两端和中间的说明不正确");
+    bool descending = true, described = true;
+    for (int level = 0; level < 100; level++)
+        if (distances[level + 1] > distances[level] || reversals[level + 1] > reversals[level]) descending = false;
+    for (int level = 0; level <= 100; level++)
+    {
+        int xs[16];
+        int count = reversals[level] + 2;
+        for (int index = 0; index < count; index++) xs[index] = index % 2 == 0 ? 100 : 101 + distances[level];
+        if (!shake_x(level, xs, count, 70)) described = false;
+    }
+    CHECK(descending, "灵敏度说明没有随滑块单调变化");
+    CHECK(described, "按设置页说明的幅度和次数晃动没有触发");
+
+    // 时长：太快的抖动和太慢的来回都不算。
+    const GesturePoint fast[] = { { 100, 100, 0 }, { 143, 100, 30 }, { 100, 100, 60 }, { 143, 100, 90 }, { 100, 100, 120 }, { 143, 100, 150 } };
+    CHECK(!any_sample(SHAKE_BALANCED, fast, 6, false), "瞬间抖动被错误识别为晃动手势");
+    const GesturePoint slow[] = { { 100, 100, 0 }, { 143, 100, 300 }, { 100, 100, 600 }, { 143, 100, 900 }, { 100, 100, 1200 }, { 143, 100, 1500 } };
+    CHECK(!any_sample(SHAKE_BALANCED, slow, 6, false), "缓慢来回移动被错误识别为晃动手势");
+
+    // 采样不规则。
+    const GesturePoint delayed[] = { { 100, 100, 0 }, { 143, 103, 60 }, { 100, 99, 380 }, { 144, 105, 445 }, { 99, 98, 510 } };
+    CHECK(any_sample(SHAKE_BALANCED, delayed, 5, false), "系统短暂忙碌导致采样间隔变长后未能识别手势");
+    GesturePoint compact[6];
+    const int compact_xs[] = { 100, 138, 100, 138, 100, 138 };
+    for (int index = 0; index < 6; index++) compact[index] = (GesturePoint){ compact_xs[index], 100 + index % 2 * 2, index * 55LL };
+    CHECK(any_sample(SHAKE_BALANCED, compact, 6, false), "合理幅度和时长的晃动未被识别");
+
+    // 其他方向。
+    const GesturePoint vertical[] = { { 100, 100, 0 }, { 101, 150, 65 }, { 100, 95, 130 }, { 101, 155, 195 }, { 100, 90, 260 } };
+    CHECK(any_sample(SHAKE_BALANCED, vertical, 5, false), "快速上下晃动未被识别");
+    const GesturePoint diagonal[] = { { 100, 100, 0 }, { 140, 140, 65 }, { 90, 90, 130 }, { 145, 145, 195 }, { 85, 85, 260 } };
+    CHECK(any_sample(SHAKE_BALANCED, diagonal, 5, false), "快速斜向晃动未被识别");
+
+    // 普通移动。
+    GesturePoint straight[12];
+    for (int index = 0; index < 12; index++) straight[index] = (GesturePoint){ 100 + index * 12, 100 + index, index * 40LL };
+    CHECK(!any_sample(SHAKE_RESPONSIVE, straight, 12, false), "普通直线移动被误识别");
+    const GesturePoint turning[] = { { 100, 100, 0 }, { 140, 100, 45 }, { 140, 140, 90 }, { 100, 140, 135 }, { 100, 100, 180 }, { 140, 100, 225 } };
+    CHECK(!any_sample(SHAKE_RESPONSIVE, turning, 6, false), "普通转弯移动被误识别");
+
+    // 屏幕边缘。
+    const GesturePoint edge[] = { { 100, 4, 0 }, { 150, 4, 50 }, { 95, 4, 100 }, { 155, 4, 150 }, { 90, 4, 200 } };
+    CHECK(!any_sample(SHAKE_RESPONSIVE, edge, 5, true), "屏幕边缘移动被误识别");
+}
+
+static void test_shake_raw_samples(void)
+{
+    static const int sensitivities[] = { SHAKE_STEADY, 25, SHAKE_BALANCED, 75, SHAKE_RESPONSIVE };
+    const double pi = 3.14159265358979323846;
+    for (int item = 0; item < 5; item++)
+    {
+        // 1000 Hz 回报率，约 4 次/秒、幅度 ±60 像素的左右晃动，叠加 ±1 像素的抖动。
+        ShakeDetector detector;
+        shake_detector_init(&detector, sensitivities[item]);
+        DotnetRandom random;
+        dotnet_random_init(&random, 7);
+        bool triggered = false;
+        for (int ms = 0; ms < 1200 && !triggered; ms++)
+        {
+            int x = 500 + (int)rint(60 * sin(ms / 1000.0 * 2 * pi * 4)) + dotnet_random_next(&random, -1, 2);
+            int y = 300 + dotnet_random_next(&random, -1, 2);
+            triggered = shake_detector_add_raw_sample(&detector, x, y, ms, false);
+        }
+        CHECK(triggered, "没有识别高回报率鼠标的晃动");
+
+        // 系统计时每 15.6 毫秒才跳一次，1000 Hz 鼠标的多次采样时间完全相同。
+        shake_detector_set_sensitivity(&detector, sensitivities[item]);
+        triggered = false;
+        for (int ms = 0; ms < 1200 && !triggered; ms++)
+        {
+            int x = 500 + (int)rint(55 * sin(ms / 1000.0 * 2 * pi * 4.5));
+            long long coarse = (long long)(floor(ms / 15.625) * 15.625);
+            triggered = shake_detector_add_raw_sample(&detector, x, 300 + ms % 3, coarse, false);
+        }
+        CHECK(triggered, "在低精度计时下没有识别晃动");
+        shake_detector_free(&detector);
+    }
+
+    ShakeDetector straight;
+    shake_detector_init(&straight, SHAKE_RESPONSIVE);
+    bool straight_triggered = false;
+    for (int ms = 0; ms < 1500 && !straight_triggered; ms++)
+        straight_triggered = shake_detector_add_raw_sample(&straight, 100 + ms, 300 + ms / 10, ms, false);
+    shake_detector_free(&straight);
+    CHECK(!straight_triggered, "高回报率的直线拖动被误识别");
+
+    ShakeDetector circle;
+    shake_detector_init(&circle, SHAKE_RESPONSIVE);
+    bool circle_triggered = false;
+    for (int ms = 0; ms < 2000 && !circle_triggered; ms++)
+        circle_triggered = shake_detector_add_raw_sample(&circle, 500 + (int)(80 * cos(ms / 300.0)), 400 + (int)(80 * sin(ms / 300.0)), ms, false);
+    shake_detector_free(&circle);
+    CHECK(!circle_triggered, "绕圈拖动被误识别");
+
+    // 每次掉头时先出现一次几乎垂直的细小位移，再继续反向移动；旧算法会因此清空已记录的往返。
+    GesturePoint jitter[32];
+    int count = 0, x = 100;
+    jitter[count++] = (GesturePoint){ 100, 100, 0 };
+    for (int cycle = 0; cycle < 5; cycle++)
+    {
+        int direction = cycle % 2 == 0 ? 1 : -1;
+        for (int step = 0; step < 4; step++)
+        {
+            x += direction * 12;
+            jitter[count] = (GesturePoint){ x, 100, count * 14LL };
+            count++;
+        }
+        jitter[count] = (GesturePoint){ x + direction, 105, count * 14LL };
+        count++;
+    }
+    CHECK(any_sample(SHAKE_BALANCED, jitter, count, false), "掉头时的侧向位移打断了手势");
+    const GesturePoint zigzag[] = { { 100, 100, 0 }, { 130, 100, 40 }, { 131, 106, 80 }, { 131, 112, 120 }, { 131, 118, 160 },
+                                    { 101, 118, 200 }, { 100, 124, 240 }, { 100, 130, 280 } };
+    CHECK(!any_sample(SHAKE_BALANCED, zigzag, 8, false), "连续侧向移动被误识别");
+}
+
+/// 一次示范：1000 Hz、每秒来回 4 次的左右晃动。
+static void calibration_demo(ShakeSample *samples, double amplitude)
+{
+    for (int ms = 0; ms < 1200; ms++)
+        samples[ms] = (ShakeSample){ 500 + (int)rint(amplitude * sin(ms / 1000.0 * 2 * 3.14159265358979323846 * 4)), 300, ms };
+}
+
+static void test_shake_calibration(void)
+{
+    static ShakeSample demo[1200];
+    calibration_demo(demo, 15);
+    int light = shake_calibration_steadiest_level(demo, 1200);
+    calibration_demo(demo, 60);
+    int strong = shake_calibration_steadiest_level(demo, 1200);
+    calibration_demo(demo, 3);
+    int weak = shake_calibration_steadiest_level(demo, 1200);
+    calibration_demo(demo, 40);
+    int normal = shake_calibration_steadiest_level(demo, 1200);
+    CHECK(light > 50 && light < 100 && normal > 0 && normal < 50 && strong == SHAKE_STEADY, "示范的力度和能触发的档位对不上");
+    CHECK(weak == -1, "几乎没动的示范也算数了");
+    CHECK(shake_calibration_triggers(demo, 1200, normal) && !shake_calibration_triggers(demo, 1200, normal - 1), "最稳健的档位不是刚好能触发的那一档");
+    CHECK(shake_calibration_recommend((const int[]){ 30, 42, 36 }, 3) == 42 + CALIBRATION_MARGIN &&
+          shake_calibration_recommend((const int[]){ 95, 99, 97 }, 3) == 100, "建议的灵敏度不正确");
+}
+
+static void test_edge_dwell(void)
+{
+    EdgeDwellDetector detector;
+    edge_dwell_init(&detector, edge_dwell_milliseconds(DWELL_MEDIUM));
+    CHECK(!edge_dwell_update(&detector, EDGE_LEFT, 0, 300, 0) && !edge_dwell_update(&detector, EDGE_LEFT, 0, 310, 300) &&
+          edge_dwell_update(&detector, EDGE_LEFT, 0, 320, 600), "在左边缘停留 0.6 秒没有触发");
+    CHECK(!edge_dwell_update(&detector, EDGE_LEFT, 0, 300, 1000) && !edge_dwell_update(&detector, EDGE_NONE, 40, 300, 1300) &&
+          !edge_dwell_update(&detector, EDGE_LEFT, 0, 300, 1400) && !edge_dwell_update(&detector, EDGE_LEFT, 0, 300, 1900), "离开边缘后没有重新计时");
+    CHECK(!edge_dwell_update(&detector, EDGE_RIGHT, 1919, 300, 3000) &&
+          !edge_dwell_update(&detector, EDGE_RIGHT, 1919, 300 + EDGE_MAXIMUM_DRIFT + 1, 3500) &&
+          !edge_dwell_update(&detector, EDGE_RIGHT, 1919, 400, 4000), "沿边缘大幅移动后没有重新计时");
+    CHECK(!edge_dwell_update(&detector, EDGE_TOP, 100, 0, 5000) && !edge_dwell_update(&detector, EDGE_LEFT, 0, 0, 5400), "换到另一条边缘时没有重新计时");
+    detector.dwell_milliseconds = edge_dwell_milliseconds(DWELL_SHORT);
+    CHECK(edge_dwell_update(&detector, EDGE_LEFT, 0, 0, 5700), "停留时间调整后没有生效");
+    CHECK(auto_open_uses_shake(TRIGGER_BOTH) && auto_open_uses_edge(TRIGGER_BOTH) && !auto_open_uses_shake(TRIGGER_EDGE) &&
+          !auto_open_uses_edge(TRIGGER_SHAKE), "呼出方式判断不正确");
+}
+
+static void test_gesture_service(void)
+{
+    CHECK(gesture_service_start(NULL, WM_APP, SHAKE_BALANCED), "鼠标原始输入没有注册");
+    gesture_service_set_sensitivity(SHAKE_STEADY);
+    gesture_service_set_trigger(TRIGGER_EDGE);
+    gesture_service_set_edge_dwell(DWELL_SHORT);
+    gesture_service_stop();
+    Sleep(100);
+    CHECK(!gesture_service_is_running(), "停止后仍在监听鼠标输入");
+
+    // 光标位置可能是负数（主显示器左边或上面的显示器）。
+    unsigned long long packed = ((unsigned long long)(unsigned)-1200 << 32) | (unsigned)-35;
+    POINT point = gesture_message_point((LPARAM)packed);
+    CHECK(point.x == -35 && point.y == -1200, "光标位置没有原样传过来");
+
+    POINT placed = probe_place((POINT){ 10, 1070 }, (RECT){ 0, 0, 1920, 1040 }, 320, 320);
+    CHECK(placed.x == 0 && placed.y == 720, "探针窗口没有放进工作区");
+    placed = probe_place((POINT){ 961, 500 }, (RECT){ 0, 0, 1920, 1040 }, 320, 320);
+    CHECK(placed.x == 801 && placed.y == 340, "探针窗口没有以光标为中心");
+}
+
+static void test_foreground_watcher(void)
+{
+    wchar_t *self = process_file_name(GetCurrentProcessId());
+    CHECK(self && wcs_equal_ignore_case(self, L"DropShelfTests.exe"), "读不出进程的程序文件名");
+    StrList apps;
+    foreground_windowed_apps(&apps);
+    CHECK(strlist_index_of(&apps, L"DropShelfTests.exe", true) < 0, "有窗口的程序里不应包含自己");
+    bool sorted = true;
+    for (int index = 1; index < apps.count; index++)
+        if (CompareStringOrdinal(apps.items[index - 1], -1, apps.items[index], -1, TRUE) != CSTR_LESS_THAN) sorted = false;
+    CHECK(sorted, "有窗口的程序没有按名称排好、去掉重复");
+    strlist_clear(&apps);
+
+    // 屏蔽列表为空时从不算屏蔽；屏蔽自己后，光标下是自己的窗口时算屏蔽。
+    StrList blocked = {0};
+    foreground_watcher_set_blocked_apps(&blocked);
+    CHECK(!foreground_watcher_check(), "屏蔽列表为空时不应暂停");
+    HWND window = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"", WS_POPUP | WS_VISIBLE,
+        0, 0, 200, 200, NULL, NULL, GetModuleHandleW(NULL), NULL);
+    RECT rect;
+    GetWindowRect(window, &rect);
+    strlist_add(&blocked, L"dropshelftests.EXE");
+    foreground_watcher_set_blocked_apps(&blocked);
+    POINT inside = { rect.left + 100, rect.top + 100 };
+    CHECK(GetAncestor(WindowFromPoint(inside), GA_ROOT) != window || foreground_watcher_is_blocked_at(inside),
+        "光标下是屏蔽的程序时没有算屏蔽");
+    DestroyWindow(window);
+    foreground_watcher_stop();
+    strlist_clear(&blocked);
+    free(self);
+}
+
+// ───────────── 拖放内容的判断 ─────────────
+
+static void set_bytes(IDataObject *data, const wchar_t *format_name, CLIPFORMAT format, const void *bytes, size_t size)
+{
+    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE, size ? size : 1);
+    void *target = GlobalLock(global);
+    if (size) memcpy(target, bytes, size);
+    GlobalUnlock(global);
+    FORMATETC request = { format_name ? drop_format(format_name) : format, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM medium = { TYMED_HGLOBAL };
+    medium.hGlobal = global;
+    IDataObject_SetData(data, &request, &medium, TRUE);
+}
+
+static void set_unicode(IDataObject *data, const wchar_t *format_name, CLIPFORMAT format, const wchar_t *text)
+{
+    set_bytes(data, format_name, format, text, (wcslen(text) + 1) * sizeof(wchar_t));
+}
+
+static void set_utf8(IDataObject *data, const wchar_t *format_name, const wchar_t *text)
+{
+    size_t length;
+    char *bytes = utf8_from_wide(text, &length);
+    set_bytes(data, format_name, 0, bytes, length + 1);
+    free(bytes);
+}
+
+static void set_file_drop(IDataObject *data, const wchar_t *path)
+{
+    size_t length = wcslen(path);
+    size_t size = sizeof(DROPFILES) + (length + 2) * sizeof(wchar_t);
+    unsigned char *bytes = xcalloc(1, size);
+    DROPFILES *files = (DROPFILES *)bytes;
+    files->pFiles = sizeof(DROPFILES);
+    files->fWide = TRUE;
+    memcpy(bytes + sizeof(DROPFILES), path, length * sizeof(wchar_t));
+    set_bytes(data, NULL, CF_HDROP, bytes, size);
+    free(bytes);
+}
+
+static void set_descriptor(IDataObject *data, const wchar_t *name)
+{
+    struct { UINT count; FILEDESCRIPTORW descriptor; } group = {0};
+    group.count = 1;
+    wcscpy_s(group.descriptor.cFileName, MAX_PATH, name);
+    set_bytes(data, CFSTR_FILEDESCRIPTORW, 0, &group, sizeof(group));
+}
+
+static IDataObject *new_data(void)
+{
+    IDataObject *data = NULL;
+    SHCreateDataObject(NULL, 0, NULL, NULL, &IID_IDataObject, (void **)&data);
+    return data;
+}
+
+static void write_bytes(const wchar_t *path, const char *bytes)
+{
+    file_write_atomic(path, bytes, strlen(bytes));
+}
+
+static wchar_t *file_url(const wchar_t *path)
+{
+    wchar_t url[2048];
+    DWORD length = 2048;
+    return UrlCreateFromPathW(path, url, &length, 0) == S_OK ? wcs_dup(url) : wcs_dup(L"");
+}
+
+static void test_drop_classify(void)
+{
+    HRESULT ole = OleInitialize(NULL);
+    wchar_t *folder = path_join(temporary_directory, L"classify");
+    directory_create(folder);
+    wchar_t *file = path_join(folder, L"a.txt");
+    write_bytes(file, "x");
+    wchar_t *image = path_join(folder, L"qq-image.png");
+    write_bytes(image, "\x89PNG");
+    wchar_t *image_url = file_url(image);
+
+    IDataObject *data = new_data();
+    CHECK(data != NULL, "无法创建测试用的数据对象");
+    if (!data) return;
+    set_file_drop(data, file);
+    CHECK(drop_classify(data) == DROP_FILES, "文件没有识别");
+    IDataObject_Release(data);
+
+    data = new_data();
+    set_unicode(data, NULL, CF_UNICODETEXT, L"hello");
+    CHECK(drop_classify(data) == DROP_TEXT, "文本没有识别");
+    IDataObject_Release(data);
+
+    data = new_data();
+    set_unicode(data, L"UniformResourceLocatorW", 0, L"https://example.com");
+    CHECK(drop_classify(data) == DROP_LINK, "链接没有识别");
+    IDataObject_Release(data);
+
+    data = new_data();
+    set_bytes(data, L"PNG", 0, "\x89PNG", 4);
+    CHECK(drop_classify(data) == DROP_IMAGE, "图片没有识别");
+    IDataObject_Release(data);
+
+    data = new_data();
+    CHECK(drop_classify(data) == DROP_NONE && !drop_source_shelf_id(data), "空数据被误识别");
+    set_unicode(data, SHELF_ID_FORMAT, 0, L"abc");
+    wchar_t *shelf = drop_source_shelf_id(data);
+    CHECK(shelf && wcscmp(shelf, L"abc") == 0, "来源置物架没有读出来");
+    free(shelf);
+    IDataObject_Release(data);
+    CHECK(drop_can_provide_files(DROP_IMAGE) && !drop_can_provide_files(DROP_TEXT), "快速操作可用内容判断不正确");
+
+    // 虚拟附件；全是 .url 又带链接时按链接处理。
+    data = new_data();
+    set_descriptor(data, L"报告.docx");
+    CHECK(drop_classify(data) == DROP_VIRTUAL_FILES, "标准 Windows 虚拟附件未被识别");
+    IDataObject_Release(data);
+    data = new_data();
+    set_descriptor(data, L"Example.URL");
+    set_unicode(data, L"UniformResourceLocatorW", 0, L"https://example.com");
+    CHECK(drop_classify(data) == DROP_LINK, "浏览器拖出的快捷方式没有按链接处理");
+    IDataObject_Release(data);
+
+    // 聊天软件。
+    data = new_data();
+    set_bytes(data, L"image/png", 0, "\x89PNG", 4);
+    set_unicode(data, L"UniformResourceLocatorW", 0, L"https://example.com/a.png");
+    CHECK(drop_classify(data) == DROP_IMAGE, "带有图片数据的拖动被当成了链接");
+    IDataObject_Release(data);
+
+    WStr xml = {0};
+    wstr_appendf(&xml, L"<QQRichEditFormat><Info version=\"1001\"></Info><EditElement type=\"1\" filepath=\"%ls\" shortcut=\"\"></EditElement></QQRichEditFormat>", image);
+    data = new_data();
+    set_utf8(data, L"QQ_Unicode_RichEdit_Format", xml.data);
+    set_unicode(data, NULL, CF_UNICODETEXT, L"[图片]");
+    CHECK(drop_classify(data) == DROP_FILES, "旧版 QQ 拖出的图片没有识别");
+    IDataObject_Release(data);
+    StrList paths;
+    chat_parse_qq_rich_edit(xml.data, &paths);
+    CHECK(paths.count == 1 && wcscmp(paths.items[0], image) == 0, "旧版 QQ 拖出的图片路径不正确");
+    strlist_clear(&paths);
+    wstr_free(&xml);
+
+    data = new_data();
+    set_unicode(data, L"FileNameW", 0, image);
+    CHECK(drop_classify(data) == DROP_FILES, "只提供 FileNameW 的来源没有识别");
+    IDataObject_Release(data);
+
+    WStr html = {0};
+    wstr_appendf(&html, L"<html><body><!--StartFragment--><img src=\"%ls\"><!--EndFragment--></body></html>", image_url);
+    data = new_data();
+    set_utf8(data, L"HTML Format", html.data);
+    CHECK(drop_classify(data) == DROP_FILES, "只含本地图片的网页片段没有识别为文件");
+    IDataObject_Release(data);
+    wstr_free(&html);
+    wstr_appendf(&html, L"<!--StartFragment-->说明<img src=\"%ls\"><!--EndFragment-->", image_url);
+    data = new_data();
+    set_utf8(data, L"HTML Format", html.data);
+    set_unicode(data, NULL, CF_UNICODETEXT, L"说明");
+    CHECK(drop_classify(data) == DROP_TEXT, "带文字的网页片段不应只取图片");
+    IDataObject_Release(data);
+    wstr_free(&html);
+
+    // 富文本里的网络路径一律不认。
+    wstr_appendf(&html, L"<img src=\"%ls\">", image_url);
+    chat_parse_html_local_images(html.data, &paths);
+    CHECK(paths.count == 1 && wcscmp(paths.items[0], image) == 0, "本机图片路径没有识别");
+    strlist_clear(&paths);
+    wstr_free(&html);
+    chat_parse_html_local_images(L"<img src=\"file://server/share/a.png\">", &paths);
+    CHECK(paths.count == 0, "网页片段中的网络共享路径没有被拒绝");
+    strlist_clear(&paths);
+    chat_parse_qq_rich_edit(L"<QQRichEditFormat><EditElement type=\"1\" filepath=\"\\\\server\\share\\a.png\"></EditElement></QQRichEditFormat>", &paths);
+    CHECK(paths.count == 0, "QQ 富文本中的网络共享路径没有被拒绝");
+    strlist_clear(&paths);
+    chat_parse_qq_rich_edit(L"<QQRichEditFormat><EditElement type=\"0\"><![CDATA[你好]]></EditElement>"
+                            L"<EditElement type=\"1\" filepath=\"C:\\a.png\"></EditElement></QQRichEditFormat>", &paths);
+    CHECK(paths.count == 0, "QQ 富文本里有文字时不应只取图片");
+    strlist_clear(&paths);
+
+    wchar_t *decoded = html_decode(L"a&amp;b&#20013;&#x4E2D;&unknown;&#xD800;&", 41);
+    CHECK(wcscmp(decoded, L"a&b中中&unknown;&#xD800;&") == 0, "字符引用没有按 .NET 的方式解开");
+    free(decoded);
+
+    free(image_url);
+    free(image);
+    free(file);
+    free(folder);
+    if (SUCCEEDED(ole)) OleUninitialize();
+}
+
+#include "shelf_tests.inc"
+
 static void run(const char *name, void (*test)(void))
 {
     current_test = name;
@@ -847,6 +1384,19 @@ int main(void)
     run("theme", test_theme);
     run("animation", test_animation);
     run("layout and controls", test_layout);
+    run("shake detection", test_shake_detection);
+    run("shake raw samples", test_shake_raw_samples);
+    run("shake calibration", test_shake_calibration);
+    run("edge dwell", test_edge_dwell);
+    run("gesture service", test_gesture_service);
+    run("foreground watcher", test_foreground_watcher);
+    run("drop classify", test_drop_classify);
+    run("shelf item text", test_shelf_item_text);
+    run("shelf model", test_shelf_model);
+    run("drag out rules", test_drag_out_rules);
+    run("attachment cache", test_attachment_cache);
+    run("drop read", test_drop_read);
+    run("shelf window", test_shelf_window);
 
     // 清理临时文件夹。
     settings_flush();

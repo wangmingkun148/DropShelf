@@ -30,7 +30,13 @@ GfxMatrix gfx_matrix_translate(float x, float y);
 
 /// 以 (center_x, center_y) 为中心缩放。
 GfxMatrix gfx_matrix_scale(float scale_x, float scale_y, float center_x, float center_y);
+
+/// 以 (center_x, center_y) 为中心顺时针转 degrees 度（和 WPF 的 RotateTransform 相同）。
+GfxMatrix gfx_matrix_rotate(float degrees, float center_x, float center_y);
 GfxMatrix gfx_matrix_multiply(GfxMatrix first, GfxMatrix second);   // 先做 first 再做 second
+
+/// 点 (x, y) 经过 matrix 之后的位置。
+void gfx_matrix_apply(GfxMatrix matrix, float *x, float *y);
 
 /// 创建显卡设备和各个工厂；失败时返回 false（已记入日志），界面无法显示。可以重复调用。
 bool gfx_initialize(void);
@@ -56,6 +62,24 @@ bool gfx_end(GfxSurface *surface);
 bool gfx_begin_image(int width, int height, float dpi);
 bool gfx_end_image(const wchar_t *path);
 
+/// 同上，但结束时交出一张自上而下、32 位、预乘透明度的 DIB（拖动图像用）。失败时返回 NULL。调用方负责 DeleteObject。
+HBITMAP gfx_end_image_bitmap(void);
+
+// ───────────── 图片 ─────────────
+// 像素放在内存里，任何线程都可以创建；画的时候才在显卡上建对应的位图，显卡设备重建后自动重建。
+
+typedef struct GfxImage GfxImage;
+
+/// pixels 是自上而下、32 位、预乘透明度的 BGRA，会被复制。
+GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride);
+GfxImage *gfx_image_retain(GfxImage *image);
+void gfx_image_release(GfxImage *image);        // 可以在任何线程调用；可以是 NULL
+int gfx_image_width(const GfxImage *image);
+int gfx_image_height(const GfxImage *image);
+
+/// 按高质量缩放画进 rect，整体乘以 opacity。
+void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity);
+
 // ───────────── 绘制（在 gfx_begin 和 gfx_end 之间调用） ─────────────
 
 /// 整个画面清成一种颜色；全透明就是什么都不画，露出系统材质。
@@ -66,6 +90,12 @@ void gfx_fill_rounded(GfxRect rect, float radius, Color color);
 
 /// 画在矩形边缘以内的边框（与 WPF 的 Border 一样，边框不超出矩形）。
 void gfx_stroke_rounded(GfxRect rect, float radius, Color color, float width);
+
+/// 虚线边框，和 WPF 的 Rectangle 一样画在矩形以内；dash、gap 以线宽为单位（WPF 的 StrokeDashArray）。
+void gfx_stroke_rounded_dashed(GfxRect rect, float radius, Color color, float width, float dash, float gap);
+
+/// 一段圆弧，两端是圆头：从 start_degrees（0 是正右方，顺时针为正）转过 sweep_degrees。
+void gfx_arc(float center_x, float center_y, float radius, float start_degrees, float sweep_degrees, Color color, float width);
 void gfx_fill_ellipse(float center_x, float center_y, float radius_x, float radius_y, Color color);
 void gfx_stroke_ellipse(float center_x, float center_y, float radius_x, float radius_y, Color color, float width);
 void gfx_line(float x1, float y1, float x2, float y2, Color color, float width);
