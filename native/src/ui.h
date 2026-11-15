@@ -50,6 +50,9 @@ typedef struct UiWindowOptions
     ThemeColor background;          // 没有材质时的背景色；popup 窗口不画背景
     float caption_height;           // 顶部这么高的范围可以拖动窗口（没有控件的地方）
     HICON icon;
+    /// 置物架这样的窗口：没有任何系统边框（整个窗口都是客户区），但保留系统的圆角、阴影和材质；
+    /// 不在任务栏和 Alt+Tab 中显示，可以拖动、点击后成为当前窗口。拖动窗口由调用方自己处理（ui_window_begin_move）。
+    bool frameless;
 
     void *context;                  // 原样传给下面的回调
     /// 在元素之前画（背景、自绘的内容）。time 是这一帧的时刻，交给 anim_update。
@@ -64,6 +67,12 @@ typedef struct UiWindowOptions
     void (*moved)(UiWindow *window, void *context);
     /// 窗口已经关闭并销毁，window 之后不能再用。
     void (*closed)(UiWindow *window, void *context);
+    /// 每一帧开始画之前调用：推进动画、改窗口的位置和大小。这之后才按窗口现在的大小排版和画。
+    void (*animate)(UiWindow *window, void *context, double time);
+    /// 光标在窗口里时用的光标（IDC_HAND 等）；返回 NULL 时按控件决定。
+    LPCWSTR (*cursor)(UiWindow *window, void *context, float x, float y);
+    /// 其他窗口消息先交给这里；返回 true 表示已处理，result 是返回值。
+    bool (*message)(UiWindow *window, void *context, UINT message, WPARAM wparam, LPARAM lparam, LRESULT *result);
 } UiWindowOptions;
 
 /// 创建窗口（还没有显示）。失败时返回 NULL。
@@ -101,11 +110,26 @@ void ui_window_place(UiWindow *window, int x, int y, float width, float height);
 /// 把窗口放到光标所在显示器的工作区中央。
 void ui_window_center(UiWindow *window);
 
+/// 显示窗口；activate 为 false 时不抢当前程序的焦点。
+void ui_window_show_with(UiWindow *window, bool activate);
+
+/// 保持在其他窗口上方。
+void ui_window_set_topmost(UiWindow *window, bool topmost);
+
+/// Windows 11 上窗口边框的颜色；color 为 NULL 时恢复系统默认。
+void ui_window_set_border_color(UiWindow *window, const Color *color);
+
+/// 按住鼠标后调用：由系统接着拖动窗口，直到松开鼠标才返回（和 WPF 的 DragMove 相同）。
+void ui_window_begin_move(UiWindow *window);
+
 /// 所有窗口都关掉（退出时用）。
 void ui_close_all_windows(void);
 
 /// 诊断和测试用：把窗口现在的样子画进一张 PNG 图片（没有系统材质，背景是纯色）。
 bool ui_window_snapshot(UiWindow *window, const wchar_t *path);
+
+/// 在屏幕外把窗口画一遍再扔掉（窗口可以是隐藏的）：字体、文字排版和绘制效果提前准备好，第一次显示时更快。
+void ui_window_warm(UiWindow *window);
 
 /// 把所有窗口各存一张图片到 directory：window-1.png、window-2.png……（最新打开的排在前面）。
 void ui_snapshot_windows(const wchar_t *directory);

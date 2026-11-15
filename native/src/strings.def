@@ -320,4 +320,8 @@ STR(StartupRefused, L"Windows 拒绝了这项设置", L"Windows refused this set
 // C# 版里写在带参数的方法里、但本身没有参数的文字。
 STR(PerformanceDescriptionAuto, L"使用电池或 Windows 开启节能模式时，降低动画对显卡的负担", L"Reduces the graphics load from animations on battery or when Windows energy saver is on")
 STR(PerformanceDescriptionNormal, L"动画始终完整播放。用电池时卡顿的话，可以改为自动", L"Animations always play in full. If they stutter on battery, switch to Auto")
-STR(PerformanceDescriptionLow, L"始终降低动画对显卡的负担", L"Always reduces the graphics load from animations")
+STR(DragOutModeTooltipCopy, L"所有置物架拖出时复制文件，点按改为移动", L"All shelves copy files when dragged out. Click to move instead")
+STR(DragOutModeTooltipMove, L"所有置物架拖出时移动文件，点按改为复制", L"All shelves move files when dragged out. Click to copy instead")
+STR(DragOutModeChangedCopy, L"所有置物架拖出时都将复制文件", L"All shelves now copy files when dragged out")
+STR(DragOutModeChangedMove, L"所有置物架拖出时都将移动文件", L"All shelves now move files when dragged out")
+STR(PerformanceDescriptionLow,L"始终降低动画对显卡的负担", L"Always reduces the graphics load from animations")

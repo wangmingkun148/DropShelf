@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "app.h"
+#include "power.h"
 #include "strings.h"
 #include "ui.h"
 
@@ -148,6 +149,8 @@ static void on_closed(UiWindow *closed, void *context)
 {
     (void)closed;
     (void)context;
+    // 窗口显示期间保持正常性能，关掉后交还系统决定。
+    power_hold(&window, false);
     window = NULL;
     maximize_button = language_selector = startup_toggle = hotkey_text = hotkey_description = NULL;
     performance_selector = performance_description = theme_selector = NULL;
@@ -308,6 +311,7 @@ void main_window_show(void)
         }
     }
     if (!placed) ui_window_center(window);
+    power_hold(&window, true);
     ui_window_show(window);
 }
 

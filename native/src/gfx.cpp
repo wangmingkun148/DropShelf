@@ -331,6 +331,112 @@ bool gfx_end_image(const wchar_t *path)
     return SUCCEEDED(result);
 }
 
+HBITMAP gfx_end_image_bitmap(void)
+{
+    if (drawing != &image_surface) return nullptr;
+    drawing = nullptr;
+    HRESULT result = context->EndDraw();
+    context->SetTarget(nullptr);
+
+    // 画好的位图在显卡上，先复制到一张处理器能读的位图，再逐行抄进 DIB。
+    ID2D1Bitmap1 *readable = nullptr;
+    D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), image_dpi, image_dpi);
+    if (SUCCEEDED(result)) result = context->CreateBitmap(D2D1::SizeU((UINT32)image_width, (UINT32)image_height), nullptr, 0, &properties, &readable);
+    if (SUCCEEDED(result)) result = readable->CopyFromBitmap(nullptr, image_target, nullptr);
+    HBITMAP bitmap = nullptr;
+    D2D1_MAPPED_RECT mapped = {};
+    if (SUCCEEDED(result)) result = readable->Map(D2D1_MAP_OPTIONS_READ, &mapped);
+    if (SUCCEEDED(result))
+    {
+        BITMAPINFO info = {};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = image_width;
+        info.bmiHeader.biHeight = -image_height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void *bits = nullptr;
+        bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (bitmap && bits)
+            for (int row = 0; row < image_height; row++)
+                memcpy((unsigned char *)bits + (size_t)row * image_width * 4, mapped.bits + (size_t)row * mapped.pitch, (size_t)image_width * 4);
+        readable->Unmap();
+    }
+    release(readable);
+    release(image_target);
+    if (FAILED(result)) log_error(L"生成拖动图像失败\r\nHRESULT 0x%08lX", (unsigned long)result);
+    return bitmap;
+}
+
+// ───────────── 图片 ─────────────
+
+struct GfxImage
+{
+    volatile LONG references;
+    int width, height;
+    unsigned char *pixels;
+    ID2D1Bitmap1 *bitmap;       // 只在界面线程上创建和使用
+    unsigned generation;
+};
+
+GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride)
+{
+    if (!pixels || width <= 0 || height <= 0) return nullptr;
+    GfxImage *image = (GfxImage *)calloc(1, sizeof(GfxImage));
+    if (!image) abort();
+    image->references = 1;
+    image->width = width;
+    image->height = height;
+    image->pixels = (unsigned char *)malloc((size_t)width * height * 4);
+    if (!image->pixels) abort();
+    for (int row = 0; row < height; row++)
+        memcpy(image->pixels + (size_t)row * width * 4, (const unsigned char *)pixels + (size_t)row * stride, (size_t)width * 4);
+    return image;
+}
+
+GfxImage *gfx_image_retain(GfxImage *image)
+{
+    if (image) InterlockedIncrement(&image->references);
+    return image;
+}
+
+void gfx_image_release(GfxImage *image)
+{
+    if (!image || InterlockedDecrement(&image->references) > 0) return;
+    // 显卡上的位图只在界面线程上建过；最后一个引用通常也在界面线程上放掉。
+    release(image->bitmap);
+    free(image->pixels);
+    free(image);
+}
+
+int gfx_image_width(const GfxImage *image)
+{
+    return image ? image->width : 0;
+}
+
+int gfx_image_height(const GfxImage *image)
+{
+    return image ? image->height : 0;
+}
+
+void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity)
+{
+    if (!drawing || !image || opacity <= 0) return;
+    if (image->bitmap && image->generation != device_generation) release(image->bitmap);
+    if (!image->bitmap)
+    {
+        D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        if (FAILED(context->CreateBitmap(D2D1::SizeU((UINT32)image->width, (UINT32)image->height), image->pixels, (UINT32)image->width * 4,
+                &properties, &image->bitmap)))
+            return;
+        image->generation = device_generation;
+    }
+    D2D1_RECT_F destination = D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom);
+    context->DrawBitmap(image->bitmap, &destination, opacity > 1 ? 1 : opacity, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, nullptr, nullptr);
+}
+
 void gfx_shutdown(void)
 {
     for (int index = 0; index < format_count; index++) release(format_cache[index].format);
@@ -358,6 +464,22 @@ GfxMatrix gfx_matrix_scale(float scale_x, float scale_y, float center_x, float c
 {
     GfxMatrix matrix = { scale_x, 0, 0, scale_y, center_x - scale_x * center_x, center_y - scale_y * center_y };
     return matrix;
+}
+
+GfxMatrix gfx_matrix_rotate(float degrees, float center_x, float center_y)
+{
+    float radians = degrees * 3.14159265358979f / 180.0f;
+    float c = cosf(radians), s = sinf(radians);
+    // 绕中心转：先挪到原点，转，再挪回去。y 轴朝下，正的角度是顺时针。
+    GfxMatrix matrix = { c, s, -s, c, center_x - c * center_x + s * center_y, center_y - s * center_x - c * center_y };
+    return matrix;
+}
+
+void gfx_matrix_apply(GfxMatrix matrix, float *x, float *y)
+{
+    float px = *x, py = *y;
+    *x = px * matrix.m11 + py * matrix.m21 + matrix.dx;
+    *y = px * matrix.m12 + py * matrix.m22 + matrix.dy;
 }
 
 GfxMatrix gfx_matrix_multiply(GfxMatrix a, GfxMatrix b)
@@ -429,6 +551,63 @@ void gfx_stroke_rounded(GfxRect rect, float radius, Color color, float width)
     float inner_radius = radius > inset ? radius - inset : 0;
     if (inner_radius <= 0) context->DrawRectangle(inner, use_color(color), width);
     else context->DrawRoundedRectangle(D2D1::RoundedRect(inner, inner_radius, inner_radius), use_color(color), width);
+}
+
+void gfx_stroke_rounded_dashed(GfxRect rect, float radius, Color color, float width, float dash, float gap)
+{
+    if (!drawing || color.a == 0 || width <= 0) return;
+    // 用到的虚线只有两三种，按样式缓存。
+    static struct { float dash, gap; ID2D1StrokeStyle *style; } styles[4];
+    static int style_count;
+    ID2D1StrokeStyle *style = nullptr;
+    bool cached = false;
+    for (int index = 0; index < style_count && !style; index++)
+        if (styles[index].dash == dash && styles[index].gap == gap) style = styles[index].style;
+    cached = style != nullptr;
+    if (!style)
+    {
+        float dashes[2] = { dash, gap };
+        D2D1_STROKE_STYLE_PROPERTIES properties = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+            D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_CUSTOM, 0.0f);
+        if (FAILED(d2d_factory->CreateStrokeStyle(properties, dashes, 2, &style))) return;
+        if (style_count < 4)
+        {
+            styles[style_count++] = { dash, gap, style };
+            cached = true;
+        }
+    }
+    float inset = width / 2;
+    D2D1_RECT_F inner = D2D1::RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset);
+    float inner_radius = radius > inset ? radius - inset : 0;
+    context->DrawRoundedRectangle(D2D1::RoundedRect(inner, inner_radius, inner_radius), use_color(color), width, style);
+    if (!cached) style->Release();
+}
+
+void gfx_arc(float center_x, float center_y, float radius, float start_degrees, float sweep_degrees, Color color, float width)
+{
+    if (!drawing || color.a == 0 || width <= 0 || sweep_degrees == 0) return;
+    static ID2D1StrokeStyle *round_caps;
+    if (!round_caps)
+    {
+        D2D1_STROKE_STYLE_PROPERTIES properties = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND);
+        if (FAILED(d2d_factory->CreateStrokeStyle(properties, nullptr, 0, &round_caps))) return;
+    }
+    ID2D1PathGeometry *path = nullptr;
+    ID2D1GeometrySink *sink = nullptr;
+    if (FAILED(d2d_factory->CreatePathGeometry(&path))) return;
+    if (SUCCEEDED(path->Open(&sink)))
+    {
+        float start = start_degrees * 3.14159265358979f / 180.0f, end = (start_degrees + sweep_degrees) * 3.14159265358979f / 180.0f;
+        sink->BeginFigure(D2D1::Point2F(center_x + radius * cosf(start), center_y + radius * sinf(start)), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(center_x + radius * cosf(end), center_y + radius * sinf(end)), D2D1::SizeF(radius, radius), 0,
+            sweep_degrees > 0 ? D2D1_SWEEP_DIRECTION_CLOCKWISE : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+            fabsf(sweep_degrees) > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+        sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        sink->Close();
+        release(sink);
+        context->DrawGeometry(path, use_color(color), width, round_caps);
+    }
+    release(path);
 }
 
 void gfx_fill_ellipse(float center_x, float center_y, float radius_x, float radius_y, Color color)

@@ -37,6 +37,7 @@ struct UiWindow
     bool frame_requested;       // 画的过程中有元素说还有动画在进行
     bool subscribed;            // 已经订阅逐帧回调
     bool rendering;
+    bool animating;             // 正在调用 animate 回调（它可能改窗口大小，引起嵌套的重画）
     int message_depth;          // 正在处理的窗口消息有几层
     bool destroyed;             // 窗口已经销毁，等消息都处理完再释放这块内存
     UiWindow *next;
@@ -125,14 +126,26 @@ static void on_frame(void *context, double time);
 
 static void render(UiWindow *window, double time)
 {
-    if (window->rendering || !IsWindowVisible(window->handle)) return;
+    if (window->rendering || window->animating || !IsWindowVisible(window->handle)) return;
+    // animate 里还有动画在进行时会请求下一帧，画的时候不能把这个请求清掉。
+    bool animation_requested = false;
+    if (window->options.animate)
+    {
+        // 动画先走到这一帧，窗口的位置和大小定下来以后再按新的大小画。
+        window->frame_requested = false;
+        window->animating = true;
+        window->options.animate(window, window->options.context, time);
+        window->animating = false;
+        if (window->destroyed || !window->handle || !IsWindowVisible(window->handle)) return;
+        animation_requested = window->frame_requested;
+    }
     RECT client;
     GetClientRect(window->handle, &client);
     int width = client.right - client.left, height = client.bottom - client.top;
     if (width <= 0 || height <= 0) return;
 
     window->rendering = true;
-    window->frame_requested = false;
+    window->frame_requested = animation_requested;
     float dpi = (float)GetDpiForWindow(window->handle);
     float scale = dpi / 96.0f;
     if (window->root && window->layout_dirty)
@@ -169,10 +182,10 @@ static void on_frame(void *context, double time)
 
 void ui_window_request_frame(UiWindow *window)
 {
-    if (!window) return;
+    if (!window || window->destroyed) return;
     window->frame_requested = true;
     // 不在画的过程中调用时（比如刚开始一段动画），直接订阅，下一帧就会来画。
-    if (!window->rendering && !window->subscribed)
+    if (!window->rendering && !window->animating && !window->subscribed)
     {
         frames_subscribe(on_frame, window);
         window->subscribed = true;
@@ -391,9 +404,19 @@ static LRESULT CALLBACK window_procedure(HWND handle, UINT message, WPARAM wpara
 
 static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    LRESULT hooked = 0;
+    if (window->options.message && message != WM_NCDESTROY &&
+        window->options.message(window, window->options.context, message, wparam, lparam, &hooked))
+        return hooked;
     switch (message)
     {
+        case WM_NCACTIVATE:
+            // 没有边框的窗口不让系统重画非客户区，否则激活时会闪一下标题栏。
+            if (window->options.frameless) return DefWindowProcW(handle, message, wparam, -1);
+            break;
         case WM_NCCALCSIZE:
+            // 没有边框：整个窗口都是客户区。
+            if (window->options.frameless && wparam) return 0;
             if (!window->options.popup && wparam)
             {
                 // 去掉系统的标题栏：左、右、下的边框照旧（调整大小用），顶上不留。
@@ -407,7 +430,7 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             }
             break;
         case WM_NCHITTEST:
-            if (window->options.popup) return HTCLIENT;
+            if (window->options.popup || window->options.frameless) return HTCLIENT;
             return hit_test(window, lparam);
         case WM_MOUSEACTIVATE:
             if (window->options.no_activate) return MA_NOACTIVATE;
@@ -450,6 +473,7 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             SetWindowPos(handle, NULL, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top,
                 SWP_NOZORDER | SWP_NOACTIVATE);
             ui_window_invalidate(window);
+            if (window->options.moved) window->options.moved(window, window->options.context);
             return 0;
         }
         case WM_ACTIVATE:
@@ -510,6 +534,19 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
         case WM_SETCURSOR:
             if (LOWORD(lparam) == HTCLIENT)
             {
+                if (window->options.cursor)
+                {
+                    POINT point;
+                    GetCursorPos(&point);
+                    ScreenToClient(handle, &point);
+                    float scale = ui_window_scale(window);
+                    LPCWSTR cursor = window->options.cursor(window, window->options.context, point.x / scale, point.y / scale);
+                    if (cursor)
+                    {
+                        SetCursor(LoadCursorW(NULL, cursor));
+                        return TRUE;
+                    }
+                }
                 // 能点的控件上显示手形光标。
                 bool clickable = window->hovered && !window->hovered->disabled;
                 SetCursor(LoadCursorW(NULL, clickable ? IDC_HAND : IDC_ARROW));
@@ -572,6 +609,31 @@ bool ui_window_snapshot(UiWindow *window, const wchar_t *path)
     return gfx_end_image(path);
 }
 
+void ui_window_warm(UiWindow *window)
+{
+    if (!window || !window->handle || window->rendering) return;
+    RECT client;
+    GetClientRect(window->handle, &client);
+    int width = client.right - client.left, height = client.bottom - client.top;
+    if (width <= 0 || height <= 0) return;
+    float dpi = (float)GetDpiForWindow(window->handle);
+    float scale = dpi / 96.0f;
+    if (window->root)
+    {
+        ui_measure(window->root, width / scale);
+        ui_arrange(window->root, (GfxRect){ 0, 0, width / scale, height / scale });
+    }
+    if (!gfx_begin_image(width, height, dpi)) return;
+    window->rendering = true;
+    double time = frames_time();
+    gfx_clear(COLOR_TRANSPARENT);
+    if (window->options.paint) window->options.paint(window, window->options.context, time);
+    if (window->root) ui_paint(window->root, time);
+    window->rendering = false;
+    HBITMAP bitmap = gfx_end_image_bitmap();
+    if (bitmap) DeleteObject(bitmap);
+}
+
 void ui_snapshot_windows(const wchar_t *directory)
 {
     directory_create(directory);
@@ -627,6 +689,12 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
         style = WS_POPUP;
         extended |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
         if (options->no_activate) extended |= WS_EX_NOACTIVATE;
+    }
+    else if (options->frameless)
+    {
+        // 带标题栏样式系统才画圆角和阴影；WM_NCCALCSIZE 里把整个窗口都算作客户区，标题栏并不显示。
+        style = WS_OVERLAPPED | WS_CAPTION;
+        extended |= WS_EX_TOOLWINDOW;
     }
     else
     {
@@ -699,6 +767,46 @@ void ui_window_show(UiWindow *window)
         SetForegroundWindow(window->handle);
     }
     ui_window_invalidate(window);
+}
+
+void ui_window_show_with(UiWindow *window, bool activate)
+{
+    if (!activate || window->options.no_activate)
+    {
+        ShowWindow(window->handle, SW_SHOWNOACTIVATE);
+    }
+    else
+    {
+        ShowWindow(window->handle, SW_SHOW);
+        SetForegroundWindow(window->handle);
+    }
+    ui_window_invalidate(window);
+}
+
+void ui_window_set_topmost(UiWindow *window, bool topmost)
+{
+    if (!window || !window->handle) return;
+    SetWindowPos(window->handle, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void ui_window_set_border_color(UiWindow *window, const Color *color)
+{
+    if (!window || !window->handle || !is_windows_11()) return;
+    COLORREF value = color ? RGB(color->r, color->g, color->b) : 0xFFFFFFFF;    // DWMWA_COLOR_DEFAULT
+    DwmSetWindowAttribute(window->handle, ATTRIBUTE_BORDER_COLOR, &value, sizeof(value));
+}
+
+void ui_window_begin_move(UiWindow *window)
+{
+    if (!window || !window->handle) return;
+    // 和 WPF 的 DragMove 一样：放开鼠标捕获，假装按在标题栏上，系统接着拖动窗口。
+    if (window->captured)
+    {
+        window->captured->pressed = false;
+        window->captured = NULL;
+    }
+    ReleaseCapture();
+    SendMessageW(window->handle, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
 }
 
 void ui_window_close(UiWindow *window)

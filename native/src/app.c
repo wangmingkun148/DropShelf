@@ -1,5 +1,8 @@
 #include "app.h"
 #include "anim.h"
+#include "attachment_cache.h"
+#include "foreground.h"
+#include "gesture_service.h"
 #include "gfx.h"
 #include "hotkey.h"
 #include "main_window.h"
@@ -7,11 +10,15 @@
 #include "ui.h"
 #include "lang.h"
 #include "log.h"
+#include "probe.h"
+#include "shelf_window.h"
 #include "single_instance.h"
 #include "startup.h"
 #include "strings.h"
+#include "task.h"
 #include "tray.h"
 
+#include <ole2.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +30,8 @@
 #define MESSAGE_ARGUMENTS (WM_APP + 2)      // lparam：另一个进程转交过来的命令行（StrList *）
 #define MESSAGE_SHOW_MAIN_WINDOW (WM_APP + 3)
 #define MESSAGE_SNAPSHOT (WM_APP + 4)      // 诊断用：把各窗口的画面存成图片
+#define MESSAGE_GESTURE (WM_APP + 5)       // 手势识别线程发来的消息，见 gesture_service.h
+#define MESSAGE_NUDGE_MOUSE (WM_APP + 6)
 
 static AppSettings settings;
 static HWND message_window;
@@ -30,6 +39,10 @@ static HANDLE show_window_event;
 static bool hotkey_registered;
 static bool has_shown_tray_hint;
 static bool exiting;
+static bool ole_initialized;
+/// 诊断日志用：识别到手势的时刻，记下探针多久后确认正在拖放。
+static LARGE_INTEGER gesture_at;
+static ScreenEdge pending_edge;
 
 const AppSettings *app_settings(void)
 {
@@ -41,20 +54,16 @@ bool app_is_hotkey_registered(void)
     return hotkey_registered;
 }
 
+bool app_is_gesture_running(void)
+{
+    return gesture_service_is_running();
+}
+
 void app_main_window_closed(void)
 {
     if (exiting || has_shown_tray_hint) return;
     has_shown_tray_hint = true;
     tray_show_still_running_hint();
-}
-
-// ───────────── 还没有移植的窗口 ─────────────
-// 置物架窗口在第 4 步移植，在那之前新建置物架只弹一条通知。
-
-static void new_shelf_placeholder(int file_count)
-{
-    log_info(L"请求打开置物架（%d 个文件）；置物架窗口尚未移植", file_count);
-    tray_show_notice(S(STR_NewShelf), tr(L"置物架窗口将在后面的步骤移植。", L"The shelf window comes in a later step."));
 }
 
 // ───────────── 设置 ─────────────
@@ -67,7 +76,7 @@ static wchar_t *language_pack_directory(void)
     return directory;
 }
 
-/// 设置变化后让各部分立即生效。手势、屏蔽的应用和置物架外观在后面的步骤接进来。
+/// 设置变化后让各部分立即生效。置物架外观在后面的步骤接进来。
 static void apply_settings(const AppSettings *previous, const AppSettings *current)
 {
     if (previous->theme != current->theme || !wcs_equal(previous->accent_color, current->accent_color))
@@ -83,8 +92,16 @@ static void apply_settings(const AppSettings *previous, const AppSettings *curre
         language_set_pack(language_packs_find(current->language_pack));
         tray_refresh_text();
     }
+    gesture_service_set_sensitivity(current->shake_sensitivity);
+    gesture_service_set_trigger(current->auto_open_trigger);
+    gesture_service_set_edge_dwell(current->edge_dwell);
     if (!wcs_equal(previous->hotkey, current->hotkey))
         hotkey_registered = hotkey_service_register(settings_hotkey(current));
+    if (!strlist_equal(&previous->blocked_apps, &current->blocked_apps, true))
+        foreground_watcher_set_blocked_apps(&current->blocked_apps);
+    // 尺寸、拖出方式变化时，已打开的置物架需要立即更新。
+    if (previous->quick_shelf_size != current->quick_shelf_size || previous->drag_out_mode != current->drag_out_mode)
+        shelves_apply_settings();
 }
 
 void app_update_settings(void (*change)(AppSettings *settings, void *context), void *context)
@@ -104,6 +121,16 @@ void app_update_settings(void (*change)(AppSettings *settings, void *context), v
 static void change_start_with_windows(AppSettings *target, void *context)
 {
     target->start_with_windows = *(bool *)context;
+}
+
+static void change_drag_out_mode(AppSettings *target, void *context)
+{
+    target->drag_out_mode = *(int *)context;
+}
+
+void app_update_drag_out_mode(int mode)
+{
+    app_update_settings(change_drag_out_mode, &mode);
 }
 
 bool app_set_start_with_windows(bool enabled)
@@ -131,7 +158,7 @@ void app_show_main_window(void)
 
 void app_new_shelf(void)
 {
-    if (!exiting) new_shelf_placeholder(0);
+    if (!exiting) shelves_open_at_cursor(true);
 }
 
 static wchar_t *current_hotkey_text(void)
@@ -147,9 +174,10 @@ void app_handle_arguments(const StrList *arguments)
         app_show_main_window();
         return;
     }
+    ShelfWindow *shelf = shelves_open_at_cursor(true);
     StrList paths;
     single_instance_path_arguments(arguments, &paths);
-    new_shelf_placeholder(paths.count);
+    if (shelf && paths.count > 0) shelf_window_add_paths(shelf, &paths);
     strlist_clear(&paths);
 }
 
@@ -165,6 +193,10 @@ void app_prepare_for_shutdown(void)
     exiting = true;
     settings_save(&settings);
     ui_menu_dismiss();
+    foreground_watcher_stop();
+    gesture_service_stop();
+    probe_destroy();
+    shelves_close_all();
     ui_close_all_windows();
     hotkey_service_stop();
     tray_destroy();
@@ -174,8 +206,87 @@ void app_prepare_for_shutdown(void)
     show_window_event = NULL;
     frames_shutdown();
     gfx_shutdown();
+    task_shutdown();
+    if (ole_initialized) OleUninitialize();
+    ole_initialized = false;
     // 关闭主窗口时会再保存一次窗口位置，等它写完再退出。
     settings_flush();
+}
+
+// ───────────── 手势 ─────────────
+
+/// 发送一次零距离的鼠标移动。光标静止时，正在拖放的程序要等到下一次移动才会发现光标下出现了新窗口；
+/// 从屏幕边缘呼出置物架时光标往往停着不动，用它让拖放立即交给新窗口。
+static void nudge_mouse(void)
+{
+    INPUT input = { .type = INPUT_MOUSE };
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    SendInput(1, &input, sizeof(input));
+}
+
+/// 放到消息队列里稍后再做：探针窗口先显示出来。
+static void nudge_mouse_later(void)
+{
+    if (message_window) PostMessageW(message_window, MESSAGE_NUDGE_MOUSE, 0, 0);
+}
+
+static double milliseconds_since(LARGE_INTEGER start)
+{
+    LARGE_INTEGER now, frequency;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&frequency);
+    return (double)(now.QuadPart - start.QuadPart) * 1000.0 / (double)frequency.QuadPart;
+}
+
+static bool is_blocked_at(POINT point)
+{
+    if (!foreground_watcher_is_blocked_at(point)) return false;
+    log_trace(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
+    return true;
+}
+
+static void on_gesture(GestureEvent event, ScreenEdge edge, POINT point)
+{
+    if (exiting) return;
+    static const wchar_t *const edge_names[] = { L"None", L"Left", L"Top", L"Right" };
+    switch (event)
+    {
+        case GESTURE_SHAKE:
+            if (is_blocked_at(point)) return;
+            log_trace(L"识别到晃动 (%ld, %ld)，显示探针窗口", point.x, point.y);
+            QueryPerformanceCounter(&gesture_at);
+            pending_edge = EDGE_NONE;
+            probe_show_at(point);
+            break;
+        case GESTURE_EDGE_DWELL:
+            if (is_blocked_at(point)) return;
+            log_trace(L"在屏幕边缘停留 (%ld, %ld, %ls)，显示探针窗口", point.x, point.y, edge_names[edge]);
+            QueryPerformanceCounter(&gesture_at);
+            pending_edge = edge;
+            probe_show_at(point);
+            nudge_mouse_later();
+            break;
+        case GESTURE_RELEASED:
+            log_trace(L"晃动后松开鼠标");
+            probe_hide();
+            shelves_drag_released();
+            break;
+    }
+}
+
+static void on_probe_detected(void)
+{
+    log_trace(L"探针确认正在拖放，距识别到手势 %.0fms", milliseconds_since(gesture_at));
+    POINT cursor = {0};
+    GetCursorPos(&cursor);
+    shelves_open_at(cursor, true, false, pending_edge);
+    if (pending_edge != EDGE_NONE) nudge_mouse_later();
+}
+
+static void on_blocked_changed(bool blocked)
+{
+    gesture_service_set_paused(blocked);
+    hotkey_service_set_paused(blocked);
 }
 
 // ───────────── 消息窗口 ─────────────
@@ -211,6 +322,12 @@ static LRESULT CALLBACK message_window_procedure(HWND window, UINT message, WPAR
         }
         case MESSAGE_SHOW_MAIN_WINDOW:
             if (!exiting) main_window_show();
+            return 0;
+        case MESSAGE_GESTURE:
+            on_gesture(gesture_message_event(wparam), gesture_message_edge(wparam), gesture_message_point(lparam));
+            return 0;
+        case MESSAGE_NUDGE_MOUSE:
+            nudge_mouse();
             return 0;
         case MESSAGE_SNAPSHOT:
         {
@@ -252,12 +369,17 @@ static HWND create_message_window(HINSTANCE instance)
 
 static void on_hotkey_pressed(void)
 {
-    // 屏蔽的应用在前台时不响应，这个判断在第 3 步（前台窗口监视）接进来。
-    app_new_shelf();
+    // 屏蔽的应用在前台时不响应（快捷键本该已经注销，这里再确认一次）。
+    if (!foreground_watcher_check()) app_new_shelf();
 }
 
 bool app_start(HINSTANCE instance, bool start_in_background)
 {
+    // 探针窗口接收系统拖放要用 OLE。
+    task_initialize();
+    HRESULT ole = OleInitialize(NULL);
+    ole_initialized = SUCCEEDED(ole);
+    if (!ole_initialized) log_info(L"OLE 初始化失败，错误码 0x%08lX", (unsigned long)ole);
     settings_load(&settings);
     language_set_mode(settings.language);
     wchar_t *packs = language_pack_directory();
@@ -267,6 +389,7 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     theme_initialize(settings.theme, settings.accent_color);
     low_performance_set_mode(settings.performance_mode);
     log_cleanup_old();
+    attachment_cache_cleanup_stale();
     restore_startup_registration();
 
     message_window = create_message_window(instance);
@@ -287,6 +410,14 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     hotkey_registered = hotkey_service_register(settings_hotkey(&settings));
     tray_create(message_window, &actions);
 
+    if (ole_initialized) probe_create(instance, on_probe_detected);
+    gesture_service_start(message_window, MESSAGE_GESTURE, settings.shake_sensitivity);
+    gesture_service_set_trigger(settings.auto_open_trigger);
+    gesture_service_set_edge_dwell(settings.edge_dwell);
+    foreground_watcher_set_listener(on_blocked_changed);
+    foreground_watcher_set_blocked_apps(&settings.blocked_apps);
+
+    shelves_prewarm();
     if (!start_in_background) app_show_main_window();
     return true;
 }
