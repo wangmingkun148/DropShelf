@@ -1453,6 +1453,11 @@ int main(int argc, char **argv)
     // 设置、日志和实例名称都换成测试专用的，不碰正在使用的 DropShelf。
     wchar_t base[MAX_PATH];
     GetTempPathW(MAX_PATH, base);
+    // 临时文件夹可能是 8.3 短名称（GitHub 的构建机就是 C:\Users\RUNNER~1\...），换成完整名称：
+    // 按文件标识找回的路径总是完整名称，拖进来的路径通常也是。
+    wchar_t long_base[MAX_PATH];
+    DWORD long_length = GetLongPathNameW(base, long_base, MAX_PATH);
+    if (long_length > 0 && long_length < MAX_PATH) wcscpy_s(base, MAX_PATH, long_base);
     wchar_t folder[64];
     swprintf(folder, 64, L"DropShelfCTests-%lu", GetCurrentProcessId());
     temporary_directory = path_join(base, folder);
