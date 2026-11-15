@@ -22,6 +22,12 @@ typedef struct QuickActionList
 
 /// 置物架上实际显示的操作，按从左到右的顺序。
 QuickActionList quick_actions_visible(const AppSettings *settings);
+
+/// 可以放到置物架上的全部操作：内置的在前，然后是自定义的。
+QuickActionList quick_actions_available(const AppSettings *settings);
+
+/// 按标识找操作；已删除的自定义操作或未知标识返回 false。action 用完 quick_action_free。
+bool quick_action_find(const wchar_t *id, const AppSettings *settings, QuickAction *action);
 void quick_action_list_free(QuickActionList *list);
 bool quick_action_list_same(const QuickActionList *first, const QuickActionList *second);
 

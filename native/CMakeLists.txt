@@ -25,6 +25,7 @@ target_compile_definitions(miniz PUBLIC MINIZ_NO_STDIO MINIZ_NO_ZLIB_COMPATIBLE_
 target_compile_options(miniz PRIVATE /W0 /utf-8)
 
 add_library(dropshelf_core STATIC
+    src/about_window.c
     src/anim.c
     src/app.c
     src/archive.c
@@ -34,6 +35,7 @@ add_library(dropshelf_core STATIC
     src/drop_data.c
     src/drop_read.c
     src/file_ops.c
+    src/file_dialog.c
     src/file_identity.c
     src/foreground.c
     src/gesture.c
@@ -44,8 +46,15 @@ add_library(dropshelf_core STATIC
     src/image_tools.c
     src/json.c
     src/lang.c
+    src/language_template.c
     src/log.c
+    src/main_actions.c
+    src/main_dialogs.c
+    src/main_fan.c
+    src/main_flip.c
+    src/main_pages.c
     src/main_window.c
+    src/onboarding_window.c
     src/power.c
     src/probe.c
     src/quick_action.c
@@ -67,8 +76,10 @@ add_library(dropshelf_core STATIC
     src/thumbnail.c
     src/tray.c
     src/ui_controls.c
+    src/ui_inputs.c
     src/ui_menu.c
     src/ui_window.c
+    src/update_check.c
 )
 target_include_directories(dropshelf_core PUBLIC src)
 target_compile_definitions(dropshelf_core PUBLIC
@@ -79,7 +90,7 @@ target_compile_definitions(dropshelf_core PUBLIC
 target_compile_options(dropshelf_core PUBLIC /utf-8 /W4 /wd4100)
 string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 string(REPLACE "/GR" "/GR-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-target_link_libraries(dropshelf_core PUBLIC miniz user32 gdi32 comctl32 version shell32 advapi32 ole32 dwmapi shcore shlwapi windowscodecs d2d1 d3d11 dxgi dwrite dcomp dxguid)
+target_link_libraries(dropshelf_core PUBLIC miniz user32 gdi32 comctl32 version shell32 advapi32 ole32 imm32 winhttp dwmapi shcore shlwapi windowscodecs d2d1 d3d11 dxgi dwrite dcomp dxguid)
 
 configure_file(res/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
 

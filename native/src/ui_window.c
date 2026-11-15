@@ -5,6 +5,7 @@
 
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,8 @@ struct UiWindow
     UiElement *root;
     UiElement *hovered;         // 光标下的元素
     UiElement *captured;        // 按下鼠标时的元素，松开之前事件都交给它
+    UiElement *focused;         // 有键盘焦点的元素
+    bool swallow_char;          // 按着 Alt 的按键已经由元素处理，随后的 WM_SYSCHAR 不要再交给系统（会响一声）
     bool tracking_mouse;        // 已经请求了“光标离开窗口”的通知
     bool active;
     UiBackdrop applied_backdrop;
@@ -214,6 +217,8 @@ static void send_mouse(UiElement *element, UiMouseKind kind, const UiMouseEvent 
     if (!element || !element->type->mouse) return;
     UiMouseEvent event = *source;
     event.kind = kind;
+    // 交给元素的是它自己的坐标；光标离开窗口时（-1, -1）不用换算。
+    if (event.x >= 0 || event.y >= 0) ui_element_to_local(element, &event.x, &event.y);
     element->type->mouse(element, &event);
 }
 
@@ -221,6 +226,10 @@ static void set_hovered(UiWindow *window, UiElement *element, const UiMouseEvent
 {
     if (window->hovered == element) return;
     UiElement *previous = window->hovered;
+    // 元素带提示时换成它的提示；两边都没有提示时不动，窗口自己设的提示（置物架）照常显示。
+    const wchar_t *previous_tip = previous ? ui_element_tooltip(previous) : NULL;
+    const wchar_t *next_tip = element ? ui_element_tooltip(element) : NULL;
+    if (previous_tip || next_tip) ui_window_set_tooltip(window, next_tip);
     window->hovered = element;
     if (previous)
     {
@@ -234,6 +243,57 @@ static void set_hovered(UiWindow *window, UiElement *element, const UiMouseEvent
         send_mouse(element, UI_MOUSE_ENTER, event);
     }
     ui_window_repaint(window);
+}
+
+void ui_window_set_focus(UiWindow *window, UiElement *element)
+{
+    if (!window || window->focused == element) return;
+    UiElement *previous = window->focused;
+    window->focused = element;
+    if (previous)
+    {
+        previous->focused = false;
+        if (previous->type->focus) previous->type->focus(previous, false);
+    }
+    if (element && window->focused == element)
+    {
+        element->focused = true;
+        if (element->type->focus) element->type->focus(element, true);
+    }
+    ui_window_repaint(window);
+}
+
+UiElement *ui_window_focus(UiWindow *window)
+{
+    return window ? window->focused : NULL;
+}
+
+void ui_window_cancel_press(UiWindow *window)
+{
+    if (!window || !window->captured) return;
+    UiElement *captured = window->captured;
+    window->captured = NULL;
+    captured->pressed = false;
+    // 告诉它不算点成（inside 为 false）。
+    UiMouseEvent event = { .kind = UI_MOUSE_UP, .x = -1, .y = -1 };
+    send_mouse(captured, UI_MOUSE_UP, &event);
+    ui_window_repaint(window);
+}
+
+POINT ui_window_to_screen(UiWindow *window, float x, float y)
+{
+    float scale = ui_window_scale(window);
+    POINT point = { (LONG)lroundf(x * scale), (LONG)lroundf(y * scale) };
+    if (window && window->handle) ClientToScreen(window->handle, &point);
+    return point;
+}
+
+void ui_window_from_screen(UiWindow *window, POINT point, float *x, float *y)
+{
+    if (window && window->handle) ScreenToClient(window->handle, &point);
+    float scale = ui_window_scale(window);
+    *x = point.x / scale;
+    *y = point.y / scale;
 }
 
 static UiMouseEvent make_mouse_event(UiWindow *window, UiMouseKind kind, LPARAM lparam)
@@ -281,7 +341,11 @@ static void on_mouse_down(UiWindow *window, LPARAM lparam, bool right)
     if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
     UiElement *under = element_at(window, event.x, event.y);
     set_hovered(window, under, &event);
-    if (!under || under->disabled) return;
+    // 点到能接收键盘的元素（或它里面）时把焦点给它，点到别处时谁都没有。
+    UiElement *focusable = under;
+    while (focusable && !focusable->type->focusable) focusable = focusable->parent;
+    if (!right) ui_window_set_focus(window, focusable && !focusable->disabled ? focusable : NULL);
+    if (!under || under->disabled || window->hovered != under) return;
     if (!right)
     {
         window->captured = under;
@@ -317,9 +381,44 @@ static void on_mouse_up(UiWindow *window, LPARAM lparam, bool right)
     ui_window_repaint(window);
 }
 
+void ui_window_layout(UiWindow *window)
+{
+    if (!window || !window->handle || !window->root || !window->layout_dirty || window->rendering) return;
+    RECT client;
+    GetClientRect(window->handle, &client);
+    float scale = ui_window_scale(window);
+    if (client.right <= 0 || client.bottom <= 0) return;
+    ui_measure(window->root, client.right / scale);
+    ui_arrange(window->root, (GfxRect){ 0, 0, client.right / scale, client.bottom / scale });
+    window->layout_dirty = false;
+}
+
+void ui_window_update_hover(UiWindow *window)
+{
+    if (!window || !window->handle || window->captured || window->rendering || window->animating) return;
+    POINT cursor;
+    GetCursorPos(&cursor);
+    float x, y;
+    ui_window_from_screen(window, cursor, &x, &y);
+    RECT client;
+    GetClientRect(window->handle, &client);
+    float scale = ui_window_scale(window);
+    bool inside = WindowFromPoint(cursor) == window->handle && x >= 0 && y >= 0 && x < client.right / scale && y < client.bottom / scale;
+    UiMouseEvent event = { .kind = UI_MOUSE_MOVE, .x = x, .y = y };
+    // 排版要是最新的，才找得对光标下的元素。
+    if (window->root && window->layout_dirty)
+    {
+        ui_measure(window->root, client.right / scale);
+        ui_arrange(window->root, (GfxRect){ 0, 0, client.right / scale, client.bottom / scale });
+        window->layout_dirty = false;
+    }
+    set_hovered(window, inside ? element_at(window, x, y) : NULL, &event);
+}
+
 void ui_window_forget(UiWindow *window, UiElement *element)
 {
     if (!window) return;
+    if (window->focused == element) window->focused = NULL;
     if (window->hovered == element) window->hovered = NULL;
     if (window->captured == element)
     {
@@ -378,7 +477,7 @@ static void destroy_window_state(UiWindow *window)
     }
     UiElement *root = window->root;
     window->root = NULL;
-    window->hovered = window->captured = NULL;
+    window->hovered = window->captured = window->focused = NULL;
     window->handle = NULL;
     if (root) ui_element_destroy(root);
     gfx_surface_destroy(window->surface);
@@ -529,11 +628,12 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             UiMouseEvent event = { .kind = UI_MOUSE_WHEEL, .x = point.x / scale, .y = point.y / scale };
             event.wheel = GET_WHEEL_DELTA_WPARAM(wparam) / (float)WHEEL_DELTA;
             if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return 0;
-            // 滚轮交给光标下的元素，它不处理就一级级往上找。
-            for (UiElement *element = element_at(window, event.x, event.y); element; element = element->parent)
+            // 滚轮交给光标下的元素，它不接收就一级级往上找。
+            UiElement *under = window->root ? ui_hit_test_any(window->root, event.x, event.y) : NULL;
+            for (UiElement *element = under; element; element = element->parent)
             {
-                if (!element->type->mouse) continue;
-                element->type->mouse(element, &event);
+                if (!element->type->mouse || !element->type->wheel) continue;
+                send_mouse(element, UI_MOUSE_WHEEL, &event);
                 break;
             }
             return 0;
@@ -554,14 +654,42 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
                         return TRUE;
                     }
                 }
-                // 能点的控件上显示手形光标。
-                bool clickable = window->hovered && !window->hovered->disabled;
-                SetCursor(LoadCursorW(NULL, clickable ? IDC_HAND : IDC_ARROW));
+                // 能点的控件上显示手形光标，输入框上是文字光标。
+                UiElement *hovered = window->hovered;
+                bool clickable = hovered && !hovered->disabled;
+                LPCWSTR cursor = clickable ? hovered->type->cursor ? hovered->type->cursor : IDC_HAND : IDC_ARROW;
+                SetCursor(LoadCursorW(NULL, cursor));
                 return TRUE;
             }
             break;
         case WM_KEYDOWN:
-            if (window->options.key && window->options.key(window, window->options.context, (unsigned)wparam)) return 0;
+        case WM_SYSKEYDOWN:
+        {
+            unsigned key = (unsigned)wparam | (message == WM_SYSKEYDOWN ? UI_KEY_ALT : 0);
+            // 先交给有焦点的元素（输入框、快捷键框），它不要再交给窗口。
+            UiElement *focused = window->focused;
+            if (focused && !focused->hidden && focused->type->key && focused->type->key(focused, key))
+            {
+                window->swallow_char = message == WM_SYSKEYDOWN;
+                return 0;
+            }
+            if (window->options.key && window->options.key(window, window->options.context, key))
+            {
+                window->swallow_char = message == WM_SYSKEYDOWN;
+                return 0;
+            }
+            window->swallow_char = false;
+            break;
+        }
+        case WM_CHAR:
+            if (window->focused && window->focused->type->character)
+            {
+                window->focused->type->character(window->focused, (wchar_t)wparam);
+                return 0;
+            }
+            break;
+        case WM_SYSCHAR:
+            if (window->swallow_char) return 0;
             break;
         case WM_CLOSE:
             DestroyWindow(handle);
@@ -750,7 +878,7 @@ void ui_window_set_root(UiWindow *window, UiElement *root)
 {
     UiElement *previous = window->root;
     window->root = NULL;
-    window->hovered = window->captured = NULL;
+    window->hovered = window->captured = window->focused = NULL;
     if (previous) ui_element_destroy(previous);
     window->root = root;
     if (root) ui_element_attach(root, window);

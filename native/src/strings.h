@@ -79,3 +79,23 @@ wchar_t *str_history_yesterday(const wchar_t *time);                // 昨天 14
 wchar_t *str_history_date(int month, int day);                      // 11月5日、Nov 5
 wchar_t *str_restored(int added, int unavailable);                  // 已恢复 3 项，1 项已删除或移动
 wchar_t *str_merged_shelves(int count);                             // 已合并 3 项
+
+// 主窗口
+wchar_t *str_version(const wchar_t *version);                       // 版本 2.8.2
+wchar_t *str_update_latest(const wchar_t *version);
+wchar_t *str_update_available(const wchar_t *version);
+/// 状态的说明；hotkey 为 NULL 时不提快捷键。trigger 是 AutoOpenTrigger。
+wchar_t *str_status_running_detail(int trigger, const wchar_t *hotkey);
+/// 概览页卡片上的当前设置，如“中文 · 开机启动 · Ctrl+Shift+Space”。hotkey 为 NULL 时是“未设置”。
+wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_t *hotkey);
+wchar_t *str_shelf_summary(int trigger, int drag_out_mode);
+wchar_t *str_actions_summary(const StrList *labels);
+wchar_t *str_appearance_summary(int theme, bool custom_accent);
+wchar_t *str_history_count(int count);                              // 已保留 3 个最近关闭的置物架
+wchar_t *str_history_card_detail(int count, const wchar_t *time);  // 3 个项目 · 14:05
+wchar_t *str_sensitivity_detail(int reversals, int distance);
+wchar_t *str_calibration_progress(int done, int left);
+wchar_t *str_confirm_delete_action(const wchar_t *title);
+wchar_t *str_image_size_invalid(int minimum, int maximum);
+/// 引导最后一步的说明；hotkey 为 NULL 时提示去设置里设定快捷键。
+wchar_t *str_onboarding_actions_body(const wchar_t *hotkey);

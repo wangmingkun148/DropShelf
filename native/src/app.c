@@ -6,6 +6,7 @@
 #include "gfx.h"
 #include "hotkey.h"
 #include "main_window.h"
+#include "onboarding_window.h"
 #include "theme.h"
 #include "ui.h"
 #include "lang.h"
@@ -33,6 +34,7 @@
 #define MESSAGE_SNAPSHOT (WM_APP + 4)      // 诊断用：把各窗口的画面存成图片
 #define MESSAGE_GESTURE (WM_APP + 5)       // 手势识别线程发来的消息，见 gesture_service.h
 #define MESSAGE_NUDGE_MOUSE (WM_APP + 6)
+#define MESSAGE_SHOW_ONBOARDING (WM_APP + 7)
 
 static AppSettings settings;
 static HWND message_window;
@@ -338,6 +340,9 @@ static LRESULT CALLBACK message_window_procedure(HWND window, UINT message, WPAR
         case MESSAGE_SHOW_MAIN_WINDOW:
             if (!exiting) main_window_show();
             return 0;
+        case MESSAGE_SHOW_ONBOARDING:
+            if (!exiting) onboarding_window_show();
+            return 0;
         case MESSAGE_GESTURE:
             on_gesture(gesture_message_event(wparam), gesture_message_edge(wparam), gesture_message_point(lparam));
             return 0;
@@ -434,7 +439,12 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     foreground_watcher_set_blocked_apps(&settings.blocked_apps);
 
     shelves_prewarm();
-    if (!start_in_background) app_show_main_window();
+    if (!start_in_background)
+    {
+        app_show_main_window();
+        // 第一次运行：主窗口出来之后再打开引导，放在主窗口中间。
+        if (!settings.has_completed_first_run) PostMessageW(message_window, MESSAGE_SHOW_ONBOARDING, 0, 0);
+    }
     return true;
 }
 

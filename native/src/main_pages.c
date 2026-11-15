@@ -1,0 +1,1228 @@
+// 主窗口的概览页和四个设置页（常规、手势与置物架、快速操作、外观）。和 C# 版 MainWindow.xaml 里的各页、SettingsViewModel 对应。
+#include "main_window_internal.h"
+#include "ui_internal.h"
+#include "file_dialog.h"
+#include "foreground.h"
+#include "gesture.h"
+#include "lang.h"
+#include "onboarding_window.h"
+#include "quick_action.h"
+#include "shelf_history.h"
+#include "task.h"
+#include "theme.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MIN_CARD_HEIGHT 70.0f
+#define MAX_CARD_HEIGHT 230.0f
+/// 牌抽出后会超出牌堆标题约这么高；窗口够高时在卡片和牌堆之间留出这段空间。
+#define FAN_HEADROOM 72.0f
+#define TILE_GAP 6.0f
+/// 卡片够高时换成大卡片的样式；回差让高度停在分界附近时不会来回切换。
+#define TALL_HEIGHT 138.0f
+#define TALL_HYSTERESIS 6.0f
+#define SENSITIVITY_SAVE_DELAY 250
+
+static struct
+{
+    UiElement *getting_started;
+    UiElement *language, *language_pack_card, *language_pack;
+    int language_pack_count;
+    UiElement *startup, *startup_description;
+    UiElement *hotkey, *hotkey_description;
+    UiElement *performance, *performance_description;
+    UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
+    UiElement *blocked_list;
+    UiElement *shelf_size, *drag_out_mode, *close_when_empty;
+    UiElement *history_description, *clear_history;
+    UiElement *layout, *layout_description;
+    UiElement *theme_tiles[3];
+    UiElement *swatches;
+    UiElement *add_app_button;
+    Anim card_height;
+    float card_target;
+    Anim label_value;           // 灵敏度下三个字的大小按这个值
+    int pending_sensitivity;    // 拖动中还没保存的灵敏度，-1 表示没有
+    unsigned sensitivity_generation;
+    bool sensitivity_dragging;
+} P = { .pending_sensitivity = -1 };
+
+// ───────────── 修改设置 ─────────────
+
+typedef struct IntChange
+{
+    size_t offset;
+    int value;
+} IntChange;
+
+static void change_int(AppSettings *settings, void *context)
+{
+    const IntChange *change = context;
+    *(int *)((char *)settings + change->offset) = change->value;
+}
+
+static void set_int(size_t offset, int value)
+{
+    IntChange change = { offset, value };
+    app_update_settings(change_int, &change);
+}
+
+#define SET_INT(field, value) set_int(offsetof(AppSettings, field), (value))
+
+static void on_language(int index, void *context) { (void)context; SET_INT(language, index); }
+static void on_performance(int index, void *context) { (void)context; SET_INT(performance_mode, index); }
+static void on_trigger(int index, void *context) { (void)context; SET_INT(auto_open_trigger, index); }
+static void on_edge_dwell(int index, void *context) { (void)context; SET_INT(edge_dwell, index); }
+static void on_shelf_size(int index, void *context) { (void)context; SET_INT(quick_shelf_size, index); }
+static void on_drag_out(int index, void *context) { (void)context; app_update_drag_out_mode(index); }
+static void on_layout(int index, void *context)
+{
+    (void)context;
+    static const int layouts[] = { LAYOUT_OFF, LAYOUT_TWO, LAYOUT_FOUR };
+    SET_INT(quick_action_layout, layouts[index]);
+}
+
+static void change_close_when_empty(AppSettings *settings, void *context) { settings->close_when_empty = *(bool *)context; }
+static void on_close_when_empty(bool checked, void *context) { (void)context; app_update_settings(change_close_when_empty, &checked); }
+
+static bool startup_failed;
+
+static void on_startup(bool checked, void *context)
+{
+    (void)context;
+    // 写入注册表失败时设置保持原值，开关拨回去，说明换成失败的原因。
+    startup_failed = !app_set_start_with_windows(checked);
+    main_window_refresh();
+}
+
+static void change_hotkey(AppSettings *settings, void *context)
+{
+    free(settings->hotkey);
+    settings->hotkey = wcs_dup(context);
+}
+
+static void on_hotkey(const wchar_t *gesture, void *context)
+{
+    (void)context;
+    app_update_settings(change_hotkey, (void *)gesture);
+}
+
+static void change_language_pack(AppSettings *settings, void *context)
+{
+    free(settings->language_pack);
+    settings->language_pack = context ? wcs_dup(context) : NULL;
+}
+
+static void on_language_pack(int index, void *context)
+{
+    (void)context;
+    // 第一项是“不使用”，其余按语言包的顺序。
+    const wchar_t *id = index > 0 && index - 1 < language_packs_count() ? language_pack_id(language_packs_at(index - 1)) : NULL;
+    app_update_settings(change_language_pack, (void *)id);
+}
+
+static void change_getting_started(AppSettings *settings, void *context)
+{
+    (void)context;
+    settings->show_getting_started = false;
+}
+
+static void on_dismiss_getting_started(void *context)
+{
+    (void)context;
+    app_update_settings(change_getting_started, NULL);
+}
+
+static void on_view_tutorial(void *context)
+{
+    (void)context;
+    onboarding_window_show();
+}
+
+static void on_open_shelf(void *context)
+{
+    (void)context;
+    main_open_shelf();
+}
+
+static void on_back(void *context)
+{
+    (void)context;
+    flip_back();
+}
+
+static void on_clear_history(void *context)
+{
+    (void)context;
+    shelf_history_clear();
+}
+
+// ───────────── 灵敏度 ─────────────
+
+static int current_sensitivity(void)
+{
+    return P.pending_sensitivity >= 0 ? P.pending_sensitivity : app_settings()->shake_sensitivity;
+}
+
+static void change_sensitivity(AppSettings *settings, void *context) { settings->shake_sensitivity = *(int *)context; }
+
+static void save_sensitivity(void)
+{
+    if (P.pending_sensitivity < 0) return;
+    int level = P.pending_sensitivity;
+    P.pending_sensitivity = -1;
+    app_update_settings(change_sensitivity, &level);
+}
+
+static void on_sensitivity_timer(void *data)
+{
+    // 拖动停下 0.25 秒后才保存，不会每移动一格就写一次设置文件。
+    if ((unsigned)(uintptr_t)data == P.sensitivity_generation) save_sensitivity();
+}
+
+static void update_sensitivity_description(void)
+{
+    int reversals = 0, distance = 0;
+    shake_describe(current_sensitivity(), &reversals, &distance);
+    wchar_t *text = str_sensitivity_detail(reversals, distance);
+    ui_label_set_text(P.sensitivity_description, UI_LIT(text));
+    free(text);
+}
+
+static void on_sensitivity(int value, bool dragging, void *context)
+{
+    (void)context;
+    // 三个字拖动时紧跟滑钮，点轨道或按方向键时用一小段动画跟上。
+    if (dragging || P.sensitivity_dragging) anim_set(&P.label_value, value);
+    else anim_start(&P.label_value, value, 0.22, EASE_OF(EASE_CUBIC_OUT));
+    P.sensitivity_dragging = dragging;
+    main_request_frame();
+    if (value == current_sensitivity()) return;
+    P.pending_sensitivity = value;
+    update_sensitivity_description();
+    P.sensitivity_generation++;
+    task_delay(SENSITIVITY_SAVE_DELAY, on_sensitivity_timer, (void *)(uintptr_t)P.sensitivity_generation);
+}
+
+void pages_apply_calibration(int level)
+{
+    P.sensitivity_generation++;
+    P.pending_sensitivity = -1;
+    if (level < SHAKE_STEADY) level = SHAKE_STEADY;
+    if (level > SHAKE_RESPONSIVE) level = SHAKE_RESPONSIVE;
+    app_update_settings(change_sensitivity, &level);
+}
+
+static void on_calibrate(void *context)
+{
+    (void)context;
+    dialogs_open_calibration();
+}
+
+/// 滑块下的三个字对准 0、50、100：像 macOS 程序坞，离滑钮 50 以内的字按余弦曲线放大、变清楚，两端的字从外侧放大，不会超出滑块。
+static GfxSize sensitivity_labels_measure(UiElement *element, float available)
+{
+    (void)element;
+    return (GfxSize){ available, 20 };
+}
+
+static void sensitivity_labels_paint(UiElement *element, double time)
+{
+    (void)time;
+    GfxRect bounds = element->bounds;
+    double value = P.label_value.value;
+    const StringId names[3] = { STR_SensitivitySteady, STR_SensitivityBalanced, STR_SensitivityResponsive };
+    const int stops[3] = { SHAKE_STEADY, SHAKE_BALANCED, SHAKE_RESPONSIVE };
+    const GfxAlign aligns[3] = { GFX_ALIGN_START, GFX_ALIGN_CENTER, GFX_ALIGN_END };
+    for (int index = 0; index < 3; index++)
+    {
+        double distance = value - stops[index];
+        double weight = fabs(distance) >= 50 ? 0 : 0.5 + 0.5 * cos(3.14159265358979 * distance / 50);
+        float scale = (float)(0.85 + 0.35 * weight);
+        float opacity = (float)(0.5 + 0.5 * weight);
+        GfxTextStyle style = { GFX_FONT_TEXT, 12, 400, false, false, aligns[index], GFX_ALIGN_START };
+        float width = gfx_text_measure(S(names[index]), &style, 0).width;
+        float left = index == 0 ? bounds.left : index == 1 ? (bounds.left + bounds.right - width) / 2 : bounds.right - width;
+        // 缩放的原点：左边的字在左上角，中间的在上边中点，右边的在右上角。
+        float origin = index == 0 ? left : index == 1 ? left + width / 2 : left + width;
+        gfx_push_transform(gfx_matrix_scale(scale, scale, origin, bounds.top));
+        Color color = theme_color(THEME_TEXT_PRIMARY);
+        color.a = (uint8_t)(color.a * opacity);
+        style.align = GFX_ALIGN_START;
+        gfx_text_draw(S(names[index]), (GfxRect){ left, bounds.top, left + width + 1, bounds.bottom }, &style, color);
+        gfx_pop_transform();
+    }
+}
+
+static const UiElementType sensitivity_labels_type = { sensitivity_labels_measure, NULL, sensitivity_labels_paint, NULL, NULL, false };
+
+static UiElement *build_sensitivity_control(void)
+{
+    UiElement *column = ui_stack(false, 0);
+    column->width = 200;
+    column->cross = UI_CROSS_CENTER;
+    P.sensitivity_slider = ui_slider(0, 100, current_sensitivity(), 5, on_sensitivity, NULL);
+    ui_set_tooltip(P.sensitivity_slider, UI_STR(STR_ShakeSensitivity));
+    ui_add(column, P.sensitivity_slider);
+    UiElement *labels = ui_element_new(&sensitivity_labels_type, sizeof(UiElement));
+    ui_set_margin(labels, 0, -3, 0, 0);
+    ui_add(column, labels);
+    anim_set(&P.label_value, current_sensitivity());
+    UiElement *calibrate = ui_button(UI_BUTTON_SUBTLE, UI_STR(STR_CalibrateShake), on_calibrate, NULL);
+    calibrate->height = 26;
+    ui_button_set_padding(calibrate, 8, 0, 8, 1);
+    ui_button_set_font_size(calibrate, 12);
+    ui_button_set_color(calibrate, THEME_ACCENT_TEXT);
+    ui_set_margin(calibrate, 0, 4, -8, -2);
+    calibrate->cross = UI_CROSS_END;
+    ui_set_tooltip(calibrate, UI_STR(STR_CalibrateShakeTooltip));
+    ui_add(column, calibrate);
+    return column;
+}
+
+// ───────────── 屏蔽的应用 ─────────────
+
+static void change_blocked_add(AppSettings *settings, void *context)
+{
+    if (strlist_index_of(&settings->blocked_apps, context, true) < 0) strlist_add(&settings->blocked_apps, context);
+}
+
+static void change_blocked_remove(AppSettings *settings, void *context)
+{
+    int index = strlist_index_of(&settings->blocked_apps, context, true);
+    if (index < 0) return;
+    free(settings->blocked_apps.items[index]);
+    memmove(&settings->blocked_apps.items[index], &settings->blocked_apps.items[index + 1],
+        (size_t)(settings->blocked_apps.count - index - 1) * sizeof(wchar_t *));
+    settings->blocked_apps.count--;
+}
+
+static StrList menu_apps;
+#define MENU_BROWSE_APP 1000
+
+static void on_blocked_menu(int id, void *context)
+{
+    (void)context;
+    if (id == MENU_BROWSE_APP)
+    {
+        wchar_t *path = file_dialog_open(ui_window_handle(M->window), S(STR_ChooseProgram), S(STR_AppFilter), NULL);
+        if (path) app_update_settings(change_blocked_add, (void *)path_file_name(path));
+        free(path);
+    }
+    else if (id >= 0 && id < menu_apps.count)
+    {
+        app_update_settings(change_blocked_add, menu_apps.items[id]);
+    }
+    strlist_clear(&menu_apps);
+}
+
+/// 从有窗口的程序中选择，或浏览选择程序文件。
+static void on_add_app(void *context)
+{
+    (void)context;
+    strlist_clear(&menu_apps);
+    StrList all = {0};
+    foreground_windowed_apps(&all);
+    const AppSettings *settings = app_settings();
+    for (int index = 0; index < all.count; index++)
+        if (strlist_index_of(&settings->blocked_apps, all.items[index], true) < 0) strlist_add(&menu_apps, all.items[index]);
+    strlist_clear(&all);
+    int count = menu_apps.count;
+    UiMenuItem *items = xcalloc((size_t)count + 2, sizeof(UiMenuItem));
+    int used = 0;
+    for (int index = 0; index < count; index++) items[used++] = (UiMenuItem){ .id = index, .text = menu_apps.items[index] };
+    if (count > 0) items[used++] = (UiMenuItem){ .separator = true };
+    items[used++] = (UiMenuItem){ .id = MENU_BROWSE_APP, .text = S(STR_BrowseApp) };
+    // 菜单出现在按钮下方。
+    UiElement *button = P.add_app_button;
+    float x = button->bounds.left, y = button->bounds.bottom;
+    ui_element_to_window(button, &x, &y);
+    POINT point = ui_window_to_screen(M->window, x, y);
+    ui_menu_show(items, used, point.x, point.y, on_blocked_menu, NULL);
+    free(items);
+}
+
+/// 列表上显示的程序名；删除按钮记着自己在第几个。
+static StrList blocked_names;
+
+static void on_remove_app(void *context)
+{
+    int index = (int)(intptr_t)context;
+    if (index < 0 || index >= blocked_names.count) return;
+    wchar_t *name = wcs_dup(blocked_names.items[index]);
+    app_update_settings(change_blocked_remove, name);
+    free(name);
+}
+
+static void rebuild_blocked_list(void)
+{
+    const AppSettings *settings = app_settings();
+    // 列表没变时不重建（悬停状态不会闪）。
+    if (P.blocked_list->child_count == blocked_names.count && strlist_equal(&blocked_names, &settings->blocked_apps, false)) return;
+    ui_clear_children(P.blocked_list);
+    strlist_clear(&blocked_names);
+    strlist_clone(&blocked_names, &settings->blocked_apps);
+    for (int index = 0; index < blocked_names.count; index++)
+    {
+        UiElement *remove = ui_button(UI_BUTTON_ICON, UI_LIT(GLYPH_DELETE), on_remove_app, (void *)(intptr_t)index);
+        ui_button_set_font_size(remove, 14);
+        ui_set_tooltip(remove, UI_STR(STR_RemoveBlockedApp));
+        UiElement *card = ui_settings_card(NULL, UI_LIT(blocked_names.items[index]), UI_NO_TEXT, remove, NULL);
+        ui_stack_set_padding(card, 60, 4, 10, 4);
+        card->minimum_height = 44;
+        ui_add(P.blocked_list, card);
+    }
+}
+
+// ───────────── 概览页的卡片 ─────────────
+
+typedef struct PageTile
+{
+    UiElement base;
+    int page;
+    wchar_t *summary;
+    StrList items;          // 摘要拆成的各项，大卡片上显示为标签
+    bool tall;
+    Anim tall_anim;         // 0 是一行的样式，1 是大卡片
+} PageTile;
+
+static void tile_split_summary(PageTile *tile)
+{
+    strlist_clear(&tile->items);
+    const wchar_t *text = tile->summary ? tile->summary : L"";
+    static const wchar_t *const separators[] = { L" · ", L"、", L", " };
+    const wchar_t *start = text;
+    while (*start)
+    {
+        const wchar_t *next = NULL;
+        size_t length = 0;
+        for (int index = 0; index < 3; index++)
+        {
+            const wchar_t *found = wcsstr(start, separators[index]);
+            if (found && (!next || found < next))
+            {
+                next = found;
+                length = wcslen(separators[index]);
+            }
+        }
+        size_t part = next ? (size_t)(next - start) : wcslen(start);
+        wchar_t *item = wcs_dup_n(start, part);
+        wchar_t *trimmed = wcs_trim_dup(item);
+        free(item);
+        if (*trimmed) strlist_add_owned(&tile->items, trimmed);
+        else free(trimmed);
+        if (!next) break;
+        start = next + length;
+    }
+}
+
+static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pressed)
+{
+    UiElement *element = &tile->base;
+    float height = bounds.bottom - bounds.top;
+    if (pressed) gfx_push_opacity(0.8f);
+    gfx_fill_rounded(bounds, TILE_RADIUS, theme_color(hovered ? THEME_CARD_HOVER : THEME_CARD));
+    gfx_stroke_rounded(bounds, TILE_RADIUS, theme_color(THEME_CARD_BORDER), 1);
+    gfx_push_layer((GfxRect){ bounds.left + 1, bounds.top + 1, bounds.right - 1, bounds.bottom - 1 }, TILE_RADIUS - 1, 1);
+    const wchar_t *glyph = main_page_glyph(tile->page);
+    Color accent = theme_color(THEME_ACCENT_TEXT);
+
+    // 背景的大图标随高度渐显。
+    float ramp = (height - 140) / (230 - 140);
+    ramp = ramp < 0 ? 0 : ramp > 1 ? 1 : ramp;
+    if (ramp > 0)
+    {
+        GfxTextStyle big = { GFX_FONT_ICON, 150, 400, false, false, GFX_ALIGN_END, GFX_ALIGN_END };
+        Color faint = accent;
+        faint.a = (uint8_t)(faint.a * 0.07f * ramp);
+        gfx_text_draw(glyph, (GfxRect){ bounds.left, bounds.top, bounds.right - 1 + 16, bounds.bottom - 1 + 24 }, &big, faint);
+    }
+    float tall = (float)tile->tall_anim.value;
+    Color primary = theme_color(THEME_TEXT_PRIMARY), secondary = theme_color(THEME_TEXT_SECONDARY);
+    if (tall < 0.999f)
+    {
+        // 一行的样式：图标在左，标题和摘要在右，竖直居中。
+        gfx_push_opacity(1 - tall);
+        GfxTextStyle icon = { GFX_FONT_ICON, 22, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
+        float icon_width = gfx_text_measure(glyph, &icon, 0).width;
+        gfx_text_draw(glyph, (GfxRect){ bounds.left + 1 + 18, bounds.top, bounds.left + 19 + icon_width + 1, bounds.bottom }, &icon, accent);
+        float left = bounds.left + 1 + 18 + icon_width + 16, right = bounds.right - 1 - 16;
+        GfxTextStyle header = { GFX_FONT_TEXT, 14, 600, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
+        GfxTextStyle summary = { GFX_FONT_TEXT, 12, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
+        float header_height = gfx_text_measure(S(main_page_title(tile->page)), &header, 0).height;
+        float summary_height = gfx_text_measure(L"Ag", &summary, 0).height;
+        float top = (bounds.top + bounds.bottom - header_height - 3 - summary_height) / 2;
+        gfx_text_draw(S(main_page_title(tile->page)), (GfxRect){ left, top, right, top + header_height }, &header, primary);
+        top += header_height + 3;
+        gfx_text_draw(tile->summary ? tile->summary : L"", (GfxRect){ left, top, right, top + summary_height }, &summary, secondary);
+        gfx_pop_layer();
+    }
+    if (tall > 0.001f)
+    {
+        // 大卡片：图标方块在左上，标题和标签在下。
+        gfx_push_opacity(tall);
+        GfxRect box = { bounds.left + 1 + 22, bounds.top + 1 + 22, bounds.left + 1 + 22 + 44, bounds.top + 1 + 22 + 44 };
+        gfx_fill_rounded(box, 10, theme_color(THEME_ACCENT_FAINT));
+        GfxTextStyle icon = { GFX_FONT_ICON, 22, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        gfx_text_draw(glyph, box, &icon, accent);
+        float left = bounds.left + 1 + 22, right = bounds.right - 1 - 18, bottom = bounds.bottom - 1 - 20;
+        GfxTextStyle chip = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        // 标签从左往右排，排不下换行。先算出有几行，从下往上摆。
+        float chip_height = gfx_text_measure(L"Ag", &chip, 0).height + 7;
+        int rows = 1;
+        float x = left;
+        for (int index = 0; index < tile->items.count; index++)
+        {
+            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 18;
+            if (x > left && x + width > right)
+            {
+                rows++;
+                x = left;
+            }
+            x += width + 6;
+        }
+        float chips_top = bottom - rows * chip_height;
+        GfxTextStyle header = { GFX_FONT_TEXT, 16, 600, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
+        float header_height = gfx_text_measure(S(main_page_title(tile->page)), &header, 0).height;
+        float header_top = chips_top - 10 - header_height;
+        gfx_text_draw(S(main_page_title(tile->page)), (GfxRect){ left, header_top, right, header_top + header_height }, &header, primary);
+        x = left;
+        float y = chips_top;
+        for (int index = 0; index < tile->items.count; index++)
+        {
+            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 18;
+            if (x > left && x + width > right)
+            {
+                y += chip_height;
+                x = left;
+            }
+            GfxRect pill = { x, y, x + width, y + chip_height };
+            gfx_fill_rounded(pill, 11, theme_color(THEME_SUBTLE_SELECTED));
+            gfx_text_draw(tile->items.items[index], (GfxRect){ pill.left, pill.top, pill.right, pill.bottom - 1 }, &chip, secondary);
+            x += width + 6;
+        }
+        gfx_pop_layer();
+    }
+    gfx_pop_layer();
+    if (pressed) gfx_pop_layer();
+    (void)element;
+}
+
+static void tile_paint(UiElement *element, double time)
+{
+    PageTile *tile = (PageTile *)element;
+    if (anim_update(&tile->tall_anim, time)) ui_window_request_frame(element->window);
+    tile_paint_at(tile, element->bounds, element->hovered, element->pressed && element->hovered);
+}
+
+static void tile_arrange(UiElement *element)
+{
+    PageTile *tile = (PageTile *)element;
+    float height = element->bounds.bottom - element->bounds.top;
+    if (tile->tall ? height < TALL_HEIGHT - TALL_HYSTERESIS : height >= TALL_HEIGHT + TALL_HYSTERESIS)
+    {
+        tile->tall = !tile->tall;
+        // 两种样式交叉淡入，不随高度连续变化。
+        anim_start(&tile->tall_anim, tile->tall ? 1 : 0, 0.2, EASE_OF(EASE_LINEAR));
+        ui_window_request_frame(element->window);
+    }
+}
+
+static void tile_mouse(UiElement *element, const UiMouseEvent *event)
+{
+    PageTile *tile = (PageTile *)element;
+    if (event->kind == UI_MOUSE_UP && event->inside && !event->right_button) flip_open(tile->page);
+}
+
+static void tile_destroy(UiElement *element)
+{
+    PageTile *tile = (PageTile *)element;
+    free(tile->summary);
+    strlist_clear(&tile->items);
+}
+
+static const UiElementType tile_type = { NULL, tile_arrange, tile_paint, tile_mouse, tile_destroy, true };
+
+void pages_paint_tile_face(UiElement *element, GfxMatrix matrix, float opacity)
+{
+    if (opacity <= 0.001f) return;
+    PageTile *tile = (PageTile *)element;
+    gfx_push_transform(matrix);
+    if (opacity < 0.999f) gfx_push_opacity(opacity);
+    tile_paint_at(tile, element->bounds, false, false);
+    if (opacity < 0.999f) gfx_pop_layer();
+    gfx_pop_transform();
+}
+
+static void tile_set_summary(UiElement *element, wchar_t *summary)
+{
+    PageTile *tile = (PageTile *)element;
+    if (wcs_equal(tile->summary, summary))
+    {
+        free(summary);
+        return;
+    }
+    free(tile->summary);
+    tile->summary = summary;
+    tile_split_summary(tile);
+    ui_window_repaint(element->window);
+}
+
+bool pages_update_card_height(float viewport, bool resized)
+{
+    UiElement *page = M->overview_page;
+    if (!page || page->desired.height <= 0 || viewport <= 0) return false;
+    // 用量出来的高度减去卡片区域本身，结果与卡片当前的高度无关。
+    float grid = M->tile_grid->desired.height + M->tile_grid->margin_top + M->tile_grid->margin_bottom;
+    float rest = page->desired.height - grid;
+    float spare = viewport - PAGE_TOP - PAGE_MARGIN - rest;
+    float headroom = M->history_section->hidden ? 0 : FAN_HEADROOM;
+    float cards = (spare - headroom) / 2 - TILE_GAP;
+    cards = floorf(cards < MIN_CARD_HEIGHT ? MIN_CARD_HEIGHT : cards > MAX_CARD_HEIGHT ? MAX_CARD_HEIGHT : cards);
+    if (fabsf(cards - P.card_target) < 1) return false;
+    P.card_target = cards;
+    // 拖动窗口边缘时直接跟随；只有页面内容变了（如收起入门提示）才平滑过渡，否则动画落后于窗口边缘，整页都在抖。
+    if (!resized && M->tiles[0]->height > 0 && anim_enabled())
+    {
+        anim_start(&P.card_height, cards, MOTION_SECONDS, MOTION_EASE);
+        main_request_frame();
+        return false;
+    }
+    anim_set(&P.card_height, cards);
+    for (int index = 0; index < PAGE_COUNT; index++) M->tiles[index]->height = cards;
+    return true;
+}
+
+// ───────────── 页面的框架 ─────────────
+
+static void section_header(UiElement *parent, StringId text, float top, float bottom)
+{
+    UiElement *header = ui_label(UI_STR(text), UI_TEXT_BODY_STRONG);
+    ui_set_margin(header, 2, top, 0, bottom);
+    ui_add(parent, header);
+}
+
+/// 概览页的内容：页边距和最大宽度，状态栏出现时左边距加宽。内容不够高时撑满可见范围，牌堆贴着窗口底边。
+static GfxSize column_measure(UiElement *element, float available)
+{
+    float left, right;
+    main_content_columns(&left, &right);
+    UiElement *child = element->children[0];
+    ui_measure(child, right - left);
+    (void)available;
+    return (GfxSize){ available, child->desired.height + PAGE_TOP + PAGE_MARGIN };
+}
+
+static void column_arrange(UiElement *element)
+{
+    float left, right;
+    main_content_columns(&left, &right);
+    UiElement *child = element->children[0];
+    ui_arrange(child, (GfxRect){ left, element->bounds.top + PAGE_TOP, right, element->bounds.bottom - PAGE_MARGIN });
+}
+
+static const UiElementType column_type = { column_measure, column_arrange, NULL, NULL, NULL, false };
+
+/// 设置页的外层：翻牌时整页的变换和裁剪放在这里，里面的牌按页面那张牌的位置摆。
+static GfxSize host_measure(UiElement *element, float available)
+{
+    GfxRect area = main_sheet_area();
+    ui_measure(element->children[0], area.right - area.left);
+    return (GfxSize){ available, 0 };
+}
+
+static void host_arrange(UiElement *element)
+{
+    ui_arrange(element->children[0], main_sheet_area());
+}
+
+static const UiElementType host_type = { host_measure, host_arrange, NULL, NULL, NULL, false };
+
+/// 设置页那张牌：整张铺一层很淡的强调色，左上角稍浓；圆角 12，上下留一点空，滚动条不会伸进圆角。
+static void sheet_paint(UiElement *element, double time)
+{
+    (void)time;
+    PageView *view = element->tag;
+    GfxRect bounds = element->bounds;
+    float width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+    GfxStop stops[2] = { { 0, theme_color(THEME_SHEET_GLOW) }, { 0.7f, theme_color(THEME_STACK_EDGE) } };
+    gfx_fill_rounded_radial(bounds, SHEET_RADIUS, bounds.left, bounds.top, width * 1.1f, height * 0.7f, stops, 2);
+    if (!view->sheet_border_hidden) gfx_stroke_rounded(bounds, SHEET_RADIUS, theme_color(THEME_SHEET_BORDER), 1);
+}
+
+static void sheet_arrange(UiElement *element)
+{
+    GfxRect bounds = element->bounds;
+    ui_arrange(element->children[0], (GfxRect){ bounds.left + 1, bounds.top + 1 + 6, bounds.right - 1, bounds.bottom - 1 - 6 });
+}
+
+static GfxSize sheet_measure(UiElement *element, float available)
+{
+    ui_measure(element->children[0], available - 2);
+    return (GfxSize){ available, 0 };
+}
+
+static const UiElementType sheet_type = { sheet_measure, sheet_arrange, sheet_paint, NULL, NULL, false };
+
+static UiElement *pages_build_header_row(int page, float bottom)
+{
+    UiElement *row = ui_stack(true, 0);
+    ui_set_margin(row, 0, 0, 0, bottom);
+    UiElement *back = ui_button(UI_BUTTON_ICON, UI_LIT(GLYPH_BACK), on_back, NULL);
+    back->width = back->height = 36;
+    ui_button_set_font_size(back, 14);
+    ui_set_margin(back, -6, 3, 8, 0);
+    ui_set_tooltip(back, UI_STR(STR_BackTooltip));
+    ui_add(row, back);
+    UiElement *title = ui_label(UI_STR(main_page_title(page)), UI_TEXT_TITLE);
+    title->cross = UI_CROSS_CENTER;
+    ui_add(row, title);
+    return row;
+}
+
+static void build_page_frame(int page, float header_bottom)
+{
+    PageView *view = &M->pages[page];
+    view->title = main_page_title(page);
+    view->glyph = main_page_glyph(page);
+    view->content = ui_stack(false, 0);
+    ui_stack_set_padding(view->content, 23, 12, 23, 24);
+    view->header = pages_build_header_row(page, header_bottom);
+    ui_add(view->content, view->header);
+    view->scroll = ui_scroll(view->content);
+    view->sheet = ui_element_new(&sheet_type, sizeof(UiElement));
+    view->sheet->tag = view;
+    ui_add(view->sheet, view->scroll);
+    view->host = ui_element_new(&host_type, sizeof(UiElement));
+    view->host->hidden = true;
+    ui_add(view->host, view->sheet);
+}
+
+static UiElement *add_card(UiElement *parent, const wchar_t *glyph, UiText header, UiText description, UiElement *control, UiElement **description_label)
+{
+    UiElement *card = ui_settings_card(glyph, header, description, control, description_label);
+    ui_add(parent, card);
+    return card;
+}
+
+static UiElement *segmented(const StringId *items, int count, int selected, UiSelectHandler changed)
+{
+    UiText texts[4];
+    for (int index = 0; index < count; index++) texts[index] = UI_STR(items[index]);
+    return ui_segmented(texts, count, selected, changed, NULL);
+}
+
+static UiElement *wide_button(StringId text, UiClickHandler clicked)
+{
+    UiElement *button = ui_button(UI_BUTTON_STANDARD, UI_STR(text), clicked, NULL);
+    button->minimum_width = 96;
+    return button;
+}
+
+// ───────────── 常规 ─────────────
+
+static UiElement *build_language_pack_selector(void)
+{
+    int count = language_packs_count();
+    UiText *texts = xcalloc((size_t)count + 1, sizeof(UiText));
+    texts[0] = UI_STR(STR_LanguagePackNone);
+    for (int index = 0; index < count; index++) texts[index + 1] = UI_LIT(language_pack_name(language_packs_at(index)));
+    UiElement *selector = ui_segmented(texts, count + 1, 0, on_language_pack, NULL);
+    free(texts);
+    P.language_pack_count = count;
+    return selector;
+}
+
+static void build_general_page(void)
+{
+    build_page_frame(PAGE_GENERAL, 20);
+    UiElement *content = M->pages[PAGE_GENERAL].content;
+    const AppSettings *settings = app_settings();
+    // 语言名称始终用该语言本身书写，切换错了也能认出来。
+    UiText languages[3] = { UI_STR(STR_FollowSystem), UI_LIT(L"中文"), UI_LIT(L"English") };
+    P.language = ui_segmented(languages, 3, settings->language, on_language, NULL);
+    add_card(content, GLYPH_LANGUAGE, UI_STR(STR_Language), UI_STR(STR_LanguageDescription), P.language, NULL);
+    // 找到语言包时才显示：用别的语言显示界面。
+    P.language_pack = build_language_pack_selector();
+    P.language_pack_card = add_card(content, GLYPH_LANGUAGE, UI_STR(STR_LanguagePackHeader), UI_STR(STR_LanguagePackDescription), P.language_pack, NULL);
+    P.startup = ui_toggle(settings->start_with_windows, on_startup, NULL);
+    add_card(content, GLYPH_POWER, UI_STR(STR_StartWithWindows), UI_STR(STR_StartupDescription), P.startup, &P.startup_description);
+    P.hotkey = ui_hotkey_box(settings->hotkey, on_hotkey, NULL);
+    add_card(content, GLYPH_KEYBOARD, UI_STR(STR_GlobalHotkey), UI_STR(STR_HotkeyRegistered), P.hotkey, &P.hotkey_description);
+    const StringId modes[3] = { STR_PerformanceAuto, STR_PerformanceOff, STR_PerformanceOn };
+    P.performance = segmented(modes, 3, settings->performance_mode, on_performance);
+    add_card(content, GLYPH_LIGHTNING, UI_STR(STR_LowPerformanceMode), UI_STR(STR_PerformanceDescriptionAuto), P.performance, &P.performance_description);
+    add_card(content, GLYPH_HELP, UI_STR(STR_Tutorial), UI_STR(STR_TutorialDescription), wide_button(STR_ViewTutorial, on_view_tutorial), NULL);
+}
+
+// ───────────── 手势与置物架 ─────────────
+
+static void build_shelf_page(void)
+{
+    build_page_frame(PAGE_SHELF, 20);
+    UiElement *content = M->pages[PAGE_SHELF].content;
+    const AppSettings *settings = app_settings();
+    section_header(content, STR_AutoOpen, 0, 8);
+    const StringId triggers[3] = { STR_TriggerShake, STR_TriggerEdge, STR_TriggerBoth };
+    P.trigger = segmented(triggers, 3, settings->auto_open_trigger, on_trigger);
+    add_card(content, GLYPH_EXPAND, UI_STR(STR_TriggerHeader), UI_STR(STR_TriggerDescription), P.trigger, NULL);
+    P.sensitivity_card = add_card(content, GLYPH_LIGHTNING, UI_STR(STR_ShakeSensitivity), UI_LIT(L" "), build_sensitivity_control(),
+        &P.sensitivity_description);
+    const StringId dwells[3] = { STR_DwellShort, STR_DwellMedium, STR_DwellLong };
+    P.edge_dwell = segmented(dwells, 3, settings->edge_dwell, on_edge_dwell);
+    P.edge_dwell_card = add_card(content, GLYPH_TIMER, UI_STR(STR_EdgeDwellHeader), UI_STR(STR_EdgeDwellDescription), P.edge_dwell, NULL);
+    P.add_app_button = wide_button(STR_AddApp, on_add_app);
+    add_card(content, GLYPH_SHIELD, UI_STR(STR_BlockedAppsHeader), UI_STR(STR_BlockedAppsDescription), P.add_app_button, NULL);
+    P.blocked_list = ui_stack(false, 0);
+    ui_add(content, P.blocked_list);
+
+    section_header(content, STR_Shelf, 24, 8);
+    const StringId sizes[3] = { STR_SizeSmall, STR_SizeMedium, STR_SizeLarge };
+    P.shelf_size = segmented(sizes, 3, settings->quick_shelf_size, on_shelf_size);
+    add_card(content, GLYPH_VIEW_ALL, UI_STR(STR_Size), UI_STR(STR_SizeDescription), P.shelf_size, NULL);
+    const StringId transfers[2] = { STR_TransferMove, STR_TransferCopy };
+    P.drag_out_mode = segmented(transfers, 2, settings->drag_out_mode, on_drag_out);
+    add_card(content, GLYPH_MOVE, UI_STR(STR_DragOutModeHeader), UI_STR(STR_DragOutModeDescription), P.drag_out_mode, NULL);
+    P.close_when_empty = ui_toggle(settings->close_when_empty, on_close_when_empty, NULL);
+    add_card(content, GLYPH_CLEAR, UI_STR(STR_CloseWhenEmpty), UI_STR(STR_CloseWhenEmptyDescription), P.close_when_empty, NULL);
+    P.clear_history = wide_button(STR_Clear, on_clear_history);
+    add_card(content, GLYPH_HISTORY, UI_STR(STR_ClearShelfHistory), UI_STR(STR_HistoryEmpty), P.clear_history, &P.history_description);
+}
+
+// ───────────── 快速操作 ─────────────
+
+static void build_actions_page(void)
+{
+    build_page_frame(PAGE_ACTIONS, 8);
+    UiElement *content = M->pages[PAGE_ACTIONS].content;
+    UiElement *description = ui_label(UI_STR(STR_ActionsPageDescription), UI_TEXT_CAPTION);
+    ui_label_set_size(description, 13);
+    ui_set_margin(description, 0, 0, 0, 20);
+    ui_add(content, description);
+    const StringId layouts[3] = { STR_LayoutOff, STR_LayoutTwo, STR_LayoutFour };
+    int layout = app_settings()->quick_action_layout;
+    P.layout = segmented(layouts, 3, layout == LAYOUT_FOUR ? 2 : layout == LAYOUT_TWO ? 1 : 0, on_layout);
+    add_card(content, GLYPH_VIEW_ALL, UI_STR(STR_ActionLayoutHeader), UI_STR(STR_ActionLayoutDescription), P.layout, &P.layout_description);
+    actions_build(content);
+}
+
+// ───────────── 外观 ─────────────
+
+typedef struct ThemeTile
+{
+    UiElement base;
+    int theme;
+} ThemeTile;
+
+static GfxSize theme_tile_measure(UiElement *element, float available)
+{
+    (void)element;
+    (void)available;
+    GfxTextStyle label = { GFX_FONT_TEXT, 13, 400 };
+    return (GfxSize){ 140 + 12 + 4, 92 + 8 + gfx_text_measure(L"Ag", &label, 0).height + 2 + 12 + 4 };
+}
+
+static void preview_box(GfxRect rect, float radius, uint32_t fill, uint32_t border)
+{
+    Color fill_color = COLOR_ARGB((uint8_t)(fill >> 24), (uint8_t)(fill >> 16), (uint8_t)(fill >> 8), (uint8_t)fill);
+    Color border_color = COLOR_ARGB((uint8_t)(border >> 24), (uint8_t)(border >> 16), (uint8_t)(border >> 8), (uint8_t)border);
+    gfx_fill_rounded(rect, radius, fill_color);
+    if (border) gfx_stroke_rounded(rect, radius, border_color, 1);
+}
+
+static GfxRect centered(GfxRect outer, float size)
+{
+    float x = (outer.left + outer.right - size) / 2, y = (outer.top + outer.bottom - size) / 2;
+    return (GfxRect){ x, y, x + size, y + size };
+}
+
+static void theme_tile_paint(UiElement *element, double time)
+{
+    (void)time;
+    ThemeTile *tile = (ThemeTile *)element;
+    GfxRect bounds = element->bounds;
+    bool selected = app_settings()->theme == tile->theme;
+    if (element->hovered) gfx_fill_rounded(bounds, 10, theme_color(THEME_SUBTLE_HOVER));
+    if (selected) gfx_stroke_rounded(bounds, 10, theme_color(THEME_ACCENT), 2);
+    GfxRect preview = { bounds.left + 8, bounds.top + 8, bounds.left + 8 + 140, bounds.top + 8 + 92 };
+    switch (tile->theme)
+    {
+        case THEME_LIGHT:
+            preview_box(preview, 7, 0xFFF9F7F1, 0x14000000);
+            preview_box(centered(preview, 64), 8, 0xFFFFFFFF, 0x1A000000);
+            preview_box(centered(preview, 30), 5, 0xFFF9F7F1, 0x26000000);
+            break;
+        case THEME_DARK:
+            preview_box(preview, 7, 0xFF202020, 0x33FFFFFF);
+            preview_box(centered(preview, 64), 8, 0xFF2B2B2B, 0x26FFFFFF);
+            preview_box(centered(preview, 30), 5, 0xFF3B3B3B, 0x33FFFFFF);
+            break;
+        default:
+        {
+            // 跟随系统：左浅右深。
+            float middle = (preview.left + preview.right) / 2;
+            gfx_push_layer(preview, 7, 1);
+            gfx_fill_rect((GfxRect){ preview.left, preview.top, middle, preview.bottom }, COLOR_RGB(0xF9, 0xF7, 0xF1));
+            gfx_fill_rect((GfxRect){ middle, preview.top, preview.right, preview.bottom }, COLOR_RGB(0x20, 0x20, 0x20));
+            gfx_pop_layer();
+            preview_box(centered(preview, 64), 8, 0x80808080, 0);
+            preview_box(centered(preview, 30), 5, 0xFFFFFFFF, 0x33000000);
+            break;
+        }
+    }
+    StringId names[3] = { STR_FollowSystem, STR_ThemeLight, STR_ThemeDark };
+    GfxTextStyle label = { GFX_FONT_TEXT, 13, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
+    gfx_text_draw(S(names[tile->theme]), (GfxRect){ preview.left + 2, preview.bottom + 8, preview.right, bounds.bottom - 6 }, &label,
+        theme_color(THEME_TEXT_PRIMARY));
+}
+
+static void theme_tile_mouse(UiElement *element, const UiMouseEvent *event)
+{
+    ThemeTile *tile = (ThemeTile *)element;
+    if (event->kind == UI_MOUSE_UP && event->inside && !event->right_button && app_settings()->theme != tile->theme) SET_INT(theme, tile->theme);
+}
+
+static const UiElementType theme_tile_type = { theme_tile_measure, NULL, theme_tile_paint, theme_tile_mouse, NULL, true };
+
+/// 强调色色块：选中时外圈和对勾。index 为 -1 是跟随 Windows。
+typedef struct Swatch
+{
+    UiElement base;
+    int index;
+} Swatch;
+
+static GfxSize swatch_measure(UiElement *element, float available)
+{
+    (void)element;
+    (void)available;
+    return (GfxSize){ 32, 32 };
+}
+
+static bool swatch_selected(const Swatch *swatch)
+{
+    const wchar_t *accent = app_settings()->accent_color;
+    if (swatch->index < 0) return !accent || !*accent;
+    return accent && wcs_equal_ignore_case(accent, theme_accent_preset(swatch->index));
+}
+
+static void swatch_paint(UiElement *element, double time)
+{
+    (void)time;
+    Swatch *swatch = (Swatch *)element;
+    GfxRect bounds = element->bounds;
+    float x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
+    bool selected = swatch_selected(swatch);
+    float ring = selected ? 1.0f : element->hovered ? 0.35f : 0;
+    if (ring > 0)
+    {
+        Color color = theme_color(THEME_TEXT_PRIMARY);
+        color.a = (uint8_t)(color.a * ring);
+        gfx_stroke_ellipse(x, y, 16, 16, color, 2);
+    }
+    Color fill = theme_color(THEME_SYSTEM_ACCENT);
+    COLORREF rgb;
+    if (swatch->index >= 0 && accent_color_parse(theme_accent_preset(swatch->index), &rgb)) fill = COLOR_RGB(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb));
+    gfx_fill_ellipse(x, y, 11, 11, fill);
+    if (selected)
+    {
+        GfxTextStyle check = { GFX_FONT_ICON, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        gfx_text_draw(GLYPH_CHECK, bounds, &check, COLOR_WHITE);
+    }
+}
+
+static void change_accent(AppSettings *settings, void *context)
+{
+    free(settings->accent_color);
+    settings->accent_color = context ? wcs_dup(context) : NULL;
+}
+
+static void swatch_mouse(UiElement *element, const UiMouseEvent *event)
+{
+    Swatch *swatch = (Swatch *)element;
+    if (event->kind != UI_MOUSE_UP || !event->inside || event->right_button || swatch_selected(swatch)) return;
+    app_update_settings(change_accent, swatch->index >= 0 ? (void *)theme_accent_preset(swatch->index) : NULL);
+}
+
+static const UiElementType swatch_type = { swatch_measure, NULL, swatch_paint, swatch_mouse, NULL, true };
+
+static void build_appearance_page(void)
+{
+    build_page_frame(PAGE_APPEARANCE, 20);
+    UiElement *content = M->pages[PAGE_APPEARANCE].content;
+    section_header(content, STR_Theme, 0, 10);
+    UiElement *themes = ui_stack(true, 12);
+    for (int index = 0; index < 3; index++)
+    {
+        ThemeTile *tile = (ThemeTile *)ui_element_new(&theme_tile_type, sizeof(ThemeTile));
+        tile->theme = index;
+        P.theme_tiles[index] = &tile->base;
+        ui_add(themes, &tile->base);
+    }
+    ui_add(content, themes);
+
+    // 强调色：一张卡片，色块排在标题下面。
+    UiElement *card = ui_stack(false, 0);
+    ui_stack_set_padding(card, 20, 14, 16, 14);
+    ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 8);
+    ui_set_margin(card, 0, 20, 0, 0);
+    UiElement *row = ui_stack(true, 0);
+    UiElement *icon = ui_label(UI_LIT(GLYPH_BRUSH), UI_TEXT_GLYPH);
+    ui_label_set_size(icon, 20);
+    ui_set_margin(icon, 0, 0, 20, 0);
+    ui_add(row, icon);
+    UiElement *texts = ui_stack(false, 0);
+    texts->grow = 1;
+    ui_add(texts, ui_label(UI_STR(STR_AccentColor), UI_TEXT_BODY));
+    UiElement *description = ui_label(UI_STR(STR_AccentDescription), UI_TEXT_CAPTION);
+    ui_set_margin(description, 0, 2, 0, 0);
+    ui_add(texts, description);
+    P.swatches = ui_stack(true, 4);
+    ui_set_margin(P.swatches, -5, 10, 0, 0);
+    for (int index = -1; index < theme_accent_preset_count(); index++)
+    {
+        Swatch *swatch = (Swatch *)ui_element_new(&swatch_type, sizeof(Swatch));
+        swatch->index = index;
+        // 跟随 Windows 显示系统当前的强调色，并与固定颜色之间留出间隔。
+        if (index < 0)
+        {
+            ui_set_margin(&swatch->base, 0, 0, 12, 0);
+            ui_set_tooltip(&swatch->base, UI_STR(STR_AccentFollowSystem));
+        }
+        ui_add(P.swatches, &swatch->base);
+    }
+    ui_add(texts, P.swatches);
+    ui_add(row, texts);
+    ui_add(card, row);
+    ui_add(content, card);
+}
+
+// ───────────── 概览页 ─────────────
+
+static UiElement *tip_card(const wchar_t *glyph, StringId title, StringId body)
+{
+    UiElement *card = ui_stack(false, 0);
+    ui_stack_set_padding(card, 16, 16, 16, 18);
+    ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 8);
+    UiElement *icon = ui_label(UI_LIT(glyph), UI_TEXT_GLYPH);
+    ui_label_set_size(icon, 22);
+    ui_label_set_color(icon, THEME_ACCENT_TEXT);
+    icon->cross = UI_CROSS_START;
+    ui_add(card, icon);
+    UiElement *header = ui_label(UI_STR(title), UI_TEXT_BODY_STRONG);
+    ui_label_style(header)->wrap = true;
+    ui_set_margin(header, 0, 12, 0, 4);
+    ui_add(card, header);
+    ui_add(card, ui_label(UI_STR(body), UI_TEXT_CAPTION));
+    return card;
+}
+
+static void build_overview(void)
+{
+    UiElement *page = ui_stack(false, 0);
+    M->overview_page = page;
+
+    // 标题行：窗口宽到显示左侧状态栏时，标题移到状态栏图标右侧，这一行收起。
+    UiElement *header = ui_stack(true, 0);
+    M->overview_header = header;
+    UiElement *title = ui_label(UI_STR(STR_Overview), UI_TEXT_TITLE);
+    title->cross = UI_CROSS_CENTER;
+    title->grow = 1;
+    ui_add(header, title);
+    UiElement *open = ui_button(UI_BUTTON_ACCENT, UI_STR(STR_OpenShelf), on_open_shelf, NULL);
+    ui_button_set_glyph(open, GLYPH_ADD, 13);
+    ui_button_set_padding(open, 16, 6, 16, 7);
+    open->cross = UI_CROSS_CENTER;
+    ui_add(header, open);
+    ui_add(page, header);
+
+    UiElement *body = ui_stack(false, 0);
+    M->overview_body = body;
+    P.getting_started = ui_stack(false, 0);
+    UiElement *getting_header = ui_stack(true, 0);
+    UiElement *getting_title = ui_label(UI_STR(STR_GettingStarted), UI_TEXT_BODY_STRONG);
+    ui_set_margin(getting_title, 2, 24, 0, 8);
+    getting_title->grow = 1;
+    ui_add(getting_header, getting_title);
+    UiElement *dismiss = ui_button(UI_BUTTON_ICON, UI_LIT(GLYPH_CLOSE), on_dismiss_getting_started, NULL);
+    dismiss->width = dismiss->height = 28;
+    ui_button_set_font_size(dismiss, 10);
+    dismiss->cross = UI_CROSS_END;
+    ui_set_margin(dismiss, 0, 0, 0, 4);
+    ui_set_tooltip(dismiss, UI_STR(STR_DismissTooltip));
+    ui_add(getting_header, dismiss);
+    ui_add(P.getting_started, getting_header);
+    UiElement *tips = ui_grid(3, 9, 0);
+    ui_add(tips, tip_card(GLYPH_MOUSE, STR_TipShakeTitle, STR_TipShakeBody));
+    ui_add(tips, tip_card(GLYPH_LIBRARY, STR_TipStackTitle, STR_TipStackBody));
+    ui_add(tips, tip_card(GLYPH_LIGHTNING, STR_QuickActionsTitle, STR_TipActionsBody));
+    ui_add(P.getting_started, tips);
+    ui_add(body, P.getting_started);
+
+    section_header(body, STR_SettingsSection, 24, 8);
+    M->tile_grid = ui_grid(2, TILE_GAP, TILE_GAP);
+    ui_set_margin(M->tile_grid, 0, 0, 0, TILE_GAP);
+    for (int index = 0; index < PAGE_COUNT; index++)
+    {
+        PageTile *tile = (PageTile *)ui_element_new(&tile_type, sizeof(PageTile));
+        tile->page = index;
+        tile->base.height = MIN_CARD_HEIGHT;
+        M->tiles[index] = &tile->base;
+        ui_add(M->tile_grid, &tile->base);
+    }
+    ui_add(body, M->tile_grid);
+    ui_add(page, body);
+    anim_set(&P.card_height, MIN_CARD_HEIGHT);
+    P.card_target = MIN_CARD_HEIGHT;
+
+    // 中间留空，最近关闭的置物架总是贴着窗口底边；下半截伸出页面，被窗口底边裁掉。
+    ui_add(page, ui_spacer());
+    M->history_section = ui_stack(false, 0);
+    section_header(M->history_section, STR_RecentShelves, 24, 8);
+    M->fan = fan_create();
+    M->fan->height = 165;
+    ui_set_margin(M->fan, 0, 4, 0, -36);
+    ui_add(M->history_section, M->fan);
+    ui_add(page, M->history_section);
+
+    UiElement *column = ui_element_new(&column_type, sizeof(UiElement));
+    ui_add(column, page);
+    M->overview_scroll = ui_scroll(column);
+}
+
+void pages_build(void)
+{
+    // 每次打开设置重新找一遍语言包：新放进文件夹的、刚改过的译文不用重启程序就能用上。
+    wchar_t *data = settings_data_directory();
+    wchar_t *packs = path_join(data, LANGUAGE_PACK_FOLDER);
+    language_packs_reload(packs);
+    language_set_pack(language_packs_find(app_settings()->language_pack));
+    free(packs);
+    free(data);
+    P.pending_sensitivity = -1;
+    startup_failed = false;
+    build_overview();
+    build_general_page();
+    build_shelf_page();
+    build_actions_page();
+    build_appearance_page();
+}
+
+// ───────────── 刷新 ─────────────
+
+void pages_refresh(void)
+{
+    if (!M->overview_page) return;
+    const AppSettings *settings = app_settings();
+    P.getting_started->hidden = !settings->show_getting_started;
+
+    // 概览页四张卡片上的当前设置。
+    bool has_hotkey = settings->hotkey && *settings->hotkey;
+    tile_set_summary(M->tiles[PAGE_GENERAL], str_general_summary(settings->language, settings->start_with_windows, has_hotkey ? settings->hotkey : NULL));
+    tile_set_summary(M->tiles[PAGE_SHELF], str_shelf_summary(settings->auto_open_trigger, settings->drag_out_mode));
+    QuickActionList visible = quick_actions_visible(settings);
+    StrList labels = {0};
+    for (int index = 0; index < visible.count; index++) strlist_add_owned(&labels, quick_action_label(&visible.items[index]));
+    quick_action_list_free(&visible);
+    tile_set_summary(M->tiles[PAGE_ACTIONS], str_actions_summary(&labels));
+    strlist_clear(&labels);
+    tile_set_summary(M->tiles[PAGE_APPEARANCE], str_appearance_summary(settings->theme, settings->accent_color != NULL));
+
+    // 常规。
+    ui_segmented_set_selected(P.language, settings->language);
+    if (language_packs_count() != P.language_pack_count)
+    {
+        UiElement *card = P.language_pack_card;
+        UiElement *old = P.language_pack;
+        P.language_pack = build_language_pack_selector();
+        // 换掉卡片最后的控件。
+        for (int index = 0; index < card->child_count; index++)
+        {
+            if (card->children[index] != old) continue;
+            card->children[index] = P.language_pack;
+            P.language_pack->parent = card;
+            ui_element_attach(P.language_pack, card->window);
+            old->parent = NULL;
+            ui_element_destroy(old);
+            break;
+        }
+    }
+    P.language_pack_card->hidden = language_packs_count() == 0;
+    int pack_index = 0;
+    for (int index = 0; index < language_packs_count(); index++)
+        if (settings->language_pack && wcs_equal_ignore_case(language_pack_id(language_packs_at(index)), settings->language_pack)) pack_index = index + 1;
+    ui_segmented_set_selected(P.language_pack, pack_index);
+    ui_toggle_set_checked(P.startup, settings->start_with_windows);
+    ui_label_set_text(P.startup_description, UI_STR(startup_failed ? STR_StartupFailed : STR_StartupDescription));
+    ui_hotkey_box_set(P.hotkey, settings->hotkey);
+    ui_label_set_text(P.hotkey_description, UI_STR(!has_hotkey ? STR_HotkeyNotSetDescription
+                                                    : app_is_hotkey_registered() ? STR_HotkeyRegistered : STR_HotkeyTaken));
+    ui_label_set_color(P.hotkey_description, has_hotkey && !app_is_hotkey_registered() ? THEME_CRITICAL : THEME_TEXT_SECONDARY);
+    ui_segmented_set_selected(P.performance, settings->performance_mode);
+    ui_label_set_text(P.performance_description, UI_STR(settings->performance_mode == PERFORMANCE_NORMAL ? STR_PerformanceDescriptionNormal
+                                                        : settings->performance_mode == PERFORMANCE_LOW ? STR_PerformanceDescriptionLow
+                                                                                                         : STR_PerformanceDescriptionAuto));
+
+    // 手势与置物架。
+    ui_segmented_set_selected(P.trigger, settings->auto_open_trigger);
+    P.sensitivity_card->hidden = !auto_open_uses_shake(settings->auto_open_trigger);
+    P.edge_dwell_card->hidden = !auto_open_uses_edge(settings->auto_open_trigger);
+    if (P.pending_sensitivity < 0 && ui_slider_value(P.sensitivity_slider) != settings->shake_sensitivity)
+    {
+        ui_slider_set_value(P.sensitivity_slider, settings->shake_sensitivity);
+        anim_start(&P.label_value, settings->shake_sensitivity, 0.22, EASE_OF(EASE_CUBIC_OUT));
+        main_request_frame();
+    }
+    update_sensitivity_description();
+    ui_segmented_set_selected(P.edge_dwell, settings->edge_dwell);
+    rebuild_blocked_list();
+    ui_segmented_set_selected(P.shelf_size, settings->quick_shelf_size);
+    ui_segmented_set_selected(P.drag_out_mode, settings->drag_out_mode);
+    ui_toggle_set_checked(P.close_when_empty, settings->close_when_empty);
+    int history_count = 0;
+    shelf_history_entries(&history_count);
+    if (history_count > 0)
+    {
+        wchar_t *text = str_history_count(history_count);
+        ui_label_set_text(P.history_description, UI_LIT(text));
+        free(text);
+    }
+    else ui_label_set_text(P.history_description, UI_STR(STR_HistoryEmpty));
+    ui_set_disabled(P.clear_history, history_count == 0);
+
+    // 快速操作。
+    int layout = settings->quick_action_layout;
+    ui_segmented_set_selected(P.layout, layout == LAYOUT_FOUR ? 2 : layout == LAYOUT_TWO ? 1 : 0);
+    ui_label_set_text(P.layout_description, UI_STR(layout != LAYOUT_OFF ? STR_ActionLayoutDescription : STR_ActionLayoutOffDescription));
+    main_repaint();
+}
+
+void pages_animate(double time)
+{
+    if (!M->overview_page) return;
+    if (anim_update(&P.label_value, time)) main_request_frame();
+    if (anim_update(&P.card_height, time))
+    {
+        main_request_frame();
+        for (int index = 0; index < PAGE_COUNT; index++) M->tiles[index]->height = floorf((float)P.card_height.value);
+        main_relayout();
+    }
+    else if (M->tiles[0] && M->tiles[0]->height != (float)P.card_height.value)
+    {
+        for (int index = 0; index < PAGE_COUNT; index++) M->tiles[index]->height = (float)P.card_height.value;
+        main_relayout();
+    }
+}
+
+void pages_close(void)
+{
+    save_sensitivity();
+    unsigned generation = P.sensitivity_generation + 1;
+    strlist_clear(&menu_apps);
+    strlist_clear(&blocked_names);
+    memset(&P, 0, sizeof(P));
+    // 关掉之后还在等的保存计时不再起作用。
+    P.sensitivity_generation = generation;
+    P.pending_sensitivity = -1;
+}

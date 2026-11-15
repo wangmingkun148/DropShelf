@@ -64,6 +64,23 @@ static bool find_action(const wchar_t *id, const AppSettings *settings, QuickAct
     return false;
 }
 
+bool quick_action_find(const wchar_t *id, const AppSettings *settings, QuickAction *action)
+{
+    return find_action(id, settings, action);
+}
+
+QuickActionList quick_actions_available(const AppSettings *settings)
+{
+    QuickActionList list = {0};
+    int total = quick_action_builtin_count() + settings->custom_action_count;
+    list.items = xcalloc((size_t)(total > 0 ? total : 1), sizeof(QuickAction));
+    for (int index = 0; index < quick_action_builtin_count(); index++)
+        if (find_action(quick_action_builtin_id(index), settings, &list.items[list.count])) list.count++;
+    for (int index = 0; index < settings->custom_action_count; index++)
+        if (find_action(settings->custom_actions[index].id, settings, &list.items[list.count])) list.count++;
+    return list;
+}
+
 QuickActionList quick_actions_visible(const AppSettings *settings)
 {
     QuickActionList list = {0};

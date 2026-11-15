@@ -7,13 +7,6 @@
 
 // ───────────── 控件上的文字 ─────────────
 
-/// 控件里存的文字：文字表里的一条，或自己留的一份副本。
-typedef struct StoredText
-{
-    int string;
-    wchar_t *literal;
-} StoredText;
-
 static StoredText text_store(UiText text)
 {
     return (StoredText){ text.string, text.string < 0 ? wcs_dup(text.literal ? text.literal : L"") : NULL };
@@ -31,13 +24,90 @@ static const wchar_t *text_get(const StoredText *text)
     return text->string >= 0 ? S((StringId)text->string) : text->literal;
 }
 
+StoredText ui_text_store(UiText text)
+{
+    return text_store(text);
+}
+
+void ui_text_free(StoredText *text)
+{
+    text_free(text);
+}
+
+const wchar_t *ui_text_get(const StoredText *text)
+{
+    return text_get(text);
+}
+
 // ───────────── 元素的公共部分 ─────────────
 
 UiElement *ui_element_new(const UiElementType *type, size_t size)
 {
     UiElement *element = xcalloc(1, size);
     element->type = type;
+    element->opacity = 1;
+    element->transform = gfx_matrix_identity();
+    element->tooltip_string = -1;
     return element;
+}
+
+void ui_set_tooltip(UiElement *element, UiText text)
+{
+    free(element->tooltip_literal);
+    element->tooltip_literal = NULL;
+    element->tooltip_string = text.string;
+    if (text.string < 0 && text.literal) element->tooltip_literal = wcs_dup(text.literal);
+}
+
+const wchar_t *ui_element_tooltip(const UiElement *element)
+{
+    for (; element; element = element->parent)
+    {
+        if (element->tooltip_string >= 0) return S((StringId)element->tooltip_string);
+        if (element->tooltip_literal) return element->tooltip_literal;
+    }
+    return NULL;
+}
+
+bool ui_is_within(const UiElement *element, const UiElement *ancestor)
+{
+    for (; element; element = element->parent)
+        if (element == ancestor) return true;
+    return false;
+}
+
+void ui_clear_children(UiElement *parent)
+{
+    int count = parent->child_count;
+    UiElement **children = parent->children;
+    parent->children = NULL;
+    parent->child_count = 0;
+    for (int index = 0; index < count; index++)
+    {
+        children[index]->parent = NULL;
+        ui_element_destroy(children[index]);
+    }
+    free(children);
+    ui_invalidate(parent);
+}
+
+void ui_element_to_local(const UiElement *element, float *x, float *y)
+{
+    // 从最外层往里，一层层扣掉上级和它自己的变换（变换作用于元素本身和子元素）。
+    const UiElement *chain[64];
+    int depth = 0;
+    for (const UiElement *ancestor = element; ancestor && depth < 64; ancestor = ancestor->parent) chain[depth++] = ancestor;
+    for (int index = depth - 1; index >= 0; index--)
+    {
+        GfxMatrix inverse;
+        if (chain[index]->transformed && gfx_matrix_invert(chain[index]->transform, &inverse)) gfx_matrix_apply(inverse, x, y);
+    }
+}
+
+void ui_element_to_window(const UiElement *element, float *x, float *y)
+{
+    for (const UiElement *ancestor = element; ancestor; ancestor = ancestor->parent)
+        if (ancestor->transformed) gfx_matrix_apply(ancestor->transform, x, y);
 }
 
 void ui_element_attach(UiElement *element, UiWindow *window)
@@ -57,6 +127,7 @@ void ui_element_destroy(UiElement *element)
     free(element->children);
     ui_window_forget(element->window, element);
     if (element->type->destroy) element->type->destroy(element);
+    free(element->tooltip_literal);
     free(element);
 }
 
@@ -120,24 +191,72 @@ void ui_arrange(UiElement *element, GfxRect bounds)
     if (!element->hidden && element->type->arrange) element->type->arrange(element);
 }
 
+static GfxRect clip_bounds(const UiElement *element)
+{
+    const GfxRect *rect = &element->clip_rect;
+    return rect->right > rect->left && rect->bottom > rect->top ? *rect : element->bounds;
+}
+
 void ui_paint(UiElement *element, double time)
 {
-    if (element->hidden) return;
+    if (element->hidden || element->opacity <= 0.001f) return;
+    if (element->transformed) gfx_push_transform(element->transform);
+    bool faded = element->opacity < 0.999f;
+    if (faded) gfx_push_opacity(element->opacity);
     if (element->type->paint) element->type->paint(element, time);
-    for (int index = 0; index < element->child_count; index++) ui_paint(element->children[index], time);
+    if (element->clip)
+    {
+        GfxRect clip = clip_bounds(element);
+        if (element->clip_radius > 0) gfx_push_layer(clip, element->clip_radius, 1);
+        else gfx_push_clip(clip);
+    }
+    if (!element->type->paints_children)
+        for (int index = 0; index < element->child_count; index++) ui_paint(element->children[index], time);
+    if (element->clip)
+    {
+        if (element->clip_radius > 0) gfx_pop_layer();
+        else gfx_pop_clip();
+    }
+    if (element->type->paint_over) element->type->paint_over(element, time);
+    if (faded) gfx_pop_layer();
+    if (element->transformed) gfx_pop_transform();
+}
+
+static bool inside(GfxRect rect, float x, float y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+static UiElement *hit_test(UiElement *element, float x, float y, bool any)
+{
+    if (element->hidden || element->hit_through) return NULL;
+    if (element->transformed)
+    {
+        GfxMatrix inverse;
+        if (!gfx_matrix_invert(element->transform, &inverse)) return NULL;
+        gfx_matrix_apply(inverse, &x, &y);
+    }
+    GfxRect bounds = element->bounds;
+    bounds.top -= element->hit_extend_top;
+    if (!inside(bounds, x, y)) return NULL;
+    if (element->clip && !inside(clip_bounds(element), x, y)) return NULL;
+    // 后加的子元素画在上面，先问它们。
+    for (int index = element->child_count - 1; index >= 0; index--)
+    {
+        UiElement *hit = hit_test(element->children[index], x, y, any);
+        if (hit) return hit;
+    }
+    return any || element->type->interactive ? element : NULL;
 }
 
 UiElement *ui_hit_test(UiElement *element, float x, float y)
 {
-    if (element->hidden) return NULL;
-    if (x < element->bounds.left || x >= element->bounds.right || y < element->bounds.top || y >= element->bounds.bottom) return NULL;
-    // 后加的子元素画在上面，先问它们。
-    for (int index = element->child_count - 1; index >= 0; index--)
-    {
-        UiElement *hit = ui_hit_test(element->children[index], x, y);
-        if (hit) return hit;
-    }
-    return element->type->interactive ? element : NULL;
+    return hit_test(element, x, y, false);
+}
+
+UiElement *ui_hit_test_any(UiElement *element, float x, float y)
+{
+    return hit_test(element, x, y, true);
 }
 
 /// 元素连同外边距占多大。
@@ -406,6 +525,16 @@ void ui_label_set_size(UiElement *element, float size)
     ui_invalidate(element);
 }
 
+GfxTextStyle *ui_label_style(UiElement *element)
+{
+    return &((UiLabel *)element)->style;
+}
+
+const wchar_t *ui_label_text(UiElement *element)
+{
+    return text_get(&((UiLabel *)element)->text);
+}
+
 // ───────────── 按钮 ─────────────
 
 typedef struct UiButton
@@ -415,6 +544,11 @@ typedef struct UiButton
     StoredText text;
     UiClickHandler clicked;
     void *context;
+    wchar_t *glyph;             // 文字左边的图标
+    float glyph_size;
+    float font_size;            // 0 表示默认
+    float padding_left, padding_top, padding_right, padding_bottom;
+    ThemeColor color;           // THEME_COLOR_COUNT 表示按种类
 } UiButton;
 
 static bool button_is_glyph(UiButtonKind kind)
@@ -422,16 +556,19 @@ static bool button_is_glyph(UiButtonKind kind)
     return kind == UI_BUTTON_ICON || kind == UI_BUTTON_CAPTION || kind == UI_BUTTON_CAPTION_CLOSE;
 }
 
-static GfxTextStyle button_text_style(UiButtonKind kind)
+static GfxTextStyle button_text_style(const UiButton *button)
 {
     GfxTextStyle style = { GFX_FONT_TEXT, 14, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
-    if (button_is_glyph(kind))
+    if (button_is_glyph(button->kind))
     {
         style.font = GFX_FONT_ICON;
-        style.size = kind == UI_BUTTON_ICON ? 16.0f : 10.0f;
+        style.size = button->kind == UI_BUTTON_ICON ? 16.0f : 10.0f;
     }
+    if (button->font_size > 0) style.size = button->font_size;
     return style;
 }
+
+static const GfxTextStyle button_glyph_style = { GFX_FONT_ICON, 13, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
 
 static GfxSize button_measure(UiElement *element, float available)
 {
@@ -439,10 +576,12 @@ static GfxSize button_measure(UiElement *element, float available)
     UiButton *button = (UiButton *)element;
     if (button->kind == UI_BUTTON_ICON) return (GfxSize){ 32, 32 };
     if (button->kind == UI_BUTTON_CAPTION || button->kind == UI_BUTTON_CAPTION_CLOSE) return (GfxSize){ 46, 32 };
-    GfxTextStyle style = button_text_style(button->kind);
+    GfxTextStyle style = button_text_style(button);
     GfxSize text = gfx_text_measure(text_get(&button->text), &style, 0);
-    // 内边距 12,5,12,6，最小高度 32。
-    return (GfxSize){ text.width + 24, maximum(text.height + 11, 32) };
+    float glyph = button->glyph ? button->glyph_size + 8 : 0;
+    // 内边距默认 12,5,12,6，最小高度 32。
+    return (GfxSize){ text.width + glyph + button->padding_left + button->padding_right,
+        maximum(text.height + button->padding_top + button->padding_bottom, 32) };
 }
 
 static void button_paint(UiElement *element, double time)
@@ -484,13 +623,27 @@ static void button_paint(UiElement *element, double time)
             }
             break;
     }
+    if (button->color != THEME_COLOR_COUNT && !element->disabled && !pressed) text = theme_color(button->color);
     if (element->disabled) text = theme_color(THEME_TEXT_DISABLED);
     gfx_fill_rounded(element->bounds, radius, fill);
     gfx_stroke_rounded(element->bounds, radius, border, 1);
-    GfxTextStyle style = button_text_style(button->kind);
+    GfxTextStyle style = button_text_style(button);
     GfxRect area = element->bounds;
     // 文字的内边距上 5 下 6，看起来比正中略高一点。
-    if (!button_is_glyph(button->kind)) area.bottom -= 1;
+    if (!button_is_glyph(button->kind)) area.bottom -= button->padding_bottom - button->padding_top;
+    if (button->glyph)
+    {
+        // 图标和文字作为一组居中。
+        GfxSize label = gfx_text_measure(text_get(&button->text), &style, 0);
+        float total = button->glyph_size + 8 + label.width;
+        float left = (area.left + area.right - total) / 2;
+        GfxTextStyle glyph_style = button_glyph_style;
+        glyph_style.size = button->glyph_size;
+        gfx_text_draw(button->glyph, (GfxRect){ left, area.top + 1, left + button->glyph_size + 8, area.bottom }, &glyph_style, text);
+        area.left = left + button->glyph_size + 8;
+        area.right = area.left + label.width + 1;
+        style.align = GFX_ALIGN_START;
+    }
     gfx_text_draw(text_get(&button->text), area, &style, text);
 }
 
@@ -504,6 +657,7 @@ static void button_mouse(UiElement *element, const UiMouseEvent *event)
 static void button_destroy(UiElement *element)
 {
     text_free(&((UiButton *)element)->text);
+    free(((UiButton *)element)->glyph);
 }
 
 static const UiElementType button_type = { button_measure, NULL, button_paint, button_mouse, button_destroy, true };
@@ -515,8 +669,43 @@ UiElement *ui_button(UiButtonKind kind, UiText text, UiClickHandler clicked, voi
     button->text = text_store(text);
     button->clicked = clicked;
     button->context = context;
+    button->padding_left = button->padding_right = 12;
+    button->padding_top = 5;
+    button->padding_bottom = 6;
+    button->color = THEME_COLOR_COUNT;
     button->base.cross = kind == UI_BUTTON_CAPTION || kind == UI_BUTTON_CAPTION_CLOSE ? UI_CROSS_STRETCH : UI_CROSS_CENTER;
     return &button->base;
+}
+
+void ui_button_set_glyph(UiElement *element, const wchar_t *glyph, float size)
+{
+    UiButton *button = (UiButton *)element;
+    free(button->glyph);
+    button->glyph = wcs_dup(glyph);
+    button->glyph_size = size > 0 ? size : 13;
+    ui_invalidate(element);
+}
+
+void ui_button_set_font_size(UiElement *element, float size)
+{
+    ((UiButton *)element)->font_size = size;
+    ui_invalidate(element);
+}
+
+void ui_button_set_padding(UiElement *element, float left, float top, float right, float bottom)
+{
+    UiButton *button = (UiButton *)element;
+    button->padding_left = left;
+    button->padding_top = top;
+    button->padding_right = right;
+    button->padding_bottom = bottom;
+    ui_invalidate(element);
+}
+
+void ui_button_set_color(UiElement *element, ThemeColor color)
+{
+    ((UiButton *)element)->color = color;
+    ui_window_repaint(element->window);
 }
 
 void ui_button_set_text(UiElement *element, UiText text)

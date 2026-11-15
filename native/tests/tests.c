@@ -31,6 +31,10 @@
 #include "theme.h"
 #include "ui.h"
 #include "../src/shelf_window_internal.h"
+#include "../src/main_window_internal.h"
+#include "about_window.h"
+#include "onboarding_window.h"
+#include "update_check.h"
 
 #include <limits.h>
 #include <math.h>
@@ -1356,6 +1360,7 @@ static void test_drop_classify(void)
 #include "shelf_tests.inc"
 #include "action_tests.inc"
 #include "merge_tests.inc"
+#include "main_tests.inc"
 
 static void run(const char *name, void (*test)(void))
 {
@@ -1418,6 +1423,12 @@ int main(void)
     run("adopt between shelves", test_adopt_between_shelves);
     run("merge and split", test_merge_and_split);
     run("shelf history", test_shelf_history);
+    run("update check", test_update_check);
+    run("main window strings", test_main_strings);
+    run("language template", test_language_template);
+    run("matrix invert", test_matrix_invert);
+    run("main window", test_main_window);
+    run("about and onboarding", test_about_and_onboarding);
 
     // 清理临时文件夹。
     settings_flush();
