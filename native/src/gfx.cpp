@@ -395,6 +395,35 @@ GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride
     return image;
 }
 
+GfxImage *gfx_image_from_icon(HICON icon)
+{
+    if (!icon) return nullptr;
+    HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    IWICImagingFactory *factory = nullptr;
+    IWICBitmap *bitmap = nullptr;
+    IWICFormatConverter *converter = nullptr;
+    GfxImage *image = nullptr;
+    HRESULT result = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IWICImagingFactory), (void **)&factory);
+    if (SUCCEEDED(result)) result = factory->CreateBitmapFromHICON(icon, &bitmap);
+    if (SUCCEEDED(result)) result = factory->CreateFormatConverter(&converter);
+    if (SUCCEEDED(result))
+        result = converter->Initialize(bitmap, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+    UINT width = 0, height = 0;
+    if (SUCCEEDED(result)) result = converter->GetSize(&width, &height);
+    if (SUCCEEDED(result) && width > 0 && height > 0)
+    {
+        unsigned char *pixels = (unsigned char *)malloc((size_t)width * height * 4);
+        if (!pixels) abort();
+        if (SUCCEEDED(converter->CopyPixels(nullptr, width * 4, width * height * 4, pixels))) image = gfx_image_create(pixels, (int)width, (int)height, (int)width * 4);
+        free(pixels);
+    }
+    release(converter);
+    release(bitmap);
+    release(factory);
+    if (SUCCEEDED(initialized)) CoUninitialize();
+    return image;
+}
+
 GfxImage *gfx_image_retain(GfxImage *image)
 {
     if (image) InterlockedIncrement(&image->references);
@@ -696,6 +725,212 @@ void gfx_pop_layer(void)
     if (drawing) context->PopLayer();
 }
 
+void gfx_push_layer_hole(GfxRect outer, GfxRect hole, float radius, GfxMatrix hole_matrix, float opacity)
+{
+    if (!drawing) return;
+    ID2D1RectangleGeometry *bounds = nullptr;
+    ID2D1RoundedRectangleGeometry *card = nullptr;
+    ID2D1TransformedGeometry *moved = nullptr;
+    ID2D1GeometryGroup *group = nullptr;
+    D2D1::Matrix3x2F matrix(hole_matrix.m11, hole_matrix.m12, hole_matrix.m21, hole_matrix.m22, hole_matrix.dx, hole_matrix.dy);
+    if (SUCCEEDED(d2d_factory->CreateRectangleGeometry(to_rect(outer), &bounds)) &&
+        SUCCEEDED(d2d_factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(to_rect(hole), radius, radius), &card)) &&
+        SUCCEEDED(d2d_factory->CreateTransformedGeometry(card, matrix, &moved)))
+    {
+        // 交替填充：矩形里挖掉卡片覆盖的部分。
+        ID2D1Geometry *parts[2] = { bounds, moved };
+        d2d_factory->CreateGeometryGroup(D2D1_FILL_MODE_ALTERNATE, parts, 2, &group);
+    }
+    context->PushLayer(D2D1::LayerParameters1(to_rect(outer), group, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), opacity), nullptr);
+    release(group);
+    release(moved);
+    release(card);
+    release(bounds);
+}
+
+bool gfx_matrix_invert(GfxMatrix matrix, GfxMatrix *inverse)
+{
+    float determinant = matrix.m11 * matrix.m22 - matrix.m12 * matrix.m21;
+    if (fabsf(determinant) < 1e-9f) return false;
+    float a = matrix.m22 / determinant, b = -matrix.m12 / determinant;
+    float c = -matrix.m21 / determinant, d = matrix.m11 / determinant;
+    *inverse = { a, b, c, d, -(matrix.dx * a + matrix.dy * c), -(matrix.dx * b + matrix.dy * d) };
+    return true;
+}
+
+// ───────────── 渐变和路径 ─────────────
+
+static ID2D1GradientStopCollection *make_stops(const GfxStop *stops, int count)
+{
+    if (count <= 0 || count > 8) return nullptr;
+    D2D1_GRADIENT_STOP converted[8];
+    for (int index = 0; index < count; index++)
+    {
+        Color color = stops[index].color;
+        converted[index] = { stops[index].offset, D2D1::ColorF(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f) };
+    }
+    ID2D1GradientStopCollection *collection = nullptr;
+    context->CreateGradientStopCollection(converted, (UINT32)count, &collection);
+    return collection;
+}
+
+void gfx_fill_rounded_radial(GfxRect rect, float radius, float center_x, float center_y, float radius_x, float radius_y,
+    const GfxStop *stops, int count)
+{
+    if (!drawing || radius_x <= 0 || radius_y <= 0) return;
+    ID2D1GradientStopCollection *collection = make_stops(stops, count);
+    ID2D1RadialGradientBrush *gradient = nullptr;
+    if (collection && SUCCEEDED(context->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(D2D1::Point2F(center_x, center_y), D2D1::Point2F(0, 0), radius_x, radius_y), collection, &gradient)))
+    {
+        if (radius <= 0) context->FillRectangle(to_rect(rect), gradient);
+        else context->FillRoundedRectangle(D2D1::RoundedRect(to_rect(rect), radius, radius), gradient);
+    }
+    release(gradient);
+    release(collection);
+}
+
+void gfx_fill_rect_linear(GfxRect rect, float x1, float y1, float x2, float y2, const GfxStop *stops, int count)
+{
+    if (!drawing) return;
+    ID2D1GradientStopCollection *collection = make_stops(stops, count);
+    ID2D1LinearGradientBrush *gradient = nullptr;
+    if (collection && SUCCEEDED(context->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2)), collection, &gradient)))
+        context->FillRectangle(to_rect(rect), gradient);
+    release(gradient);
+    release(collection);
+}
+
+/// 上面两个角半径为 top、下面两个角为 bottom 的圆角矩形路径；open_top 时不画上沿（描边用）。
+static ID2D1PathGeometry *corner_path(D2D1_RECT_F rect, float top, float bottom, bool open_top, bool filled)
+{
+    float width = rect.right - rect.left, height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) return nullptr;
+    float limit = (width < height ? width : height) / 2;
+    if (top > limit) top = limit;
+    if (bottom > limit) bottom = limit;
+    if (top < 0) top = 0;
+    if (bottom < 0) bottom = 0;
+    ID2D1PathGeometry *path = nullptr;
+    ID2D1GeometrySink *sink = nullptr;
+    if (FAILED(d2d_factory->CreatePathGeometry(&path))) return nullptr;
+    if (FAILED(path->Open(&sink)))
+    {
+        release(path);
+        return nullptr;
+    }
+    D2D1_FIGURE_BEGIN begin = filled ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW;
+    if (open_top)
+    {
+        // 从左上沿顺时针反着走：左边往下、底边、右边往上。
+        sink->BeginFigure(D2D1::Point2F(rect.left, rect.top + top), begin);
+        if (top > 0) sink->AddLine(D2D1::Point2F(rect.left, rect.top + top));
+    }
+    else
+    {
+        sink->BeginFigure(D2D1::Point2F(rect.left + top, rect.top), begin);
+        sink->AddLine(D2D1::Point2F(rect.right - top, rect.top));
+        if (top > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.right, rect.top + top), D2D1::SizeF(top, top), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        sink->AddLine(D2D1::Point2F(rect.right, rect.bottom - bottom));
+        if (bottom > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.right - bottom, rect.bottom), D2D1::SizeF(bottom, bottom), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        sink->AddLine(D2D1::Point2F(rect.left + bottom, rect.bottom));
+        if (bottom > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.left, rect.bottom - bottom), D2D1::SizeF(bottom, bottom), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        sink->AddLine(D2D1::Point2F(rect.left, rect.top + top));
+        if (top > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.left + top, rect.top), D2D1::SizeF(top, top), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink->Close();
+        release(sink);
+        return path;
+    }
+    sink->AddLine(D2D1::Point2F(rect.left, rect.bottom - bottom));
+    if (bottom > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.left + bottom, rect.bottom), D2D1::SizeF(bottom, bottom), 0, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine(D2D1::Point2F(rect.right - bottom, rect.bottom));
+    if (bottom > 0) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(rect.right, rect.bottom - bottom), D2D1::SizeF(bottom, bottom), 0, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine(D2D1::Point2F(rect.right, rect.top + top));
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    sink->Close();
+    release(sink);
+    return path;
+}
+
+void gfx_fill_rounded_corners(GfxRect rect, float top, float bottom, Color color)
+{
+    if (!drawing || color.a == 0) return;
+    ID2D1PathGeometry *path = corner_path(to_rect(rect), top, bottom, false, true);
+    if (path) context->FillGeometry(path, use_color(color));
+    release(path);
+}
+
+void gfx_stroke_rounded_corners(GfxRect rect, float top, float bottom, Color color, float width)
+{
+    if (!drawing || color.a == 0 || width <= 0) return;
+    float inset = width / 2;
+    D2D1_RECT_F inner = D2D1::RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset);
+    ID2D1PathGeometry *path = corner_path(inner, top - inset, bottom - inset, false, false);
+    if (path) context->DrawGeometry(path, use_color(color), width);
+    release(path);
+}
+
+void gfx_stroke_rounded_open_top(GfxRect rect, float top, float bottom, Color color, float width)
+{
+    if (!drawing || color.a == 0 || width <= 0) return;
+    float inset = width / 2;
+    D2D1_RECT_F inner = D2D1::RectF(rect.left + inset, rect.top, rect.right - inset, rect.bottom - inset);
+    ID2D1PathGeometry *path = corner_path(inner, top - inset, bottom - inset, true, false);
+    if (path) context->DrawGeometry(path, use_color(color), width);
+    release(path);
+}
+
+static ID2D1StrokeStyle *round_stroke(void)
+{
+    static ID2D1StrokeStyle *style;
+    if (!style)
+    {
+        D2D1_STROKE_STYLE_PROPERTIES properties = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+            D2D1_LINE_JOIN_ROUND);
+        d2d_factory->CreateStrokeStyle(properties, nullptr, 0, &style);
+    }
+    return style;
+}
+
+static ID2D1PathGeometry *points_path(const float *points, int count, bool closed)
+{
+    if (count < 2) return nullptr;
+    ID2D1PathGeometry *path = nullptr;
+    ID2D1GeometrySink *sink = nullptr;
+    if (FAILED(d2d_factory->CreatePathGeometry(&path))) return nullptr;
+    if (FAILED(path->Open(&sink)))
+    {
+        release(path);
+        return nullptr;
+    }
+    sink->BeginFigure(D2D1::Point2F(points[0], points[1]), closed ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+    for (int index = 1; index < count; index++) sink->AddLine(D2D1::Point2F(points[index * 2], points[index * 2 + 1]));
+    sink->EndFigure(closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
+    sink->Close();
+    release(sink);
+    return path;
+}
+
+void gfx_polygon(const float *points, int count, Color fill, Color stroke, float stroke_width)
+{
+    if (!drawing) return;
+    ID2D1PathGeometry *path = points_path(points, count, true);
+    if (!path) return;
+    if (fill.a) context->FillGeometry(path, use_color(fill));
+    if (stroke.a && stroke_width > 0) context->DrawGeometry(path, use_color(stroke), stroke_width, round_stroke());
+    release(path);
+}
+
+void gfx_polyline(const float *points, int count, Color color, float width)
+{
+    if (!drawing || color.a == 0 || width <= 0) return;
+    ID2D1PathGeometry *path = points_path(points, count, false);
+    if (path) context->DrawGeometry(path, use_color(color), width, round_stroke());
+    release(path);
+}
+
 // ───────────── 文字 ─────────────
 
 static bool font_exists(const wchar_t *family)
@@ -799,4 +1034,43 @@ void gfx_text_draw(const wchar_t *text, GfxRect rect, const GfxTextStyle *style,
     if (!layout) return;
     context->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout, use_color(color), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     layout->Release();
+}
+
+/// 输入框用的单行排版：一律靠左、不换行、不省略。
+static IDWriteTextLayout *line_layout(const wchar_t *text, const GfxTextStyle *style)
+{
+    GfxTextStyle line = *style;
+    line.wrap = false;
+    line.ellipsis = false;
+    line.align = GFX_ALIGN_START;
+    line.vertical = GFX_ALIGN_START;
+    return text_layout(text ? text : L"", &line, 100000.0f, 100000.0f);
+}
+
+float gfx_text_caret_x(const wchar_t *text, const GfxTextStyle *style, int index)
+{
+    if (!text || index <= 0) return 0;
+    IDWriteTextLayout *layout = line_layout(text, style);
+    if (!layout) return 0;
+    int length = (int)wcslen(text);
+    if (index > length) index = length;
+    FLOAT x = 0, y = 0;
+    DWRITE_HIT_TEST_METRICS metrics;
+    layout->HitTestTextPosition((UINT32)index, FALSE, &x, &y, &metrics);
+    layout->Release();
+    return x;
+}
+
+int gfx_text_hit(const wchar_t *text, const GfxTextStyle *style, float x)
+{
+    if (!text || !*text) return 0;
+    IDWriteTextLayout *layout = line_layout(text, style);
+    if (!layout) return 0;
+    BOOL trailing = FALSE, inside = FALSE;
+    DWRITE_HIT_TEST_METRICS metrics;
+    layout->HitTestPoint(x, 1, &trailing, &inside, &metrics);
+    layout->Release();
+    int index = (int)metrics.textPosition + (trailing ? (int)metrics.length : 0);
+    int length = (int)wcslen(text);
+    return index < 0 ? 0 : index > length ? length : index;
 }

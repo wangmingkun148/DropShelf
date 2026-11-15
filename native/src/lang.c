@@ -281,8 +281,18 @@ LanguagePack *language_packs_find(const wchar_t *id)
 
 // ───────────── 文字 ─────────────
 
+static LanguageCollector collector;
+static void *collector_context;
+
+void language_set_collector(LanguageCollector handler, void *context)
+{
+    collector = handler;
+    collector_context = context;
+}
+
 const wchar_t *tr(const wchar_t *chinese, const wchar_t *english)
 {
+    if (collector) collector(chinese, english, collector_context);
     if (current_pack)
     {
         const wchar_t *source = current_pack->from_chinese ? chinese : english;
@@ -333,6 +343,7 @@ failed:
 wchar_t *trf(const LocFormat *chinese, const LocFormat *english)
 {
     WStr text = {0};
+    if (collector) collector(chinese->template_text, english->template_text, collector_context);
     const LocFormat *source = language_is_chinese() ? chinese : english;
     if (current_pack)
     {

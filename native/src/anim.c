@@ -35,6 +35,8 @@ double ease_apply(Ease ease, double t)
         // 与 WPF 的 SineEase 相同。
         case EASE_SINE_OUT: return sin(t * 1.5707963267948966);
         case EASE_SINE_IN_OUT: return (1 - cos(t * 3.141592653589793)) / 2;
+        // 与 WPF 的 CubicEase（EaseInOut）相同。
+        case EASE_CUBIC_IN_OUT: return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
         case EASE_CUBIC_IN: return t * t * t;
         case EASE_CUBIC_OUT:
         {

@@ -23,7 +23,7 @@ typedef enum UiMouseKind
 typedef struct UiMouseEvent
 {
     UiMouseKind kind;
-    float x, y;
+    float x, y;         // 交给元素时已经换算成元素自己的坐标（扣掉了上级的 transform）；窗口的 mouse 回调收到的是窗口坐标
     bool right_button;
     bool inside;
     float wheel;        // 滚轮转动的格数，向上为正
@@ -89,6 +89,12 @@ void ui_window_close(UiWindow *window);
 /// 内容变了：下一次刷新时重新排版并重画。
 void ui_window_invalidate(UiWindow *window);
 
+/// 只重画，不重新排版（外观或动画的变化）。
+void ui_window_repaint(UiWindow *window);
+
+/// 内容变过的话马上重新排版（要读排版后的位置时），不等下一次画。
+void ui_window_layout(UiWindow *window);
+
 /// 画的过程中调用：还有动画在进行，下一帧接着画。
 void ui_window_request_frame(UiWindow *window);
 
@@ -150,6 +156,9 @@ typedef enum UiCross
     UI_CROSS_END
 } UiCross;
 
+/// 按键时一起按着 Alt（WM_SYSKEYDOWN）：加在虚拟键码上。
+#define UI_KEY_ALT 0x10000u
+
 /// 一种元素的行为。没有的函数填 NULL。
 typedef struct UiElementType
 {
@@ -161,6 +170,18 @@ typedef struct UiElementType
     void (*mouse)(UiElement *element, const UiMouseEvent *event);
     void (*destroy)(UiElement *element);
     bool interactive;   // 接收鼠标事件；否则事件交给上一级
+    /// 有键盘焦点时的按键（虚拟键码，按着 Alt 时加上 UI_KEY_ALT），返回 true 表示已处理。
+    bool (*key)(UiElement *element, unsigned key);
+    /// 有键盘焦点时输入的字符（WM_CHAR）。
+    void (*character)(UiElement *element, wchar_t character);
+    /// 得到或失去键盘焦点。
+    void (*focus)(UiElement *element, bool focused);
+    bool focusable;     // 点一下就得到键盘焦点
+    /// 画完子元素之后再画的部分（滚动条）。
+    void (*paint_over)(UiElement *element, double time);
+    LPCWSTR cursor;     // 光标在上面时的样子；NULL 时能点的元素显示手形
+    bool wheel;         // 接收滚轮；否则滚轮交给上一级
+    bool paints_children;   // paint 自己按需要的顺序画子元素（ui_paint 不再挨个画）
 } UiElementType;
 
 /// 所有元素开头的公共部分。具体的控件把它放在自己结构的第一个成员。
@@ -183,6 +204,21 @@ struct UiElement
     bool disabled;
     bool hovered;
     bool pressed;
+    bool focused;
+
+    // 以下由调用方按帧修改，用来做动画；改了之后调用 ui_window_repaint（不用重新排版）。
+    float opacity;              // 连同子元素整体的透明度，新建时为 1
+    bool transformed;           // 画和点击之前先做 transform（坐标与 bounds 相同，都是窗口里的 DIP）
+    GfxMatrix transform;
+    bool clip;                  // 子元素只画在 clip_rect（为空时用 bounds）以内，圆角 clip_radius
+    GfxRect clip_rect;
+    float clip_radius;
+    bool hit_through;           // 不接收鼠标（连同子元素），鼠标交给下面的元素
+    float hit_extend_top;       // 上沿以上这么高也算在元素里（抽出的牌超出面板上沿）
+    void *tag;                  // 调用方自己用
+
+    int tooltip_string;         // 光标停在上面时的提示：文字表里的一条，或 tooltip_literal；都没有时用上一级的
+    wchar_t *tooltip_literal;
 };
 
 /// 新建一个元素：size 是整个结构的大小（开头是 UiElement）。
@@ -205,6 +241,21 @@ void ui_paint(UiElement *element, double time);
 /// (x, y) 处最里层的能接收鼠标的元素；没有时返回 NULL。
 UiElement *ui_hit_test(UiElement *element, float x, float y);
 
+/// (x, y) 处最里层的元素，不管能不能接收鼠标（判断按在了页面的空白处还是卡片上）。
+UiElement *ui_hit_test_any(UiElement *element, float x, float y);
+
+/// 把窗口里的一点换算成 element 自己的坐标（扣掉上级的 transform）。
+void ui_element_to_local(const UiElement *element, float *x, float *y);
+
+/// 把 element 坐标里的一点换算回窗口坐标（加上上级和它自己的 transform）。
+void ui_element_to_window(const UiElement *element, float *x, float *y);
+
+/// ancestor 是不是 element 自己或它的上级。
+bool ui_is_within(const UiElement *element, const UiElement *ancestor);
+
+/// 移除并销毁 parent 的所有子元素。
+void ui_clear_children(UiElement *parent);
+
 // ───────────── 控件上的文字 ─────────────
 
 /// 一段文字：文字表里的一条（切换语言后自动跟着变），或一段固定的文字（会被复制）。
@@ -217,6 +268,30 @@ typedef struct UiText
 #define UI_STR(id) ((UiText){ (id), NULL })
 #define UI_LIT(text) ((UiText){ -1, (text) })
 #define UI_NO_TEXT ((UiText){ -1, NULL })
+
+/// 光标停在元素上时显示的提示。
+void ui_set_tooltip(UiElement *element, UiText text);
+
+/// 元素上的提示现在的文字；没有时找上一级的，都没有时返回 NULL。
+const wchar_t *ui_element_tooltip(const UiElement *element);
+
+// ───────────── 键盘焦点 ─────────────
+
+/// 把键盘焦点交给 element（NULL 时谁都没有）。
+void ui_window_set_focus(UiWindow *window, UiElement *element);
+UiElement *ui_window_focus(UiWindow *window);
+
+/// 按住鼠标的元素不再算按下（拖动由窗口接手了），松开时也不会算点击。
+void ui_window_cancel_press(UiWindow *window);
+
+/// 光标现在在哪个元素上（悬停状态按这个算）；元素树变了以后调用，不必等光标移动。
+void ui_window_update_hover(UiWindow *window);
+
+/// 把窗口里的点换算成屏幕像素。
+POINT ui_window_to_screen(UiWindow *window, float x, float y);
+
+/// 屏幕像素换算成窗口里的点。
+void ui_window_from_screen(UiWindow *window, POINT point, float *x, float *y);
 
 // ───────────── 容器 ─────────────
 
@@ -247,6 +322,10 @@ void ui_label_set_text(UiElement *label, UiText text);
 void ui_label_set_color(UiElement *label, ThemeColor color);
 void ui_label_set_size(UiElement *label, float size);
 
+/// 直接改文字的样式（字号、粗细、换行、省略、对齐、行高）；改完调用 ui_invalidate。
+GfxTextStyle *ui_label_style(UiElement *label);
+const wchar_t *ui_label_text(UiElement *label);
+
 // ───────────── 按钮 ─────────────
 
 typedef enum UiButtonKind
@@ -263,6 +342,18 @@ typedef void (*UiClickHandler)(void *context);
 
 UiElement *ui_button(UiButtonKind kind, UiText text, UiClickHandler clicked, void *context);
 void ui_button_set_text(UiElement *button, UiText text);
+
+/// 文字左边加一个图标字形（如“＋ 打开置物架”）。
+void ui_button_set_glyph(UiElement *button, const wchar_t *glyph, float size);
+
+/// 文字或图标的字号（默认 14，图标按钮 16）。
+void ui_button_set_font_size(UiElement *button, float size);
+
+/// 内边距（默认 12, 5, 12, 6）。
+void ui_button_set_padding(UiElement *button, float left, float top, float right, float bottom);
+
+/// 文字颜色（默认按按钮的种类）。
+void ui_button_set_color(UiElement *button, ThemeColor color);
 
 // ───────────── 开关 ─────────────
 
@@ -285,6 +376,65 @@ void ui_segmented_set_selected(UiElement *segmented, int selected);
 /// 一行设置：左边图标，中间标题和说明，右边一个控件。glyph、control 可以是 NULL，description 可以是 UI_NO_TEXT。
 /// description_label 不为 NULL 时带回说明文字的元素，之后可以用 ui_label_set_text 改它。
 UiElement *ui_settings_card(const wchar_t *glyph, UiText header, UiText description, UiElement *control, UiElement **description_label);
+
+// ───────────── 等宽网格 ─────────────
+
+/// 子元素按 columns 列排开，每列一样宽，同一行一样高；列间隔 column_gap，行间隔 row_gap。
+UiElement *ui_grid(int columns, float column_gap, float row_gap);
+
+/// 每行的高度固定为 height（0 表示按内容）。
+void ui_grid_set_row_height(UiElement *grid, float height);
+void ui_grid_set_columns(UiElement *grid, int columns);
+
+// ───────────── 滚动区 ─────────────
+
+/// 内容比可见范围高时可以上下滚动，右边是细的滚动条（叠在内容上，出现和消失都不改变内容的宽度）。
+/// 滚动区自己的高度由上一级给（grow 或固定高度）。
+UiElement *ui_scroll(UiElement *content);
+UiElement *ui_scroll_content(UiElement *scroll);
+void ui_scroll_to_top(UiElement *scroll);
+float ui_scroll_offset(UiElement *scroll);
+void ui_scroll_set_offset(UiElement *scroll, float offset);
+
+/// 能滚动的最大距离（内容比可见范围高出多少）。
+float ui_scroll_extent(UiElement *scroll);
+
+/// 窗口里的 (x, y) 在滚动条上。
+bool ui_scroll_hits_bar(UiElement *scroll, float x, float y);
+
+/// 隐藏滚动条（翻牌时），或者恢复；淡入时 fade_in 为 true。
+void ui_scroll_set_bar_hidden(UiElement *scroll, bool hidden, bool fade_in);
+
+// ───────────── 滑块 ─────────────
+
+/// changed 的 dragging 表示按住滑钮拖动中（不是点了轨道或按了方向键）。
+typedef void (*UiSliderHandler)(int value, bool dragging, void *context);
+
+UiElement *ui_slider(int minimum, int maximum, int value, int step, UiSliderHandler changed, void *context);
+void ui_slider_set_value(UiElement *slider, int value);
+int ui_slider_value(UiElement *slider);
+
+/// 只显示，不能拖动（校准的结果）。
+void ui_slider_set_read_only(UiElement *slider, bool read_only);
+
+// ───────────── 输入框 ─────────────
+
+typedef void (*UiTextHandler)(const wchar_t *text, void *context);
+
+/// 单行输入框。placeholder 是空白时的提示文字；max_length 为 0 时不限长度。changed 每次改动后调用，submitted 在按回车时调用（可以是 NULL）。
+UiElement *ui_textbox(const wchar_t *text, UiText placeholder, int max_length, UiTextHandler changed, UiClickHandler submitted, void *context);
+const wchar_t *ui_textbox_text(UiElement *textbox);
+void ui_textbox_set_text(UiElement *textbox, const wchar_t *text);
+void ui_textbox_set_placeholder(UiElement *textbox, UiText placeholder);
+
+// ───────────── 快捷键输入框 ─────────────
+
+/// 点一下开始录制：按下一组快捷键，Esc 取消，Backspace 或 Delete 清除。右边的 × 也是清除。
+typedef void (*UiHotkeyHandler)(const wchar_t *gesture, void *context);
+
+UiElement *ui_hotkey_box(const wchar_t *gesture, UiHotkeyHandler changed, void *context);
+void ui_hotkey_box_set(UiElement *box, const wchar_t *gesture);
+bool ui_hotkey_box_is_recording(UiElement *box);
 
 // ───────────── 菜单（ui_menu.c） ─────────────
 

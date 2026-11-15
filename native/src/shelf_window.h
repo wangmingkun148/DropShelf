@@ -13,6 +13,9 @@ typedef struct ShelfHistoryEntry ShelfHistoryEntry;
 ShelfWindow *shelves_open_at(POINT center, bool by_gesture, bool activate, ScreenEdge edge);
 ShelfWindow *shelves_open_at_cursor(bool activate);
 
+/// 在 anchor 窗口旁边打开（右边放不下就放左边）；anchor 为 NULL 时在光标处。
+ShelfWindow *shelves_open_next_to(HWND anchor, bool activate);
+
 /// 把这些文件放进置物架（命令行传来的路径）；有重复或读不到的会提示。
 void shelf_window_add_paths(ShelfWindow *shelf, const StrList *paths);
 

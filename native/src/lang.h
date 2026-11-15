@@ -87,3 +87,10 @@ wchar_t *trf(const LocFormat *chinese, const LocFormat *english);
 
 /// 英文里的 "1 item" / "3 items"。调用方负责 free。
 wchar_t *english_count(long long count, const wchar_t *one, const wchar_t *many);
+
+/// 导出翻译模板时用：设置之后每取一条文字都把它的中英文原文（带参数的是模板）交给 collector。NULL 取消。
+typedef void (*LanguageCollector)(const wchar_t *chinese, const wchar_t *english, void *context);
+void language_set_collector(LanguageCollector collector, void *context);
+
+/// 把全部界面文字的原文写成一个空白的语言包（JSON），交给翻译的人去填；from_chinese 决定对照中文还是英文。调用方 free。
+wchar_t *language_template_build(bool from_chinese);

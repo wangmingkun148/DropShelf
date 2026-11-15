@@ -1,4 +1,5 @@
 #include "strings.h"
+#include "settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -251,6 +252,140 @@ wchar_t *str_restored(int added, int unavailable)
 }
 
 wchar_t *str_merged_shelves(int count) { return counted(L"已合并 {0} 项", L"Merged {0}", count, L"item", L"items"); }
+
+// ───────────── 主窗口 ─────────────
+
+wchar_t *str_version(const wchar_t *version) { return with_text(L"版本 {0}", L"Version {0}", version); }
+wchar_t *str_update_latest(const wchar_t *version) { return with_text(L"已经是最新版本（{0}）", L"You have the latest version ({0})", version); }
+wchar_t *str_update_available(const wchar_t *version) { return with_text(L"有新版本 {0}", L"Version {0} is available", version); }
+
+wchar_t *str_status_running_detail(int trigger, const wchar_t *hotkey)
+{
+    // 与 C# 版一样，括号里的快捷键一句是填进模板的参数。
+    wchar_t chinese_tail[96] = L"", english_tail[128] = L"";
+    const wchar_t *chinese_template, *english_template;
+    switch (trigger)
+    {
+        case TRIGGER_SHAKE:
+            chinese_template = L"拖住文件并快速晃动鼠标{0}";
+            english_template = L"Drag a file and shake the mouse{0}";
+            if (hotkey) swprintf(chinese_tail, ARRAYSIZE(chinese_tail), L"，或按 %ls 打开置物架", hotkey);
+            if (hotkey) swprintf(english_tail, ARRAYSIZE(english_tail), L", or press %ls to open a shelf", hotkey);
+            break;
+        case TRIGGER_EDGE:
+            chinese_template = L"把文件拖到屏幕边缘停一下{0}";
+            english_template = L"Drag a file to the edge of the screen and pause{0}";
+            if (hotkey) swprintf(chinese_tail, ARRAYSIZE(chinese_tail), L"，或按 %ls 打开置物架", hotkey);
+            if (hotkey) swprintf(english_tail, ARRAYSIZE(english_tail), L", or press %ls to open a shelf", hotkey);
+            break;
+        default:
+            chinese_template = L"拖住文件晃一晃，或拖到屏幕边缘停一下{0}";
+            english_template = L"Drag a file and shake it, or pause at the screen edge{0}";
+            if (hotkey) swprintf(chinese_tail, ARRAYSIZE(chinese_tail), L"；也可以按 %ls", hotkey);
+            if (hotkey) swprintf(english_tail, ARRAYSIZE(english_tail), L". You can also press %ls", hotkey);
+            break;
+    }
+    LocFormat chinese = { chinese_template, 1, { ARG_TEXT(chinese_tail) } };
+    LocFormat english = { english_template, 1, { ARG_TEXT(english_tail) } };
+    return trf(&chinese, &english);
+}
+
+static void join_part(WStr *text, const wchar_t *part)
+{
+    if (text->length > 0) wstr_append(text, L" · ");
+    wstr_append(text, part);
+}
+
+wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_t *hotkey)
+{
+    WStr text = {0};
+    join_part(&text, language == LANGUAGE_CHINESE ? L"中文" : language == LANGUAGE_ENGLISH ? L"English" : tr(L"语言跟随系统", L"System language"));
+    join_part(&text, start_with_windows ? tr(L"开机启动", L"Starts with Windows") : tr(L"不开机启动", L"Doesn't start with Windows"));
+    join_part(&text, hotkey && *hotkey ? hotkey : S(STR_HotkeyNotSet));
+    return wstr_take(&text);
+}
+
+wchar_t *str_shelf_summary(int trigger, int drag_out_mode)
+{
+    WStr text = {0};
+    join_part(&text, trigger == TRIGGER_SHAKE ? tr(L"晃动呼出", L"Shake to open")
+                   : trigger == TRIGGER_EDGE ? tr(L"屏幕边缘呼出", L"Pause at edge to open")
+                                             : tr(L"晃动或屏幕边缘呼出", L"Shake or pause at edge to open"));
+    join_part(&text, drag_out_mode == TRANSFER_COPY ? tr(L"拖出时复制", L"Drag out to copy") : tr(L"拖出时移动", L"Drag out to move"));
+    return wstr_take(&text);
+}
+
+wchar_t *str_actions_summary(const StrList *labels)
+{
+    if (!labels || labels->count == 0) return wcs_dup(tr(L"不显示快速操作", L"Quick actions are off"));
+    WStr text = {0};
+    const wchar_t *separator = tr(L"、", L", ");
+    for (int index = 0; index < labels->count; index++)
+    {
+        if (index > 0) wstr_append(&text, separator);
+        wstr_append(&text, labels->items[index]);
+    }
+    return wstr_take(&text);
+}
+
+wchar_t *str_appearance_summary(int theme, bool custom_accent)
+{
+    WStr text = {0};
+    join_part(&text, theme == THEME_LIGHT ? S(STR_ThemeLight) : theme == THEME_DARK ? S(STR_ThemeDark) : tr(L"主题跟随系统", L"System theme"));
+    join_part(&text, custom_accent ? tr(L"自选强调色", L"Custom accent color") : tr(L"Windows 强调色", L"Windows accent color"));
+    return wstr_take(&text);
+}
+
+wchar_t *str_history_count(int count)
+{
+    return counted(L"已保留 {0} 个最近关闭的置物架", L"{0} kept", count, L"recently closed shelf", L"recently closed shelves");
+}
+
+wchar_t *str_history_card_detail(int count, const wchar_t *time)
+{
+    // C# 版直接拼起来，不经过语言包。
+    wchar_t *items = str_item_count(count);
+    WStr text = {0};
+    wstr_appendf(&text, L"%ls · %ls", items, time ? time : L"");
+    free(items);
+    return wstr_take(&text);
+}
+
+wchar_t *str_sensitivity_detail(int reversals, int distance)
+{
+    LocFormat chinese = { L"来回晃动约 {0} 像素、掉头 {1} 次即可弹出", 2, { ARG_INT(distance), ARG_INT(reversals) } };
+    LocFormat english = { L"Opens when you shake about {0} px back and forth, changing direction {1} times", 2, { ARG_INT(distance), ARG_INT(reversals) } };
+    return trf(&chinese, &english);
+}
+
+wchar_t *str_calibration_progress(int done, int left)
+{
+    LocFormat chinese = { L"第 {0} 次记下了，再来 {1} 次", 2, { ARG_INT(done), ARG_INT(left) } };
+    LocFormat english = { L"Got shake {0}. {1} more to go", 2, { ARG_INT(done), ARG_INT(left) } };
+    return trf(&chinese, &english);
+}
+
+wchar_t *str_confirm_delete_action(const wchar_t *title)
+{
+    return with_text(L"“{0}”将从快速操作中移除，此操作无法撤销。", L"“{0}” will be removed from your quick actions. This can't be undone.", title);
+}
+
+wchar_t *str_image_size_invalid(int minimum_value, int maximum_value)
+{
+    LocFormat chinese = { L"请输入 {0} 到 {1} 之间的整数", 2, { ARG_INT(minimum_value), ARG_INT(maximum_value) } };
+    LocFormat english = { L"Enter a whole number from {0} to {1}", 2, { ARG_INT(minimum_value), ARG_INT(maximum_value) } };
+    return trf(&chinese, &english);
+}
+
+wchar_t *str_onboarding_actions_body(const wchar_t *hotkey)
+{
+    if (!hotkey)
+        return wcs_dup(tr(L"把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。在设置中设定快捷键后，还能随时打开空置物架。",
+            L"Drag files to the bottom of the shelf to reveal quick actions: compress them, copy their paths, move them or view their properties. You can change these actions or add your own in Settings, and set a keyboard shortcut there to open an empty shelf at any time."));
+    return with_text(L"把文件拖到置物架底部，会展开快速操作，可以直接压缩、复制路径、移动或查看属性。这些操作可以在设置中更换，也能添加自己的操作。按 {0} 能随时打开空置物架。",
+        L"Drag files to the bottom of the shelf to reveal quick actions: compress them, copy their paths, move them or view their properties. You can change these actions or add your own in Settings. Press {0} to open an empty shelf at any time.",
+        hotkey);
+}
 
 wchar_t *str_with_failed_attachments(const wchar_t *message, int failed)
 {

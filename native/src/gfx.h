@@ -72,6 +72,9 @@ typedef struct GfxImage GfxImage;
 
 /// pixels 是自上而下、32 位、预乘透明度的 BGRA，会被复制。
 GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride);
+
+/// 把图标（LoadImage 按需要的大小取出的）转成图片；失败时返回 NULL。只在界面线程调用。
+GfxImage *gfx_image_from_icon(HICON icon);
 GfxImage *gfx_image_retain(GfxImage *image);
 void gfx_image_release(GfxImage *image);        // 可以在任何线程调用；可以是 NULL
 int gfx_image_width(const GfxImage *image);
@@ -112,9 +115,45 @@ void gfx_push_layer(GfxRect rect, float radius, float opacity);
 void gfx_push_opacity(float opacity);
 void gfx_pop_layer(void);
 
+/// 之后的内容只画在 outer 以内、并且挖掉 hole（经过 hole_matrix 变换的圆角矩形）的地方，整体乘以 opacity，直到 gfx_pop_layer。
+/// 翻牌时概览页挖出卡片的形状，旧内容不会透过半透明的牌面。
+void gfx_push_layer_hole(GfxRect outer, GfxRect hole, float radius, GfxMatrix hole_matrix, float opacity);
+
 /// 之后的内容先做 matrix 变换（叠加在已有的变换上），直到 gfx_pop_transform。
 void gfx_push_transform(GfxMatrix matrix);
 void gfx_pop_transform(void);
+
+/// 矩阵的逆变换；没有逆（缩放为 0）时返回 false。
+bool gfx_matrix_invert(GfxMatrix matrix, GfxMatrix *inverse);
+
+// ───────────── 渐变和路径 ─────────────
+
+/// 渐变上的一点：offset 在 0–1 之间。
+typedef struct GfxStop
+{
+    float offset;
+    Color color;
+} GfxStop;
+
+/// 用径向渐变填充圆角矩形：渐变的中心 (center_x, center_y)，横向半径 radius_x、纵向半径 radius_y（都是 DIP）。和 WPF 的 RadialGradientBrush 一样，GradientOrigin 与中心相同。
+void gfx_fill_rounded_radial(GfxRect rect, float radius, float center_x, float center_y, float radius_x, float radius_y,
+    const GfxStop *stops, int count);
+
+/// 用线性渐变填充矩形：从 (x1, y1) 渐变到 (x2, y2)。
+void gfx_fill_rect_linear(GfxRect rect, float x1, float y1, float x2, float y2, const GfxStop *stops, int count);
+
+/// 上面两个角的半径是 top、下面两个角是 bottom 的圆角矩形（牌堆露出的边）。描边画在矩形以内。
+void gfx_fill_rounded_corners(GfxRect rect, float top, float bottom, Color color);
+void gfx_stroke_rounded_corners(GfxRect rect, float top, float bottom, Color color, float width);
+
+/// 只描左、右、下三条边（上沿被前一张牌盖住），圆角同上。
+void gfx_stroke_rounded_open_top(GfxRect rect, float top, float bottom, Color color, float width);
+
+/// 由 count 个点 (x, y) 围成的多边形：先填充 fill，再沿边描 stroke（圆角连接）。不要的传全透明。
+void gfx_polygon(const float *points, int count, Color fill, Color stroke, float stroke_width);
+
+/// 一串相连的线段，圆头、圆角连接。
+void gfx_polyline(const float *points, int count, Color color, float width);
 
 // ───────────── 文字 ─────────────
 
@@ -146,6 +185,12 @@ typedef struct GfxTextStyle
 /// 文字占多大；max_width 是可用的宽度（换行或省略时用），不限制时传 0。
 GfxSize gfx_text_measure(const wchar_t *text, const GfxTextStyle *style, float max_width);
 void gfx_text_draw(const wchar_t *text, GfxRect rect, const GfxTextStyle *style, Color color);
+
+/// 单行文字里第 index 个字符前面的横坐标（从文字的左边算起）。输入框画光标和选中范围用。
+float gfx_text_caret_x(const wchar_t *text, const GfxTextStyle *style, int index);
+
+/// 单行文字里横坐标 x 处离得最近的字符边界（0 到文字长度）。
+int gfx_text_hit(const wchar_t *text, const GfxTextStyle *style, float x);
 
 #ifdef __cplusplus
 }

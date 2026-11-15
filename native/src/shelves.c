@@ -140,12 +140,12 @@ ShelfWindow *shelves_open_at_cursor(bool activate)
     return shelves_open_at(cursor, false, activate, EDGE_NONE);
 }
 
-void shelves_open_beside(ShelfWindow *source, const StrList *paths)
+/// 紧挨着 anchor 窗口的位置：放在右边，右边放不下就放左边，两边都不行时叠在它右侧靠里一点。
+static POINT next_to(HWND anchor)
 {
-    if (shutting_down || paths->count == 0) return;
     POINT center = {0};
     RECT rect;
-    if (source && !source->closed && source->handle && GetWindowRect(source->handle, &rect))
+    if (anchor && GetWindowRect(anchor, &rect))
     {
         // 放在右边，右边放不下就放左边，两边都不行时叠在它右侧靠里一点。
         POINT middle = { rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2 };
@@ -163,7 +163,20 @@ void shelves_open_beside(ShelfWindow *source, const StrList *paths)
         center.y = middle.y;
     }
     else GetCursorPos(&center);
-    ShelfWindow *shelf = shelves_open_at(center, false, false, EDGE_NONE);
+    return center;
+}
+
+ShelfWindow *shelves_open_next_to(HWND anchor, bool activate)
+{
+    if (shutting_down) return NULL;
+    return shelves_open_at(next_to(anchor), false, activate, EDGE_NONE);
+}
+
+void shelves_open_beside(ShelfWindow *source, const StrList *paths)
+{
+    if (shutting_down || paths->count == 0) return;
+    HWND anchor = source && !source->closed ? source->handle : NULL;
+    ShelfWindow *shelf = shelves_open_at(next_to(anchor), false, false, EDGE_NONE);
     if (shelf) shelf_model_add_files(shelf->model, paths);
 }
 
