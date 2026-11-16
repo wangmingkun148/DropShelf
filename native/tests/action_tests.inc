@@ -514,18 +514,18 @@ static void test_archive_already_compressed(void)
         memset(&reader, 0, sizeof(reader));
         if (loaded && mz_zip_reader_init_mem(&reader, bytes, (size_t)zip_size, 0))
         {
-            mz_zip_archive_file_stat stored, deflated, small;
+            mz_zip_archive_file_stat stored, deflated, tiny;
             int stored_at = mz_zip_reader_locate_file(&reader, "video.bin", NULL, 0);
             int deflated_at = mz_zip_reader_locate_file(&reader, "report.txt", NULL, 0);
             int small_at = mz_zip_reader_locate_file(&reader, "small.bin", NULL, 0);
             bool found = stored_at >= 0 && deflated_at >= 0 && small_at >= 0 && mz_zip_reader_file_stat(&reader, (mz_uint)stored_at, &stored) &&
-                         mz_zip_reader_file_stat(&reader, (mz_uint)deflated_at, &deflated) && mz_zip_reader_file_stat(&reader, (mz_uint)small_at, &small);
+                         mz_zip_reader_file_stat(&reader, (mz_uint)deflated_at, &deflated) && mz_zip_reader_file_stat(&reader, (mz_uint)small_at, &tiny);
             CHECK(found, "压缩包里少了文件");
             if (found)
             {
                 CHECK(stored.m_method == 0 && stored.m_comp_size == size && stored.m_uncomp_size == size, "压不小的大文件没有原样存入");
                 CHECK(deflated.m_method == MZ_DEFLATED && deflated.m_comp_size < size / 20, "能压小的大文件没有压缩");
-                CHECK(small.m_method == MZ_DEFLATED, "小文件应照常压缩");
+                CHECK(tiny.m_method == MZ_DEFLATED, "小文件应照常压缩");
                 size_t out_size = 0;
                 void *out = mz_zip_reader_extract_to_heap(&reader, (mz_uint)stored_at, &out_size, 0);
                 CHECK(out && out_size == size && memcmp(out, noise, size) == 0, "原样存入的文件解出来和原来不一样");
