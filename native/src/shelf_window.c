@@ -396,9 +396,8 @@ void shelf_layout(ShelfWindow *shelf)
     int from = -1, to = -1;
     if (list_shown)
     {
-        int last;
-        shelf_visible_tiles(shelf, &from, &last);
-        to = last + 1;
+        // 看得见的几行，上下各多备一行（含两端）。
+        shelf_visible_tiles(shelf, &from, &to);
     }
     if (from != shelf->model->visible_from || to != shelf->model->visible_to)
     {

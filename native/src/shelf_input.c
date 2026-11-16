@@ -215,7 +215,7 @@ static void convert_to_files(ShelfWindow *shelf, ShelfItem **items, int count)
     else if (shelf->toast_action != TOAST_ACTION_NONE) shelf_hide_toast(shelf);
 }
 
-/// 放回刚才移除的项目：列表里各行从左边滑回来，堆叠里的牌从“撤销”按钮处飞回去。
+/// 放回刚才移除的项目：平铺里的牌从下面一点升回原来的格子，堆叠里的牌从“撤销”按钮处飞回去。
 static bool undo_removal(ShelfWindow *shelf)
 {
     if (!shelf->undo || shelf->closing) return false;
@@ -445,7 +445,7 @@ static void received(DropReadResult *result, void *context)
     }
     else if (receive->paste)
     {
-        // 和拖进来的一样落进堆叠或列表：从光标那里飞进来，光标在窗口外时从离它最近的窗口边上飞进来。
+        // 和拖进来的一样落进堆叠或平铺：从光标那里飞进来，光标在窗口外时从离它最近的窗口边上飞进来。
         if (summary.added > 0 && shelf_window_is_visible(shelf))
         {
             POINT cursor;
@@ -995,7 +995,7 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     for (int index = 0; index < dragged_count; index++) shelf_item_retain(dragged[index]);
 
     shelf_dim_dragged(shelf, items, count);
-    // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。
+    // 从平铺里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。
     if (model->expanded && count < model->count) split_pad_show_for(shelf);
     ShelfDragSession session = { shelf, NULL, 0, 0, false };
     shelf_drag_session_begin(&session);
@@ -1170,7 +1170,7 @@ static void open_shelf_menu(ShelfWindow *shelf)
     items[n++] = menu_item(MENU_CLEAR, STR_MenuClear, L"\xE894", NULL, has_items);
     items[n++] = menu_item(MENU_SETTINGS, STR_MenuSettings, L"\xE713", NULL, true);
     items[n++] = separator();
-    // 展开着列表时 Esc 是收起，只在“收起”上标出来；收起后 Esc 才是关闭。
+    // 平铺开时 Esc 是叠起来，只在“叠起来”上标出来；叠起来后 Esc 才是关闭。
     items[n++] = menu_item(MENU_CLOSE, STR_CloseShelf, L"\xE711", model->expanded ? NULL : L"Esc", true);
     show_menu(shelf, items, n);
     history_menu_free_texts(&history_menu);

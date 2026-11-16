@@ -1,5 +1,5 @@
 // 合并和拆分置物架，和 C# 版 ShelfWindow.DragOut.cs 里“合并和拆分”的部分、ShelfDragSession 以及 SplitPadWindow 对应：
-// 把项目拖到另一个置物架上就移过去；从列表里只拖出一部分时下边伸出“新置物架”，放上去就拆成一个新的置物架；
+// 把项目拖到另一个置物架上就移过去；从平铺里只拖出一部分时下边伸出“新置物架”，放上去就拆成一个新的置物架；
 // 拖着标题栏把整个置物架拖到另一个上面，停一下再松手就合并过去。
 #include "shelf_window_internal.h"
 #include "drop_data.h"
@@ -577,7 +577,7 @@ void shelf_merge_on_dwell(ShelfWindow *shelf)
     shelf_window_release(candidate);
 }
 
-/// 合并：全部项目交给 target，从这个置物架所在的位置飞进它的堆叠或列表；这边带着原来的样子淡出关闭，不留下一个空置物架，也不记进最近关闭。
+/// 合并：全部项目交给 target，从这个置物架所在的位置飞进它的堆叠或平铺；这边带着原来的样子淡出关闭，不留下一个空置物架，也不记进最近关闭。
 static void merge_into(ShelfWindow *shelf, ShelfWindow *target)
 {
     int count = shelf->model->count;

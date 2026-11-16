@@ -136,7 +136,7 @@ static void forget_item(ShelfModel *model, ShelfItem *item)
     item->selected = false;
 }
 
-/// 数量变了：空了就收起列表，再告诉窗口，最后按新的顶部三张和显示的行更新缩略图。
+/// 数量变了：空了就叠起来，再告诉窗口，最后按新的顶部三张和生成出来的牌更新缩略图。
 static void items_changed(ShelfModel *model)
 {
     if (model->count == 0 && model->expanded)

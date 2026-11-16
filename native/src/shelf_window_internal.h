@@ -142,7 +142,7 @@ typedef struct ShelfLayout
     float width, height;
     GfxRect pin, mode, view, more, close, title;
     GfxRect body;
-    GfxRect stack, list;        // 堆叠和列表各自占的范围（动画期间可能固定为别的大小）
+    GfxRect stack, list;        // 堆叠和平铺各自占的范围（动画期间可能固定为别的大小）
     float canvas_x, canvas_y, canvas_scale;     // 堆叠画布左上角和缩放
     GfxRect caption, detail;
     GfxRect drop_zone;
@@ -442,13 +442,13 @@ typedef struct SplitPlace
 } SplitPlace;
 
 bool shelf_split_place(ShelfWindow *source, SplitPlace *place);
-/// “新置物架”小窗口：从列表里只拖出一部分时贴着来源置物架伸出来，拖动结束就收起。收起时返回它刚才所在的位置。
+/// “新置物架”小窗口：从平铺里只拖出一部分时贴着来源置物架伸出来，拖动结束就收起。收起时返回它刚才所在的位置。
 void split_pad_show_for(ShelfWindow *source);
 bool split_pad_dismiss(SplitPlace *place);
 bool split_pad_is_shown(void);
 void split_pad_close_shared(void);
 
-/// 接收另一个置物架交来的项目，从 (x, y)（相对本窗口）飞进堆叠或列表。这边已经有的不重复放；一个也没放进来时提示。
+/// 接收另一个置物架交来的项目，从 (x, y)（相对本窗口）飞进堆叠或平铺。这边已经有的不重复放；一个也没放进来时提示。
 int shelf_receive(ShelfWindow *shelf, ShelfItem **items, int count, ShelfModel *from, float x, float y);
 /// 项目已经交给别的置物架，这边放手：全部交出去且设置为自动关闭时直接淡出关闭，否则播放移除动画。
 void shelf_let_go(ShelfWindow *shelf, ShelfItem **items, int count);

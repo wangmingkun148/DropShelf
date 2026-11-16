@@ -13,7 +13,7 @@ typedef struct ShelfModel ShelfModel;
 typedef enum ShelfChange
 {
     SHELF_CHANGED_ITEMS,        // 增加、移除、替换了项目（数量可能没变）
-    SHELF_CHANGED_EXPANDED,     // 展开或收起了列表
+    SHELF_CHANGED_EXPANDED,     // 平铺开或叠起来了
     SHELF_CHANGED_BUSY,         // 开始或结束忙碌
     SHELF_CHANGED_ITEM_TEXT     // 某个项目的说明、缩略图或可用性变了，只需重画
 } ShelfChange;
@@ -43,7 +43,7 @@ struct ShelfModel
     bool has_interacted;        // 点击过、切换过置顶或放入过内容，空置物架也不再自动关闭
     bool dragging_out;
     int thumbnail_size;         // 缩略图的像素大小，由窗口按堆叠卡片的实际显示大小设置
-    int visible_from, visible_to;   // 列表里显示出来的行（含），没有展开时为 -1
+    int visible_from, visible_to;   // 平铺里生成出来的牌（含两端），没有平铺开时为 -1
     bool released;
     volatile LONG lifetime_over;    // 关闭后变为 1，后台的工作据此尽快停下
 
@@ -174,7 +174,7 @@ wchar_t *shelf_model_stack_caption(ShelfModel *model);
 FileSuit shelf_model_suit(const ShelfModel *model);
 wchar_t *shelf_model_stack_detail(ShelfModel *model);
 
-/// 只有堆叠顶部三张和列表里显示出来的行持有缩略图：其余的取消并释放，内存不随项目数量增长。
+/// 只有堆叠顶部三张和平铺里生成出来的牌持有缩略图：其余的取消并释放，内存不随项目数量增长。
 void shelf_model_update_thumbnails(ShelfModel *model);
 
 /// 关闭置物架时调用：取消后台的工作，清理临时附件，放掉全部项目。
