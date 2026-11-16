@@ -225,16 +225,18 @@ static void edge_paint(UiElement *element, double time)
     }
     if (edge->frame_opacity > 0.001f)
     {
+        // 其余几张牌背面朝上，露出的边是牌背的斜格纹。
         gfx_push_opacity(edge->frame_opacity);
-        gfx_fill_rounded_corners(rect, edge->top_radius, edge->bottom_radius, theme_color(THEME_STACK_EDGE));
-        gfx_stroke_rounded_open_top(rect, edge->top_radius, edge->bottom_radius, theme_color(THEME_SHEET_BORDER), 1);
+        ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+        gfx_fill_rounded_corners_pattern(rect, edge->top_radius, edge->bottom_radius, &back);
+        gfx_stroke_rounded_open_top(rect, edge->top_radius, edge->bottom_radius, theme_color(THEME_CARD_BACK_LINE), 1);
         gfx_pop_layer();
     }
     float label = (float)edge->label_opacity.value;
     if (edge->label_visible && label > 0.001f)
     {
-        // 页名在这条边露出的部分里：图标和名称，靠下。
-        Color color = theme_color(THEME_TEXT_SECONDARY);
+        // 页名在这条边露出的部分里：图标和名称，靠下，用牌桌上的文字颜色。
+        Color color = theme_color(THEME_TABLE_TEXT);
         color.a = (uint8_t)(color.a * label);
         GfxTextStyle glyph = { GFX_FONT_ICON, 12, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
         GfxTextStyle text = { GFX_FONT_TEXT, 12, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_CENTER };
@@ -1146,7 +1148,10 @@ void flip_paint_stage(double time)
         GfxRect to_clip = slide.to_area;
         to_clip.bottom = to_clip.top + rect_height(slide.new_card) / (rect_width(slide.new_card) / rect_width(slide.to_area));
         paint_host(to, time, slide.new_matrix, to_clip, 1);
-        gfx_stroke_rounded(slide.new_card, SHEET_RADIUS, theme_color(THEME_SHEET_BORDER), 1);
+        // 新牌按宽度缩放着展开，外面那圈牌背跟着一起缩放。
+        ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+        float band = SHEET_BAND * rect_width(slide.new_card) / rect_width(slide.to_area);
+        gfx_stroke_rounded_pattern(slide.new_card, SHEET_RADIUS, &back, band);
         return;
     }
 
@@ -1173,7 +1178,8 @@ void flip_paint_stage(double time)
             gfx_push_transform(flip.back_matrix);
             GfxRect card = flip.back_card;
             if (flip.shade > 0.001f) gfx_fill_rounded(card, SHEET_RADIUS, COLOR_ARGB((uint8_t)(255 * flip.shade), 0, 0, 0));
-            gfx_stroke_rounded(card, SHEET_RADIUS, theme_color(THEME_SHEET_BORDER), 1);
+            ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+            gfx_stroke_rounded_pattern(card, SHEET_RADIUS, &back, SHEET_BAND);
             gfx_pop_transform();
             continue;
         }

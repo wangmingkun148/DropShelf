@@ -592,7 +592,7 @@ static void button_paint(UiElement *element, double time)
     UiButton *button = (UiButton *)element;
     Color fill = COLOR_TRANSPARENT, border = COLOR_TRANSPARENT, text = theme_color(THEME_TEXT_PRIMARY);
     bool hovered = element->hovered && !element->disabled, pressed = element->pressed && element->hovered;
-    float radius = 4;
+    float radius = 6;
     switch (button->kind)
     {
         case UI_BUTTON_STANDARD:
@@ -883,8 +883,7 @@ static void segmented_paint(UiElement *element, double time)
     if (anim_update(&segmented->slide, time)) ui_window_request_frame(element->window);
     float progress = (float)segmented->slide.value;
 
-    gfx_fill_rounded(element->bounds, 5, theme_color(THEME_CONTROL_ALT));
-    gfx_stroke_rounded(element->bounds, 5, theme_color(THEME_CONTROL_BORDER), 1);
+    gfx_stroke_rounded(element->bounds, 6, theme_color(THEME_CONTROL_STRONG_BORDER), 1);
 
     // 选中块：在原来的和新的选项之间按进度过渡。
     if (segmented->selected >= 0)
@@ -895,7 +894,7 @@ static void segmented_paint(UiElement *element, double time)
             from.left + (to.left - from.left) * progress, to.top,
             from.right + (to.right - from.right) * progress, to.bottom
         };
-        gfx_fill_rounded(block, 3, theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_ACCENT));
+        gfx_fill_rounded(block, 4, theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_ACCENT));
     }
 
     Color normal = theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_TEXT_PRIMARY);
@@ -907,7 +906,7 @@ static void segmented_paint(UiElement *element, double time)
         if (index == segmented->selected) color = color_lerp(normal, selected, progress);
         else if (index == segmented->previous) color = color_lerp(selected, normal, progress);
         else if (index == segmented->hovered_item && element->hovered && !element->disabled)
-            gfx_fill_rounded(bounds, 3, theme_color(THEME_SUBTLE_HOVER));
+            gfx_fill_rounded(bounds, 4, theme_color(THEME_SUBTLE_HOVER));
         bounds.bottom -= 1;
         gfx_text_draw(text_get(&segmented->items[index]), bounds, &segment_text_style, color);
     }
@@ -995,7 +994,7 @@ UiElement *ui_settings_card(const wchar_t *glyph, UiText header, UiText descript
     if (description_label) *description_label = NULL;
     UiElement *card = ui_stack(true, 0);
     ui_stack_set_padding(card, 16, 11, 16, 11);
-    ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 6);
+    ui_stack_set_background(card, THEME_SETTING_ROW, THEME_SETTING_ROW_BORDER, 6);
     card->minimum_height = 66;
     ui_set_margin(card, 0, 0, 0, 4);
 

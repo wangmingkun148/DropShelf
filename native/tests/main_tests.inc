@@ -640,8 +640,10 @@ static void test_main_window_settings(void)
     UiElement *slider = pages_control(PAGES_SENSITIVITY_SLIDER);
     ui_window_layout(M->window);
     float slider_width = rect_width(slider->bounds);
-    CHECK(slider_width > 40 && click_element_at(slider, (10 + (slider_width - 20) * 0.2f) / slider_width), "灵敏度滑块点不到");
+    // 切牌卡宽 14，中心从两端各 7 处之间走过。
+    CHECK(slider_width > 40 && click_element_at(slider, (7 + (slider_width - 14) * 0.2f) / slider_width), "灵敏度滑块点不到");
     CHECK(ui_slider_value(slider) == 20, "点在滑块 20% 的位置应选中 20");
+    CHECK(ui_slider_face_down_count(slider) == 2, "切牌卡越过前两张牌的中线，应正好翻过两张");
     int reversals = 0, distance = 0;
     shake_describe(20, &reversals, &distance);
     wchar_t *detail = str_sensitivity_detail(reversals, distance);

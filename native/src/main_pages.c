@@ -394,8 +394,10 @@ typedef struct PageTile
     int page;
     wchar_t *summary;
     StrList items;          // 摘要拆成的各项，大卡片上显示为标签
+    StrList glance;         // 卡片右侧画出的当前设置：常规是快捷键的各个按键，快速操作是底部各个按钮的图标
     bool tall;
     Anim tall_anim;         // 0 是一行的样式，1 是大卡片
+    Anim lift;              // 悬停时卡片抬起、底下的牌背多露出一点（0 到 1）
 } PageTile;
 
 static void tile_split_summary(PageTile *tile)
@@ -428,16 +430,151 @@ static void tile_split_summary(PageTile *tile)
     }
 }
 
+// ───────────── 卡片右侧的当前设置 ─────────────
+
+/// 键帽：一键一格，下沿加粗，数字用 Bahnschrift。返回画完后的右边。
+static float keycaps_width(const StrList *keys)
+{
+    GfxTextStyle style = { GFX_FONT_NUMBER, 11, 400 };
+    float width = 0;
+    for (int index = 0; index < keys->count; index++) width += gfx_text_measure(keys->items[index], &style, 0).width + 12 + 3;
+    return width;
+}
+
+static void paint_keycaps(const StrList *keys, float left, float middle, Color color)
+{
+    GfxTextStyle style = { GFX_FONT_NUMBER, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    float height = gfx_text_measure(L"0", &style, 0).height + 1 + 3;
+    float top = middle - height / 2;
+    for (int index = 0; index < keys->count; index++)
+    {
+        float width = gfx_text_measure(keys->items[index], &style, 0).width + 12;
+        GfxRect cap = { left, top, left + width, top + height };
+        gfx_stroke_rounded(cap, 3, color, 1);
+        gfx_fill_rect((GfxRect){ cap.left + 2, cap.bottom - 2, cap.right - 2, cap.bottom - 1 }, color);
+        gfx_text_draw(keys->items[index], (GfxRect){ cap.left, cap.top + 1, cap.right, cap.bottom - 2 }, &style, color);
+        left += width + 3;
+    }
+}
+
+/// 把快捷键拆成一个个按键；没有快捷键或没注册上时为空，和 C# 版的 HotkeyKeys 相同。
+static void hotkey_keys(StrList *keys)
+{
+    strlist_clear(keys);
+    const AppSettings *settings = app_settings();
+    if (!settings->hotkey || !*settings->hotkey || !app_is_hotkey_registered()) return;
+    const wchar_t *start = settings->hotkey;
+    for (const wchar_t *cursor = start;; cursor++)
+    {
+        if (*cursor && *cursor != L'+') continue;
+        strlist_add_owned(keys, wcs_dup_n(start, (size_t)(cursor - start)));
+        if (!*cursor) break;
+        start = cursor + 1;
+    }
+}
+
+/// 一段折线，线条用墨色、圆角连接（入门提示和卡片上的小图共用）。
+static void line_art(const float *points, int count, float x, float y, float opacity)
+{
+    float moved[16];
+    for (int index = 0; index < count * 2 && index < 16; index += 2)
+    {
+        moved[index] = points[index] + x;
+        moved[index + 1] = points[index + 1] + y;
+    }
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    ink.a = (uint8_t)(ink.a * opacity);
+    gfx_polyline(moved, count, ink, 1.4f);
+}
+
+static float glance_width(const PageTile *tile)
+{
+    switch (tile->page)
+    {
+        case PAGE_GENERAL: return keycaps_width(&tile->glance);
+        case PAGE_SHELF: return 74;
+        case PAGE_ACTIONS: return tile->glance.count * 31.0f;
+        default: return 3 * 22.0f;
+    }
+}
+
+/// 卡片右侧直接画出当前设置：快捷键、呼出方式、底部按钮、主题。left 是左边，middle 是竖直的中线。
+static void paint_glance(const PageTile *tile, float left, float middle)
+{
+    const AppSettings *settings = app_settings();
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    switch (tile->page)
+    {
+        case PAGE_GENERAL:
+            paint_keycaps(&tile->glance, left, middle, ink);
+            break;
+        case PAGE_SHELF:
+        {
+            // 左边的折线是晃动，右边的箭头和竖线是屏幕边缘；没用到的那种变淡。
+            float top = middle - 13;
+            float shake[] = { 2, 13, 8, 5, 15, 21, 22, 5, 29, 21, 35, 13 };
+            line_art(shake, 6, left, top, settings->auto_open_trigger == TRIGGER_EDGE ? 0.25f : 1);
+            float edge_opacity = settings->auto_open_trigger == TRIGGER_SHAKE ? 0.25f : 1;
+            float shaft[] = { 48, 13, 62, 13 }, head[] = { 57, 8, 62, 13, 57, 18 };
+            line_art(shaft, 2, left, top, edge_opacity);
+            line_art(head, 3, left, top, edge_opacity);
+            Color accent = theme_color(THEME_ACCENT);
+            accent.a = (uint8_t)(accent.a * edge_opacity);
+            gfx_line(left + 71, top + 1, left + 71, top + 25, accent, 2.4f);
+            break;
+        }
+        case PAGE_ACTIONS:
+        {
+            GfxTextStyle glyph = { GFX_FONT_ICON, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+            for (int index = 0; index < tile->glance.count; index++)
+            {
+                GfxRect slot = { left + index * 31.0f, middle - 13, left + index * 31.0f + 28, middle + 13 };
+                gfx_stroke_rounded(slot, 4, ink, 1);
+                gfx_text_draw(tile->glance.items[index], slot, &glyph, ink);
+            }
+            break;
+        }
+        default:
+        {
+            // 浅色、深色两张牌和一张强调色的牌；没选的主题变淡。
+            Color border = theme_color(THEME_CONTROL_BORDER), accent = theme_color(THEME_ACCENT);
+            GfxRect chip = { left, middle - 12, left + 18, middle + 12 };
+            gfx_push_opacity(settings->theme == THEME_DARK ? 0.45f : 1);
+            gfx_fill_rounded(chip, 3, COLOR_RGB(0xFB, 0xFA, 0xF6));
+            gfx_stroke_rounded(chip, 3, border, 1);
+            gfx_pop_layer();
+            chip.left += 22, chip.right += 22;
+            gfx_push_opacity(settings->theme == THEME_LIGHT ? 0.45f : 1);
+            gfx_fill_rounded(chip, 3, COLOR_RGB(0x26, 0x25, 0x22));
+            gfx_stroke_rounded(chip, 3, border, 1);
+            gfx_pop_layer();
+            chip.left += 22, chip.right += 22;
+            gfx_fill_rounded(chip, 3, accent);
+            break;
+        }
+    }
+}
+
+/// 卡片左边的图标框：一张描边的小牌，悬停时铺满强调色。
+static void paint_emblem(GfxRect box, const wchar_t *glyph, float glyph_size, bool hovered)
+{
+    if (hovered) gfx_fill_rounded(box, 6, theme_color(THEME_ACCENT));
+    else gfx_stroke_rounded(box, 6, theme_color(THEME_TEXT_PRIMARY), 1);
+    GfxTextStyle icon = { GFX_FONT_ICON, glyph_size, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    gfx_text_draw(glyph, box, &icon, theme_color(hovered ? THEME_TEXT_ON_ACCENT : THEME_TEXT_PRIMARY));
+}
+
+/// 卡片就是点开后会翻过来的那张牌：bounds 是卡片的位置（悬停抬起之后的），翻牌时也按这个画。
 static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pressed)
 {
     UiElement *element = &tile->base;
     float height = bounds.bottom - bounds.top;
-    if (pressed) gfx_push_opacity(0.8f);
+    if (pressed) gfx_push_opacity(0.85f);
     gfx_fill_rounded(bounds, TILE_RADIUS, theme_color(hovered ? THEME_CARD_HOVER : THEME_CARD));
-    gfx_stroke_rounded(bounds, TILE_RADIUS, theme_color(THEME_CARD_BORDER), 1);
+    gfx_stroke_rounded(bounds, TILE_RADIUS, theme_color(hovered ? THEME_ACCENT : THEME_CARD_BORDER), 1);
     gfx_push_layer((GfxRect){ bounds.left + 1, bounds.top + 1, bounds.right - 1, bounds.bottom - 1 }, TILE_RADIUS - 1, 1);
     const wchar_t *glyph = main_page_glyph(tile->page);
-    Color accent = theme_color(THEME_ACCENT_TEXT);
+    Color primary = theme_color(THEME_TEXT_PRIMARY), secondary = theme_color(THEME_TEXT_SECONDARY);
 
     // 背景的大图标随高度渐显。
     float ramp = (height - 140) / (230 - 140);
@@ -445,20 +582,22 @@ static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pre
     if (ramp > 0)
     {
         GfxTextStyle big = { GFX_FONT_ICON, 150, 400, false, false, GFX_ALIGN_END, GFX_ALIGN_END };
-        Color faint = accent;
-        faint.a = (uint8_t)(faint.a * 0.07f * ramp);
+        Color faint = primary;
+        faint.a = (uint8_t)(faint.a * 0.06f * ramp);
         gfx_text_draw(glyph, (GfxRect){ bounds.left, bounds.top, bounds.right - 1 + 16, bounds.bottom - 1 + 24 }, &big, faint);
     }
     float tall = (float)tile->tall_anim.value;
-    Color primary = theme_color(THEME_TEXT_PRIMARY), secondary = theme_color(THEME_TEXT_SECONDARY);
     if (tall < 0.999f)
     {
-        // 一行的样式：图标在左，标题和摘要在右，竖直居中。
+        // 一行的样式：图标框在左，标题和摘要在中间，右边画出当前设置，都竖直居中。
         gfx_push_opacity(1 - tall);
-        GfxTextStyle icon = { GFX_FONT_ICON, 22, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
-        float icon_width = gfx_text_measure(glyph, &icon, 0).width;
-        gfx_text_draw(glyph, (GfxRect){ bounds.left + 1 + 18, bounds.top, bounds.left + 19 + icon_width + 1, bounds.bottom }, &icon, accent);
-        float left = bounds.left + 1 + 18 + icon_width + 16, right = bounds.right - 1 - 16;
+        float middle = (bounds.top + bounds.bottom) / 2;
+        GfxRect box = { bounds.left + 14, middle - 20, bounds.left + 14 + 40, middle + 20 };
+        paint_emblem(box, glyph, 19, hovered);
+        float glance = glance_width(tile);
+        float glance_left = bounds.right - 16 - glance;
+        if (glance > 0) paint_glance(tile, glance_left, middle);
+        float left = box.right + 14, right = glance > 0 ? glance_left - 12 : bounds.right - 16;
         GfxTextStyle header = { GFX_FONT_TEXT, 14, 600, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
         GfxTextStyle summary = { GFX_FONT_TEXT, 12, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
         float header_height = gfx_text_measure(S(main_page_title(tile->page)), &header, 0).height;
@@ -471,21 +610,19 @@ static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pre
     }
     if (tall > 0.001f)
     {
-        // 大卡片：图标方块在左上，标题和标签在下。
+        // 大卡片：图标框在左上，标题和标签在下。
         gfx_push_opacity(tall);
-        GfxRect box = { bounds.left + 1 + 22, bounds.top + 1 + 22, bounds.left + 1 + 22 + 44, bounds.top + 1 + 22 + 44 };
-        gfx_fill_rounded(box, 10, theme_color(THEME_ACCENT_FAINT));
-        GfxTextStyle icon = { GFX_FONT_ICON, 22, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
-        gfx_text_draw(glyph, box, &icon, accent);
-        float left = bounds.left + 1 + 22, right = bounds.right - 1 - 18, bottom = bounds.bottom - 1 - 20;
+        GfxRect box = { bounds.left + 20, bounds.top + 20, bounds.left + 20 + 44, bounds.top + 20 + 44 };
+        paint_emblem(box, glyph, 21, hovered);
+        float left = bounds.left + 20, right = bounds.right - 18, bottom = bounds.bottom - 20;
         GfxTextStyle chip = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
-        // 标签从左往右排，排不下换行。先算出有几行，从下往上摆。
-        float chip_height = gfx_text_measure(L"Ag", &chip, 0).height + 7;
+        // 标签从左往右排，排不下换行，每个标签右边和下边留 6。先算出有几行，从下往上摆。
+        float chip_height = gfx_text_measure(L"Ag", &chip, 0).height + 9;
         int rows = 1;
         float x = left;
         for (int index = 0; index < tile->items.count; index++)
         {
-            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 18;
+            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 20;
             if (x > left && x + width > right)
             {
                 rows++;
@@ -493,7 +630,7 @@ static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pre
             }
             x += width + 6;
         }
-        float chips_top = bottom - rows * chip_height;
+        float chips_top = bottom - rows * (chip_height + 6);
         GfxTextStyle header = { GFX_FONT_TEXT, 16, 600, false, true, GFX_ALIGN_START, GFX_ALIGN_START };
         float header_height = gfx_text_measure(S(main_page_title(tile->page)), &header, 0).height;
         float header_top = chips_top - 10 - header_height;
@@ -502,14 +639,15 @@ static void tile_paint_at(PageTile *tile, GfxRect bounds, bool hovered, bool pre
         float y = chips_top;
         for (int index = 0; index < tile->items.count; index++)
         {
-            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 18;
+            float width = gfx_text_measure(tile->items.items[index], &chip, 0).width + 20;
             if (x > left && x + width > right)
             {
-                y += chip_height;
+                y += chip_height + 6;
                 x = left;
             }
             GfxRect pill = { x, y, x + width, y + chip_height };
-            gfx_fill_rounded(pill, 11, theme_color(THEME_SUBTLE_SELECTED));
+            gfx_fill_rounded(pill, 4, theme_color(THEME_SETTING_ROW));
+            gfx_stroke_rounded(pill, 4, theme_color(THEME_CARD_BORDER), 1);
             gfx_text_draw(tile->items.items[index], (GfxRect){ pill.left, pill.top, pill.right, pill.bottom - 1 }, &chip, secondary);
             x += width + 6;
         }
@@ -524,7 +662,16 @@ static void tile_paint(UiElement *element, double time)
 {
     PageTile *tile = (PageTile *)element;
     if (anim_update(&tile->tall_anim, time)) ui_window_request_frame(element->window);
-    tile_paint_at(tile, element->bounds, element->hovered, element->pressed && element->hovered);
+    if (anim_update(&tile->lift, time)) ui_window_request_frame(element->window);
+    // 底下露出一道牌背，悬停时卡片微微抬起，牌背多露出一点。
+    float lift = (float)tile->lift.value;
+    GfxRect bounds = element->bounds;
+    ThemePattern back = theme_pattern(THEME_PATTERN_STACK_EDGE);
+    gfx_fill_rounded_pattern((GfxRect){ bounds.left + 3 + 2 * lift, bounds.top + 3 + 2 * lift, bounds.right + 3 + 2 * lift, bounds.bottom + 3 + 2 * lift },
+        TILE_RADIUS, &back);
+    bounds.top -= 2 * lift;
+    bounds.bottom -= 2 * lift;
+    tile_paint_at(tile, bounds, element->hovered, element->pressed && element->hovered);
 }
 
 static void tile_arrange(UiElement *element)
@@ -543,6 +690,11 @@ static void tile_arrange(UiElement *element)
 static void tile_mouse(UiElement *element, const UiMouseEvent *event)
 {
     PageTile *tile = (PageTile *)element;
+    if (event->kind == UI_MOUSE_ENTER || event->kind == UI_MOUSE_LEAVE)
+    {
+        anim_start(&tile->lift, event->kind == UI_MOUSE_ENTER ? 1 : 0, 0.12, EASE_OF(EASE_LINEAR));
+        ui_window_request_frame(element->window);
+    }
     if (event->kind == UI_MOUSE_UP && event->inside && !event->right_button) flip_open(tile->page);
 }
 
@@ -551,6 +703,7 @@ static void tile_destroy(UiElement *element)
     PageTile *tile = (PageTile *)element;
     free(tile->summary);
     strlist_clear(&tile->items);
+    strlist_clear(&tile->glance);
 }
 
 static const UiElementType tile_type = { NULL, tile_arrange, tile_paint, tile_mouse, tile_destroy, true };
@@ -992,7 +1145,7 @@ static void build_appearance_page(void)
     // 强调色：一张卡片，色块排在标题下面。
     UiElement *card = ui_stack(false, 0);
     ui_stack_set_padding(card, 20, 14, 16, 14);
-    ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 8);
+    ui_stack_set_background(card, THEME_SETTING_ROW, THEME_SETTING_ROW_BORDER, 6);
     ui_set_margin(card, 0, 20, 0, 0);
     UiElement *row = ui_stack(true, 0);
     UiElement *icon = ui_label(UI_LIT(GLYPH_BRUSH), UI_TEXT_GLYPH);
@@ -1028,23 +1181,150 @@ static void build_appearance_page(void)
 
 // ───────────── 概览页 ─────────────
 
-static UiElement *tip_card(const wchar_t *glyph, StringId title, StringId body)
+/// 入门提示顶上的一行：左边是第几步，右上角的小图画出这一步怎么做（线条用墨色，重点用强调色）。tag 是第几步（1 到 3）。
+static GfxSize tip_header_measure(UiElement *element, float available)
+{
+    (void)element;
+    return (GfxSize){ available, 26 };
+}
+
+static void tip_rect(GfxRect rect, float angle, Color fill, bool dashed)
+{
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    if (angle != 0) gfx_push_transform(gfx_matrix_rotate(angle, (rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2));
+    gfx_fill_rounded(rect, 2, fill);
+    if (dashed) gfx_stroke_rounded_dashed(rect, 2, ink, 1, 2, 2);
+    else gfx_stroke_rounded(rect, 2, ink, 1);
+    if (angle != 0) gfx_pop_transform();
+}
+
+static void tip_header_paint(UiElement *element, double time)
+{
+    (void)time;
+    GfxRect bounds = element->bounds;
+    int step = (int)(intptr_t)element->tag;
+    wchar_t rank[2] = { (wchar_t)(L'0' + step), 0 };
+    GfxTextStyle style = { GFX_FONT_RANK, 24, 600, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
+    gfx_text_draw(rank, bounds, &style, theme_color(THEME_TEXT_PRIMARY));
+    // 72 × 24 的小图靠右，竖直居中。
+    float x = bounds.right - 72, y = (bounds.top + bounds.bottom) / 2 - 12;
+    Color accent = theme_color(THEME_ACCENT), card = theme_color(THEME_CARD);
+    switch (step)
+    {
+        case 1:
+        {
+            float shake[] = { 2, 12, 9, 4, 17, 20, 25, 4, 33, 20, 40, 12 }, shaft[] = { 50, 12, 62, 12 }, head[] = { 58, 8, 62, 12, 58, 16 };
+            line_art(shake, 6, x, y, 1);
+            line_art(shaft, 2, x, y, 1);
+            line_art(head, 3, x, y, 1);
+            gfx_line(x + 69, y + 1, x + 69, y + 23, accent, 2.4f);
+            break;
+        }
+        case 2:
+        {
+            tip_rect((GfxRect){ x + 2.5f, y + 5.5f, x + 16.5f, y + 22.5f }, -8, card, false);
+            tip_rect((GfxRect){ x + 8.5f, y + 4.5f, x + 22.5f, y + 21.5f }, 6, card, false);
+            tip_rect((GfxRect){ x + 5.5f, y + 4.5f, x + 19.5f, y + 21.5f }, 0, accent, false);
+            float shaft[] = { 30, 13, 64, 13 }, head[] = { 60, 9, 64, 13, 60, 17 };
+            line_art(shaft, 2, x, y, 1);
+            line_art(head, 3, x, y, 1);
+            break;
+        }
+        default:
+        {
+            float shaft[] = { 20, 1, 20, 10 }, head[] = { 16, 7, 20, 11, 24, 7 };
+            line_art(shaft, 2, x, y, 1);
+            line_art(head, 3, x, y, 1);
+            tip_rect((GfxRect){ x + 4.5f, y + 13.5f, x + 35.5f, y + 23.5f }, 0, accent, false);
+            tip_rect((GfxRect){ x + 38.5f, y + 13.5f, x + 69.5f, y + 23.5f }, 0, COLOR_TRANSPARENT, true);
+            break;
+        }
+    }
+}
+
+static const UiElementType tip_header_type = { tip_header_measure, NULL, tip_header_paint, NULL, NULL, false };
+
+/// 三张入门提示按顺序编号，右上角的小图画出这一步怎么做。
+static UiElement *tip_card(int step, StringId title, StringId body)
 {
     UiElement *card = ui_stack(false, 0);
-    ui_stack_set_padding(card, 16, 16, 16, 18);
+    ui_stack_set_padding(card, 14, 12, 16, 16);
     ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 8);
-    UiElement *icon = ui_label(UI_LIT(glyph), UI_TEXT_GLYPH);
-    ui_label_set_size(icon, 22);
-    ui_label_set_color(icon, THEME_ACCENT_TEXT);
-    icon->cross = UI_CROSS_START;
-    ui_add(card, icon);
+    UiElement *top = ui_element_new(&tip_header_type, sizeof(UiElement));
+    top->tag = (void *)(intptr_t)step;
+    ui_add(card, top);
     UiElement *header = ui_label(UI_STR(title), UI_TEXT_BODY_STRONG);
     ui_label_style(header)->wrap = true;
-    ui_set_margin(header, 0, 12, 0, 4);
+    ui_set_margin(header, 0, 8, 0, 4);
     ui_add(card, header);
     ui_add(card, ui_label(UI_STR(body), UI_TEXT_CAPTION));
     return card;
 }
+
+/// 概览页右上角的“打开置物架”：强调色按钮，文字后面跟着快捷键的键帽（淡一些）。
+typedef struct OpenButton
+{
+    UiElement base;
+    StrList keys;
+} OpenButton;
+
+static const GfxTextStyle open_label_style = { GFX_FONT_TEXT, 14, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
+
+static GfxSize open_button_measure(UiElement *element, float available)
+{
+    (void)available;
+    OpenButton *button = (OpenButton *)element;
+    GfxSize text = gfx_text_measure(S(STR_OpenShelf), &open_label_style, 0);
+    float keys = button->keys.count > 0 ? 12 + keycaps_width(&button->keys) - 3 : 0;
+    return (GfxSize){ 16 + text.width + keys + 10, text.height + 6 + 7 };
+}
+
+static void open_button_paint(UiElement *element, double time)
+{
+    (void)time;
+    OpenButton *button = (OpenButton *)element;
+    GfxRect bounds = element->bounds;
+    bool pressed = element->pressed && element->hovered;
+    gfx_fill_rounded(bounds, 6, theme_color(pressed ? THEME_ACCENT_PRESSED : element->hovered ? THEME_ACCENT_HOVER : THEME_ACCENT));
+    Color text = theme_color(THEME_TEXT_ON_ACCENT);
+    float width = gfx_text_measure(S(STR_OpenShelf), &open_label_style, 0).width;
+    gfx_text_draw(S(STR_OpenShelf), (GfxRect){ bounds.left + 16, bounds.top, bounds.left + 16 + width + 1, bounds.bottom - 1 }, &open_label_style, text);
+    if (button->keys.count == 0) return;
+    gfx_push_opacity(0.75f);
+    paint_keycaps(&button->keys, bounds.left + 16 + width + 12, (bounds.top + bounds.bottom) / 2, text);
+    gfx_pop_layer();
+}
+
+static void open_button_mouse(UiElement *element, const UiMouseEvent *event)
+{
+    (void)element;
+    if (event->kind == UI_MOUSE_UP && event->inside && !event->right_button) on_open_shelf(NULL);
+}
+
+static void open_button_destroy(UiElement *element)
+{
+    strlist_clear(&((OpenButton *)element)->keys);
+}
+
+static const UiElementType open_button_type = { open_button_measure, NULL, open_button_paint, open_button_mouse, open_button_destroy, true };
+static UiElement *open_button;
+
+/// 最近关闭的置物架下面的牌桌：铺满窗口宽度，从标题上方一点一直铺到窗口底边（被窗口底边裁掉）。
+static void table_paint(UiElement *element, double time)
+{
+    (void)time;
+    ThemePattern table = theme_pattern(THEME_PATTERN_TABLE);
+    gfx_fill_rounded_pattern((GfxRect){ M->stage.left, element->bounds.top + 12, M->stage.right, element->bounds.top + 12 + 4000 }, 0, &table);
+}
+
+static GfxSize table_measure(UiElement *element, float available)
+{
+    (void)element;
+    return (GfxSize){ available, 0 };
+}
+
+static const UiElementType table_type = { table_measure, NULL, table_paint, NULL, NULL, false };
+static UiElement *history_tally;
 
 static void build_overview(void)
 {
@@ -1058,10 +1338,9 @@ static void build_overview(void)
     title->cross = UI_CROSS_CENTER;
     title->grow = 1;
     ui_add(header, title);
-    UiElement *open = ui_button(UI_BUTTON_ACCENT, UI_STR(STR_OpenShelf), on_open_shelf, NULL);
-    ui_button_set_glyph(open, GLYPH_ADD, 13);
-    ui_button_set_padding(open, 16, 6, 16, 7);
+    UiElement *open = ui_element_new(&open_button_type, sizeof(OpenButton));
     open->cross = UI_CROSS_CENTER;
+    open_button = open;
     ui_add(header, open);
     ui_add(page, header);
 
@@ -1082,9 +1361,9 @@ static void build_overview(void)
     ui_add(getting_header, dismiss);
     ui_add(P.getting_started, getting_header);
     UiElement *tips = ui_grid(3, 9, 0);
-    ui_add(tips, tip_card(GLYPH_MOUSE, STR_TipShakeTitle, STR_TipShakeBody));
-    ui_add(tips, tip_card(GLYPH_LIBRARY, STR_TipStackTitle, STR_TipStackBody));
-    ui_add(tips, tip_card(GLYPH_LIGHTNING, STR_QuickActionsTitle, STR_TipActionsBody));
+    ui_add(tips, tip_card(1, STR_TipShakeTitle, STR_TipShakeBody));
+    ui_add(tips, tip_card(2, STR_TipStackTitle, STR_TipStackBody));
+    ui_add(tips, tip_card(3, STR_QuickActionsTitle, STR_TipActionsBody));
     ui_add(P.getting_started, tips);
     ui_add(body, P.getting_started);
 
@@ -1107,7 +1386,22 @@ static void build_overview(void)
     // 中间留空，最近关闭的置物架总是贴着窗口底边；下半截伸出页面，被窗口底边裁掉。
     ui_add(page, ui_spacer());
     M->history_section = ui_stack(false, 0);
-    section_header(M->history_section, STR_RecentShelves, 24, 8);
+    ui_add(M->history_section, ui_element_new(&table_type, sizeof(UiElement)));
+    // 标题和右侧“已保留几个 / 最多几个”都用牌桌上的文字颜色。
+    UiElement *history_header = ui_stack(true, 0);
+    ui_set_margin(history_header, 2, 24, 0, 8);
+    UiElement *history_title = ui_label(UI_STR(STR_RecentShelves), UI_TEXT_BODY_STRONG);
+    ui_label_set_color(history_title, THEME_TABLE_TEXT);
+    history_title->grow = 1;
+    ui_add(history_header, history_title);
+    history_tally = ui_label(UI_LIT(L""), UI_TEXT_BODY);
+    ui_label_style(history_tally)->font = GFX_FONT_NUMBER;
+    ui_label_set_size(history_tally, 13);
+    ui_label_set_color(history_tally, THEME_TABLE_TEXT);
+    history_tally->cross = UI_CROSS_END;
+    ui_set_margin(history_tally, 0, 0, 0, 1);
+    ui_add(history_header, history_tally);
+    ui_add(M->history_section, history_header);
     M->fan = fan_create();
     M->fan->height = 165;
     ui_set_margin(M->fan, 0, 4, 0, -36);
@@ -1151,7 +1445,14 @@ void pages_refresh(void)
     tile_set_summary(M->tiles[PAGE_SHELF], str_shelf_summary(settings->auto_open_trigger, settings->drag_out_mode));
     QuickActionList visible = quick_actions_visible(settings);
     StrList labels = {0};
-    for (int index = 0; index < visible.count; index++) strlist_add_owned(&labels, quick_action_label(&visible.items[index]));
+    PageTile *general = (PageTile *)M->tiles[PAGE_GENERAL], *actions = (PageTile *)M->tiles[PAGE_ACTIONS];
+    hotkey_keys(&general->glance);
+    strlist_clear(&actions->glance);
+    for (int index = 0; index < visible.count; index++)
+    {
+        strlist_add_owned(&labels, quick_action_label(&visible.items[index]));
+        strlist_add(&actions->glance, quick_action_glyph(&visible.items[index]));
+    }
     quick_action_list_free(&visible);
     tile_set_summary(M->tiles[PAGE_ACTIONS], str_actions_summary(&labels));
     strlist_clear(&labels);
@@ -1210,6 +1511,22 @@ void pages_refresh(void)
     ui_toggle_set_checked(P.close_when_empty, settings->close_when_empty);
     int history_count = 0;
     shelf_history_entries(&history_count);
+    wchar_t tally[32];
+    swprintf(tally, ARRAYSIZE(tally), L"%d / %d", history_count, SHELF_HISTORY_CAPACITY);
+    ui_label_set_text(history_tally, UI_LIT(tally));
+    if (open_button)
+    {
+        OpenButton *button = (OpenButton *)open_button;
+        StrList keys = {0};
+        hotkey_keys(&keys);
+        if (!strlist_equal(&keys, &button->keys, false))
+        {
+            strlist_clear(&button->keys);
+            button->keys = keys;
+            ui_window_invalidate(M->window);
+        }
+        else strlist_clear(&keys);
+    }
     if (history_count > 0)
     {
         wchar_t *text = str_history_count(history_count);
@@ -1250,6 +1567,7 @@ void pages_close(void)
     strlist_clear(&menu_apps);
     strlist_clear(&blocked_names);
     memset(&P, 0, sizeof(P));
+    open_button = history_tally = NULL;
     // 关掉之后还在等的保存计时不再起作用。
     P.sensitivity_generation = generation;
     P.pending_sensitivity = -1;

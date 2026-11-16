@@ -421,6 +421,8 @@ typedef void (*UiSliderHandler)(int value, bool dragging, void *context);
 UiElement *ui_slider(int minimum, int maximum, int value, int step, UiSliderHandler changed, void *context);
 void ui_slider_set_value(UiElement *slider, int value);
 int ui_slider_value(UiElement *slider);
+/// 切牌滑块上已经翻成牌背的张数。
+int ui_slider_face_down_count(UiElement *slider);
 
 /// 只显示，不能拖动（校准的结果）。
 void ui_slider_set_read_only(UiElement *slider, bool read_only);

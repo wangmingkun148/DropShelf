@@ -352,7 +352,7 @@ typedef struct PanelIcon
     UiElement base;
 } PanelIcon;
 
-/// 线框版的应用图标（256 × 256 的画布缩进 52 × 52），跟随文字颜色。
+/// 应用图标（256 × 256 的画布缩进 52 × 52）：一张牌背上叠一张牌，牌背跟随强调色，牌上是向下的箭头和托盘。
 static void panel_icon_paint(UiElement *element, double time)
 {
     (void)time;
@@ -364,23 +364,34 @@ static void panel_icon_paint(UiElement *element, double time)
     if (opacity <= 0.001f) return;
     gfx_push_transform(gfx_matrix_scale(zoom, zoom, center_x, center_y));
     gfx_push_opacity(opacity);
-    Color color = theme_color(THEME_TEXT_PRIMARY);
-    gfx_stroke_rounded((GfxRect){ bounds.left + 16 * scale, bounds.top + 16 * scale, bounds.left + 240 * scale, bounds.top + 240 * scale }, 50 * scale,
-        color, 12 * scale);
-    float x = bounds.left, y = bounds.top, s = scale;
-    float stem[] = { x + 128 * s, y + 64 * s, x + 128 * s, y + 156 * s };
-    float arrow[] = { x + 90 * s, y + 120 * s, x + 128 * s, y + 158 * s, x + 166 * s, y + 120 * s };
-    float tray[] = { x + 68 * s, y + 170 * s, x + 68 * s, y + 190 * s, x + 188 * s, y + 190 * s, x + 188 * s, y + 170 * s };
-    gfx_polyline(stem, 2, color, 12 * s);
-    gfx_polyline(arrow, 3, color, 12 * s);
-    gfx_polyline(tray, 4, color, 12 * s);
+    // 之后都按 256 的画布坐标画。
+    gfx_push_transform(gfx_matrix_multiply(gfx_matrix_scale(scale, scale, 0, 0), gfx_matrix_translate(bounds.left, bounds.top)));
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+    gfx_push_transform(gfx_matrix_rotate(10, 92 + 70, 22 + 95));
+    gfx_fill_rounded_pattern((GfxRect){ 92, 22, 232, 212 }, 18, &back);
+    gfx_pop_transform();
+    gfx_push_transform(gfx_matrix_rotate(-6, 30 + 70, 46 + 95));
+    gfx_fill_rounded((GfxRect){ 30, 46, 170, 236 }, 18, theme_color(THEME_CARD));
+    gfx_stroke_rounded((GfxRect){ 30, 46, 170, 236 }, 18, ink, 8);
+    gfx_pop_transform();
+    gfx_push_transform(gfx_matrix_rotate(-6, 100, 141));
+    float stem[] = { 100, 90, 100, 160 };
+    float arrow[] = { 72, 134, 100, 162, 128, 134 };
+    float tray[] = { 66, 194, 134, 194 };
+    Color accent = theme_color(THEME_ACCENT);
+    gfx_polyline(stem, 2, accent, 16);
+    gfx_polyline(arrow, 3, accent, 16);
+    gfx_polyline(tray, 2, ink, 14);
+    gfx_pop_transform();
+    gfx_pop_transform();
     gfx_pop_layer();
     gfx_pop_transform();
 }
 
 static const UiElementType panel_icon_type = { NULL, NULL, panel_icon_paint, NULL, NULL, false };
 
-/// 状态栏里的“＋ 打开置物架”：强调色底，向右渐隐。
+/// 状态栏里的“＋ 打开置物架”：强调色的圆角按钮。
 typedef struct SoftButton
 {
     UiElement base;
@@ -397,11 +408,7 @@ static void soft_button_paint(UiElement *element, double time)
     (void)time;
     GfxRect bounds = element->bounds;
     bool pressed = element->pressed && element->hovered;
-    Color fill = theme_color(pressed ? THEME_ACCENT_PRESSED : element->hovered ? THEME_ACCENT_HOVER : THEME_ACCENT);
-    GfxStop stops[3] = { { 0, fill }, { 0.62f, fill }, { 1, color_with_alpha(fill, 0) } };
-    gfx_push_layer(bounds, 6, 1);
-    gfx_fill_rect_linear(bounds, bounds.left, bounds.top, bounds.right, bounds.top, stops, 3);
-    gfx_pop_layer();
+    gfx_fill_rounded(bounds, 6, theme_color(pressed ? THEME_ACCENT_PRESSED : element->hovered ? THEME_ACCENT_HOVER : THEME_ACCENT));
     Color text = theme_color(THEME_TEXT_ON_ACCENT);
     GfxTextStyle glyph = { GFX_FONT_ICON, 13, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
     GfxTextStyle label = { GFX_FONT_TEXT, 13, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_CENTER };
@@ -454,19 +461,15 @@ static void back_pill_mouse(UiElement *element, const UiMouseEvent *event)
 
 static const UiElementType back_pill_type = { back_pill_measure, NULL, back_pill_paint, back_pill_mouse, NULL, true };
 
-/// 状态栏背景：卡片色的椭圆渐隐，左上角一点强调色的光晕。
+/// 状态栏是一张竖放的牌：牌面底色，右边描一条边，再露出 3 像素宽的一道牌背，和概览页的卡片一样。
 static void side_panel_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
-    float width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
-    Color card = theme_color(THEME_CARD);
-    GfxStop fade[3] = { { 0, card }, { 0.6f, color_with_alpha(card, (uint8_t)(card.a * 0xB0 / 255)) }, { 1, color_with_alpha(card, 0) } };
-    gfx_fill_rounded_radial(bounds, 0, bounds.left, bounds.top + height * 0.2f, width, height * 0.8f, fade, 3);
-    Color accent = theme_color(THEME_ACCENT);
-    accent.a = (uint8_t)(accent.a * 0.2f);
-    GfxStop glow[2] = { { 0, accent }, { 1, color_with_alpha(accent, 0) } };
-    gfx_fill_rounded_radial(bounds, 0, bounds.left, bounds.top, width, height * 0.5f, glow, 2);
+    ThemePattern edge = theme_pattern(THEME_PATTERN_STACK_EDGE);
+    gfx_fill_rounded_pattern((GfxRect){ bounds.right, bounds.top, bounds.right + 3, bounds.bottom }, 0, &edge);
+    gfx_fill_rect(bounds, theme_color(THEME_CARD));
+    gfx_fill_rect((GfxRect){ bounds.right - 1, bounds.top, bounds.right, bounds.bottom }, theme_color(THEME_CARD_BORDER));
 }
 
 static void side_panel_arrange(UiElement *element)
@@ -509,7 +512,7 @@ static UiElement *way_row(const wchar_t *glyph, UiElement *content)
     ui_set_margin(row, 2, 0, 0, 12);
     UiElement *icon = ui_label(UI_LIT(glyph), UI_TEXT_GLYPH);
     ui_label_set_size(icon, 15);
-    ui_label_set_color(icon, THEME_ACCENT_TEXT);
+    ui_label_set_color(icon, THEME_TEXT_PRIMARY);
     icon->width = 26;
     ui_add(row, icon);
     content->cross = UI_CROSS_CENTER;
@@ -525,11 +528,11 @@ static UiElement *way_text(StringId text)
     return label;
 }
 
-/// 快捷键的一个按键：小方块，下边框略粗。
+/// 快捷键的一个按键：墨色描边的小方块，下边框略粗，数字用 Bahnschrift。
 static GfxSize key_cap_measure(UiElement *element, float available)
 {
     (void)available;
-    GfxTextStyle style = { GFX_FONT_TEXT, 11, 400 };
+    GfxTextStyle style = { GFX_FONT_NUMBER, 11, 400 };
     GfxSize text = gfx_text_measure(element->tag, &style, 0);
     return (GfxSize){ text.width + 12, text.height + 3 + 3 };
 }
@@ -538,10 +541,11 @@ static void key_cap_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
-    gfx_fill_rounded(bounds, 4, theme_color(THEME_CONTROL_BORDER));
-    gfx_fill_rounded((GfxRect){ bounds.left + 1, bounds.top + 1, bounds.right - 1, bounds.bottom - 2 }, 3, theme_color(THEME_CONTROL));
-    GfxTextStyle style = { GFX_FONT_TEXT, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
-    gfx_text_draw(element->tag, (GfxRect){ bounds.left, bounds.top, bounds.right, bounds.bottom - 1 }, &style, theme_color(THEME_TEXT_PRIMARY));
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    gfx_stroke_rounded(bounds, 3, ink, 1);
+    gfx_fill_rect((GfxRect){ bounds.left + 2, bounds.bottom - 2, bounds.right - 2, bounds.bottom - 1 }, ink);
+    GfxTextStyle style = { GFX_FONT_NUMBER, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    gfx_text_draw(element->tag, (GfxRect){ bounds.left, bounds.top, bounds.right, bounds.bottom - 1 }, &style, ink);
 }
 
 static void key_cap_destroy(UiElement *element)
@@ -683,7 +687,7 @@ static void status_paint(UiElement *element, double time)
     GfxRect bounds = element->bounds;
     bool healthy = app_is_gesture_running();
     float middle = (bounds.top + bounds.bottom) / 2;
-    gfx_fill_ellipse(bounds.left + 3.5f, middle + 0.5f, 3.5f, 3.5f, theme_color(healthy ? THEME_SUCCESS : THEME_CAUTION));
+    gfx_fill_ellipse(bounds.left + 3.5f, middle + 0.5f, 3.5f, 3.5f, theme_color(healthy ? THEME_ACCENT : THEME_CAUTION));
     gfx_text_draw(S(healthy ? STR_StatusRunning : STR_StatusGestureFailed), (GfxRect){ bounds.left + 13, bounds.top, bounds.right + 20, bounds.bottom - 1 },
         &caption_style, theme_color(THEME_TEXT_SECONDARY));
 }
@@ -709,7 +713,7 @@ static void refresh_status(void)
 static GfxSize link_measure(UiElement *element, float available)
 {
     (void)available;
-    GfxTextStyle style = { GFX_FONT_TEXT, 12, 400 };
+    GfxTextStyle style = { GFX_FONT_NUMBER, 12, 400 };
     wchar_t *text = str_version(DROPSHELF_VERSION);
     GfxSize size = gfx_text_measure(text, &style, 0);
     free(text);
@@ -720,9 +724,11 @@ static GfxSize link_measure(UiElement *element, float available)
 static void link_paint(UiElement *element, double time)
 {
     (void)time;
-    GfxTextStyle style = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    GfxTextStyle style = { GFX_FONT_NUMBER, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
     wchar_t *text = str_version(DROPSHELF_VERSION);
-    gfx_text_draw(text, element->bounds, &style, theme_color(element->hovered ? THEME_ACCENT_TEXT : THEME_TEXT_SECONDARY));
+    // 概览页有历史牌时版本号压在牌桌上，跟牌桌上的文字同色。
+    bool on_table = M->page == PAGE_OVERVIEW && M->history_section && !M->history_section->hidden;
+    gfx_text_draw(text, element->bounds, &style, theme_color(on_table ? THEME_TABLE_TEXT : element->hovered ? THEME_ACCENT_TEXT : THEME_TEXT_SECONDARY));
     free(text);
 }
 

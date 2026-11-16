@@ -30,6 +30,7 @@ add_library(dropshelf_core STATIC
     src/app.c
     src/archive.c
     src/attachment_cache.c
+    src/card_face.c
     src/base.c
     src/clipboard.c
     src/drop_data.c
