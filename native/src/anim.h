@@ -86,8 +86,11 @@ typedef void (*FrameHandler)(void *context, double time);
 void frames_subscribe(FrameHandler handler, void *context);
 void frames_unsubscribe(FrameHandler handler, void *context);
 
-/// 当前的时刻（秒），与逐帧回调收到的 time 同一个起点。
+/// 当前的时刻（秒），与逐帧回调收到的 time 同一个起点。逐帧回调收到的是这一帧将要显示的时刻，可能比“现在”晚不到一个刷新周期。
 double frames_time(void);
+
+/// 屏幕的刷新周期（秒），按 DWM 最近一次报告的；还没读到时按 60Hz。
+double frames_refresh_period(void);
 
 /// 程序退出前调用：停掉等待屏幕刷新的线程。
 void frames_shutdown(void);

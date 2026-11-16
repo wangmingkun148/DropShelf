@@ -116,7 +116,8 @@ bool anim_update(Anim *anim, double time)
     if (!anim->running) return false;
     if (anim->has_last_time)
     {
-        if (time == anim->last_time) return true;
+        // 同一帧重复调用不多走；时间比上次还早时（逐帧回调给的是下一次刷新的时刻，窗口消息里现画的一帧用的是现在）也不往回走。
+        if (time <= anim->last_time) return true;
         anim->elapsed += frame_clock_step(time - anim->last_time, &anim->lag);
     }
     anim->last_time = time;
@@ -135,6 +136,8 @@ bool anim_update(Anim *anim, double time)
 
 // ───────────── 逐帧回调 ─────────────
 // 一个后台线程用 DwmFlush 等屏幕的下一次刷新，然后给界面线程发一条消息；界面线程在这条消息里调用各个订阅者。
+// 交给订阅者的时刻是这一帧将要显示的时刻（DWM 报告的上一次刷新加一个刷新周期），不是消息处理时的“现在”：
+// 消息有时排在鼠标输入后面晚到几毫秒，按“现在”算的话相邻两帧走的距离忽大忽小，看起来发抖；按显示的时刻算，每帧正好走一个周期。
 // 上一条消息处理完之前不再发：发来的消息排在鼠标和键盘之前处理，画一帧比刷新间隔慢时如果马上又来一条，
 // 界面线程会一直在画、顾不上鼠标（光标移动很久才有反应）；现在这时跳过一次刷新，中间先处理输入。
 
@@ -157,18 +160,49 @@ static HANDLE frame_wake;           // 有订阅时置位，线程才开始等�
 static volatile LONG frame_pending; // 已经发出、还没处理完的帧消息
 static volatile LONG64 frame_posted_at;
 static volatile LONG frame_stopping;
+static volatile LONG64 frame_target;    // 下一帧将要显示的时刻（性能计数器的读数），读不到时为 0
+static volatile LONG64 frame_period;    // 刷新周期（性能计数器的计数），读不到时为 0
+
+static LARGE_INTEGER clock_frequency, clock_origin;
+
+static void clock_start(void)
+{
+    if (clock_frequency.QuadPart != 0) return;
+    QueryPerformanceFrequency(&clock_frequency);
+    QueryPerformanceCounter(&clock_origin);
+}
+
+/// 性能计数器的读数换成 frames_time 的秒数。
+static double clock_seconds(LONG64 counter)
+{
+    clock_start();
+    return (double)(counter - clock_origin.QuadPart) / (double)clock_frequency.QuadPart;
+}
 
 double frames_time(void)
 {
-    static LARGE_INTEGER frequency, origin;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    if (frequency.QuadPart == 0)
-    {
-        QueryPerformanceFrequency(&frequency);
-        origin = now;
-    }
-    return (double)(now.QuadPart - origin.QuadPart) / (double)frequency.QuadPart;
+    return clock_seconds(now.QuadPart);
+}
+
+double frames_refresh_period(void)
+{
+    LONG64 period = InterlockedCompareExchange64(&frame_period, 0, 0);
+    clock_start();
+    if (period <= 0) return 1.0 / 60;
+    return (double)period / (double)clock_frequency.QuadPart;
+}
+
+/// 这一帧用的时刻：DWM 给的显示时刻，在合理的范围内（不早于现在、不晚于现在加两个周期）才用，否则用现在。
+static double frame_time_now(void)
+{
+    double now = frames_time();
+    LONG64 target = InterlockedCompareExchange64(&frame_target, 0, 0);
+    if (target <= 0) return now;
+    double predicted = clock_seconds(target);
+    double period = frames_refresh_period();
+    return predicted >= now && predicted - now <= 2 * period ? predicted : now;
 }
 
 static DWORD WINAPI frame_thread_procedure(LPVOID parameter)
@@ -179,7 +213,22 @@ static DWORD WINAPI frame_thread_procedure(LPVOID parameter)
         WaitForSingleObject(frame_wake, INFINITE);
         if (frame_stopping) break;
         // 桌面合成不可用时（极少见）DwmFlush 立即返回失败，改为按 60Hz 等待。
-        if (FAILED(DwmFlush())) Sleep(16);
+        if (FAILED(DwmFlush()))
+        {
+            Sleep(16);
+            InterlockedExchange64(&frame_target, 0);
+        }
+        else
+        {
+            // 刚合成完一帧：现在画的内容在下一次刷新时显示。
+            DWM_TIMING_INFO timing = { .cbSize = (UINT32)sizeof(timing) };
+            if (SUCCEEDED(DwmGetCompositionTimingInfo(NULL, &timing)) && timing.qpcRefreshPeriod > 0 && timing.qpcVBlank > 0)
+            {
+                InterlockedExchange64(&frame_period, (LONG64)timing.qpcRefreshPeriod);
+                InterlockedExchange64(&frame_target, (LONG64)(timing.qpcVBlank + timing.qpcRefreshPeriod));
+            }
+            else InterlockedExchange64(&frame_target, 0);
+        }
         LONG64 now = (LONG64)GetTickCount64();
         bool stuck = frame_pending && now - frame_posted_at > FRAME_STUCK_MILLISECONDS;
         if (InterlockedCompareExchange(&frame_pending, 1, 0) != 0 && !stuck) continue;
@@ -196,7 +245,7 @@ static LRESULT CALLBACK frame_window_procedure(HWND window, UINT message, WPARAM
     if (count > 0)
     {
         // 回调里可能增减订阅，先留一份副本；调用前再确认它还在订阅。
-        double time = frames_time();
+        double time = frame_time_now();
         Subscriber *copy = xalloc((size_t)count * sizeof(Subscriber));
         memcpy(copy, subscribers, (size_t)count * sizeof(Subscriber));
         for (int index = 0; index < count; index++)
@@ -216,6 +265,8 @@ static LRESULT CALLBACK frame_window_procedure(HWND window, UINT message, WPARAM
 static bool frames_start(void)
 {
     if (frame_window) return true;
+    // 时钟的起点在界面线程上定好，之后后台线程读到的显示时刻和界面线程用的是同一个起点。
+    clock_start();
     WNDCLASSEXW class = { .cbSize = sizeof(class) };
     class.lpfnWndProc = frame_window_procedure;
     class.hInstance = GetModuleHandleW(NULL);

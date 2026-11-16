@@ -777,7 +777,12 @@ void flip_animate(double time)
     }
     else
     {
-        if (current == flip.last) return;
+        // 同一帧重复调用，或者时刻比上次还早（窗口消息里现画、用的是“现在”）：这次不走，下一帧接着走。
+        if (current <= flip.last)
+        {
+            main_request_frame();
+            return;
+        }
         double lag_seconds = flip.lag / 1000;
         flip.ran += frame_clock_step((current - flip.last) / 1000, &lag_seconds) * 1000;
         flip.lag = lag_seconds * 1000;

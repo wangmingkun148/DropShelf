@@ -784,11 +784,16 @@ static void test_animation(void)
         anim_update(&anim, 5.18);
         anim_update(&anim, 5.20);
         CHECK(close_to(anim.value, 15), "动画走到一半时的数值不正确");
+        // 逐帧回调给的是下一次刷新的时刻，窗口消息里现画的一帧用的是现在，可能稍早：不往回走。
+        CHECK(anim_update(&anim, 5.19) && close_to(anim.value, 15), "时刻比上一帧早时数值不应往回走");
         anim_update(&anim, 5.23);
         anim_update(&anim, 5.26);
         anim_update(&anim, 5.29);
         CHECK(!anim_update(&anim, 5.31) && anim.value == 20 && !anim.running, "动画没有按时结束在终点");
     }
+
+    double period = frames_refresh_period();
+    CHECK(period > 0.001 && period < 0.1, "刷新周期不在合理范围内");
 
     low_performance_set_mode(PERFORMANCE_NORMAL);
     CHECK(!low_performance_enabled() && !low_performance_skip(1.0), "关闭低性能模式时不应跳帧");
@@ -1525,6 +1530,8 @@ int main(int argc, char **argv)
     run("language template", test_language_template);
     run("matrix invert", test_matrix_invert);
     run("image release on other thread", test_image_release_on_other_thread);
+    run("shadow templates", test_shadow_templates);
+    run("graphics trim", test_graphics_trim);
     run("gfx layers", test_gfx_layers);
     run("main window", test_main_window);
     run("main window settings", test_main_window_settings);

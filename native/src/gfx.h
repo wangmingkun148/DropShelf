@@ -42,6 +42,10 @@ void gfx_matrix_apply(GfxMatrix matrix, float *x, float *y);
 bool gfx_initialize(void);
 void gfx_shutdown(void);
 
+/// 空闲时调用（没有窗口在显示）：让 Direct2D 放掉留着下次用的中间位图和字形缓存，再让显卡驱动把替程序留着的内存交回去。
+/// 之后第一次画时这些会重新建，所以只在一段时间不画之后调用。正在画时什么也不做。
+void gfx_trim(void);
+
 // ───────────── 窗口的画面 ─────────────
 // 每个窗口一份：一个带透明度的交换链，经 DirectComposition 显示在窗口上，没画到的地方透出窗口背后的系统材质或桌面。
 // 窗口需要带 WS_EX_NOREDIRECTIONBITMAP。
@@ -111,7 +115,12 @@ void gfx_stroke_ellipse(float center_x, float center_y, float radius_x, float ra
 void gfx_line(float x1, float y1, float x2, float y2, Color color, float width);
 
 /// 圆角矩形投下的阴影：blur 是模糊半径，color 的透明度是阴影的浓度。
+/// 第一次遇到某种圆角、模糊和颜色时画一个模板，之后按九宫格贴图，不再每次做模糊；矩形太小拼不开时每次现算。
 void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float offset_y, Color color);
+
+/// 诊断和测试用：关掉时阴影都每次现算（和以前一样），用来对比；现有的模板有几个。
+void gfx_set_shadow_templates(bool enabled);
+int gfx_shadow_template_count(void);
 
 /// 之后的内容只画在 rect 以内，直到 gfx_pop_clip。
 void gfx_push_clip(GfxRect rect);
