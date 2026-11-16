@@ -716,7 +716,9 @@ static HRESULT STDMETHODCALLTYPE target_query_interface(IDropTarget *self, REFII
 {
     if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_IDropTarget))
     {
+        // 交出去的指针也要算一份引用：系统用完会 Release，不加的话置物架会被提前释放。
         *object = self;
+        IDropTarget_AddRef(self);
         return S_OK;
     }
     *object = NULL;
@@ -1007,6 +1009,7 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
 
 // ───────────── 菜单 ─────────────
 
+/// 收下 items 数组本身（调用方不再释放），并持有其中每一项。
 static void set_menu_items(ShelfWindow *shelf, ShelfItem **items, int count)
 {
     for (int index = 0; index < shelf->menu_count; index++) shelf_item_release(shelf->menu_items[index]);
@@ -1098,9 +1101,7 @@ static void open_shelf_menu(ShelfWindow *shelf)
 {
     ShelfModel *model = shelf->model;
     int count;
-    ShelfItem **targets = target_items(shelf, &count);
-    set_menu_items(shelf, targets, count);
-    free(targets);
+    set_menu_items(shelf, target_items(shelf, &count), count);
     bool has_items = model->count > 0, file_system = false, text = false;
     for (int index = 0; index < shelf->menu_count; index++)
     {
@@ -1137,9 +1138,7 @@ static void open_shelf_menu(ShelfWindow *shelf)
 static void open_item_menu(ShelfWindow *shelf)
 {
     int count;
-    ShelfItem **selected = selected_items(shelf, &count);
-    set_menu_items(shelf, selected, count);
-    free(selected);
+    set_menu_items(shelf, selected_items(shelf, &count), count);
     ShelfItem *single = count == 1 ? shelf->menu_items[0] : NULL;
     bool file_system = false, text = false;
     for (int index = 0; index < count; index++)
