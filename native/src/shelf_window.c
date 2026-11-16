@@ -1058,13 +1058,13 @@ void shelf_window_release(ShelfWindow *shelf)
     free(shelf->removing);
     free(shelf->rows_before);
     free(shelf->rows_before_y);
-    free(shelf->dimmed);
     free(shelf->toast_text);
     for (int index = 0; index < shelf->convert_count; index++) shelf_item_release(shelf->convert_items[index]);
     free(shelf->convert_items);
     for (int index = 0; index < shelf->menu_count; index++) shelf_item_release(shelf->menu_items[index]);
     free(shelf->menu_items);
     for (int index = 0; index < shelf->dimmed_count; index++) shelf_item_release(shelf->dimmed[index]);
+    free(shelf->dimmed);
     for (int index = 0; index < SHELF_MAX_ACTIONS; index++)
     {
         free(shelf->action_labels[index]);
