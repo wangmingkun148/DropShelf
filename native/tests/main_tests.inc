@@ -216,6 +216,107 @@ static void test_gfx_layers(void)
     if (bitmap) DeleteObject(bitmap);
 }
 
+/// 画一个阴影，取回像素（自上而下、32 位、预乘透明度）。失败时返回 NULL。
+static unsigned char *shadow_pixels(int width, int height, float dpi, GfxMatrix matrix, GfxRect rect, float radius, float blur, Color color,
+    bool templates)
+{
+    gfx_set_shadow_templates(templates);
+    unsigned char *pixels = NULL;
+    if (gfx_begin_image(width, height, dpi))
+    {
+        gfx_clear(COLOR_TRANSPARENT);
+        gfx_push_transform(matrix);
+        gfx_shadow(rect, radius, blur, 0, 4, color);
+        gfx_pop_transform();
+        HBITMAP bitmap = gfx_end_image_bitmap();
+        DIBSECTION section;
+        if (bitmap && GetObjectW(bitmap, sizeof(section), &section) == sizeof(section) && section.dsBm.bmBits)
+        {
+            pixels = xalloc((size_t)width * height * 4);
+            memcpy(pixels, section.dsBm.bmBits, (size_t)width * height * 4);
+        }
+        if (bitmap) DeleteObject(bitmap);
+    }
+    gfx_set_shadow_templates(true);
+    return pixels;
+}
+
+/// 每次现算和按模板拼出来的阴影逐像素比较。
+static void compare_shadow(const char *name, int width, int height, float dpi, GfxMatrix matrix, GfxRect rect, float radius, float blur, Color color)
+{
+    unsigned char *expected = shadow_pixels(width, height, dpi, matrix, rect, radius, blur, color, false);
+    unsigned char *actual = shadow_pixels(width, height, dpi, matrix, rect, radius, blur, color, true);
+    CHECK(expected && actual, "没能画出阴影");
+    if (expected && actual)
+    {
+        int largest = 0, strongest = 0;
+        double total = 0;
+        size_t count = (size_t)width * height * 4;
+        for (size_t index = 0; index < count; index++)
+        {
+            int difference = abs((int)expected[index] - (int)actual[index]);
+            if (difference > largest) largest = difference;
+            total += difference;
+            if (index % 4 == 3 && expected[index] > strongest) strongest = expected[index];
+        }
+        double mean = total / (double)count;
+        bool same = largest <= 8 && mean <= 0.5;
+        if (!same || strongest < 20)
+            printf("  阴影 %s：最大差 %d，平均差 %.3f，现算的阴影最浓处透明度 %d\n", name, largest, mean, strongest);
+        CHECK(strongest >= 20, "现算的阴影没有画出来");
+        CHECK(same, "按模板拼出的阴影和现算的差得太多");
+    }
+    free(expected);
+    free(actual);
+}
+
+static void test_shadow_templates(void)
+{
+    GfxMatrix identity = gfx_matrix_identity();
+    // 置物架上的牌：100%、150% 缩放，以及转了一个角度、缩小一点（出场时）。
+    compare_shadow("牌", 200, 200, 96, identity, (GfxRect){ 50, 50, 122, 122 }, 10, 10, COLOR_ARGB(41, 0, 0, 0));
+    int before = gfx_shadow_template_count();
+    CHECK(before >= 1, "画过阴影后应有模板");
+    compare_shadow("牌 150%", 300, 300, 144, identity, (GfxRect){ 50, 50, 122, 122 }, 10, 10, COLOR_ARGB(41, 0, 0, 0));
+    GfxMatrix turned = gfx_matrix_multiply(gfx_matrix_scale(0.9f, 0.9f, 86, 86), gfx_matrix_rotate(-7, 86, 86));
+    compare_shadow("转动的牌", 300, 300, 144, turned, (GfxRect){ 50, 50, 122, 122 }, 10, 10, COLOR_ARGB(41, 0, 0, 0));
+    // 放大两倍：模板按两倍的像素画。
+    compare_shadow("放大的牌", 400, 400, 96, gfx_matrix_scale(2, 2, 0, 0), (GfxRect){ 30, 30, 102, 102 }, 10, 10, COLOR_ARGB(41, 0, 0, 0));
+    // 对话框那样的大矩形：四条边拉长。
+    compare_shadow("对话框", 600, 500, 120, identity, (GfxRect){ 40, 40, 400, 330 }, 8, 32, COLOR_ARGB(56, 0, 0, 0));
+    // 同样的圆角、模糊和颜色只是透明度不同，用同一个模板。
+    int templates = gfx_shadow_template_count();
+    compare_shadow("淡一些的对话框", 600, 500, 120, identity, (GfxRect){ 40, 40, 300, 260 }, 8, 32, COLOR_ARGB(30, 0, 0, 0));
+    CHECK(gfx_shadow_template_count() == templates, "只是透明度和大小不同时不应另画模板");
+    // 太小拼不开：照旧现算，两种画法应完全一样。
+    compare_shadow("小矩形", 120, 120, 96, identity, (GfxRect){ 40, 40, 60, 60 }, 8, 20, COLOR_ARGB(51, 0, 0, 0));
+}
+
+/// 放掉显卡缓存以后照常能画，阴影的模板还留着。
+static void test_graphics_trim(void)
+{
+    unsigned char *first = shadow_pixels(200, 200, 96, gfx_matrix_identity(), (GfxRect){ 50, 50, 122, 122 }, 10, 10, COLOR_ARGB(41, 0, 0, 0), true);
+    int templates = gfx_shadow_template_count();
+    gfx_trim();
+    CHECK(gfx_shadow_template_count() == templates, "放掉显卡缓存不应丢掉阴影的模板");
+    unsigned char *second = shadow_pixels(200, 200, 96, gfx_matrix_identity(), (GfxRect){ 50, 50, 122, 122 }, 10, 10, COLOR_ARGB(41, 0, 0, 0), true);
+    CHECK(first && second && memcmp(first, second, (size_t)200 * 200 * 4) == 0, "放掉显卡缓存以后画出的阴影应和之前一样");
+    free(first);
+    free(second);
+    // 写字也照常：排好的文字和字形缓存都会重新建。
+    bool drawn = gfx_begin_image(200, 60, 96);
+    if (drawn)
+    {
+        GfxTextStyle style = { GFX_FONT_TEXT, 14, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_START, 0 };
+        gfx_clear(COLOR_TRANSPARENT);
+        gfx_text_draw(L"DropShelf 置物架", (GfxRect){ 4, 4, 196, 56 }, &style, COLOR_RGB(0, 0, 0));
+        HBITMAP bitmap = gfx_end_image_bitmap();
+        drawn = bitmap != NULL;
+        if (bitmap) DeleteObject(bitmap);
+    }
+    CHECK(drawn, "放掉显卡缓存以后应能照常画");
+}
+
 static void change_window_size(AppSettings *settings, void *context)
 {
     (void)context;

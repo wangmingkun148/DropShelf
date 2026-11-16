@@ -31,7 +31,8 @@
 
 bool clock_tick(MotionClock *clock, double time)
 {
-    if (clock->has_last && time == clock->last) return false;
+    // 同一帧不重复走；比上次还早的时刻（窗口消息里现画、用的是“现在”）也不往回走。
+    if (clock->has_last && time <= clock->last) return false;
     if (clock->has_last) clock->elapsed += frame_clock_step(time - clock->last, &clock->lag);
     clock->last = time;
     clock->has_last = true;

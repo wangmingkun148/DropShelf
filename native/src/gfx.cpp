@@ -11,7 +11,7 @@ extern "C" {
 #include <d3d11.h>
 #include <dcomp.h>
 #include <dwrite.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <wincodec.h>
 #include <math.h>
 #include <stdlib.h>
@@ -32,6 +32,10 @@ static ID2D1Device *d2d_device;
 static ID2D1DeviceContext *context;
 static ID2D1SolidColorBrush *brush;
 static ID2D1Effect *shadow_effect;
+/// 另一个设备上下文，专门在画别的东西的同时画阴影的模板（见下面“阴影”一节）；和 context 在同一个设备上，画出的位图两边都能用。
+static ID2D1DeviceContext *template_context;
+static ID2D1SolidColorBrush *template_brush;
+static ID2D1Effect *template_shadow;
 static IDWriteFactory *dwrite_factory;
 static IDCompositionDevice *composition;
 
@@ -103,8 +107,14 @@ struct GfxSurface
     unsigned generation;
 };
 
+static void release_shadow_templates(void);
+
 static void release_device_resources(void)
 {
+    release_shadow_templates();
+    release(template_shadow);
+    release(template_brush);
+    release(template_context);
     release(shadow_effect);
     release(brush);
     release(context);
@@ -138,6 +148,20 @@ static bool create_device_resources(void)
     // 画面是带透明度的，子像素（ClearType）抗锯齿在透明背景上会出彩边，用灰度抗锯齿。
     context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     context->SetUnitMode(D2D1_UNIT_MODE_DIPS);
+    // 画阴影模板用的上下文；建不了时阴影照旧每次现算。模板按像素画，DPI 固定为 96。
+    if (SUCCEEDED(d2d_device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &template_context)) &&
+        SUCCEEDED(template_context->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &template_brush)) &&
+        SUCCEEDED(template_context->CreateEffect(CLSID_D2D1Shadow, &template_shadow)))
+    {
+        template_context->SetDpi(96, 96);
+        template_context->SetUnitMode(D2D1_UNIT_MODE_DIPS);
+    }
+    else
+    {
+        release(template_shadow);
+        release(template_brush);
+        release(template_context);
+    }
     device_generation++;
     return true;
 }
@@ -570,6 +594,27 @@ void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity)
     context->DrawBitmap(image->bitmap, &destination, opacity > 1 ? 1 : opacity, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, nullptr, nullptr);
 }
 
+void gfx_trim(void)
+{
+    if (drawing || !context) return;
+    release_retired_bitmaps();
+    // Direct2D 自己留着的中间位图、字形缓存等；用到时会重新建。
+    d2d_device->ClearResources(0);
+    // 再让显卡驱动把替程序留着、准备下次用的内存交回去（Intel 核显的驱动用过的中间位图不主动还）。
+    // 调用前要先清掉设备上下文绑定的状态并提交。
+    ID3D11DeviceContext *immediate = nullptr;
+    d3d_device->GetImmediateContext(&immediate);
+    if (immediate)
+    {
+        immediate->ClearState();
+        immediate->Flush();
+    }
+    release(immediate);
+    IDXGIDevice3 *device3 = nullptr;
+    if (SUCCEEDED(dxgi_device->QueryInterface(__uuidof(IDXGIDevice3), (void **)&device3))) device3->Trim();
+    release(device3);
+}
+
 void gfx_shutdown(void)
 {
     release_retired_bitmaps();
@@ -763,9 +808,133 @@ void gfx_line(float x1, float y1, float x2, float y2, Color color, float width)
     context->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), use_color(color), width);
 }
 
-void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float offset_y, Color color)
+// ───────────── 阴影 ─────────────
+// 阴影要做一次高斯模糊，每帧每个阴影现算一遍很费显卡，模糊用的中间位图也会被驱动留着不还。
+// 圆角矩形的阴影可以按九宫格拼：四个角各是一块固定的图，四条边沿着边的方向处处相同、拉长即可，中间是纯色。
+// 所以只要按圆角、模糊半径、颜色和像素比例画一次“模板”（一个刚好够拼的小圆角矩形的阴影），之后每次贴九块图。
+// 模板和阴影的大小无关，很小；透明度在贴图时乘上，也不在键里。
+
+struct ShadowTemplate
 {
-    if (!drawing || color.a == 0) return;
+    float radius, blur, scale;  // scale：模板每 DIP 几个像素
+    BYTE r, g, b;
+    int pad;                    // 矩形外面留给模糊的宽度（像素）
+    int corner;                 // 矩形里面受圆角影响的宽度（像素），角上的一块是 pad + corner 见方
+    ID2D1Bitmap1 *bitmap;
+    unsigned generation;
+    UINT64 used;
+};
+
+#define SHADOW_TEMPLATES 16
+#define SHADOW_MIDDLE 4         // 模板中间留几个像素：边上沿着边的方向处处相同，拉长的就是这一段
+
+static ShadowTemplate shadow_templates[SHADOW_TEMPLATES];
+static UINT64 shadow_clock;
+static bool shadow_templates_enabled = true;
+
+static void release_shadow_templates(void)
+{
+    for (int index = 0; index < SHADOW_TEMPLATES; index++)
+    {
+        release(shadow_templates[index].bitmap);
+        shadow_templates[index] = {};
+    }
+}
+
+void gfx_set_shadow_templates(bool enabled)
+{
+    shadow_templates_enabled = enabled;
+}
+
+int gfx_shadow_template_count(void)
+{
+    int count = 0;
+    for (int index = 0; index < SHADOW_TEMPLATES; index++)
+        if (shadow_templates[index].bitmap && shadow_templates[index].generation == device_generation) count++;
+    return count;
+}
+
+/// 在模板用的上下文里画出这个阴影模板：先把圆角矩形录进命令列表，再交给阴影效果画进一张位图。
+static ID2D1Bitmap1 *draw_shadow_template(float radius, float blur, float scale, Color color, int pad, int corner)
+{
+    int side = 2 * corner + SHADOW_MIDDLE;
+    int size = 2 * pad + side;
+    ID2D1CommandList *shape = nullptr;
+    ID2D1Bitmap1 *bitmap = nullptr;
+    HRESULT result = template_context->CreateCommandList(&shape);
+    if (SUCCEEDED(result))
+    {
+        template_context->SetTarget(shape);
+        template_context->BeginDraw();
+        template_context->SetTransform(D2D1::Matrix3x2F::Identity());
+        template_context->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(0, 0, (float)side, (float)side), radius * scale, radius * scale),
+            template_brush);
+        result = template_context->EndDraw();
+        template_context->SetTarget(nullptr);
+    }
+    if (SUCCEEDED(result)) result = shape->Close();
+    if (SUCCEEDED(result))
+    {
+        D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        result = template_context->CreateBitmap(D2D1::SizeU((UINT32)size, (UINT32)size), nullptr, 0, &properties, &bitmap);
+    }
+    if (SUCCEEDED(result))
+    {
+        template_context->SetTarget(bitmap);
+        template_context->BeginDraw();
+        template_context->SetTransform(D2D1::Matrix3x2F::Identity());
+        template_context->Clear(D2D1::ColorF(0, 0, 0, 0));
+        template_shadow->SetInput(0, shape);
+        // 模糊半径约为标准差的三倍。
+        template_shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, blur * scale / 3.0f);
+        template_shadow->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f));
+        template_context->DrawImage(template_shadow, D2D1::Point2F((float)pad, (float)pad));
+        template_shadow->SetInput(0, nullptr);
+        result = template_context->EndDraw();
+        template_context->SetTarget(nullptr);
+    }
+    release(shape);
+    if (FAILED(result))
+    {
+        log_error(L"画阴影模板失败\r\nHRESULT 0x%08lX", (unsigned long)result);
+        release(bitmap);
+    }
+    return bitmap;
+}
+
+static ShadowTemplate *shadow_template(float radius, float blur, float scale, Color color)
+{
+    ShadowTemplate *oldest = &shadow_templates[0];
+    for (int index = 0; index < SHADOW_TEMPLATES; index++)
+    {
+        ShadowTemplate *entry = &shadow_templates[index];
+        if (entry->bitmap && entry->generation != device_generation)
+        {
+            release(entry->bitmap);
+            *entry = {};
+        }
+        if (entry->bitmap && entry->radius == radius && entry->blur == blur && entry->scale == scale &&
+            entry->r == color.r && entry->g == color.g && entry->b == color.b)
+        {
+            entry->used = ++shadow_clock;
+            return entry;
+        }
+        if (!entry->bitmap || (oldest->bitmap && entry->used < oldest->used)) oldest = entry;
+    }
+    // 模糊在矩形外最多扩出约三倍标准差（即 blur），再多留一个像素；圆角加上模糊的范围以内都受角的影响。
+    int pad = (int)ceilf(blur * scale) + 1;
+    int corner = (int)ceilf((radius + blur) * scale) + 1;
+    ID2D1Bitmap1 *bitmap = draw_shadow_template(radius, blur, scale, color, pad, corner);
+    if (!bitmap) return nullptr;
+    release(oldest->bitmap);
+    *oldest = { radius, blur, scale, color.r, color.g, color.b, pad, corner, bitmap, device_generation, ++shadow_clock };
+    return oldest;
+}
+
+/// 每次现算阴影：模板用不了时（太小、拼不开或者模板画不出来）。
+static void draw_shadow_effect(GfxRect rect, float radius, float blur, float offset_x, float offset_y, Color color)
+{
     if (!shadow_effect && FAILED(context->CreateEffect(CLSID_D2D1Shadow, &shadow_effect))) return;
 
     // 先把圆角矩形画进一份“命令列表”，再让阴影效果按它的形状算出模糊的影子。
@@ -793,6 +962,55 @@ void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float of
         shadow_effect->SetInput(0, nullptr);
     }
     release(shape);
+}
+
+void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float offset_y, Color color)
+{
+    if (!drawing || color.a == 0) return;
+    if (!shadow_templates_enabled || !template_context || blur <= 0 || radius < 0)
+    {
+        draw_shadow_effect(rect, radius, blur, offset_x, offset_y, color);
+        return;
+    }
+    // 模板的像素比例：DPI 乘上当前变换的缩放（放大很多时按整数倍画得更细，避免贴图发虚）。
+    float dpi_x, dpi_y;
+    context->GetDpi(&dpi_x, &dpi_y);
+    D2D1_MATRIX_3X2_F transform;
+    context->GetTransform(&transform);
+    float zoom = sqrtf(fabsf(transform._11 * transform._22 - transform._12 * transform._21));
+    float scale = dpi_x / 96.0f * (zoom <= 1.25f ? 1.0f : ceilf(zoom));
+    ShadowTemplate *entry = nullptr;
+    float width = rect.right - rect.left, height = rect.bottom - rect.top;
+    int corner = (int)ceilf((radius + blur) * scale) + 1;
+    // 矩形要够大，四个角才拼得开。
+    if (width * scale >= 2 * corner && height * scale >= 2 * corner) entry = shadow_template(radius, blur, scale, color);
+    if (!entry)
+    {
+        draw_shadow_effect(rect, radius, blur, offset_x, offset_y, color);
+        return;
+    }
+
+    // 九块的分界：目标在 DIP（经过当前变换），来源在模板的像素。
+    float unit = 1.0f / scale;
+    float left = rect.left + offset_x, top = rect.top + offset_y, right = rect.right + offset_x, bottom = rect.bottom + offset_y;
+    float xs[4] = { left - entry->pad * unit, left + entry->corner * unit, right - entry->corner * unit, right + entry->pad * unit };
+    float ys[4] = { top - entry->pad * unit, top + entry->corner * unit, bottom - entry->corner * unit, bottom + entry->pad * unit };
+    float near_edge = (float)(entry->pad + entry->corner), far_edge = near_edge + SHADOW_MIDDLE;
+    float size = far_edge + entry->pad + entry->corner;
+    float us[4] = { 0, near_edge, far_edge, size };
+    // 九块贴在一起：不抗锯齿，相邻两块的接缝就不会因为各自的半透明边缘透出一条细线；最外圈本来就几乎全透明。
+    D2D1_ANTIALIAS_MODE antialias = context->GetAntialiasMode();
+    context->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+    float opacity = color.a / 255.0f;
+    for (int row = 0; row < 3; row++)
+        for (int column = 0; column < 3; column++)
+        {
+            if (xs[column + 1] <= xs[column] || ys[row + 1] <= ys[row]) continue;
+            D2D1_RECT_F destination = D2D1::RectF(xs[column], ys[row], xs[column + 1], ys[row + 1]);
+            D2D1_RECT_F source = D2D1::RectF(us[column], us[row], us[column + 1], us[row + 1]);
+            context->DrawBitmap(entry->bitmap, &destination, opacity, D2D1_INTERPOLATION_MODE_LINEAR, &source, nullptr);
+        }
+    context->SetAntialiasMode(antialias);
 }
 
 void gfx_push_clip(GfxRect rect)

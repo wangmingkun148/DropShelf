@@ -2,9 +2,11 @@
 #include "ui_internal.h"
 #include "lang.h"
 #include "log.h"
+#include "task.h"
 
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <psapi.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +24,22 @@
 #define ATTRIBUTE_SYSTEMBACKDROP_TYPE 38
 #define CORNER_DO_NOT_ROUND 1
 #define BORDER_COLOR_NONE 0xFFFFFFFE
+
+/// 两帧之间隔了这么久（秒），算作新的一段绘制，统计分开记。
+#define FRAME_BURST_GAP 0.25
+/// 所有窗口都不在显示、也没有画过这么久（毫秒）以后，放掉显卡上留着下次用的缓存。
+#define IDLE_TRIM_MILLISECONDS 3000
+
+/// 一段连续的绘制（一段动画、一次拖动边框调整大小）用了多少时间。DROPSHELF_TRACE=1 时记进日志，用来比较优化前后。
+typedef struct FrameStats
+{
+    int frames;
+    int missed;                 // 和上一帧隔了一个半刷新周期以上（低性能模式隔帧画，按两个半）
+    double first;               // 第一帧画了多久（秒）
+    double total, longest;
+    double began, last;         // 第一帧、最近一帧开始画的时刻
+    float width, height;        // 最近一帧的窗口大小（DIP）
+} FrameStats;
 
 struct UiWindow
 {
@@ -47,6 +65,7 @@ struct UiWindow
     bool destroyed;             // 窗口已经销毁，等消息都处理完再释放这块内存
     HWND tooltip;               // 提示框（第一次需要时创建）
     wchar_t *tooltip_text;
+    FrameStats stats;
     UiWindow *next;
 };
 
@@ -127,6 +146,100 @@ static void apply_appearance(UiWindow *window, bool force)
     }
 }
 
+// ───────────── 帧耗时和空闲 ─────────────
+
+static void flush_frame_stats(UiWindow *window)
+{
+    FrameStats *stats = &window->stats;
+    if (stats->frames >= 2 && log_trace_enabled())
+    {
+        const wchar_t *title = window->options.title && window->options.title[0] ? window->options.title :
+                               window->options.popup ? L"弹出窗口" : L"窗口";
+        log_trace(L"绘制 %ls（%.0f×%.0f）：%d 帧，历时 %.0f 毫秒；每帧平均 %.2f、最长 %.2f、第一帧 %.2f 毫秒；掉帧 %d 次（刷新周期 %.2f 毫秒）",
+            title, stats->width, stats->height, stats->frames, (stats->last - stats->began) * 1000, stats->total / stats->frames * 1000,
+            stats->longest * 1000, stats->first * 1000, stats->missed, frames_refresh_period() * 1000);
+    }
+    *stats = (FrameStats){0};
+}
+
+/// 画完一帧：began、ended 是开始和画完的时刻（真实时间，不是动画用的显示时刻）。
+static void record_frame(UiWindow *window, double began, double ended, float width, float height)
+{
+    FrameStats *stats = &window->stats;
+    if (stats->frames > 0 && began - stats->last > FRAME_BURST_GAP) flush_frame_stats(window);
+    double spent = ended - began;
+    if (stats->frames == 0)
+    {
+        stats->began = began;
+        stats->first = spent;
+    }
+    else if (began - stats->last > (low_performance_enabled() ? 2.5 : 1.5) * frames_refresh_period()) stats->missed++;
+    stats->frames++;
+    stats->total += spent;
+    if (spent > stats->longest) stats->longest = spent;
+    stats->last = began;
+    stats->width = width;
+    stats->height = height;
+}
+
+static void trace_memory(const wchar_t *moment)
+{
+    if (!log_trace_enabled()) return;
+    PROCESS_MEMORY_COUNTERS_EX counters = { .cb = sizeof(counters) };
+    if (!K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&counters, sizeof(counters))) return;
+    log_trace(L"内存（%ls）：私有 %.1f MB，工作集 %.1f MB", moment, counters.PrivateUsage / 1048576.0, counters.WorkingSetSize / 1048576.0);
+}
+
+static bool idle_check_scheduled;
+static bool trimmed;                // 放掉显卡缓存以后还没有再画过
+static ULONGLONG last_activity;
+
+static void idle_check(void *data);
+
+static void schedule_idle_check(unsigned milliseconds)
+{
+    if (idle_check_scheduled) return;
+    idle_check_scheduled = true;
+    task_delay(milliseconds, idle_check, NULL);
+}
+
+/// 画了一帧（drew），或者有窗口隐藏、关闭：空闲从现在起重新计时。
+static void note_activity(bool drew)
+{
+    last_activity = GetTickCount64();
+    if (drew) trimmed = false;
+    schedule_idle_check(IDLE_TRIM_MILLISECONDS);
+}
+
+static bool any_window_showing(void)
+{
+    for (UiWindow *window = windows; window; window = window->next)
+        if (!window->destroyed && window->handle && IsWindowVisible(window->handle) && !IsIconic(window->handle)) return true;
+    return false;
+}
+
+/// 空闲了一阵：把各窗口还没记下的绘制统计记下；所有窗口都不在显示时（只剩托盘图标），放掉显卡上留着下次用的缓存。
+/// 有窗口在显示时不放：放掉以后下一次重画（比如光标移过控件）要把窗口里的字全部重新栅格化，会顿一下。
+static void idle_check(void *data)
+{
+    (void)data;
+    idle_check_scheduled = false;
+    bool animating = false;
+    for (UiWindow *window = windows; window; window = window->next) animating |= window->subscribed;
+    ULONGLONG idle = GetTickCount64() - last_activity;
+    if (animating || idle < IDLE_TRIM_MILLISECONDS)
+    {
+        schedule_idle_check(animating ? IDLE_TRIM_MILLISECONDS : (unsigned)(IDLE_TRIM_MILLISECONDS - idle));
+        return;
+    }
+    for (UiWindow *window = windows; window; window = window->next) flush_frame_stats(window);
+    if (trimmed || any_window_showing()) return;
+    trace_memory(L"放掉显卡缓存之前");
+    gfx_trim();
+    trimmed = true;
+    trace_memory(L"放掉显卡缓存之后");
+}
+
 // ───────────── 画 ─────────────
 
 static void on_frame(void *context, double time);
@@ -141,6 +254,7 @@ static void stop_frames(UiWindow *window)
 static void render(UiWindow *window, double time)
 {
     if (window->rendering || window->animating) return;
+    double began = frames_time();
     if (!IsWindowVisible(window->handle))
     {
         stop_frames(window);
@@ -191,6 +305,7 @@ static void render(UiWindow *window, double time)
         if (window->root) ui_paint(window->root, time);
         // 显卡设备丢失时已经重建，下一帧重画一次。
         if (!gfx_end(window->surface)) window->frame_requested = true;
+        record_frame(window, began, frames_time(), width / scale, height / scale);
     }
     window->rendering = false;
     window->stale = false;
@@ -199,6 +314,7 @@ static void render(UiWindow *window, double time)
     if (window->frame_requested && !window->subscribed) frames_subscribe(on_frame, window);
     else if (!window->frame_requested && window->subscribed) frames_unsubscribe(on_frame, window);
     window->subscribed = window->frame_requested;
+    note_activity(true);
 }
 
 static void on_frame(void *context, double time)
@@ -492,6 +608,7 @@ static LRESULT hit_test(UiWindow *window, LPARAM lparam)
 
 static void destroy_window_state(UiWindow *window)
 {
+    flush_frame_stats(window);
     // 提示框属于这个窗口，系统随窗口一起销毁。
     window->tooltip = NULL;
     free(window->tooltip_text);
@@ -513,6 +630,7 @@ static void destroy_window_state(UiWindow *window)
     window->surface = NULL;
     if (creating == window) creating = NULL;
     if (window->options.closed) window->options.closed(window, window->options.context);
+    note_activity(false);
     // 点击按钮关掉窗口时，外层还在处理这次点击的消息，等它们都返回了再释放。
     window->destroyed = true;
     if (window->message_depth == 0) free(window);
@@ -591,9 +709,14 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             if (!window->subscribed || window->stale) render(window, frames_time());
             return 0;
         case WM_WINDOWPOSCHANGED:
-            if (((const WINDOWPOS *)lparam)->flags & SWP_HIDEWINDOW) window->stale = true;
+            if (((const WINDOWPOS *)lparam)->flags & SWP_HIDEWINDOW)
+            {
+                window->stale = true;
+                note_activity(false);
+            }
             break;
         case WM_SIZE:
+            if (wparam == SIZE_MINIMIZED) note_activity(false);
             if (wparam != SIZE_MINIMIZED)
             {
                 // 拖动边框调整大小时系统在自己的循环里，直接画，内容才跟得上窗口。
