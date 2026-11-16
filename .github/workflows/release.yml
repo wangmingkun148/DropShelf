@@ -98,11 +98,18 @@ jobs:
               $files += $scoop
           }
 
+          # 已经在 Releases 页面建好（说明也在那里写好了）时只附上文件。还没有时新建一个：
+          # 仓库里有这一版的发布说明 docs/releases/<标签>.md 就用它，没有时按提交记录自动生成。
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
               gh release upload $tag @files --clobber
           } else {
-              gh release create $tag @files --title "DropShelf $version" --generate-notes
+              $notes = "docs\releases\$tag.md"
+              if (Test-Path -LiteralPath $notes) {
+                  gh release create $tag @files --title "DropShelf $version" --notes-file $notes
+              } else {
+                  gh release create $tag @files --title "DropShelf $version" --generate-notes
+              }
           }
           if ($LASTEXITCODE -ne 0) { throw "无法发布到 Release。" }
 

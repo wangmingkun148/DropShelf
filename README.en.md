@@ -156,7 +156,7 @@ The C# version:
 ## Releasing a new version
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
-2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish.
+2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish. Alternatively, write the release notes in `docs/releases/v<version>.md` and just push the tag: Actions then creates the release with those notes, or generates notes from the commits if the file is missing.
 3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
 
 Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
