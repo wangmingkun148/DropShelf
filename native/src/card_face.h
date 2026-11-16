@@ -34,5 +34,8 @@ typedef struct CardCorner
 
 /// 左上角的牌角，(left, top) 是它的左上角；inverted 时把同样的牌角倒过来画在 card 的右下角，right、bottom 是到牌边的距离。
 void card_paint_corner(const wchar_t *rank, FileSuit suit, const CardCorner *corner, float left, float top, Color color, float opacity);
+/// 同上，但数字单独下移 rank_shift、乘上 rank_opacity（新牌落下时数字从下面滚上来），花色不动。
+void card_paint_corner_rolling(const wchar_t *rank, FileSuit suit, const CardCorner *corner, float left, float top, Color color, float opacity,
+    float rank_shift, float rank_opacity);
 void card_paint_corner_inverted(const wchar_t *rank, FileSuit suit, const CardCorner *corner, GfxRect card, float right, float bottom, Color color,
     float opacity);

@@ -76,6 +76,8 @@ typedef struct GfxImage GfxImage;
 
 /// pixels 是自上而下、32 位、预乘透明度的 BGRA，会被复制。
 GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride);
+/// 结束画到图片（gfx_begin_image），留作一张可以再画的图片（设备像素）；失败时返回 NULL。
+GfxImage *gfx_end_image_capture(void);
 
 /// 把图标（LoadImage 按需要的大小取出的）转成图片；失败时返回 NULL。只在界面线程调用。
 GfxImage *gfx_image_from_icon(HICON icon);

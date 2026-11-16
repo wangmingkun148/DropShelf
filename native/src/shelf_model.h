@@ -169,6 +169,9 @@ wchar_t *shelf_model_title(const ShelfModel *model);
 
 /// 堆叠下面的两行：一项时是它的名称和说明；多项时按类别列出各有几项、文件和文件夹的总大小。调用方负责 free。
 wchar_t *shelf_model_stack_caption(ShelfModel *model);
+
+/// 堆叠牌角上的花色：数量最多的文件类型；一样多时取最后放入的那一种。
+FileSuit shelf_model_suit(const ShelfModel *model);
 wchar_t *shelf_model_stack_detail(ShelfModel *model);
 
 /// 只有堆叠顶部三张和列表里显示出来的行持有缩略图：其余的取消并释放，内存不随项目数量增长。

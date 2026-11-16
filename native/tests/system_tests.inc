@@ -29,8 +29,9 @@ static void test_shelf_sizes(void)
             if (list_width < width + 60) wide = false;
         }
         CHECK(ratio, "堆叠区域比例不一致");
-        CHECK(wide, "展开列表过窄");
-        CHECK(expanded[0] < expanded[1] && expanded[1] < expanded[2] && expanded[1] == 300, "展开后的宽度没有随三档尺寸变化");
+        CHECK(wide, "平铺开后过窄");
+        // 平铺开时一行放 4、5、6 张牌：中档 5 × 70 + 22。
+        CHECK(expanded[0] < expanded[1] && expanded[1] < expanded[2] && expanded[1] == 372, "展开后的宽度没有随三档尺寸变化");
     }
 
     // 小窗以鼠标为中心并保持在屏幕内（和探针窗口用同一个算法）。
@@ -383,29 +384,41 @@ static void test_shelf_window_actions(void)
     click_rect(shelf->ui, shelf->layout.pin);
     CHECK(shelf->model->pinned && (GetWindowLongW(handle, GWL_EXSTYLE) & WS_EX_TOPMOST), "再点钉子后置物架应恢复置顶");
 
-    // 切换时窗口大小平滑过渡、牌飞到各行，等动画播完再检查。
+    // 切换时窗口先平滑变大、牌再一张张发到格子，等动画播完再检查。
     float scale = shelf_scale(shelf);
     int collapsed_width = window_width(handle);
     click_rect(shelf->ui, shelf->layout.view);
-    pump_for(800);
-    CHECK(shelf->model->expanded, "点击切换按钮没有展开列表");
+    pump_for(900);
+    CHECK(shelf->model->expanded, "点击切换按钮没有平铺开");
     CHECK(window_width(handle) >= (int)lroundf(shelf_width_for(SHELF_SIZE_MEDIUM) * scale) + (int)(60 * scale), "展开后宽度没有变化");
 
-    // 展开时继续放入项目：窗口跟着变高。
-    int two_rows_height = window_height(handle);
-    wchar_t *extra = test_file(folder, L"b.txt", "y");
-    strlist_add(&paths, extra);
+    // 平铺时继续放入项目：一行放满之后再放一张时窗口变高。
+    int columns = shelf_grid_columns(shelf->size);
+    shelf_layout(shelf);
+    CHECK(shelf->layout.columns == columns, "平铺一行放的牌数不对");
+    int one_row_height = window_height(handle);
+    wchar_t *extras[8] = {0};
+    for (int index = 0; index < columns - 1 && index < 8; index++)
+    {
+        wchar_t name[32];
+        swprintf(name, ARRAYSIZE(name), L"extra%d.txt", index);
+        extras[index] = test_file(folder, name, "y");
+        strlist_add(&paths, extras[index]);
+    }
     shelf_window_add_paths(shelf, &paths);
     strlist_clear(&paths);
     pump_for(800);
-    CHECK(shelf->model->count == 3 && window_height(handle) > two_rows_height, "展开时放入项目后列表或高度没有更新");
-    ShelfItem *last = shelf->model->items[shelf->model->count - 1];
-    shelf_remove_items(shelf, &last, 1);
+    CHECK(shelf->model->count == columns + 1 && window_height(handle) > one_row_height, "平铺时放入项目后牌或高度没有更新");
+    int later_count = shelf->model->count > 2 ? shelf->model->count - 2 : 0;
+    ShelfItem *later[8];
+    for (int index = 0; index < later_count && index < 8; index++) later[index] = shelf->model->items[2 + index];
+    shelf_remove_items(shelf, later, later_count < 8 ? later_count : 8);
     pump_for(600);
     shelf_layout(shelf);
     click_rect(shelf->ui, shelf->layout.view);
-    pump_for(800);
-    CHECK(!shelf->model->expanded && abs(window_width(handle) - collapsed_width) <= 1, "收起列表的动画结束后应回到堆叠，窗口恢复收起时的宽度");
+    pump_for(900);
+    CHECK(!shelf->model->expanded && abs(window_width(handle) - collapsed_width) <= 1 && !shelf->switching && !shelf->card_posed[0],
+        "叠起来的动画结束后应回到堆叠，窗口恢复收起时的宽度");
 
     // 关掉以后记入最近关闭，恢复时项目原样回来。
     shelf_window_close_animated(shelf);
@@ -427,7 +440,7 @@ static void test_shelf_window_actions(void)
     shelf_history_flush();
     DeleteFileW(history_file);
     free(history_file);
-    free(extra);
+    for (int index = 0; index < 8; index++) free(extras[index]);
     free(file);
     free(folder);
     if (SUCCEEDED(ole)) OleUninitialize();

@@ -1,7 +1,8 @@
-// 置物架的动画，和 C# 版的 ShelfWindow.Motion.cs、ShelfWindow.Entrance.cs、ShelfMotion.cs 对应。
-// 拖进来的文件从松手处飞进堆叠或列表；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来）。
-// 窗口大小平滑过渡，但不和牌同时动：展开时窗口先变大再飞牌，收起时牌飞回去之后窗口再变小。动画途中再有变化时直接跳到终点。
+// 置物架的动画，和 C# style 版的 ShelfWindow.Motion.cs、ShelfWindow.Entrance.cs、ShelfMotion.cs 对应。
+// 拖进来的文件从松手处飞进堆叠或平铺的格子；堆叠和平铺之间切换时，牌从堆叠里一张张发到各自的格子（或收回来）。
+// 窗口大小平滑过渡，但不和牌同时动：展开时窗口先变大再发牌，收起时牌收回去之后窗口再变小。动画途中再有变化时直接跳到终点。
 #include "shelf_window_internal.h"
+#include "shelf_card.h"
 #include "log.h"
 #include "task.h"
 
@@ -14,18 +15,20 @@
 #define LAND_STAGGER 0.080
 #define PUSH_DELAY 0.120
 #define PUSH_DURATION 0.300
-#define FLY_DURATION 0.280
-#define FLY_STAGGER 0.024
-#define ROW_FADE_DELAY 0.070
-#define ROW_FADE_DURATION 0.200
-#define ROW_STAGGER_LIMIT 5
-#define FADE_OUT_DURATION 0.120
-#define RESIZE_DURATION 0.160
+/// 松手时摊开的牌，在新牌开始落下这么久之后合拢。
+#define FAN_CLOSE_DELAY 0.200
+#define FAN_CLOSE_DURATION 0.260
+#define FAN_DURATION 0.200
+#define FLY_DURATION 0.260
+#define DEAL_STAGGER 0.034
+/// 整批发牌最多错开这么多个 DEAL_STAGGER，正好是小尺寸平铺 8 张牌的间隔数。
+#define MAX_DEAL_GAPS 7.0
+#define NAME_FADE_DURATION 0.190
+#define FADE_OUT_DURATION 0.100
+#define RESIZE_DURATION 0.170
 #define REMOVE_DURATION 0.160
 #define CLOSE_UP_DURATION 0.220
-#define CLOSE_DURATION 0.170
-#define CLOSE_SCALE 0.94f
-#define BADGE_POP_DURATION 0.240
+#define RANK_ROLL_DURATION 0.220
 
 // ───────────── 时钟 ─────────────
 
@@ -164,7 +167,7 @@ static void rest_cards(ShelfWindow *shelf)
 
 static void restore_stack_mark(ShelfWindow *shelf)
 {
-    shelf->mark_override = false;
+    shelf->rank_hidden = false;
     shelf->mark_opacity = 1;
 }
 
@@ -173,7 +176,7 @@ static void reset_item_motion(ShelfWindow *shelf)
     for (int index = 0; index < shelf->model->count; index++) shelf_item_motion_reset(shelf->model->items[index]);
 }
 
-static void close_up_rows(void *data);
+static void close_up_tiles(void *data);
 static void rise_stack(void *data);
 
 typedef struct RisePlan
@@ -190,6 +193,7 @@ void shelf_finish_motion(ShelfWindow *shelf)
     if (!cleanup) return;
     if (cleanup & CLEANUP_ITEM_MOTION) reset_item_motion(shelf);
     if (cleanup & CLEANUP_REST_CARDS) rest_cards(shelf);
+    if (cleanup & CLEANUP_FAN) shelf->fan_held = false;
     if (cleanup & CLEANUP_STACK_MARK) restore_stack_mark(shelf);
     if (cleanup & CLEANUP_UNPIN) shelf->stack_pinned = shelf->list_pinned = false;
     if (cleanup & CLEANUP_UPDATE_VIEWS) shelf->switching = false;
@@ -201,8 +205,6 @@ void shelf_finish_motion(ShelfWindow *shelf)
         shelf->removing_count = 0;
         bool remains = shelf->remove_remains;
         bool expanded = shelf->remove_expanded;
-        // 列表移除之后补位：等数量变化引起的刷新按新的数量排好列表，再从移除前的位置滑过去。
-        shelf->hold_size = remains && expanded;
         RisePlan *rise = NULL;
         if (remains && !expanded)
         {
@@ -218,7 +220,8 @@ void shelf_finish_motion(ShelfWindow *shelf)
         shelf_perform_remove(shelf, items, count, shelf->remove_kind, shelf->remove_expanded_before);
         for (int index = 0; index < count; index++) shelf_item_release(items[index]);
         free(items);
-        if (remains && expanded) task_post(close_up_rows, shelf_window_retain(shelf));
+        // 平铺移除之后补位：等数量变化引起的刷新按新的数量排好格子，再从移除前的位置滑过去。
+        if (remains && expanded) task_post(close_up_tiles, shelf_window_retain(shelf));
         if (rise) task_post(rise_stack, rise);
     }
     if (cleanup & CLEANUP_WINDOW_SIZE) shelf_update_window_size(shelf);
@@ -239,28 +242,111 @@ static void apply_card_arc(ShelfWindow *shelf, Tween *tween, float t)
     shelf->card_pose[tween->card] = arc_pose(tween->from, tween->to, tween->control_x, tween->control_y, t);
 }
 
-void shelf_card_landed_mark(ShelfWindow *shelf, int count)
+void shelf_roll_rank(ShelfWindow *shelf)
 {
-    shelf->mark_override = true;
-    shelf->mark_count = count;
-    if (count < 2) return;
-    // 每落下一张，角标的数字加一并弹一下。
-    shelf->badge_popping = true;
-    clock_reset(&shelf->badge_clock);
-    shelf->badge_scale = 1.28f;
+    if (!anim_enabled() || !shelf_window_is_visible(shelf)) return;
+    shelf->rank_rolling = true;
+    clock_reset(&shelf->rank_clock);
+    shelf->rank_shift = 8;
+    shelf->rank_opacity = 0;
     request_frame(shelf);
 }
 
+/// 最上面那张落下后牌角出现，数字从下面滚上来。
 static void card_landed(ShelfWindow *shelf, Tween *tween, float t)
 {
     (void)t;
-    shelf_card_landed_mark(shelf, tween->number);
+    if (tween->card != 0) return;
+    shelf->rank_hidden = false;
+    shelf_roll_rank(shelf);
+}
+
+// ───────────── 拖入时摊开的牌 ─────────────
+
+CardPose shelf_fan_pose(int index, float progress)
+{
+    // 放置区域里 176 × 108 的画布上，两张牌叠在 (56, 10)；摊开时左边那张（最上面的）转开 13° 往左移，右边那张接着转到 12° 往右移。
+    float center_x = 56 + SHELF_CARD_WIDTH / 2, center_y = 10 + SHELF_CARD_HEIGHT / 2;
+    if (index == 0) return (CardPose){ center_x - 34 * progress, center_y + 4 * progress, -13 * progress, 1, 1 };
+    return (CardPose){ center_x + 11 + 23 * progress, center_y + 2 + 2 * progress, 7 + 5 * progress, 1, 1 };
+}
+
+void shelf_fan_out(ShelfWindow *shelf)
+{
+    anim_set(&shelf->fan, 0);
+    anim_start(&shelf->fan, 1, FAN_DURATION, EASE_OF(EASE_CUBIC_OUT));
+    request_frame(shelf);
+}
+
+/// 摊开的第 index 张牌换到堆叠的画布上：松手后堆叠里的牌从这里合拢，看起来是同一摞牌。没有那张牌时返回 false。
+static bool fan_pose_in_stack(ShelfWindow *shelf, int index, CardPose *pose)
+{
+    if (!shelf->overlay_visible || !shelf_model_from_end(shelf->model, index + 1)) return false;
+    const ShelfLayout *layout = &shelf->layout;
+    CardPose fan = shelf_fan_pose(index, (float)shelf->fan.value);
+    float x = layout->drop_canvas_x + fan.x * layout->drop_canvas_scale, y = layout->drop_canvas_y + fan.y * layout->drop_canvas_scale;
+    float cx, cy;
+    shelf_to_canvas(shelf, x, y, &cx, &cy);
+    *pose = (CardPose){ cx, cy, fan.angle, layout->drop_canvas_scale / (layout->canvas_scale > 0 ? layout->canvas_scale : 1), 1 };
+    return true;
+}
+
+/// 摊开时第 card 张牌的姿态；没有摊开的那张停在原位但看不见。
+static CardPose fan_start(ShelfWindow *shelf, int card)
+{
+    if (card < 2 && shelf->fan_valid[card]) return shelf->fan_poses[card];
+    CardPose home = shelf_card_home(card);
+    home.opacity = 0;
+    return home;
+}
+
+bool shelf_take_fan(ShelfWindow *shelf)
+{
+    shelf_layout(shelf);
+    for (int index = 0; index < 2; index++) shelf->fan_valid[index] = fan_pose_in_stack(shelf, index, &shelf->fan_poses[index]);
+    return shelf->fan_valid[0];
+}
+
+void shelf_hold_fan(ShelfWindow *shelf)
+{
+    if (!anim_enabled() || !shelf->fan_valid[0]) return;
+    shelf_finish_motion(shelf);
+    // 最上面两张分在左右，第三张先藏起来，牌角也藏起来，中间空着等新牌。
+    for (int card = 0; card < 3; card++)
+    {
+        shelf->card_posed[card] = true;
+        shelf->card_pose[card] = fan_start(shelf, card);
+    }
+    shelf->rank_hidden = true;
+    shelf->fan_held = true;
+    shelf->cleanup |= CLEANUP_FAN | CLEANUP_REST_CARDS | CLEANUP_STACK_MARK;
+    shelf_repaint(shelf);
+}
+
+void shelf_close_fan(ShelfWindow *shelf)
+{
+    if (!shelf->fan_held) return;
+    shelf_stop_motion(shelf);
+    shelf->fan_held = false;
+    for (int card = 0; card < 3; card++)
+    {
+        Tween tween = make_tween(0, FAN_CLOSE_DURATION, apply_card_lerp);
+        tween.card = card;
+        tween.from = fan_start(shelf, card);
+        tween.to = shelf_card_home(card);
+        start_tween(shelf, tween);
+    }
+    shelf->cleanup |= CLEANUP_REST_CARDS | CLEANUP_STACK_MARK;
+    shelf_finish_after(shelf, FAN_CLOSE_DURATION);
 }
 
 /// 松手后，拖进来的文件从松手处飞进堆叠：从拖动图像大小放大，划一道弧落到自己的位置，原来的牌往下退一层。
-/// 一次拖入多个时最多 3 张依次落下，最上面那张最后落下，数量随每张落下增加。
+/// 一次拖入多个时最多 3 张依次落下，最上面那张最后落下，落下后牌角的数字滚上来。
+/// 拖入时摊开过（fan_held）的，新牌落进中间的空位，快落定时原来的牌从左右合拢到下面。
 bool shelf_play_landing(ShelfWindow *shelf, float x, float y, int added)
 {
+    bool fan = shelf->fan_held;
+    shelf->fan_held = false;
     shelf_finish_motion(shelf);
     int shown = shelf->model->count < 3 ? shelf->model->count : 3;
     int incoming = added < shown ? added : shown;
@@ -268,9 +354,8 @@ bool shelf_play_landing(ShelfWindow *shelf, float x, float y, int added)
     shelf_layout(shelf);
     float start_x, start_y;
     shelf_to_canvas(shelf, x, y, &start_x, &start_y);
-    int count = shelf->model->count;
-    shelf->mark_override = true;
-    shelf->mark_count = count - incoming;
+    // 落下动画期间最上面那张还没落下，先藏起牌角。
+    shelf->rank_hidden = true;
     double end = 0;
     for (int card = 0; card < shown; card++)
     {
@@ -284,19 +369,22 @@ bool shelf_play_landing(ShelfWindow *shelf, float x, float y, int added)
             tween.to = home;
             tween.control_x = (tween.from.x + home.x) / 2;
             tween.control_y = fminf(tween.from.y, home.y) - 20;
-            tween.number = count - card;
             tween.completed = card_landed;
             start_tween(shelf, tween);
             end = max_of(end, delay + LAND_DURATION);
         }
         else
         {
-            Tween tween = make_tween(PUSH_DELAY, PUSH_DURATION, apply_card_lerp);
+            // 退一层的牌原来在上面第 card - incoming 张的位置，摊开过就从摊开的样子合拢。
+            int above = card - incoming;
+            double delay = fan ? LAND_STAGGER * (incoming - 1) + FAN_CLOSE_DELAY : PUSH_DELAY;
+            double duration = fan ? FAN_CLOSE_DURATION : PUSH_DURATION;
+            Tween tween = make_tween(delay, duration, apply_card_lerp);
             tween.card = card;
-            tween.from = shelf_card_home(card - incoming);
+            tween.from = fan ? fan_start(shelf, above) : shelf_card_home(above);
             tween.to = home;
             start_tween(shelf, tween);
-            end = max_of(end, PUSH_DELAY + PUSH_DURATION);
+            end = max_of(end, delay + duration);
         }
     }
     shelf->cleanup |= CLEANUP_REST_CARDS | CLEANUP_STACK_MARK;
@@ -304,58 +392,55 @@ bool shelf_play_landing(ShelfWindow *shelf, float x, float y, int added)
     return true;
 }
 
-// ───────────── 列表里的行 ─────────────
+// ───────────── 平铺里的牌 ─────────────
 
-static void apply_thumb_arc(ShelfWindow *shelf, Tween *tween, float t)
+static void set_tile_pose(ShelfItem *item, CardPose pose)
 {
-    (void)shelf;
-    CardPose pose = arc_pose(tween->from, tween->to, tween->control_x, tween->control_y, t);
-    ShelfItemMotion *motion = &tween->item->motion;
-    motion->thumb_dx = pose.x;
-    motion->thumb_dy = pose.y;
-    motion->thumb_angle = pose.angle;
-    motion->thumb_scale = pose.scale;
-    motion->thumb_opacity = pose.opacity;
+    ShelfItemMotion *motion = &item->motion;
+    motion->dx = pose.x;
+    motion->dy = pose.y;
+    motion->angle = pose.angle;
+    motion->scale = pose.scale;
+    motion->opacity = pose.opacity;
 }
 
-/// 文字从左边滑出：a 是起点的偏移。
-static void apply_text_in(ShelfWindow *shelf, Tween *tween, float t)
+/// 牌从 from 划一道弧（经过 control）落到原位。
+static void apply_tile_arc(ShelfWindow *shelf, Tween *tween, float t)
 {
     (void)shelf;
-    tween->item->motion.text_opacity = t;
-    tween->item->motion.text_dx = tween->a * (1 - t);
+    set_tile_pose(tween->item, arc_pose(tween->from, tween->to, tween->control_x, tween->control_y, t));
 }
 
-/// 整行从左边滑入（a 是起点的偏移）或滑出（flag）。
-static void apply_row_slide(ShelfWindow *shelf, Tween *tween, float t)
+/// 牌在 from 和 to 之间直线过渡；flag 时途中略微抬起再放平（发牌）。
+static void apply_tile_lerp(ShelfWindow *shelf, Tween *tween, float t)
 {
     (void)shelf;
-    ShelfItemMotion *motion = &tween->item->motion;
-    if (tween->flag)
-    {
-        motion->row_opacity = tween->b * (1 - t);
-        motion->row_dx = tween->a * t;
-    }
-    else
-    {
-        motion->row_opacity = t;
-        motion->row_dx = tween->a * (1 - t);
-    }
+    CardPose pose = lerp_pose(tween->from, tween->to, t);
+    if (tween->flag) pose.scale += 0.04f * sinf(3.14159265f * t);
+    set_tile_pose(tween->item, pose);
 }
 
-/// 补位：整行从 a 的偏移滑到原位，flag 时同时淡入。
-static void apply_row_close_up(ShelfWindow *shelf, Tween *tween, float t)
+/// 要移除的牌缩小、往下沉一点、略微转开并淡出；flag 反过来是撤销后放回。a 是转开的方向，b 是起始的透明度。
+static void apply_tile_leave(ShelfWindow *shelf, Tween *tween, float t)
 {
     (void)shelf;
-    tween->item->motion.row_dy = tween->a * (1 - t);
-    if (tween->flag) tween->item->motion.row_opacity = t;
+    float k = tween->flag ? 1 - t : t;
+    float opacity = tween->flag ? t : tween->b * (1 - t);
+    set_tile_pose(tween->item, (CardPose){ 0, 10 * k, tween->a * 6 * k, 1 - 0.3f * k, opacity });
 }
 
-/// 列表状态下拖入：新文件的图标从松手处划一道弧飞到自己那一行的行首，快落下时这一行的文字从左边滑出。
-/// 一次拖入多个时最多 3 个依次落下；新项目在列表末尾，看不到时先滚过去。lead 是窗口先长高的时间。
-bool shelf_play_list_landing(ShelfWindow *shelf, float x, float y, int added, double lead)
+/// 名字淡入；flag 时淡出。
+static void apply_tile_name(ShelfWindow *shelf, Tween *tween, float t)
 {
-    if (lead == 0) shelf_finish_motion(shelf);
+    (void)shelf;
+    tween->item->motion.name_opacity = tween->flag ? 1 - t : t;
+}
+
+/// 平铺状态下拖入：新文件的牌从松手处划一道弧落到自己的格子，快落下时名字淡入。
+/// 一次拖入多个时最多 3 张依次落下，最后一张最后落下；新项目在末尾，看不到时先滚过去。
+bool shelf_play_grid_landing(ShelfWindow *shelf, float x, float y, int added)
+{
+    shelf_finish_motion(shelf);
     int count = shelf->model->count;
     int incoming = added < count ? added : count;
     if (incoming > 3) incoming = 3;
@@ -367,30 +452,38 @@ bool shelf_play_list_landing(ShelfWindow *shelf, float x, float y, int added, do
     {
         int index = count - 1 - order;
         ShelfItem *item = shelf->model->items[index];
-        GfxRect thumb = shelf_row_thumb_rect(shelf, index);
-        float center_x = (thumb.left + thumb.right) / 2, center_y = (thumb.top + thumb.bottom) / 2;
-        double delay = lead + LAND_STAGGER * (incoming - 1 - order);
-        Tween fly = make_tween(delay, LAND_DURATION, apply_thumb_arc);
+        GfxRect card = shelf_tile_card_rect(shelf, index);
+        float center_x = (card.left + card.right) / 2, center_y = (card.top + card.bottom) / 2;
+        double delay = LAND_STAGGER * (incoming - 1 - order);
+        Tween fly = make_tween(delay, LAND_DURATION, apply_tile_arc);
         fly.item = item;
-        fly.from = (CardPose){ x - center_x, y - center_y, -8, 1.5f, 0 };
+        fly.from = (CardPose){ x - center_x, y - center_y, -8, 0.5f, 0 };
         fly.to = (CardPose){ 0, 0, 0, 1, 1 };
         fly.control_x = fly.from.x / 2;
         fly.control_y = fminf(fly.from.y, 0) - 20;
         start_tween(shelf, fly);
-        double text_delay = delay + LAND_DURATION / 2;
-        Tween text = make_tween(text_delay, ROW_FADE_DURATION, apply_text_in);
-        text.item = item;
-        text.a = -10;
-        start_tween(shelf, text);
-        end = max_of(end, text_delay + ROW_FADE_DURATION);
+        double name_delay = delay + LAND_DURATION / 2;
+        Tween name = make_tween(name_delay, NAME_FADE_DURATION, apply_tile_name);
+        name.item = item;
+        start_tween(shelf, name);
+        end = max_of(end, name_delay + NAME_FADE_DURATION);
     }
     shelf->cleanup |= CLEANUP_ITEM_MOTION;
-    shelf_finish_after(shelf, max_of(end, lead));
+    shelf_finish_after(shelf, end);
     return true;
 }
 
-/// 撤销移除之后放回：列表里放回的行从左边滑回来；堆叠里放回的牌从“撤销”按钮处飞回去，只有放回的正好是最上面几张时才播放。
-bool shelf_play_return(ShelfWindow *shelf, float x, float y, ShelfItem **items, int count, double lead)
+/// 平铺里这张牌现在看不看得见（格子和平铺的范围有重叠）。height 是平铺的可见高度。
+static bool tile_visible(ShelfWindow *shelf, int index, float height)
+{
+    GfxRect slot = shelf_tile_rect(shelf, index);
+    float top = slot.top - shelf->layout.list.top - 1;
+    return top + SHELF_SLOT_HEIGHT > 0 && top < height;
+}
+
+/// 撤销移除之后放回：平铺里放回的牌从下面一点升回原来的格子、转正并淡入（和移除时相反），看不到时先滚到第一张；
+/// 堆叠里放回的牌从“撤销”按钮处飞回去，只有放回的正好是最上面几张时才播放。
+bool shelf_play_return(ShelfWindow *shelf, float x, float y, ShelfItem **items, int count)
 {
     if (!shelf->model->expanded)
     {
@@ -405,22 +498,26 @@ bool shelf_play_return(ShelfWindow *shelf, float x, float y, ShelfItem **items, 
         }
         return top > 0 && shelf_play_landing(shelf, x, y, top);
     }
-    if (lead == 0) shelf_finish_motion(shelf);
+    shelf_finish_motion(shelf);
     if (count == 0) return false;
     shelf_scroll_into_view(shelf, shelf_model_index_of(shelf->model, items[0]));
-    bool any = false;
+    shelf_layout(shelf);
+    float height = shelf->layout.list.bottom - shelf->layout.list.top - 2;
+    int order = 0;
     for (int index = 0; index < count; index++)
     {
-        if (!shelf_model_contains(shelf->model, items[index])) continue;
-        Tween tween = make_tween(lead, ROW_FADE_DURATION, apply_row_slide);
+        int at = shelf_model_index_of(shelf->model, items[index]);
+        if (at < 0 || !tile_visible(shelf, at, height)) continue;
+        Tween tween = make_tween(0, CLOSE_UP_DURATION, apply_tile_leave);
         tween.item = items[index];
-        tween.a = -12;
+        tween.flag = true;
+        tween.a = order % 2 == 0 ? -1.0f : 1.0f;
         start_tween(shelf, tween);
-        any = true;
+        order++;
     }
-    if (!any) return false;
+    if (order == 0) return false;
     shelf->cleanup |= CLEANUP_ITEM_MOTION;
-    shelf_finish_after(shelf, lead + ROW_FADE_DURATION);
+    shelf_finish_after(shelf, CLOSE_UP_DURATION);
     return true;
 }
 
@@ -482,28 +579,6 @@ static void tween_window_size(ShelfWindow *shelf, double delay)
     start_tween(shelf, tween);
 }
 
-static float client_height(ShelfWindow *shelf)
-{
-    return ui_window_size(shelf->ui).height;
-}
-
-/// 列表里多了几行、窗口要变高：列表先固定为变高后的大小，窗口平滑长高把新的行露出来，之后再播落下的动画。
-double shelf_grow_for_rows(ShelfWindow *shelf)
-{
-    shelf_layout(shelf);
-    float width, height;
-    shelf_target_size(shelf, shelf->model->expanded, &width, &height);
-    float actual = client_height(shelf);
-    if (height <= actual + 0.5f || !shelf->handle) return 0;
-    GfxRect list = shelf->layout.list;
-    shelf->list_pinned = true;
-    shelf->list_pin = (GfxSize){ list.right - list.left, list.bottom - list.top + height - actual };
-    shelf_layout(shelf);
-    tween_window_size(shelf, 0);
-    shelf->cleanup |= CLEANUP_UNPIN | CLEANUP_WINDOW_SIZE;
-    return RESIZE_DURATION;
-}
-
 // ───────────── 移除 ─────────────
 
 static bool listed(ShelfItem **items, int count, const ShelfItem *item)
@@ -539,76 +614,91 @@ static void remember_removal(ShelfWindow *shelf, ShelfItem **items, int count, R
     shelf->cleanup |= CLEANUP_REMOVE;
 }
 
-static void remove_rows(ShelfWindow *shelf, ShelfItem **leaving, int count, RemoveKind kind, bool remains)
+/// 平铺里要移除的牌缩小、往下沉一点、略微转开并淡出；剩下的、生成出来的牌记下移除前的格子，移除后按它补位。
+static void remove_tiles(ShelfWindow *shelf, ShelfItem **leaving, int count, RemoveKind kind, bool remains)
 {
     shelf_layout(shelf);
-    // 剩下的、看得见的行移除前的位置，移除后按它补位。
+    int first, last;
+    shelf_visible_tiles(shelf, &first, &last);
+    size_t capacity = last >= first ? (size_t)(last - first + 1) : 1;
     free(shelf->rows_before);
+    free(shelf->rows_before_x);
     free(shelf->rows_before_y);
-    shelf->rows_before = xalloc((size_t)shelf->model->count * sizeof(ShelfItem *));
-    shelf->rows_before_y = xalloc((size_t)shelf->model->count * sizeof(float));
+    shelf->rows_before = xalloc(capacity * sizeof(ShelfItem *));
+    shelf->rows_before_x = xalloc(capacity * sizeof(float));
+    shelf->rows_before_y = xalloc(capacity * sizeof(float));
     shelf->rows_before_count = 0;
     GfxRect list = shelf->layout.list;
-    for (int index = 0; index < shelf->model->count; index++)
+    for (int index = first; index <= last; index++)
     {
         ShelfItem *item = shelf->model->items[index];
-        GfxRect row = shelf_row_rect(shelf, index);
-        if (listed(leaving, count, item) || row.bottom < list.top || row.top > list.bottom) continue;
+        if (listed(leaving, count, item)) continue;
+        GfxRect slot = shelf_tile_rect(shelf, index);
         shelf->rows_before[shelf->rows_before_count] = item;
-        shelf->rows_before_y[shelf->rows_before_count++] = row.top - list.top;
+        shelf->rows_before_x[shelf->rows_before_count] = slot.left - list.left;
+        shelf->rows_before_y[shelf->rows_before_count++] = slot.top - list.top;
     }
     remember_removal(shelf, leaving, count, kind, remains);
     shelf->cleanup |= CLEANUP_ITEM_MOTION;
+    int order = 0;
     for (int index = 0; index < count; index++)
     {
-        Tween tween = make_tween(0, REMOVE_DURATION, apply_row_slide);
+        int at = shelf_model_index_of(shelf->model, leaving[index]);
+        if (at < first || at > last) continue;
+        Tween tween = make_tween(0, REMOVE_DURATION, apply_tile_leave);
         tween.item = leaving[index];
-        tween.flag = true;
-        tween.a = -12;
+        tween.a = order % 2 == 0 ? -1.0f : 1.0f;
         tween.b = take_dimmed(shelf, leaving[index]);
         start_tween(shelf, tween);
+        order++;
     }
     shelf_finish_after(shelf, REMOVE_DURATION);
 }
 
-/// 列表移除之后补位：每一行从移除前的位置滑到现在的位置，之前看不见的行从下面一点淡入；补完窗口再平滑变小。
-static void close_up_rows(void *data)
+/// 平铺移除之后补位：每张牌从移除前的格子滑到现在的格子，之前没有生成的牌从下面一点淡入。
+static void close_up_tiles(void *data)
 {
     ShelfWindow *shelf = data;
-    shelf->hold_size = false;
     if (shelf->closing || shelf->closed || !shelf_window_is_visible(shelf) || !shelf->model->expanded)
     {
-        if (!shelf->closing && !shelf->closed) shelf_update_window_size(shelf);
+        shelf->rows_before_count = 0;
         shelf_window_release(shelf);
         return;
     }
     shelf_finish_motion(shelf);
     shelf_layout(shelf);
     GfxRect list = shelf->layout.list;
+    int first, last;
+    shelf_visible_tiles(shelf, &first, &last);
     bool moved = false;
-    for (int index = 0; index < shelf->model->count; index++)
+    for (int index = first; index <= last; index++)
     {
         ShelfItem *item = shelf->model->items[index];
-        GfxRect row = shelf_row_rect(shelf, index);
-        if (row.bottom < list.top || row.top > list.bottom) continue;
+        GfxRect slot = shelf_tile_rect(shelf, index);
         int before = -1;
         for (int at = 0; at < shelf->rows_before_count && before < 0; at++)
             if (shelf->rows_before[at] == item) before = at;
-        bool appears = before < 0;
-        float from = appears ? 8 : shelf->rows_before_y[before] - (row.top - list.top);
-        if (fabsf(from) < 0.5f) continue;
-        Tween tween = make_tween(0, CLOSE_UP_DURATION, apply_row_close_up);
+        CardPose from;
+        if (before >= 0)
+        {
+            float dx = shelf->rows_before_x[before] - (slot.left - list.left), dy = shelf->rows_before_y[before] - (slot.top - list.top);
+            if (hypotf(dx, dy) < 0.5f) continue;
+            from = (CardPose){ dx, dy, 0, 1, 1 };
+        }
+        else from = (CardPose){ 0, 8, 0, 0.92f, 0 };
+        Tween tween = make_tween(0, CLOSE_UP_DURATION, apply_tile_lerp);
         tween.item = item;
-        tween.a = from;
-        tween.flag = appears;
+        tween.from = from;
+        tween.to = (CardPose){ 0, 0, 0, 1, 1 };
         start_tween(shelf, tween);
         moved = true;
     }
     shelf->rows_before_count = 0;
-    double lead = moved ? CLOSE_UP_DURATION : 0;
-    tween_window_size(shelf, lead);
-    shelf->cleanup |= CLEANUP_ITEM_MOTION | CLEANUP_WINDOW_SIZE;
-    shelf_finish_after(shelf, lead + RESIZE_DURATION);
+    if (moved)
+    {
+        shelf->cleanup |= CLEANUP_ITEM_MOTION;
+        shelf_finish_after(shelf, CLOSE_UP_DURATION);
+    }
     shelf_window_release(shelf);
 }
 
@@ -701,8 +791,9 @@ static void rise_stack(void *data)
     free(plan);
 }
 
-/// 移除项目：列表里要移除的行向左滑出并淡出，堆叠里要移除的牌缩小、下沉、转开并淡出，然后才真正移除，剩下的补位。
-/// 动画途中被打断时立即移除。关闭了动画效果、看不见或 animate 为 false 时直接移除。
+/// 移除牌：要移除的牌缩小、往下沉一点、略微转开并淡出，然后才真正移除。平铺时剩下的牌从原来的格子滑到新的格子补上空位，新露出来的牌淡入；
+/// 堆叠时下面的牌升上来补位，新露出来的从最下面淡入。拖出后移除时从拖动期间变淡的样子接着淡出。
+/// 动画途中被打断时立即移除，补位直接到位。关闭了动画效果、看不见或 animate 为 false 时直接移除。
 void shelf_remove_with_motion(ShelfWindow *shelf, ShelfItem **items, int count, RemoveKind kind, bool animate)
 {
     shelf_finish_motion(shelf);
@@ -717,131 +808,115 @@ void shelf_remove_with_motion(ShelfWindow *shelf, ShelfItem **items, int count, 
     {
         bool remains = leaving_count < shelf->model->count;
         shelf->remove_expanded_before = expanded_before;
-        if (shelf->model->expanded) remove_rows(shelf, leaving, leaving_count, kind, remains);
+        if (shelf->model->expanded) remove_tiles(shelf, leaving, leaving_count, kind, remains);
         else remove_from_stack(shelf, leaving, leaving_count, kind, remains, expanded_before);
     }
     free(leaving);
 }
 
-// ───────────── 堆叠和列表之间切换 ─────────────
-
-static void apply_switch_card(ShelfWindow *shelf, Tween *tween, float t)
-{
-    CardPose pose = lerp_pose(tween->from, tween->to, t);
-    // 飞到行首时和行里的图标交叉淡入淡出，两者大小不完全一样也看不出跳动。
-    if (tween->flag && tween->item)
-    {
-        pose.opacity = clampf((1 - t) / 0.25f, 0, 1);
-        tween->item->motion.thumb_opacity = 1 - pose.opacity;
-    }
-    shelf->card_posed[tween->card] = true;
-    shelf->card_pose[tween->card] = pose;
-}
+// ───────────── 堆叠和平铺之间切换 ─────────────
 
 static void apply_mark_fade(ShelfWindow *shelf, Tween *tween, float t)
 {
     shelf->mark_opacity = tween->flag ? 1 - t : t;
 }
 
-/// 堆叠和列表之间切换：堆叠保持收起时的大小留在左上角，牌飞到列表里自己那一行并缩成行首图标，各行随后从左边滑出；
-/// 收起时各行淡出，图标飞回去叠成一摞。展开时窗口先平滑变大再开始，收起时等这些都结束了窗口再平滑变小。
+/// 堆叠和平铺之间切换。展开时窗口先平滑变大，堆叠里的牌藏起来，平铺里看得见的牌从堆叠的位置出发，一张张发到各自的格子，
+/// 落下时略微抬起再放平，名字随后淡入；最后几张占住堆叠顶上几张的位置，其余的从最下面那张出发、压在它们下面，起手时那一摞和堆叠一模一样。
+/// 收起时名字先淡出，牌倒着一张张收回堆叠，之后窗口再平滑变小。只有看得见的牌参与，其余的直接出现或消失。
 void shelf_animate_view_switch(ShelfWindow *shelf)
 {
     shelf_finish_motion(shelf);
     shelf_layout(shelf);
     ShelfModel *model = shelf->model;
-    bool to_list = model->expanded;
+    bool to_grid = model->expanded;
     float width, height;
-    shelf_target_size(shelf, to_list, &width, &height);
+    shelf_target_size(shelf, to_grid, &width, &height);
     GfxSize actual = ui_window_size(shelf->ui);
     GfxRect body = shelf->layout.body;
-    GfxSize body_size = { body.right - body.left + width - actual.width, body.bottom - body.top + height - actual.height };
-    GfxSize stack_size = to_list ? (GfxSize){ body.right - body.left, body.bottom - body.top } : body_size;
-    GfxSize list_size = to_list ? body_size : (GfxSize){ body.right - body.left, body.bottom - body.top };
+    GfxSize now = { body.right - body.left, body.bottom - body.top };
+    GfxSize body_size = { now.width + width - actual.width, now.height + height - actual.height };
 
-    // 堆叠和列表都固定为各自显示时的大小，窗口比它们大或小时只是露出或裁掉一部分。
+    // 堆叠和平铺都固定为各自显示时的大小，窗口比它们大或小时只是露出或裁掉一部分；平铺压在堆叠上面，牌飞过堆叠时不会被挡住。
     shelf->switching = true;
     shelf->stack_pinned = shelf->list_pinned = true;
-    shelf->stack_pin = stack_size;
-    shelf->list_pin = list_size;
+    shelf->stack_pin = to_grid ? now : body_size;
+    shelf->list_pin = to_grid ? body_size : now;
     shelf_layout(shelf);
-    if (to_list && model->count > 0) shelf_scroll_into_view(shelf, model->count - 1);
+    // 展开时平铺滚到最后：堆叠最上面几张是最新放进来的，在平铺末尾，这样发出去的牌里一定有它们，项目再多也一样。
+    if (to_grid && model->count > 0) shelf_scroll_into_view(shelf, model->count - 1);
     shelf_layout(shelf);
-    GfxRect list = shelf->layout.list;
-    float list_height = list_size.height;
+    const ShelfLayout *layout = &shelf->layout;
 
-    double lead = to_list ? RESIZE_DURATION : 0;
-    double end = 0;
+    // 堆叠里各张牌在窗口里的姿态；切换期间堆叠里的牌藏起来，由平铺里的牌替它们飞。
+    int shown = model->count < 3 ? model->count : 3;
+    int start_count = shown > 0 ? shown : 1;
+    CardPose starts[3];
     for (int card = 0; card < 3; card++)
     {
-        ShelfItem *item = shelf_model_from_end(model, card + 1);
-        if (!item) continue;
-        int index = shelf_model_index_of(model, item);
-        GfxRect thumb = shelf_row_thumb_rect(shelf, index);
-        bool lands = thumb.top - list.top >= 0 && thumb.bottom - list.top <= list_height;
-        CardPose target;
-        if (lands)
-        {
-            float cx, cy;
-            shelf_to_canvas(shelf, (thumb.left + thumb.right) / 2, (thumb.top + thumb.bottom) / 2, &cx, &cy);
-            target = (CardPose){ cx, cy, 0, (32 / shelf->layout.canvas_scale) / SHELF_CARD_SIZE, 1 };
-            item->motion.thumb_opacity = 0;
-        }
-        else
-        {
-            // 这一行在列表可见范围之外：牌朝列表底边飞去并淡出，或从那里淡入。
-            float ex, ey;
-            shelf_to_canvas(shelf, list.left + 22, list.top + list_height, &ex, &ey);
-            target = (CardPose){ ex, ey, 0, 0.3f, 0 };
-        }
-        double delay = lead + FLY_STAGGER * (to_list ? card : 2 - card);
-        Tween tween = make_tween(delay, FLY_DURATION, apply_switch_card);
-        tween.card = card;
-        tween.from = to_list ? shelf_card_home(card) : target;
-        tween.to = to_list ? target : shelf_card_home(card);
-        tween.flag = to_list && lands;
-        if (tween.flag) tween.item = item;
-        start_tween(shelf, tween);
-        end = max_of(end, delay + FLY_DURATION);
+        CardPose home = shelf_card_home(card);
+        if (card < start_count)
+            starts[card] = (CardPose){ layout->canvas_x + home.x * layout->canvas_scale, layout->canvas_y + home.y * layout->canvas_scale, home.angle,
+                layout->canvas_scale, 1 };
+        home.opacity = 0;
+        shelf->card_posed[card] = true;
+        shelf->card_pose[card] = home;
     }
 
-    // 只动看得见的行，依次滑出的先后也按看得见的顺序排。
-    int order = 0;
-    for (int index = 0; index < model->count; index++)
+    // 只动看得见的牌。
+    int first, last;
+    shelf_visible_tiles(shelf, &first, &last);
+    int *tiles = xalloc((size_t)(last >= first ? last - first + 1 : 1) * sizeof(int));
+    int tile_count = 0;
+    float grid_height = layout->list.bottom - layout->list.top;
+    for (int index = first; index <= last; index++)
     {
-        GfxRect row = shelf_row_rect(shelf, index);
-        float top = row.top - 1 - list.top;
-        if (top + SHELF_ROW_PITCH <= 0 || top >= list_height) continue;
-        int stagger = order < ROW_STAGGER_LIMIT ? order : ROW_STAGGER_LIMIT;
-        order++;
-        Tween tween;
-        if (to_list)
-        {
-            double delay = lead + ROW_FADE_DELAY + FLY_STAGGER * stagger;
-            tween = make_tween(delay, ROW_FADE_DURATION, apply_row_slide);
-            tween.a = -10;
-            end = max_of(end, delay + ROW_FADE_DURATION);
-        }
-        else
-        {
-            tween = make_tween(0, FADE_OUT_DURATION, apply_row_slide);
-            tween.flag = true;
-            tween.a = -10;
-            tween.b = 1;
-        }
-        tween.item = model->items[index];
-        start_tween(shelf, tween);
+        GfxRect slot = shelf_tile_rect(shelf, index);
+        if (slot.bottom - layout->list.top > 0 && slot.top - layout->list.top < grid_height) tiles[tile_count++] = index;
     }
 
-    double fade_delay = to_list ? 0 : FLY_DURATION - FADE_OUT_DURATION;
-    Tween mark = make_tween(fade_delay, to_list ? FADE_OUT_DURATION : ROW_FADE_DURATION, apply_mark_fade);
-    mark.flag = to_list;
-    start_tween(shelf, mark);
-    end = max_of(end, fade_delay + ROW_FADE_DURATION);
+    double lead = to_grid ? RESIZE_DURATION : FADE_OUT_DURATION / 2;
+    // 牌多时间隔缩短：大尺寸的平铺不比小尺寸的发得久。
+    double stagger = DEAL_STAGGER * fmin(1, MAX_DEAL_GAPS / fmax(1, tile_count - 1));
+    double end = 0;
+    for (int order = 0; order < tile_count; order++)
+    {
+        int index = tiles[order];
+        GfxRect card = shelf_tile_card_rect(shelf, index);
+        float center_x = (card.left + card.right) / 2, center_y = (card.top + card.bottom) / 2;
+        // 从后往前数：最后一张对着堆叠最上面那张，依次往下，其余的都从最下面那张出发。
+        int from_card = tile_count - 1 - order < start_count - 1 ? tile_count - 1 - order : start_count - 1;
+        CardPose stack = starts[from_card];
+        CardPose away = { stack.x - center_x, stack.y - center_y, stack.angle, stack.scale, 1 };
+        CardPose home = { 0, 0, 0, 1, 1 };
+        double delay = lead + stagger * (to_grid ? order : tile_count - 1 - order);
+        Tween fly = make_tween(delay, FLY_DURATION, apply_tile_lerp);
+        fly.item = model->items[index];
+        fly.from = to_grid ? away : home;
+        fly.to = to_grid ? home : away;
+        fly.flag = true;
+        start_tween(shelf, fly);
+        end = max_of(end, delay + FLY_DURATION);
+        double name_delay = to_grid ? delay + FLY_DURATION * 0.6 : 0;
+        Tween name = make_tween(name_delay, to_grid ? NAME_FADE_DURATION : FADE_OUT_DURATION, apply_tile_name);
+        name.item = model->items[index];
+        name.flag = !to_grid;
+        start_tween(shelf, name);
+        if (to_grid) end = max_of(end, name_delay + NAME_FADE_DURATION);
+    }
+    free(tiles);
 
-    // 展开时上面的动画都推迟到窗口变大之后；收起时等牌都回到堆叠里再把窗口变小。
-    tween_window_size(shelf, to_list ? 0 : end);
-    if (!to_list) end += RESIZE_DURATION;
+    // 堆叠下方的说明和牌角：展开时随牌发出淡出，收起时在最后一张收回前淡入。
+    double caption_delay = to_grid ? lead : max_of(0, end - NAME_FADE_DURATION);
+    double caption_duration = to_grid ? FADE_OUT_DURATION : NAME_FADE_DURATION;
+    Tween mark = make_tween(caption_delay, caption_duration, apply_mark_fade);
+    mark.flag = to_grid;
+    start_tween(shelf, mark);
+    end = max_of(end, caption_delay + caption_duration);
+
+    // 展开时上面的动画都推迟到窗口变大之后；收起时牌是从各个格子飞回来的，等它们都回到堆叠里再把窗口变小。
+    tween_window_size(shelf, to_grid ? 0 : end);
+    if (!to_grid) end += RESIZE_DURATION;
     shelf->cleanup |= CLEANUP_REST_CARDS | CLEANUP_ITEM_MOTION | CLEANUP_STACK_MARK | CLEANUP_UNPIN | CLEANUP_UPDATE_VIEWS | CLEANUP_WINDOW_SIZE;
     shelf_finish_after(shelf, end);
 }
@@ -880,46 +955,12 @@ void shelf_restore_dimmed(ShelfWindow *shelf)
 }
 
 // ───────────── 出场和离场 ─────────────
+// 快捷键、托盘菜单等主动打开：窗口从下方升起一点，内容淡入并放大到原尺寸。晃动和边缘呼出由一张牌替置物架出场，关闭时也由一张牌离场，见 shelf_card.h。
 
-static int pixels(double dip, double scale)
-{
-    return (int)lround(dip * scale);
-}
-
-/// 朝某条屏幕边缘的偏移；不是边缘时往下。
-static void toward(ScreenEdge edge, double distance, double scale, int *x, int *y)
-{
-    *x = *y = 0;
-    switch (edge)
-    {
-        case EDGE_LEFT: *x = -pixels(distance, scale); break;
-        case EDGE_RIGHT: *x = pixels(distance, scale); break;
-        case EDGE_TOP: *y = -pixels(distance, scale); break;
-        default: *y = pixels(distance / 2, scale); break;
-    }
-}
-
-/// 窗口滑入前的起始偏移：边缘呼出时从屏幕外侧滑入，其余情况从下方升起。
-static void open_offset(const ShelfWindow *shelf, double scale, int *x, int *y)
-{
-    if (shelf->entrance == ENTRANCE_EDGE) toward(shelf->edge, 40, scale, x, y);
-    else
-    {
-        *x = 0;
-        *y = pixels(shelf->entrance == ENTRANCE_SHAKE ? 16 : 12, scale);
-    }
-}
-
-/// 关闭时窗口退回的方向：边缘呼出的退回边缘，其余情况轻微下沉。
-static void close_offset(const ShelfWindow *shelf, double scale, int *x, int *y)
-{
-    if (shelf->entrance == ENTRANCE_EDGE) toward(shelf->edge, 24, scale, x, y);
-    else
-    {
-        *x = 0;
-        *y = pixels(10, scale);
-    }
-}
+#define RISE_DURATION 0.300
+#define RISE_FADE_DURATION 0.180
+#define RISE_START_SCALE 0.94f
+#define RISE_DISTANCE 12.0
 
 static void move_window(ShelfWindow *shelf, int x, int y)
 {
@@ -936,7 +977,7 @@ void shelf_stop_pop(ShelfWindow *shelf)
     shelf->popping = false;
 }
 
-/// 逐帧移动整个窗口。只改变位置不改变大小，系统材质不需要重新计算，移动很流畅。
+/// 逐帧移动整个窗口。只改变位置不改变大小，移动很流畅。
 static void slide_window(ShelfWindow *shelf, int from_x, int from_y, int to_x, int to_y, double duration, Ease ease, bool keep_in_work_area)
 {
     shelf_stop_slide(shelf);
@@ -974,13 +1015,12 @@ static void update_slide(ShelfWindow *shelf, double time)
     if (shelf->slide_keep_in_work_area) shelf_keep_in_work_area(shelf);
 }
 
-/// 弹出动画：窗口从来源方向滑入，内容同时淡入并放大到原尺寸。晃动呼出时内容从光标处弹出，带一点回弹；从屏幕边缘呼出时从该边缘滑入。
-/// 低性能模式下窗口直接出现在原处，内容在窗口里走同样一段路，系统不用每帧重新计算亚克力背景。
-void shelf_animate_in(ShelfWindow *shelf, POINT cursor)
+/// 主动打开时的弹出动画：窗口从下方升起一点，内容同时淡入并放大到原尺寸。
+/// 低性能模式下窗口直接出现在原处，内容在窗口里升起同样一段：不用逐帧移动窗口。
+void shelf_animate_in(ShelfWindow *shelf)
 {
     shelf_stop_slide(shelf);
     shelf_stop_pop(shelf);
-    shelf->leaving = false;
     shelf->surface_dx = shelf->surface_dy = 0;
     shelf->surface_scale = 1;
     if (!anim_enabled())
@@ -989,61 +1029,18 @@ void shelf_animate_in(ShelfWindow *shelf, POINT cursor)
         shelf_repaint(shelf);
         return;
     }
-    switch (shelf->entrance)
-    {
-        case ENTRANCE_SHAKE:
-            shelf->pop_duration = 0.420;
-            shelf->pop_fade = 0.200;
-            shelf->pop_start_scale = 0.82;
-            shelf->pop_ease = EASE_BACK_OF(0.28);
-            break;
-        case ENTRANCE_EDGE:
-            shelf->pop_duration = 0.380;
-            shelf->pop_fade = 0.220;
-            shelf->pop_start_scale = 0.96;
-            shelf->pop_ease = EASE_OF(EASE_QUINTIC_OUT);
-            break;
-        default:
-            shelf->pop_duration = 0.300;
-            shelf->pop_fade = 0.180;
-            shelf->pop_start_scale = 0.94;
-            shelf->pop_ease = EASE_OF(EASE_QUINTIC_OUT);
-            break;
-    }
-    RECT rect;
     bool low = low_performance_enabled();
-    shelf->origin_x = 0.5f;
-    shelf->origin_y = 0.4f;
-    shelf->pop_shift_x = shelf->pop_shift_y = 0;
-    if (shelf->handle && GetWindowRect(shelf->handle, &rect))
-    {
-        int width = rect.right - rect.left, height = rect.bottom - rect.top;
-        // 内容从光标所在的位置展开。
-        if (shelf->entrance == ENTRANCE_SHAKE && width > 0 && height > 0)
-        {
-            shelf->origin_x = clampf((float)(cursor.x - rect.left) / width, 0.15f, 0.85f);
-            shelf->origin_y = clampf((float)(cursor.y - rect.top) / height, 0.15f, 0.85f);
-        }
-        if (!low)
-        {
-            int dx, dy;
-            open_offset(shelf, shelf_scale(shelf), &dx, &dy);
-            slide_window(shelf, rect.left + dx, rect.top + dy, rect.left, rect.top, shelf->pop_duration, EASE_OF(EASE_QUINTIC_OUT), true);
-        }
-    }
-    if (low)
-    {
-        int dx, dy;
-        open_offset(shelf, 1, &dx, &dy);
-        shelf->pop_shift_x = (float)dx;
-        shelf->pop_shift_y = (float)dy;
-    }
-    // 淡入和放大与滑入用同一种时钟逐帧推进。
+    RECT rect;
+    if (!low && shelf->handle && GetWindowRect(shelf->handle, &rect))
+        slide_window(shelf, rect.left, rect.top + (int)lround(RISE_DISTANCE * shelf_scale(shelf)), rect.left, rect.top, RISE_DURATION,
+            EASE_OF(EASE_QUINTIC_OUT), true);
+    // 低性能模式下内容在窗口里升起同样一段（DIP），缓动和升起窗口一样。
+    shelf->pop_shift_y = low ? (float)RISE_DISTANCE : 0;
+    // 淡入、放大和升起用同一种时钟逐帧推进，第一帧耽搁时一起从头开始。
     shelf->popping = true;
     clock_reset(&shelf->pop_clock);
     shelf->surface_opacity = 0;
-    shelf->surface_scale = (float)shelf->pop_start_scale;
-    shelf->surface_dx = shelf->pop_shift_x;
+    shelf->surface_scale = RISE_START_SCALE;
     shelf->surface_dy = shelf->pop_shift_y;
     request_frame(shelf);
 }
@@ -1052,73 +1049,115 @@ static void update_pop(ShelfWindow *shelf, double time)
 {
     if (!shelf->popping || !clock_tick(&shelf->pop_clock, time)) return;
     double elapsed = shelf->pop_clock.elapsed;
-    shelf->surface_opacity = (float)ease_apply(EASE_OF(EASE_CUBIC_OUT), fmin(1, elapsed / shelf->pop_fade));
-    double progress = fmin(1, elapsed / shelf->pop_duration);
-    shelf->surface_scale = (float)(shelf->pop_start_scale + (1 - shelf->pop_start_scale) * ease_apply(shelf->pop_ease, progress));
-    double rest = 1 - ease_apply(EASE_OF(EASE_QUINTIC_OUT), progress);
-    shelf->surface_dx = (float)(shelf->pop_shift_x * rest);
-    shelf->surface_dy = (float)(shelf->pop_shift_y * rest);
-    if (progress < 1) return;
+    double eased = ease_apply(EASE_OF(EASE_QUINTIC_OUT), fmin(1, elapsed / RISE_DURATION));
+    shelf->surface_opacity = (float)ease_apply(EASE_OF(EASE_CUBIC_OUT), fmin(1, elapsed / RISE_FADE_DURATION));
+    shelf->surface_scale = (float)(RISE_START_SCALE + (1 - RISE_START_SCALE) * eased);
+    shelf->surface_dy = (float)(shelf->pop_shift_y * (1 - eased));
+    if (elapsed < RISE_DURATION) return;
     shelf->popping = false;
     shelf->surface_opacity = 1;
     shelf->surface_scale = 1;
     shelf->surface_dx = shelf->surface_dy = 0;
 }
 
-void shelf_start_leave(ShelfWindow *shelf)
+static RECT work_area_of(RECT rect)
 {
-    // 出场还没播完就关闭：从当前的大小和透明度接着退出。
-    shelf_stop_pop(shelf);
-    shelf->leaving = true;
-    clock_reset(&shelf->leave_clock);
-    shelf->leave_from_opacity = shelf->surface_opacity;
-    shelf->leave_from_scale = shelf->surface_scale;
-    shelf->leave_from_dx = shelf->surface_dx;
-    shelf->leave_from_dy = shelf->surface_dy;
-    shelf->leave_shift_x = shelf->leave_shift_y = 0;
-    // 窗口本身也朝来时的方向退回一小段；低性能模式下窗口不动，内容在窗口里退回。
-    if (low_performance_enabled())
-    {
-        int dx, dy;
-        close_offset(shelf, 1, &dx, &dy);
-        shelf->leave_shift_x = (float)dx;
-        shelf->leave_shift_y = (float)dy;
-    }
-    else
-    {
-        shelf->leave_shift_x = shelf->leave_from_dx;
-        shelf->leave_shift_y = shelf->leave_from_dy;
-        RECT rect;
-        if (GetWindowRect(shelf->handle, &rect))
-        {
-            int dx, dy;
-            close_offset(shelf, shelf_scale(shelf), &dx, &dy);
-            slide_window(shelf, rect.left, rect.top, rect.left + dx, rect.top + dy, CLOSE_DURATION, EASE_OF(EASE_CUBIC_IN), false);
-        }
-    }
-    request_frame(shelf);
+    POINT center = { rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2 };
+    MONITORINFO info = { .cbSize = sizeof(info) };
+    GetMonitorInfoW(MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST), &info);
+    return info.rcWork;
 }
 
-static void close_after_leave(void *data)
+/// 出场的牌落定：置物架现身。
+static void entrance_finished(void *context)
+{
+    ShelfWindow *shelf = context;
+    shelf->card = NULL;
+    window_set_cloaked(shelf->handle, false);
+}
+
+void shelf_deal_in(ShelfWindow *shelf, POINT cursor)
+{
+    shelf->surface_opacity = 1;
+    shelf->surface_scale = 1;
+    shelf->surface_dx = shelf->surface_dy = 0;
+    RECT rect;
+    GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
+    ShelfCard *card = face ? shelf_card_rent() : NULL;
+    if (!card)
+    {
+        gfx_image_release(face);
+        window_set_cloaked(shelf->handle, false);
+        shelf_repaint(shelf);
+        return;
+    }
+    double scale = shelf_scale(shelf);
+    RECT work = work_area_of(rect);
+    double width = rect.right - rect.left, height = rect.bottom - rect.top;
+    // 光标离置物架中心太远时按靠近中心的位置算，牌不会从老远飞过来。
+    double dx = fmax(-0.35 * width, fmin(0.35 * width, cursor.x - (rect.left + width / 2))) / scale;
+    double dy = fmax(-0.35 * height, fmin(0.35 * height, cursor.y - (rect.top + height / 2))) / scale;
+    CardMotion motion = shelf->entrance == ENTRANCE_SHAKE ? card_motion_shake_in(dx, dy) : card_motion_edge_in(shelf->edge, rect, work, scale);
+    shelf->flipped_on_horizontal_axis = motion.horizontal_axis;
+    shelf->card = card;
+    shelf_card_play(card, rect, work, scale, face, &motion, NULL, entrance_finished, shelf);
+    gfx_image_release(face);
+}
+
+void shelf_finish_entrance(ShelfWindow *shelf)
+{
+    ShelfCard *card = shelf->card;
+    if (!card) return;
+    shelf->card = NULL;
+    window_set_cloaked(shelf->handle, false);
+    shelf_card_cancel(card);
+}
+
+void shelf_cancel_card(ShelfWindow *shelf)
+{
+    shelf_card_cancel(shelf->card);
+    shelf->card = NULL;
+}
+
+/// 离场的牌现身的同一刻置物架隐身，中间不会空一帧，两层阴影也不会叠在一起。
+static void exit_shown(void *context)
+{
+    ShelfWindow *shelf = context;
+    window_set_cloaked(shelf->handle, true);
+}
+
+static void close_after_exit(void *data)
 {
     ShelfWindow *shelf = data;
     shelf_window_close_now(shelf);
     shelf_window_release(shelf);
 }
 
-static void update_leave(ShelfWindow *shelf, double time)
+static void exit_finished(void *context)
 {
-    if (!shelf->leaving || !clock_tick(&shelf->leave_clock, time)) return;
-    double progress = fmin(1, shelf->leave_clock.elapsed / CLOSE_DURATION);
-    float eased = (float)ease_apply(EASE_OF(EASE_CUBIC_IN), progress);
-    shelf->surface_opacity = shelf->leave_from_opacity * (1 - eased);
-    shelf->surface_scale = shelf->leave_from_scale + (CLOSE_SCALE - shelf->leave_from_scale) * eased;
-    shelf->surface_dx = shelf->leave_from_dx + (shelf->leave_shift_x - shelf->leave_from_dx) * eased;
-    shelf->surface_dy = shelf->leave_from_dy + (shelf->leave_shift_y - shelf->leave_from_dy) * eased;
-    if (progress < 1) return;
-    shelf->leaving = false;
+    ShelfWindow *shelf = context;
+    shelf->card = NULL;
     // 不在画的过程中销毁窗口，放到消息循环里去关。
-    task_post(close_after_leave, shelf_window_retain(shelf));
+    task_post(close_after_exit, shelf_window_retain(shelf));
+}
+
+bool shelf_play_exit(ShelfWindow *shelf)
+{
+    RECT rect;
+    GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
+    ShelfCard *card = face ? shelf_card_rent() : NULL;
+    if (!card)
+    {
+        gfx_image_release(face);
+        return false;
+    }
+    double scale = shelf_scale(shelf);
+    RECT work = work_area_of(rect);
+    CardMotion motion = card_motion_exit(shelf->entrance == ENTRANCE_EDGE ? shelf->edge : EDGE_NONE, shelf->flipped_on_horizontal_axis, rect, work, scale);
+    shelf->card = card;
+    shelf_card_play(card, rect, work, scale, face, &motion, exit_shown, exit_finished, shelf);
+    gfx_image_release(face);
+    return true;
 }
 
 // ───────────── 每一帧 ─────────────
@@ -1135,17 +1174,20 @@ void shelf_animate(UiWindow *window, void *context, double time)
     if (shelf->closed) return;
     update_slide(shelf, time);
     update_pop(shelf, time);
-    update_leave(shelf, time);
     update_motion(shelf, time);
-    bool running = shelf->sliding || shelf->popping || shelf->leaving || shelf->motion_running;
+    bool running = shelf->sliding || shelf->popping || shelf->motion_running;
 
-    if (shelf->badge_popping && clock_tick(&shelf->badge_clock, time))
+    // 牌角的数字从下面滚上来。
+    if (shelf->rank_rolling && clock_tick(&shelf->rank_clock, time))
     {
-        double progress = fmin(1, shelf->badge_clock.elapsed / BADGE_POP_DURATION);
-        shelf->badge_scale = (float)(1.28 + (1 - 1.28) * ease_apply(EASE_BACK_OF(0.5), progress));
-        if (progress >= 1) shelf->badge_popping = false;
+        double progress = fmin(1, shelf->rank_clock.elapsed / RANK_ROLL_DURATION);
+        float eased = (float)ease_apply(EASE_OF(EASE_CUBIC_OUT), progress);
+        shelf->rank_shift = 8 * (1 - eased);
+        shelf->rank_opacity = eased;
+        if (progress >= 1) shelf->rank_rolling = false;
     }
-    running |= shelf->badge_popping;
+    running |= shelf->rank_rolling;
+    running |= update_anim(&shelf->fan, time);
 
     running |= update_anim(&shelf->overlay_opacity, time);
     running |= update_anim(&shelf->body_opacity, time);
@@ -1171,6 +1213,11 @@ void shelf_animate(UiWindow *window, void *context, double time)
         shelf->overlay_visible = false;
         shelf_reset_merge_charge(shelf);
     }
-    for (int index = 0; index < shelf->model->count; index++) running |= update_anim(&shelf->model->items[index]->dim, time);
+    for (int index = 0; index < shelf->model->count; index++)
+    {
+        ShelfItem *item = shelf->model->items[index];
+        running |= update_anim(&item->dim, time);
+        running |= update_anim(&item->lift, time);
+    }
     if (running) request_frame(shelf);
 }

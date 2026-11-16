@@ -449,6 +449,8 @@ static void begin_merge_charge(ShelfWindow *shelf)
     if (!shelf->overlay_visible) anim_set(&shelf->overlay_opacity, 0);
     shelf->overlay_visible = true;
     ease_to(&shelf->overlay_opacity, 1, OVERLAY_FADE_IN, EASE_OF(EASE_CUBIC_OUT));
+    // 蓄力时还不标张数。
+    shelf->incoming = 0;
     anim_set(&shelf->drop_label_opacity, 0);
     ease_to(&shelf->merge_charge_opacity, 1, OVERLAY_FADE_IN, EASE_OF(EASE_CUBIC_OUT));
     anim_set(&shelf->merge_charge_scale, 0.4);
@@ -459,10 +461,10 @@ static void begin_merge_charge(ShelfWindow *shelf)
     shelf_repaint(shelf);
 }
 
-/// 停够了：内容淡出，写上“松开以合并”，边框变成强调色，涨满的放置区域轻轻弹一下，表示可以松手了。
-static void arm_merge(ShelfWindow *shelf)
+/// 停够了：内容淡出，写上“松开以合并”并标出带过来几张，边框变成强调色，涨满的放置区域轻轻弹一下，表示可以松手了。
+static void arm_merge(ShelfWindow *shelf, int incoming)
 {
-    shelf_show_drop_overlay(shelf);
+    shelf_show_drop_overlay(shelf, NULL, incoming);
     shelf->drop_zone_text = STR_ReleaseToMerge;
     shelf->overlay_hit = false;
     ease_to(&shelf->drop_label_opacity, 1, OVERLAY_FADE_IN, EASE_OF(EASE_CUBIC_OUT));
@@ -486,14 +488,15 @@ void shelf_update_merge_pulse(ShelfWindow *shelf)
     anim_start(&shelf->drop_zone_scale, 1, 0.170, EASE_OF(EASE_SINE_IN_OUT));
 }
 
-static void show_merge_hint(ShelfWindow *shelf, MergeHint hint)
+/// incoming 是可以合并时带过来几张（放置区域的角标上标出）。
+static void show_merge_hint(ShelfWindow *shelf, MergeHint hint, int incoming)
 {
     if (hint == shelf->merge_hint || (shelf->closing && hint != MERGE_HINT_NONE)) return;
     shelf->merge_hint = hint;
     switch (hint)
     {
         case MERGE_HINT_CHARGING: begin_merge_charge(shelf); break;
-        case MERGE_HINT_ARMED: arm_merge(shelf); break;
+        case MERGE_HINT_ARMED: arm_merge(shelf, incoming); break;
         default:
             if (!shelf->drag_inside) shelf_end_drag(shelf);
             break;
@@ -512,9 +515,9 @@ static void set_reference(ShelfWindow **slot, ShelfWindow *shelf)
 static void set_merge_target(ShelfWindow *shelf, ShelfWindow *target)
 {
     if (target == shelf->merge_target) return;
-    if (shelf->merge_target) show_merge_hint(shelf->merge_target, MERGE_HINT_NONE);
+    if (shelf->merge_target) show_merge_hint(shelf->merge_target, MERGE_HINT_NONE, 0);
     set_reference(&shelf->merge_target, target);
-    if (target) show_merge_hint(target, MERGE_HINT_ARMED);
+    if (target) show_merge_hint(target, MERGE_HINT_ARMED, shelf->model->count);
     ease_to(&shelf->merge_dim, target ? MERGE_DIM : 1, DIM_DURATION, EASE_OF(EASE_CUBIC_OUT));
     request_frame(shelf);
     if (target)
@@ -534,10 +537,10 @@ static void set_merge_target(ShelfWindow *shelf, ShelfWindow *target)
 static void set_merge_candidate(ShelfWindow *shelf, ShelfWindow *candidate)
 {
     if (shelf->handle) KillTimer(shelf->handle, SHELF_TIMER_MERGE);
-    if (shelf->merge_candidate && shelf->merge_candidate != shelf->merge_target) show_merge_hint(shelf->merge_candidate, MERGE_HINT_NONE);
+    if (shelf->merge_candidate && shelf->merge_candidate != shelf->merge_target) show_merge_hint(shelf->merge_candidate, MERGE_HINT_NONE, 0);
     set_reference(&shelf->merge_candidate, candidate);
     if (!candidate) return;
-    show_merge_hint(candidate, MERGE_HINT_CHARGING);
+    show_merge_hint(candidate, MERGE_HINT_CHARGING, 0);
     SetTimer(shelf->handle, SHELF_TIMER_MERGE, MERGE_DWELL, NULL);
 }
 
@@ -570,7 +573,7 @@ void shelf_merge_on_dwell(ShelfWindow *shelf)
     POINT cursor;
     GetCursorPos(&cursor);
     if (shelf->merge_watch && can_receive_merge(candidate) && contains_screen_point(candidate, cursor)) set_merge_target(shelf, candidate);
-    else show_merge_hint(candidate, MERGE_HINT_NONE);
+    else show_merge_hint(candidate, MERGE_HINT_NONE, 0);
     shelf_window_release(candidate);
 }
 
@@ -624,7 +627,7 @@ void shelf_move_by_hand(ShelfWindow *shelf)
     {
         shelf_window_retain(target);
         set_reference(&shelf->merge_target, NULL);
-        show_merge_hint(target, MERGE_HINT_NONE);
+        show_merge_hint(target, MERGE_HINT_NONE, 0);
         shelf_hide_toast(shelf);
         merge_into(shelf, target);
         shelf_window_release(target);

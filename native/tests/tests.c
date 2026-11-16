@@ -15,6 +15,7 @@
 #include "shelf_history.h"
 #include "shelf_model.h"
 #include "shelf_window.h"
+#include "shelf_card.h"
 #include "task.h"
 #include "foreground.h"
 #include "gesture.h"
@@ -1517,6 +1518,8 @@ int main(int argc, char **argv)
     run("program resources", test_program_resources);
     run("log", test_log);
     run("theme", test_theme);
+    run("file suits", test_file_suits);
+    run("shelf motion", test_shelf_motion);
     run("animation", test_animation);
     run("layout and controls", test_layout);
     run("shake detection", test_shake_detection);

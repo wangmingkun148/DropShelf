@@ -1,5 +1,6 @@
 // 管理同时打开的多个置物架，并预先准备一个隐藏的窗口，让晃动后能立即弹出。和 C# 版的 ShelfManager 对应。
 #include "shelf_window_internal.h"
+#include "shelf_card.h"
 #include "lang.h"
 #include "shelf_history.h"
 #include "log.h"
@@ -98,6 +99,8 @@ static void prewarm_tick(void *data)
     spare = shelf_window_create();
     // 在屏幕外画一帧：字体、文字排版和绘制效果都在这时准备好，晃动弹出时显示窗口只剩少量工作。
     if (spare) ui_window_warm(spare->ui);
+    // 替置物架出场的那张牌也先备好。
+    shelf_card_prewarm();
 }
 
 void shelves_prewarm(void)

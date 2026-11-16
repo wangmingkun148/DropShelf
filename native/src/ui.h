@@ -140,6 +140,12 @@ void ui_close_all_windows(void);
 /// 诊断和测试用：把窗口现在的样子画进一张 PNG 图片（没有系统材质，背景是纯色）。
 bool ui_window_snapshot(UiWindow *window, const wchar_t *path);
 
+/// 把窗口现在的样子按设备像素画进一张图片（置物架出场和离场那张牌的正面）。正在画这个窗口或失败时返回 NULL。
+GfxImage *ui_window_capture(UiWindow *window);
+
+/// Windows 11 及以上：窗口有系统画的圆角。
+bool ui_is_windows_11(void);
+
 /// 在屏幕外把窗口画一遍再扔掉（窗口可以是隐藏的）：字体、文字排版和绘制效果提前准备好，第一次显示时更快。
 void ui_window_warm(UiWindow *window);
 

@@ -60,6 +60,7 @@ add_library(dropshelf_core STATIC
     src/probe.c
     src/quick_action.c
     src/settings.c
+    src/shelf_card.c
     src/shelf_drag.c
     src/shelf_history.c
     src/shelf_input.c

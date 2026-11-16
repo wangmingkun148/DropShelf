@@ -456,42 +456,65 @@ bool gfx_end_image(const wchar_t *path)
     return SUCCEEDED(result);
 }
 
-HBITMAP gfx_end_image_bitmap(void)
+/// 结束画到图片，把画好的位图（在显卡上）复制到一张处理器能读的位图并映射出来，交给 read 抄走。
+static bool read_image(void (*read)(const D2D1_MAPPED_RECT *mapped, void *data), void *data, const wchar_t *failure)
 {
-    if (drawing != &image_surface) return nullptr;
+    if (drawing != &image_surface) return false;
     drawing = nullptr;
     HRESULT result = context->EndDraw();
     context->SetTarget(nullptr);
-
-    // 画好的位图在显卡上，先复制到一张处理器能读的位图，再逐行抄进 DIB。
     ID2D1Bitmap1 *readable = nullptr;
     D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), image_dpi, image_dpi);
     if (SUCCEEDED(result)) result = context->CreateBitmap(D2D1::SizeU((UINT32)image_width, (UINT32)image_height), nullptr, 0, &properties, &readable);
     if (SUCCEEDED(result)) result = readable->CopyFromBitmap(nullptr, image_target, nullptr);
-    HBITMAP bitmap = nullptr;
     D2D1_MAPPED_RECT mapped = {};
     if (SUCCEEDED(result)) result = readable->Map(D2D1_MAP_OPTIONS_READ, &mapped);
     if (SUCCEEDED(result))
     {
-        BITMAPINFO info = {};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = image_width;
-        info.bmiHeader.biHeight = -image_height;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        void *bits = nullptr;
-        bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (bitmap && bits)
-            for (int row = 0; row < image_height; row++)
-                memcpy((unsigned char *)bits + (size_t)row * image_width * 4, mapped.bits + (size_t)row * mapped.pitch, (size_t)image_width * 4);
+        read(&mapped, data);
         readable->Unmap();
     }
     release(readable);
     release(image_target);
-    if (FAILED(result)) log_error(L"生成拖动图像失败\r\nHRESULT 0x%08lX", (unsigned long)result);
+    if (FAILED(result)) log_error(L"%ls\r\nHRESULT 0x%08lX", failure, (unsigned long)result);
+    return SUCCEEDED(result);
+}
+
+static void read_into_dib(const D2D1_MAPPED_RECT *mapped, void *data)
+{
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = image_width;
+    info.bmiHeader.biHeight = -image_height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void *bits = nullptr;
+    HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bitmap && bits)
+        for (int row = 0; row < image_height; row++)
+            memcpy((unsigned char *)bits + (size_t)row * image_width * 4, mapped->bits + (size_t)row * mapped->pitch, (size_t)image_width * 4);
+    *(HBITMAP *)data = bitmap;
+}
+
+HBITMAP gfx_end_image_bitmap(void)
+{
+    HBITMAP bitmap = nullptr;
+    read_image(read_into_dib, &bitmap, L"生成拖动图像失败");
     return bitmap;
+}
+
+static void read_into_image(const D2D1_MAPPED_RECT *mapped, void *data)
+{
+    *(GfxImage **)data = gfx_image_create(mapped->bits, image_width, image_height, (int)mapped->pitch);
+}
+
+GfxImage *gfx_end_image_capture(void)
+{
+    GfxImage *image = nullptr;
+    read_image(read_into_image, &image, L"截下窗口的画面失败");
+    return image;
 }
 
 // ───────────── 图片 ─────────────

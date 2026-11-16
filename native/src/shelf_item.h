@@ -4,15 +4,15 @@
 
 #include "anim.h"
 #include "base.h"
+#include "card_face.h"
 #include "file_identity.h"
 #include "gfx.h"
 
-/// 项目在列表里那一行的动画状态：整行、行首图标和文字各自的偏移和透明度。平时都是原样（偏移 0，透明度和缩放 1）。
+/// 平铺里这张牌相对自己格子的姿态（以牌面中心为原点缩放、转动，再平移），以及牌下面名字的透明度。
 typedef struct ShelfItemMotion
 {
-    float row_opacity, row_dx, row_dy;
-    float thumb_dx, thumb_dy, thumb_angle, thumb_scale, thumb_opacity;
-    float text_opacity, text_dx;
+    float dx, dy, angle, scale, opacity;
+    float name_opacity;
 } ShelfItemMotion;
 
 typedef enum ShelfItemKind
@@ -50,7 +50,8 @@ typedef struct ShelfItem
     unsigned thumbnail_request; // 每次请求加一，回来的结果对不上就丢掉
     bool measuring;             // 正在统计文件夹
     ShelfItemMotion motion;
-    Anim dim;                   // 拖出期间被拖的牌或行变淡（1 是原样）
+    Anim dim;                   // 拖出期间被拖的牌变淡（1 是原样）
+    Anim lift;                  // 平铺里悬停时牌抬起（0 到 1）
 } ShelfItem;
 
 void shelf_item_motion_reset(ShelfItem *item);
@@ -63,6 +64,12 @@ bool shelf_item_is_file_system(const ShelfItem *item);
 const wchar_t *shelf_item_display_name(ShelfItem *item);
 const wchar_t *shelf_item_detail(ShelfItem *item);
 const wchar_t *shelf_item_glyph(const ShelfItem *item);
+
+/// 花色：按文件类型分，印在牌角。文件夹是文件夹，文字算文档，链接算其他。
+FileSuit shelf_item_suit(const ShelfItem *item);
+
+/// 牌角印的类型：文件的扩展名（最多四个字母），链接为 URL，文字为 TXT，文件夹不印。调用方负责 free。
+wchar_t *shelf_item_card_mark(const ShelfItem *item);
 
 /// 内容变了（大小、类型、可用性），下次重新生成说明文字。
 void shelf_item_text_changed(ShelfItem *item);

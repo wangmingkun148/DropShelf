@@ -128,7 +128,8 @@ static GfxSize corner_size(const wchar_t *rank, const CardCorner *corner)
     return (GfxSize){ width, height };
 }
 
-void card_paint_corner(const wchar_t *rank, FileSuit suit, const CardCorner *corner, float left, float top, Color color, float opacity)
+void card_paint_corner_rolling(const wchar_t *rank, FileSuit suit, const CardCorner *corner, float left, float top, Color color, float opacity,
+    float rank_shift, float rank_opacity)
 {
     if (opacity <= 0.001f) return;
     GfxSize size = corner_size(rank, corner);
@@ -137,11 +138,18 @@ void card_paint_corner(const wchar_t *rank, FileSuit suit, const CardCorner *cor
     {
         GfxTextStyle style = rank_style(corner);
         Color ink = color;
-        ink.a = (uint8_t)(ink.a * (opacity > 1 ? 1 : opacity));
-        gfx_text_draw(rank, (GfxRect){ left - 20, top, left + size.width + 20, top + corner->line_height }, &style, ink);
+        float alpha = opacity * rank_opacity;
+        ink.a = (uint8_t)(ink.a * (alpha > 1 ? 1 : alpha < 0 ? 0 : alpha));
+        if (ink.a > 0)
+            gfx_text_draw(rank, (GfxRect){ left - 20, top + rank_shift, left + size.width + 20, top + rank_shift + corner->line_height }, &style, ink);
         y += corner->line_height;
     }
     card_paint_suit(suit, left + size.width / 2, y + corner->suit_gap, corner->suit_size, opacity);
+}
+
+void card_paint_corner(const wchar_t *rank, FileSuit suit, const CardCorner *corner, float left, float top, Color color, float opacity)
+{
+    card_paint_corner_rolling(rank, suit, corner, left, top, color, opacity, 0, 1);
 }
 
 void card_paint_corner_inverted(const wchar_t *rank, FileSuit suit, const CardCorner *corner, GfxRect card, float right, float bottom, Color color,
