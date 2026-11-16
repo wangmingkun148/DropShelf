@@ -1,6 +1,7 @@
 #define COBJMACROS
 #include "shelf_drag.h"
 #include "log.h"
+#include "task.h"
 #include "theme.h"
 
 #include <math.h>
@@ -63,14 +64,132 @@ static IDataObject *create_empty_data(void)
     return data;
 }
 
+// ───────────── 预先解析的路径 ─────────────
+// 把路径解析成外壳的标识（SHParseDisplayName）每个要好几毫秒，拖出八个文件时按下就要卡几十毫秒。
+// 项目放上置物架时就在后台解析好留着，拖出时直接复制一份。文件的属性、大小、修改时间和当时不一样了就重新解析。
+
+#define PIDL_CACHE_SIZE 256
+
+typedef struct CachedPidl
+{
+    wchar_t *path;
+    PIDLIST_ABSOLUTE pidl;
+    DWORD attributes;
+    FILETIME written;
+    DWORD size_high, size_low;
+    ULONGLONG used;
+} CachedPidl;
+
+static SRWLOCK pidl_lock = SRWLOCK_INIT;
+static CachedPidl pidl_cache[PIDL_CACHE_SIZE];
+static ULONGLONG pidl_clock;
+
+static bool same_file_data(const CachedPidl *entry, const WIN32_FILE_ATTRIBUTE_DATA *data)
+{
+    return entry->attributes == data->dwFileAttributes && CompareFileTime(&entry->written, &data->ftLastWriteTime) == 0 &&
+           entry->size_high == data->nFileSizeHigh && entry->size_low == data->nFileSizeLow;
+}
+
+/// 找到还能用的就返回一份副本（用 CoTaskMemFree 释放），否则返回 NULL。
+static PIDLIST_ABSOLUTE pidl_cache_find(const wchar_t *path, const WIN32_FILE_ATTRIBUTE_DATA *data)
+{
+    PIDLIST_ABSOLUTE copy = NULL;
+    AcquireSRWLockExclusive(&pidl_lock);
+    for (int index = 0; index < PIDL_CACHE_SIZE; index++)
+    {
+        CachedPidl *entry = &pidl_cache[index];
+        if (!entry->path || !wcs_equal_ignore_case(entry->path, path)) continue;
+        if (same_file_data(entry, data))
+        {
+            copy = ILCloneFull(entry->pidl);
+            entry->used = ++pidl_clock;
+        }
+        break;
+    }
+    ReleaseSRWLockExclusive(&pidl_lock);
+    return copy;
+}
+
+/// 记下一份副本：同一路径的旧记录直接换掉，满了换掉最久没用的。
+static void pidl_cache_store(const wchar_t *path, PCIDLIST_ABSOLUTE pidl, const WIN32_FILE_ATTRIBUTE_DATA *data)
+{
+    PIDLIST_ABSOLUTE copy = ILCloneFull(pidl);
+    if (!copy) return;
+    AcquireSRWLockExclusive(&pidl_lock);
+    CachedPidl *slot = NULL;
+    for (int index = 0; index < PIDL_CACHE_SIZE && !slot; index++)
+        if (pidl_cache[index].path && wcs_equal_ignore_case(pidl_cache[index].path, path)) slot = &pidl_cache[index];
+    for (int index = 0; index < PIDL_CACHE_SIZE && !slot; index++)
+        if (!pidl_cache[index].path) slot = &pidl_cache[index];
+    if (!slot)
+    {
+        slot = &pidl_cache[0];
+        for (int index = 1; index < PIDL_CACHE_SIZE; index++)
+            if (pidl_cache[index].used < slot->used) slot = &pidl_cache[index];
+    }
+    free(slot->path);
+    CoTaskMemFree(slot->pidl);
+    slot->path = wcs_dup(path);
+    slot->pidl = copy;
+    slot->attributes = data->dwFileAttributes;
+    slot->written = data->ftLastWriteTime;
+    slot->size_high = data->nFileSizeHigh;
+    slot->size_low = data->nFileSizeLow;
+    slot->used = ++pidl_clock;
+    ReleaseSRWLockExclusive(&pidl_lock);
+}
+
+/// 解析一个路径，能用缓存时用缓存。返回的标识用 CoTaskMemFree 释放；解析不了时返回 NULL。
+static PIDLIST_ABSOLUTE parse_path(const wchar_t *path, bool *from_cache)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    bool has_data = GetFileAttributesExW(path, GetFileExInfoStandard, &data) != FALSE;
+    if (from_cache) *from_cache = false;
+    if (has_data)
+    {
+        PIDLIST_ABSOLUTE cached = pidl_cache_find(path, &data);
+        if (cached)
+        {
+            if (from_cache) *from_cache = true;
+            return cached;
+        }
+    }
+    PIDLIST_ABSOLUTE pidl = NULL;
+    if (FAILED(SHParseDisplayName(path, NULL, &pidl, 0, NULL)) || !pidl) return NULL;
+    if (has_data) pidl_cache_store(path, pidl, &data);
+    return pidl;
+}
+
+static void prefetch_work(void *data)
+{
+    StrList *paths = data;
+    HRESULT com = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    for (int index = 0; index < paths->count; index++) CoTaskMemFree(parse_path(paths->items[index], NULL));
+    if (SUCCEEDED(com)) CoUninitialize();
+}
+
+static void prefetch_done(void *data)
+{
+    strlist_clear(data);
+    free(data);
+}
+
+void shell_paths_prefetch(const StrList *paths)
+{
+    if (!paths || paths->count == 0) return;
+    StrList *copy = xcalloc(1, sizeof(StrList));
+    strlist_clone(copy, paths);
+    task_run(prefetch_work, prefetch_done, copy);
+}
+
 IDataObject *shell_data_object_create(const StrList *paths)
 {
     PIDLIST_ABSOLUTE *pidls = xcalloc((size_t)paths->count, sizeof(PIDLIST_ABSOLUTE));
     int parsed = 0;
     for (int index = 0; index < paths->count; index++)
     {
-        PIDLIST_ABSOLUTE pidl = NULL;
-        if (SUCCEEDED(SHParseDisplayName(paths->items[index], NULL, &pidl, 0, NULL)) && pidl) pidls[parsed++] = pidl;
+        PIDLIST_ABSOLUTE pidl = parse_path(paths->items[index], NULL);
+        if (pidl) pidls[parsed++] = pidl;
     }
     IDataObject *data = NULL;
     IShellItemArray *array = NULL;

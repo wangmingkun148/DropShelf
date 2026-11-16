@@ -40,6 +40,7 @@ struct UiWindow
     bool layout_dirty;
     bool frame_requested;       // 画的过程中有元素说还有动画在进行
     bool subscribed;            // 已经订阅逐帧回调
+    bool stale;                 // 隐藏后还没画过：屏幕上还是上次显示时的画面
     bool rendering;
     bool animating;             // 正在调用 animate 回调（它可能改窗口大小，引起嵌套的重画）
     int message_depth;          // 正在处理的窗口消息有几层
@@ -130,9 +131,21 @@ static void apply_appearance(UiWindow *window, bool force)
 
 static void on_frame(void *context, double time);
 
+/// 隐藏或最小化的窗口不用逐帧回调（不然后台线程每次刷新都要叫醒界面线程）；再显示时系统会让它重画。
+static void stop_frames(UiWindow *window)
+{
+    if (window->subscribed) frames_unsubscribe(on_frame, window);
+    window->subscribed = false;
+}
+
 static void render(UiWindow *window, double time)
 {
-    if (window->rendering || window->animating || !IsWindowVisible(window->handle)) return;
+    if (window->rendering || window->animating) return;
+    if (!IsWindowVisible(window->handle))
+    {
+        stop_frames(window);
+        return;
+    }
     // animate 里还有动画在进行时会请求下一帧，画的时候不能把这个请求清掉。
     bool animation_requested = false;
     if (window->options.animate)
@@ -142,13 +155,22 @@ static void render(UiWindow *window, double time)
         window->animating = true;
         window->options.animate(window, window->options.context, time);
         window->animating = false;
-        if (window->destroyed || !window->handle || !IsWindowVisible(window->handle)) return;
+        if (window->destroyed || !window->handle) return;
+        if (!IsWindowVisible(window->handle))
+        {
+            stop_frames(window);
+            return;
+        }
         animation_requested = window->frame_requested;
     }
     RECT client;
     GetClientRect(window->handle, &client);
     int width = client.right - client.left, height = client.bottom - client.top;
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0)
+    {
+        stop_frames(window);
+        return;
+    }
 
     window->rendering = true;
     window->frame_requested = animation_requested;
@@ -171,6 +193,7 @@ static void render(UiWindow *window, double time)
         if (!gfx_end(window->surface)) window->frame_requested = true;
     }
     window->rendering = false;
+    window->stale = false;
 
     // 还有动画在进行就接着订阅逐帧回调，否则退订，不占用处理器。
     if (window->frame_requested && !window->subscribed) frames_subscribe(on_frame, window);
@@ -198,6 +221,11 @@ void ui_window_request_frame(UiWindow *window)
     }
 }
 
+bool ui_window_is_animating(UiWindow *window)
+{
+    return window && !window->destroyed && (window->subscribed || window->frame_requested);
+}
+
 void ui_window_invalidate(UiWindow *window)
 {
     if (!window || !window->handle) return;
@@ -207,7 +235,8 @@ void ui_window_invalidate(UiWindow *window)
 
 void ui_window_repaint(UiWindow *window)
 {
-    if (window && window->handle) InvalidateRect(window->handle, NULL, FALSE);
+    // 排到下一次刷新时画：一次刷新最多画一次，光标快速移过控件时不会每条鼠标消息都整窗重画。
+    if (window && window->handle && IsWindowVisible(window->handle)) ui_window_request_frame(window);
 }
 
 // ───────────── 鼠标 ─────────────
@@ -558,8 +587,12 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             return 1;
         case WM_PAINT:
             ValidateRect(handle, NULL);
-            render(window, frames_time());
+            // 有动画在进行时下一次刷新就会画，这里不再多画一次；刚显示、屏幕上还是旧画面时马上画。
+            if (!window->subscribed || window->stale) render(window, frames_time());
             return 0;
+        case WM_WINDOWPOSCHANGED:
+            if (((const WINDOWPOS *)lparam)->flags & SWP_HIDEWINDOW) window->stale = true;
+            break;
         case WM_SIZE:
             if (wparam != SIZE_MINIMIZED)
             {
@@ -628,8 +661,10 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             UiMouseEvent event = { .kind = UI_MOUSE_WHEEL, .x = point.x / scale, .y = point.y / scale };
             event.wheel = GET_WHEEL_DELTA_WPARAM(wparam) / (float)WHEEL_DELTA;
             if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return 0;
-            // 滚轮交给光标下的元素，它不接收就一级级往上找。
-            UiElement *under = window->root ? ui_hit_test_any(window->root, event.x, event.y) : NULL;
+            // 滚轮交给光标下的元素，它不接收就一级级往上找。先找能接收鼠标的：盖在页面上的透明的一层
+            // （设置页下面露出的牌边所在的那层铺满整个窗口）不接收鼠标，滚轮要穿过它交给下面的页面。
+            UiElement *under = window->root ? ui_hit_test(window->root, event.x, event.y) : NULL;
+            if (!under && window->root) under = ui_hit_test_any(window->root, event.x, event.y);
             for (UiElement *element = under; element; element = element->parent)
             {
                 if (!element->type->mouse || !element->type->wheel) continue;
@@ -818,6 +853,7 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
     UiWindow *window = xcalloc(1, sizeof(UiWindow));
     window->options = *options;
     window->layout_dirty = true;
+    window->stale = true;
     DWORD style, extended = WS_EX_NOREDIRECTIONBITMAP;
     if (options->popup)
     {

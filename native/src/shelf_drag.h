@@ -40,6 +40,9 @@ typedef struct DragOutOutcome
 /// 资源管理器同款的数据对象（拖出、多个文件的属性窗口用）；解析不了的路径（个别文件刚被删）时返回 NULL。
 IDataObject *shell_data_object_create(const StrList *paths);
 
+/// 在后台先把这些路径解析好，之后拖出时不用在按下时等。
+void shell_paths_prefetch(const StrList *paths);
+
 /// 开始拖出，直到松手才返回。有文件时只拖出文件（和 extra_files），否则拖出文字和链接。
 DragOutOutcome drag_out(const DragOutRequest *request);
 

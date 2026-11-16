@@ -224,8 +224,14 @@ static void card_set(Anim *anim, double *goal, double value, Ease ease, bool ani
     animate &= anim_enabled();
     if (animate && *goal == value && (anim->running || anim->value == value)) return;
     *goal = value;
-    if (animate) anim_start(anim, value, MOVE_SECONDS, ease);
-    else anim_set(anim, value);
+    if (!animate)
+    {
+        anim_set(anim, value);
+        return;
+    }
+    anim_start(anim, value, MOVE_SECONDS, ease);
+    // 从光标换到这张牌的这一刻开始计时，下一帧就动起来，不像一般的动画那样第一帧停在起点：光标扫得快时少落后一帧。
+    anim_update(anim, frames_time());
 }
 
 static void apply_state(bool animate)
@@ -233,6 +239,7 @@ static void apply_state(bool animate)
     int slots = slots_count();
     float mid = (slots - 1) / 2.0f;
     int hot_slot = hot >= 0 && hot < card_count ? slot_of(hot) : -1;
+    bool moving = false;
     for (int index = 0; index < card_count; index++)
     {
         Card *card = &cards[index];
@@ -257,12 +264,14 @@ static void apply_state(bool animate)
         card->z = is_hot ? 1000 : index == last_hot ? 999 : slots - (int)ceilf(fabsf(slot - mid));
         double hint = is_hot ? 1 : 0;
         if (card->hint.to != hint) anim_start(&card->hint, hint, is_hot ? 0.2 : 0.15, EASE_OF(EASE_LINEAR));
+        moving |= card->scale.running || card->angle.running || card->x.running || card->y.running || card->hint.running;
     }
     // 选出的牌超出面板上沿，这块区域也要接收鼠标。
     float extend = hot >= 0 ? LIFT + CARD_HEIGHT * (HOT_SCALE - 1) + 8 : 0;
     fan->hit_extend_top = extend;
     if (M->history_section) M->history_section->hit_extend_top = extend;
-    main_request_frame();
+    // 直接放到位时（改窗口大小时在排版里调用）这一帧本来就会画，不用再多要一帧。
+    if (animate || moving) main_request_frame();
 }
 
 static void set_hot(int index)

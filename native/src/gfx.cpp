@@ -223,6 +223,38 @@ struct CachedFormat
 static CachedFormat format_cache[FORMAT_CACHE_SIZE];
 static int format_count;
 
+/// 排好的文字留着下次用：同样的文字每一帧都要量、要画，每次现排一遍要做字形分析，一帧上百段文字时很慢。
+/// 按文字和样式分组，每组四个，满了换掉最久没用的。
+#define LAYOUT_CACHE_SETS 128
+#define LAYOUT_CACHE_WAYS 4
+
+struct CachedLayout
+{
+    UINT32 hash;
+    wchar_t *text;
+    UINT32 length;
+    GfxTextStyle style;
+    bool measure;
+    float width, height;
+    IDWriteTextLayout *layout;
+    UINT64 used;
+};
+
+static CachedLayout layout_cache[LAYOUT_CACHE_SETS][LAYOUT_CACHE_WAYS];
+static UINT64 layout_clock;
+
+static void layout_cache_clear(void)
+{
+    for (int set = 0; set < LAYOUT_CACHE_SETS; set++)
+        for (int way = 0; way < LAYOUT_CACHE_WAYS; way++)
+        {
+            CachedLayout *entry = &layout_cache[set][way];
+            if (entry->layout) entry->layout->Release();
+            free(entry->text);
+            *entry = {};
+        }
+}
+
 /// 变换的栈：gfx_push_transform 叠加，gfx_pop_transform 还原。
 #define TRANSFORM_STACK_SIZE 16
 static D2D1_MATRIX_3X2_F transform_stack[TRANSFORM_STACK_SIZE];
@@ -468,6 +500,7 @@ void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity)
 
 void gfx_shutdown(void)
 {
+    layout_cache_clear();
     for (int index = 0; index < format_count; index++) release(format_cache[index].format);
     format_count = 0;
     release_device_resources();
@@ -981,22 +1014,21 @@ static DWRITE_PARAGRAPH_ALIGNMENT paragraph_alignment(GfxAlign align)
     return align == GFX_ALIGN_CENTER ? DWRITE_PARAGRAPH_ALIGNMENT_CENTER : align == GFX_ALIGN_END ? DWRITE_PARAGRAPH_ALIGNMENT_FAR : DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
 }
 
-/// 排好一段文字。width、height 是排版的范围，不限制时传很大的数。
-static IDWriteTextLayout *text_layout(const wchar_t *text, const GfxTextStyle *style, float width, float height)
+static IDWriteTextLayout *create_layout(const wchar_t *text, UINT32 length, const GfxTextStyle *style, bool measure, float width, float height)
 {
-    if (!text || !style || (!dwrite_factory && !gfx_initialize())) return nullptr;
     IDWriteTextFormat *format = text_format(style->font, style->size, style->weight > 0 ? style->weight : 400);
     if (!format) return nullptr;
     IDWriteTextLayout *layout = nullptr;
-    if (FAILED(dwrite_factory->CreateTextLayout(text, (UINT32)wcslen(text), format, width, height, &layout))) return nullptr;
+    if (FAILED(dwrite_factory->CreateTextLayout(text, length, format, width, height, &layout))) return nullptr;
     // 和 WPF 一样，一个词比整行还长时在词中间折行。
     layout->SetWordWrapping(style->wrap ? DWRITE_WORD_WRAPPING_EMERGENCY_BREAK : DWRITE_WORD_WRAPPING_NO_WRAP);
     if (style->line_height > 0) layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, style->line_height, style->line_height * 0.8f);
-    layout->SetTextAlignment(text_alignment(style->align));
-    layout->SetParagraphAlignment(paragraph_alignment(style->vertical));
+    // 量的时候一律靠左上，否则居中的文字会把整个排版范围算进去。
+    layout->SetTextAlignment(measure ? DWRITE_TEXT_ALIGNMENT_LEADING : text_alignment(style->align));
+    layout->SetParagraphAlignment(measure ? DWRITE_PARAGRAPH_ALIGNMENT_NEAR : paragraph_alignment(style->vertical));
     if (style->ellipsis)
     {
-        // 省略号的大小跟着字号走，所以每次按这段文字的格式现做一个。
+        // 省略号的大小跟着字号走，所以按这段文字的格式现做一个。
         IDWriteInlineObject *sign = nullptr;
         dwrite_factory->CreateEllipsisTrimmingSign(format, &sign);
         DWRITE_TRIMMING trimming = { DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
@@ -1006,14 +1038,66 @@ static IDWriteTextLayout *text_layout(const wchar_t *text, const GfxTextStyle *s
     return layout;
 }
 
+static bool same_style(const GfxTextStyle *a, const GfxTextStyle *b)
+{
+    return a->font == b->font && a->size == b->size && a->weight == b->weight && a->wrap == b->wrap && a->ellipsis == b->ellipsis &&
+           a->align == b->align && a->vertical == b->vertical && a->line_height == b->line_height;
+}
+
+static UINT32 layout_hash(const wchar_t *text, UINT32 length, const GfxTextStyle *style, bool measure)
+{
+    UINT32 hash = 2166136261u;
+    for (UINT32 index = 0; index < length; index++) hash = (hash ^ text[index]) * 16777619u;
+    UINT32 bits;
+    memcpy(&bits, &style->size, sizeof(bits));
+    UINT32 fields[] = { (UINT32)style->font, bits, (UINT32)style->weight, (UINT32)style->wrap | (UINT32)style->ellipsis << 1 | (UINT32)measure << 2,
+        (UINT32)style->align, (UINT32)style->vertical };
+    for (UINT32 field : fields) hash = (hash ^ field) * 16777619u;
+    return hash;
+}
+
+/// 排好一段文字。width、height 是排版的范围，不限制时传很大的数。measure 为真时一律靠左上。
+/// 返回的排版归缓存所有，调用的地方不要释放，也不要改它的属性。
+static IDWriteTextLayout *text_layout(const wchar_t *text, const GfxTextStyle *style, float width, float height, bool measure)
+{
+    if (!text || !style || (!dwrite_factory && !gfx_initialize())) return nullptr;
+    UINT32 length = (UINT32)wcslen(text);
+    UINT32 hash = layout_hash(text, length, style, measure);
+    CachedLayout *set = layout_cache[hash % LAYOUT_CACHE_SETS];
+    CachedLayout *oldest = &set[0];
+    for (int way = 0; way < LAYOUT_CACHE_WAYS; way++)
+    {
+        CachedLayout *entry = &set[way];
+        if (entry->layout && entry->hash == hash && entry->length == length && entry->measure == measure && same_style(&entry->style, style) &&
+            memcmp(entry->text, text, length * sizeof(wchar_t)) == 0)
+        {
+            // 排版范围变了只重新断行，字形分析的结果留着。
+            if (entry->width != width) entry->layout->SetMaxWidth(width);
+            if (entry->height != height) entry->layout->SetMaxHeight(height);
+            entry->width = width;
+            entry->height = height;
+            entry->used = ++layout_clock;
+            return entry->layout;
+        }
+        if (!entry->layout || (oldest->layout && entry->used < oldest->used)) oldest = entry;
+    }
+
+    IDWriteTextLayout *layout = create_layout(text, length, style, measure, width, height);
+    if (!layout) return nullptr;
+    if (oldest->layout) oldest->layout->Release();
+    free(oldest->text);
+    wchar_t *copy = (wchar_t *)malloc(((size_t)length + 1) * sizeof(wchar_t));
+    if (!copy) abort();
+    memcpy(copy, text, ((size_t)length + 1) * sizeof(wchar_t));
+    *oldest = { hash, copy, length, *style, measure, width, height, layout, ++layout_clock };
+    return layout;
+}
+
 GfxSize gfx_text_measure(const wchar_t *text, const GfxTextStyle *style, float max_width)
 {
     GfxSize size = { 0, 0 };
-    IDWriteTextLayout *layout = text_layout(text, style, max_width > 0 ? max_width : 100000.0f, 100000.0f);
+    IDWriteTextLayout *layout = text_layout(text, style, max_width > 0 ? max_width : 100000.0f, 100000.0f, true);
     if (!layout) return size;
-    // 量的时候一律靠左上，否则居中的文字会把整个排版范围算进去。
-    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     DWRITE_TEXT_METRICS metrics;
     if (SUCCEEDED(layout->GetMetrics(&metrics)))
     {
@@ -1021,7 +1105,6 @@ GfxSize gfx_text_measure(const wchar_t *text, const GfxTextStyle *style, float m
         size.width = ceilf(metrics.widthIncludingTrailingWhitespace);
         size.height = ceilf(metrics.height);
     }
-    layout->Release();
     return size;
 }
 
@@ -1030,10 +1113,9 @@ void gfx_text_draw(const wchar_t *text, GfxRect rect, const GfxTextStyle *style,
     if (!drawing || color.a == 0 || !text || !*text) return;
     float width = rect.right - rect.left, height = rect.bottom - rect.top;
     if (width <= 0 || height <= 0) return;
-    IDWriteTextLayout *layout = text_layout(text, style, width, height);
+    IDWriteTextLayout *layout = text_layout(text, style, width, height, false);
     if (!layout) return;
     context->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout, use_color(color), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-    layout->Release();
 }
 
 /// 输入框用的单行排版：一律靠左、不换行、不省略。
@@ -1044,7 +1126,7 @@ static IDWriteTextLayout *line_layout(const wchar_t *text, const GfxTextStyle *s
     line.ellipsis = false;
     line.align = GFX_ALIGN_START;
     line.vertical = GFX_ALIGN_START;
-    return text_layout(text ? text : L"", &line, 100000.0f, 100000.0f);
+    return text_layout(text ? text : L"", &line, 100000.0f, 100000.0f, false);
 }
 
 float gfx_text_caret_x(const wchar_t *text, const GfxTextStyle *style, int index)
@@ -1057,7 +1139,6 @@ float gfx_text_caret_x(const wchar_t *text, const GfxTextStyle *style, int index
     FLOAT x = 0, y = 0;
     DWRITE_HIT_TEST_METRICS metrics;
     layout->HitTestTextPosition((UINT32)index, FALSE, &x, &y, &metrics);
-    layout->Release();
     return x;
 }
 
@@ -1069,7 +1150,6 @@ int gfx_text_hit(const wchar_t *text, const GfxTextStyle *style, float x)
     BOOL trailing = FALSE, inside = FALSE;
     DWRITE_HIT_TEST_METRICS metrics;
     layout->HitTestPoint(x, 1, &trailing, &inside, &metrics);
-    layout->Release();
     int index = (int)metrics.textPosition + (trailing ? (int)metrics.length : 0);
     int length = (int)wcslen(text);
     return index < 0 ? 0 : index > length ? length : index;

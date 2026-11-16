@@ -245,12 +245,25 @@ static bool screen_fits(float width, float height)
     return fits;
 }
 
+static bool main_window_idle(void)
+{
+    return !ui_window_is_animating(M->window) && !flip_morphing();
+}
+
+/// 先处理 minimum 毫秒的消息，再等主窗口的动画都停下来。动画跟着屏幕刷新推进，
+/// 刷新很慢时（锁屏、远程桌面、没有显示器的构建机）比固定的时间久：等的是结果，不是固定的时间。
+static void pump_until_main_idle(int minimum)
+{
+    pump_for(minimum);
+    pump_until_done(main_window_idle, 10000);
+}
+
 static void resize_main_window(float width, float height)
 {
     RECT rect = {0};
     GetWindowRect(ui_window_handle(M->window), &rect);
     ui_window_place(M->window, rect.left, rect.top, width, height);
-    pump_for(700);
+    pump_until_main_idle(300);
     ui_window_layout(M->window);
 }
 
@@ -360,7 +373,7 @@ static void test_main_window_settings(void)
     // 点卡片翻到置物架页。
     shelf_history_clear();
     CHECK(click_element(M->tiles[PAGE_SHELF]), "概览页的置物架卡片点不到");
-    pump_for(900);
+    pump_until_main_idle(300);
     PageView *shelf = &M->pages[PAGE_SHELF];
     CHECK(M->page == PAGE_SHELF && !shelf->host->hidden && M->overview_scroll->hidden, "点击设置卡片没有切换页面");
     CHECK(!flip_morphing() && !shelf->host->transformed && !shelf->host->clip, "翻牌结束后页面应回到静止状态：没有变换和裁剪");
@@ -394,7 +407,7 @@ static void test_main_window_settings(void)
         float scale = ui_window_scale(M->window);
         SendMessageW(ui_window_handle(M->window), WM_MOUSEMOVE, 0,
             MAKELPARAM((int)lroundf((lowest->bounds.left + lowest->bounds.right) / 2 * scale), (int)lroundf((lowest->bounds.top + lowest->bounds.bottom) / 2 * scale)));
-        pump_for(240);
+        pump_until_main_idle(100);
         float bottom = 0;
         for (int index = 0; index < M->stack_layer->child_count; index++)
             if (!M->stack_layer->children[index]->hidden && M->stack_layer->children[index]->bounds.bottom > bottom) bottom = M->stack_layer->children[index]->bounds.bottom;
@@ -410,7 +423,7 @@ static void test_main_window_settings(void)
     {
         int page = targets[index];
         CHECK(click_element(stack_edge_for(page)), "露出的牌边点不到");
-        pump_for(900);
+        pump_until_main_idle(300);
         PageView *view = &M->pages[page];
         CHECK(M->page == page && !view->host->hidden && M->overview_scroll->hidden && !view->host->transformed && !view->host->clip &&
                   !M->stack_layer->hidden && !M->stack_layer->hit_through,
@@ -419,6 +432,21 @@ static void test_main_window_settings(void)
     }
     CHECK(fabsf(ui_scroll_offset(shelf->scroll) - saved_offset) < 1, "设置页之间切换不应重置各页的滚动位置");
     CHECK(M->history_section->hidden, "没有记录时不应显示最近关闭");
+
+    // 滚轮：光标在设置页上时滚动这一页，不能被盖在页面上的牌边那一层挡住。
+    {
+        UiElement *scroll = shelf->scroll;
+        ui_scroll_set_offset(scroll, 0);
+        ui_window_layout(M->window);
+        HWND handle = ui_window_handle(M->window);
+        POINT point = ui_window_to_screen(M->window, (scroll->bounds.left + scroll->bounds.right) / 2, (scroll->bounds.top + scroll->bounds.bottom) / 2);
+        CHECK(ui_scroll_extent(scroll) > 48, "置物架页应比窗口高，能滚动");
+        SendMessageW(handle, WM_MOUSEWHEEL, MAKEWPARAM(0, (WORD)(SHORT)-WHEEL_DELTA), MAKELPARAM(point.x, point.y));
+        CHECK(ui_scroll_offset(scroll) > 0, "滚轮在设置页上没有滚动页面");
+        SendMessageW(handle, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), MAKELPARAM(point.x, point.y));
+        CHECK(ui_scroll_offset(scroll) == 0, "向上滚轮没有滚回顶部");
+        ui_window_layout(M->window);
+    }
 
     // 灵敏度：点滑块，说明立即更新；停下后三个字偏向稳健，并保存。
     UiElement *slider = pages_control(PAGES_SENSITIVITY_SLIDER);
@@ -431,7 +459,7 @@ static void test_main_window_settings(void)
     wchar_t *detail = str_sensitivity_detail(reversals, distance);
     CHECK(label_is(pages_control(PAGES_SENSITIVITY_DESCRIPTION), detail), "拖动滑块时说明没有立即更新");
     free(detail);
-    pump_for(400);
+    pump_until_main_idle(400);
     float steady = pages_sensitivity_label_scale(0), balanced = pages_sensitivity_label_scale(1), responsive = pages_sensitivity_label_scale(2);
     CHECK(steady > balanced && balanced > responsive && fabsf(responsive - 0.85f) < 0.001f, "滑块偏向稳健时，稳健应最大、均衡其次、灵敏保持最小");
     // 各项选择和开关。
