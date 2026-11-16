@@ -31,6 +31,17 @@ static Color mix(Color from, Color to, double amount)
     return COLOR_RGB(mix_channel(from.r, to.r, amount), mix_channel(from.g, to.g, amount), mix_channel(from.b, to.b, amount));
 }
 
+Color color_over(Color top, Color bottom)
+{
+    double top_alpha = top.a / 255.0, bottom_alpha = bottom.a / 255.0;
+    double alpha = top_alpha + bottom_alpha * (1 - top_alpha);
+    if (alpha <= 0) return COLOR_TRANSPARENT;
+#define OVER(channel) (uint8_t)lround((top.channel * top_alpha + bottom.channel * bottom_alpha * (1 - top_alpha)) / alpha)
+    Color result = { (uint8_t)lround(alpha * 255), OVER(r), OVER(g), OVER(b) };
+#undef OVER
+    return result;
+}
+
 Color color_lerp(Color from, Color to, double amount)
 {
     if (amount <= 0) return from;

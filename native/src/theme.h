@@ -22,6 +22,9 @@ Color color_with_alpha(Color color, uint8_t alpha);
 /// 两种颜色之间按 amount（0–1）过渡，透明度一起过渡。
 Color color_lerp(Color from, Color to, double amount);
 
+/// top 盖在 bottom 上面（普通的透明叠加）得到的颜色。
+Color color_over(Color top, Color bottom);
+
 /// 强调色的一组深浅：Windows 提供的，或由一个颜色生成的。
 typedef struct AccentPalette
 {

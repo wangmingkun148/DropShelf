@@ -725,6 +725,11 @@ static void test_theme(void)
     CHECK(color_equal(color_lerp(COLOR_BLACK, COLOR_WHITE, 0), COLOR_BLACK) && color_equal(color_lerp(COLOR_BLACK, COLOR_WHITE, 1), COLOR_WHITE) &&
           color_lerp(COLOR_BLACK, COLOR_WHITE, 0.5).r == 128 && color_equal(color_lerp(COLOR_TRANSPARENT, COLOR_RGB(10, 20, 30), 0.5), COLOR_ARGB(128, 10, 20, 30)),
         "颜色过渡不正确");
+    CHECK(color_equal(color_over(COLOR_ARGB(0x80, 255, 255, 255), COLOR_BLACK), COLOR_RGB(128, 128, 128)) &&
+          color_equal(color_over(COLOR_ARGB(0x40, 10, 20, 30), COLOR_TRANSPARENT), COLOR_ARGB(0x40, 10, 20, 30)) &&
+          color_equal(color_over(COLOR_RGB(1, 2, 3), COLOR_ARGB(0x80, 200, 100, 50)), COLOR_RGB(1, 2, 3)) &&
+          color_equal(color_over(COLOR_TRANSPARENT, COLOR_TRANSPARENT), COLOR_TRANSPARENT),
+        "颜色叠加不正确");
 
     theme_set_mode(THEME_DARK, L"#8764B8");
     CHECK(theme_is_dark() && color_equal(theme_accent().base, COLOR_RGB(0x87, 0x64, 0xB8)) && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0x2C, 0x2C, 0x2C)),
@@ -1520,6 +1525,7 @@ int main(int argc, char **argv)
     run("language template", test_language_template);
     run("matrix invert", test_matrix_invert);
     run("image release on other thread", test_image_release_on_other_thread);
+    run("gfx layers", test_gfx_layers);
     run("main window", test_main_window);
     run("main window settings", test_main_window_settings);
     run("calibration dialog", test_calibration_dialog);

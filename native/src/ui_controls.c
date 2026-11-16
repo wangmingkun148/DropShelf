@@ -202,12 +202,14 @@ void ui_paint(UiElement *element, double time)
     if (element->hidden || element->opacity <= 0.001f) return;
     if (element->transformed) gfx_push_transform(element->transform);
     bool faded = element->opacity < 0.999f;
-    if (faded) gfx_push_opacity(element->opacity);
+    // 自己不画、只画子元素时，淡出和圆角裁剪合成一层：画出来一样，少一张中间位图。
+    bool merged = faded && element->clip && element->clip_radius > 0 && !element->type->paint && !element->type->paint_over;
+    if (faded && !merged) gfx_push_opacity(element->opacity);
     if (element->type->paint) element->type->paint(element, time);
     if (element->clip)
     {
         GfxRect clip = clip_bounds(element);
-        if (element->clip_radius > 0) gfx_push_layer(clip, element->clip_radius, 1);
+        if (element->clip_radius > 0) gfx_push_layer(clip, element->clip_radius, merged ? element->opacity : 1);
         else gfx_push_clip(clip);
     }
     if (!element->type->paints_children)
@@ -218,7 +220,7 @@ void ui_paint(UiElement *element, double time)
         else gfx_pop_clip();
     }
     if (element->type->paint_over) element->type->paint_over(element, time);
-    if (faded) gfx_pop_layer();
+    if (faded && !merged) gfx_pop_layer();
     if (element->transformed) gfx_pop_transform();
 }
 

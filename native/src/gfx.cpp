@@ -308,10 +308,20 @@ static void layout_cache_clear(void)
         }
 }
 
+void gfx_release_text_cache(void)
+{
+    if (!drawing) layout_cache_clear();
+}
+
 /// 变换的栈：gfx_push_transform 叠加，gfx_pop_transform 还原。
 #define TRANSFORM_STACK_SIZE 16
 static D2D1_MATRIX_3X2_F transform_stack[TRANSFORM_STACK_SIZE];
 static int transform_depth;
+
+/// 层的栈：每层是否真的交给了 Direct2D（省掉的层弹出时也不弹）。
+#define LAYER_STACK_SIZE 32
+static bool layer_pushed[LAYER_STACK_SIZE];
+static int layer_depth;
 
 bool gfx_begin(GfxSurface *surface, int width, int height, float dpi)
 {
@@ -329,6 +339,7 @@ bool gfx_begin(GfxSurface *surface, int width, int height, float dpi)
     context->BeginDraw();
     context->SetTransform(D2D1::Matrix3x2F::Identity());
     transform_depth = 0;
+    layer_depth = 0;
     drawing = surface;
     return true;
 }
@@ -372,6 +383,7 @@ bool gfx_begin_image(int width, int height, float dpi)
     context->BeginDraw();
     context->SetTransform(D2D1::Matrix3x2F::Identity());
     transform_depth = 0;
+    layer_depth = 0;
     drawing = &image_surface;
     return true;
 }
@@ -796,9 +808,15 @@ void gfx_pop_clip(void)
 void gfx_push_layer(GfxRect rect, float radius, float opacity)
 {
     if (!drawing) return;
+    // 不裁剪、不透明的层画出来和不开层一样，却要一张和窗口一样大的中间位图（显卡驱动用过以后不还给系统），不开。
+    bool clips = rect.right > rect.left && rect.bottom > rect.top;
+    bool pushed = clips || opacity < 0.999f;
+    if (layer_depth < LAYER_STACK_SIZE) layer_pushed[layer_depth] = pushed;
+    layer_depth++;
+    if (!pushed) return;
     ID2D1Geometry *mask = nullptr;
     D2D1_RECT_F bounds = D2D1::InfiniteRect();
-    if (rect.right > rect.left && rect.bottom > rect.top)
+    if (clips)
     {
         bounds = to_rect(rect);
         ID2D1RoundedRectangleGeometry *rounded = nullptr;
@@ -816,30 +834,23 @@ void gfx_push_opacity(float opacity)
 
 void gfx_pop_layer(void)
 {
-    if (drawing) context->PopLayer();
+    if (!drawing || layer_depth <= 0) return;
+    layer_depth--;
+    if (layer_depth < LAYER_STACK_SIZE && !layer_pushed[layer_depth]) return;
+    context->PopLayer();
 }
 
-void gfx_push_layer_hole(GfxRect outer, GfxRect hole, float radius, GfxMatrix hole_matrix, float opacity)
+void gfx_fill_rounded_replace(GfxRect rect, float radius, GfxMatrix matrix, Color color)
 {
     if (!drawing) return;
-    ID2D1RectangleGeometry *bounds = nullptr;
-    ID2D1RoundedRectangleGeometry *card = nullptr;
-    ID2D1TransformedGeometry *moved = nullptr;
-    ID2D1GeometryGroup *group = nullptr;
-    D2D1::Matrix3x2F matrix(hole_matrix.m11, hole_matrix.m12, hole_matrix.m21, hole_matrix.m22, hole_matrix.dx, hole_matrix.dy);
-    if (SUCCEEDED(d2d_factory->CreateRectangleGeometry(to_rect(outer), &bounds)) &&
-        SUCCEEDED(d2d_factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(to_rect(hole), radius, radius), &card)) &&
-        SUCCEEDED(d2d_factory->CreateTransformedGeometry(card, matrix, &moved)))
-    {
-        // 交替填充：矩形里挖掉卡片覆盖的部分。
-        ID2D1Geometry *parts[2] = { bounds, moved };
-        d2d_factory->CreateGeometryGroup(D2D1_FILL_MODE_ALTERNATE, parts, 2, &group);
-    }
-    context->PushLayer(D2D1::LayerParameters1(to_rect(outer), group, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), opacity), nullptr);
-    release(group);
-    release(moved);
-    release(card);
-    release(bounds);
+    D2D1_MATRIX_3X2_F current;
+    context->GetTransform(&current);
+    D2D1::Matrix3x2F local(matrix.m11, matrix.m12, matrix.m21, matrix.m22, matrix.dx, matrix.dy);
+    context->SetTransform(local * (*D2D1::Matrix3x2F::ReinterpretBaseType(&current)));
+    context->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+    context->FillRoundedRectangle(D2D1::RoundedRect(to_rect(rect), radius, radius), use_color(color));
+    context->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+    context->SetTransform(current);
 }
 
 bool gfx_matrix_invert(GfxMatrix matrix, GfxMatrix *inverse)

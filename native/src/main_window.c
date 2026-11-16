@@ -787,6 +787,13 @@ static void root_arrange(UiElement *element)
     ui_arrange(M->dialogs, bounds);
 }
 
+Color main_stage_background(void)
+{
+    // 和下面 root_paint 画出来的一样：窗口先清成底色（有系统材质时全透明），内容区再盖一层 THEME_LAYER。
+    Color window = ui_window_has_backdrop(M->window) ? COLOR_TRANSPARENT : theme_color(THEME_WINDOW_BACKGROUND);
+    return color_over(theme_color(THEME_LAYER), window);
+}
+
 static void root_paint(UiElement *element, double time)
 {
     GfxRect bounds = element->bounds;
@@ -981,6 +988,8 @@ static void on_closed(UiWindow *closed, void *context)
     actions_close();
     dialogs_close();
     flip_close();
+    // 排好的几百段文字只有主窗口用，留着要占几兆内存；下次打开时第一帧重新排。
+    gfx_release_text_cache();
     memset(M, 0, sizeof(*M));
     M->page = PAGE_OVERVIEW;
     minimize_button = maximize_button = close_button = status_element = NULL;

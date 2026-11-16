@@ -92,6 +92,9 @@ void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity);
 /// 整个画面清成一种颜色；全透明就是什么都不画，露出系统材质。
 void gfx_clear(Color color);
 
+/// 放掉留着下次用的文字排版；正在画时什么也不做。
+void gfx_release_text_cache(void);
+
 void gfx_fill_rect(GfxRect rect, Color color);
 void gfx_fill_rounded(GfxRect rect, float radius, Color color);
 
@@ -114,14 +117,16 @@ void gfx_shadow(GfxRect rect, float radius, float blur, float offset_x, float of
 void gfx_push_clip(GfxRect rect);
 void gfx_pop_clip(void);
 
-/// 之后的内容裁成圆角矩形并整体乘以 opacity，直到 gfx_pop_layer。radius 为 0 且 rect 为空时只调整透明度。
+/// 之后的内容裁成圆角矩形并整体乘以 opacity，直到 gfx_pop_layer。radius 为 0 且 rect 为空时只调整透明度；
+/// 这时 opacity 为 1 的层什么也不改变，不会真的开。
 void gfx_push_layer(GfxRect rect, float radius, float opacity);
 void gfx_push_opacity(float opacity);
 void gfx_pop_layer(void);
 
-/// 之后的内容只画在 outer 以内、并且挖掉 hole（经过 hole_matrix 变换的圆角矩形）的地方，整体乘以 opacity，直到 gfx_pop_layer。
-/// 翻牌时概览页挖出卡片的形状，旧内容不会透过半透明的牌面。
-void gfx_push_layer_hole(GfxRect outer, GfxRect hole, float radius, GfxMatrix hole_matrix, float opacity);
+/// 圆角矩形 rect（经过 matrix 变换）以内已经画上的内容直接换成 color，不和底下的颜色混合；边缘按覆盖的比例过渡。
+/// 翻牌时用它在旧内容里挖出卡片的形状：底下是一种纯色时，先照常画、再用底色盖回去，和开一层挖空的效果一样，
+/// 却不用另开一层（每层都要一张和范围一样大的中间位图，显卡驱动用过以后不还给系统）。
+void gfx_fill_rounded_replace(GfxRect rect, float radius, GfxMatrix matrix, Color color);
 
 /// 之后的内容先做 matrix 变换（叠加在已有的变换上），直到 gfx_pop_transform。
 void gfx_push_transform(GfxMatrix matrix);

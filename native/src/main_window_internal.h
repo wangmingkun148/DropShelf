@@ -131,6 +131,8 @@ extern MainShell main_shell;
 GfxRect main_sheet_area(void);
 /// 页面内容（概览页）静止时的左右边。
 void main_content_columns(float *left, float *right);
+/// 内容区的底色：窗口的底色上盖一层内容区的颜色。
+Color main_stage_background(void);
 void main_request_frame(void);
 void main_repaint(void);
 void main_relayout(void);

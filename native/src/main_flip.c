@@ -1121,22 +1121,21 @@ void flip_paint_stage(double time)
     GfxRect outer = { stage.left - 2, stage.top - 2, stage.right + 2, stage.bottom + 2 };
     bool hole = flipping && flip.page_shown == 1;
 
-    // 概览页：翻牌时在卡片范围内挖空，旧内容不会透过半透明的牌面。
-    if (!M->overview_scroll->hidden)
-    {
-        if (hole) gfx_push_layer_hole(outer, flip.back_card, SHEET_RADIUS, flip.back_matrix, 1);
-        ui_paint(M->overview_scroll, time);
-        if (hole) gfx_pop_layer();
-    }
+    // 翻牌和抽牌时，卡片范围里的旧内容（概览页、旧页面、牌的边）要挖掉，不能透过半透明的牌面。
+    // 内容区的底色是纯色：先照常画，再用底色把卡片的形状直接盖回去。效果和开一层挖空一样，
+    // 却不用每帧一张内容区大小的中间位图（显卡驱动用过以后不还给系统，内存只增不减）。
+    // 抽牌只在设置页之间，那时概览页是隐藏的，不会被一起盖掉。
+    if (hole || sliding) gfx_push_clip(outer);
+    if (!M->overview_scroll->hidden) ui_paint(M->overview_scroll, time);
 
     if (sliding)
     {
         // 旧页面退到牌堆后面：只露出新卡片以外的部分。
-        gfx_push_layer_hole(outer, slide.new_card, SHEET_RADIUS, gfx_matrix_identity(), 1);
         GfxRect clip = { slide.from_area.left, slide.from_area.top, slide.from_area.right, slide.from_area.bottom };
         paint_host(&M->pages[slide.from_page], time, slide.old_matrix, clip, slide.old_opacity);
         paint_edges(time);
-        gfx_pop_layer();
+        gfx_fill_rounded_replace(slide.new_card, SHEET_RADIUS, gfx_matrix_identity(), main_stage_background());
+        gfx_pop_clip();
         // 新页面从牌堆前面抽出，外框单独画，下沿跟着卡片走。
         PageView *to = &M->pages[slide.page];
         GfxRect to_clip = slide.to_area;
@@ -1146,9 +1145,12 @@ void flip_paint_stage(double time)
         return;
     }
 
-    if (hole) gfx_push_layer_hole(outer, flip.back_card, SHEET_RADIUS, flip.back_matrix, 1);
     paint_edges(time);
-    if (hole) gfx_pop_layer();
+    if (hole)
+    {
+        gfx_fill_rounded_replace(flip.back_card, SHEET_RADIUS, flip.back_matrix, main_stage_background());
+        gfx_pop_clip();
+    }
 
     if (flipping && flip.page_shown == 0)
     {

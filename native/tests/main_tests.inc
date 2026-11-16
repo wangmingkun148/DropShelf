@@ -168,6 +168,54 @@ static void test_image_release_on_other_thread(void)
     CHECK(gfx_retired_bitmap_count() == 0, "界面线程开始画时应释放留下的位图");
 }
 
+/// 位图上 (x, y) 处的像素：自上而下、预乘透明度的 BGRA。
+static const uint8_t *bitmap_pixel(HBITMAP bitmap, int x, int y)
+{
+    static const uint8_t none[4] = {0};
+    DIBSECTION section;
+    if (!bitmap || GetObjectW(bitmap, sizeof(section), &section) != sizeof(section) || !section.dsBm.bmBits) return none;
+    return (const uint8_t *)section.dsBm.bmBits + (size_t)y * section.dsBm.bmWidthBytes + (size_t)x * 4;
+}
+
+static bool pixel_near(const uint8_t *pixel, int b, int g, int r, int a)
+{
+    return abs(pixel[0] - b) <= 2 && abs(pixel[1] - g) <= 2 && abs(pixel[2] - r) <= 2 && abs(pixel[3] - a) <= 2;
+}
+
+/// 层和直接盖色：省掉的层（不裁剪、不透明）弹出时不能多弹；盖色不和底下混合，用完恢复普通的叠加。
+static void test_gfx_layers(void)
+{
+    HBITMAP bitmap = NULL;
+    if (gfx_begin_image(40, 20, 96))
+    {
+        gfx_clear(COLOR_RGB(0, 0, 255));
+        // 左半边：不开的层套着圆角裁剪和半透明。
+        gfx_push_opacity(1);
+        gfx_push_layer((GfxRect){ 2, 2, 18, 18 }, 4, 1);
+        gfx_push_opacity(0.5f);
+        gfx_fill_rect((GfxRect){ 0, 0, 40, 20 }, COLOR_RGB(255, 0, 0));
+        gfx_pop_layer();
+        gfx_pop_layer();
+        gfx_pop_layer();
+        gfx_fill_rect((GfxRect){ 0, 0, 1, 1 }, COLOR_RGB(0, 255, 0));
+        // 右半边：红底上（经过平移）直接换成半透明的绿，之后再画的照常叠加。
+        gfx_fill_rect((GfxRect){ 20, 0, 40, 20 }, COLOR_RGB(255, 0, 0));
+        gfx_fill_rounded_replace((GfxRect){ 0, 0, 12, 12 }, 0, gfx_matrix_translate(24, 4), COLOR_ARGB(0x80, 0, 255, 0));
+        gfx_fill_rect((GfxRect){ 37, 0, 40, 20 }, COLOR_ARGB(0x80, 0, 255, 0));
+        bitmap = gfx_end_image_bitmap();
+    }
+    CHECK(bitmap != NULL, "没能画进图片（层没有成对弹出时 Direct2D 会报错）");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 10, 10), 128, 0, 128, 255), "半透明的层没有按一半透明度叠加");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 1, 10), 255, 0, 0, 255) && pixel_near(bitmap_pixel(bitmap, 2, 2), 255, 0, 0, 255),
+        "圆角裁剪以外不应画上");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 0, 0), 0, 255, 0, 255), "层弹出以后裁剪没有解除");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 30, 10), 0, 128, 0, 128), "盖色应直接换掉底下的颜色，不和它混合");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 22, 10), 0, 0, 255, 255) && pixel_near(bitmap_pixel(bitmap, 30, 2), 0, 0, 255, 255),
+        "盖色超出了范围");
+    CHECK(pixel_near(bitmap_pixel(bitmap, 38, 10), 0, 128, 127, 255), "盖色以后应恢复普通的叠加");
+    if (bitmap) DeleteObject(bitmap);
+}
+
 static void change_window_size(AppSettings *settings, void *context)
 {
     (void)context;
