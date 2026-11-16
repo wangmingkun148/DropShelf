@@ -278,8 +278,9 @@ DropContentKind drop_classify(IDataObject *data)
     if (!data) return DROP_NONE;
     if (drop_has_format(data, CF_HDROP)) return DROP_FILES;
     wchar_t *single = drop_read_single_file_name(data);
+    bool has_single_file = single != NULL;
     free(single);
-    if (single) return DROP_FILES;
+    if (has_single_file) return DROP_FILES;
 
     bool has_url = false;
     for (int index = 0; index < COUNT_OF(url_formats) && !has_url; index++)

@@ -236,6 +236,7 @@ static DWORD copy_file(const wchar_t *source, const wchar_t *target)
 }
 
 /// 联接点和目录符号链接无法原样复制，跳过又会让移动后删掉源文件夹时丢失它们；扫描时一并检查，发现就在复制之前报错。
+/// OneDrive 等按需下载的文件夹也带重解析点属性，但是真正的文件夹，照常复制（见 find_data_is_link）。
 static DWORD copy_directory(const wchar_t *source, const wchar_t *destination)
 {
     StrList directories = {0}, files = {0}, pending = {0};
@@ -260,7 +261,7 @@ static DWORD copy_directory(const wchar_t *source, const wchar_t *destination)
             if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
             wchar_t *full = path_join(current, data.cFileName);
             if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) strlist_add_owned(&files, full);
-            else if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            else if (find_data_is_link(&data))
             {
                 free(full);
                 error = ERROR_CONTAINS_LINKS;

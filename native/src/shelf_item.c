@@ -155,6 +155,8 @@ wchar_t *text_summarize(const wchar_t *text, int maximum)
         if ((int)builder.length > maximum)
         {
             builder.length = (size_t)maximum;
+            // 表情等字符占两个 UTF-16 单元，别把它们截成半个（留下的半个会显示成方框，写进文件名也不合法）。
+            if (builder.length > 0 && IS_HIGH_SURROGATE(builder.data[builder.length - 1])) builder.length--;
             builder.data[builder.length] = 0;
             wstr_append(&builder, L"…");
             break;
@@ -489,7 +491,7 @@ typedef struct FolderWalk
     volatile LONG *cancelled;
 } FolderWalk;
 
-/// 递归累加文件大小。联接点和符号链接不进去也不计入，没有权限的子文件夹跳过。
+/// 递归累加文件大小。联接点和符号链接不进去也不计入（OneDrive 等按需下载的文件和文件夹照常计入），没有权限的子文件夹跳过。
 static bool walk_folder(const wchar_t *path, FolderWalk *walk)
 {
     wchar_t *pattern = path_join(path, L"*");
@@ -505,7 +507,7 @@ static bool walk_folder(const wchar_t *path, FolderWalk *walk)
             ok = false;
             break;
         }
-        if (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        if (find_data_is_link(&found)) continue;
         if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
         {
             if (wcscmp(found.cFileName, L".") == 0 || wcscmp(found.cFileName, L"..") == 0) continue;

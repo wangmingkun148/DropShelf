@@ -273,6 +273,45 @@ bool path_is_directory(const wchar_t *path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+/// 带这些重解析点标记的是真正的文件或文件夹，内容由系统或同步程序按需提供。
+static bool reparse_tag_has_content(DWORD tag)
+{
+    // 云文件（OneDrive 的“按需下载”等）：0x9000001A，以及 0x9000x01A（x 为 1–F）。
+    if ((tag & 0xFFFF0FFFu) == 0x9000001Au) return true;
+    switch (tag)
+    {
+        case 0x80000013u:   // 重复数据删除
+        case 0x80000017u:   // 系统压缩（WOF）
+        case 0x8000001Eu:   // 存储同步
+        case 0x80000021u:   // OneDrive（旧版占位文件）
+        case 0x9000001Cu:   // 投影文件系统（ProjFS）
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool find_data_is_link(const WIN32_FIND_DATAW *data)
+{
+    if (!(data->dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    // 带重解析点属性时，dwReserved0 里是它的标记；读不出时是 0，按链接处理。
+    return !reparse_tag_has_content(data->dwReserved0);
+}
+
+bool path_is_link(const wchar_t *path)
+{
+    // 末尾的分隔符会让 FindFirstFile 去找文件夹里面的东西。
+    wchar_t *trimmed = wcs_dup(path);
+    size_t length = wcslen(trimmed);
+    while (length > 3 && is_separator(trimmed[length - 1])) trimmed[--length] = 0;
+    WIN32_FIND_DATAW data;
+    HANDLE find = FindFirstFileW(trimmed, &data);
+    free(trimmed);
+    if (find == INVALID_HANDLE_VALUE) return true;
+    FindClose(find);
+    return find_data_is_link(&data);
+}
+
 bool directory_create(const wchar_t *path)
 {
     if (!path || !*path) return false;

@@ -184,7 +184,8 @@ static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
 }
 
 /// 整棵目录树只走一遍：每个文件夹列一次，文件直接写入，子文件夹排队，什么都没有的文件夹留一个空条目。
-/// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。
+/// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。OneDrive 等按需下载的文件和文件夹也带重解析点属性，
+/// 但是真正的内容，照常压缩（见 find_data_is_link）。
 static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList *used)
 {
     wchar_t *folder_name = path_folder_name(directory);
@@ -219,7 +220,7 @@ static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList
             {
                 if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
                 empty = false;
-                if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+                if (find_data_is_link(&data)) continue;
                 WStr name = {0};
                 wstr_appendf(&name, L"%ls/%ls", current_name, data.cFileName);
                 wchar_t *full = path_join(current, data.cFileName);

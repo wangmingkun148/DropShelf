@@ -503,6 +503,8 @@ wchar_t *shelf_item_file_name(const ShelfItem *item)
         if (builder.length == MAXIMUM_STEM_LENGTH) break;
     }
     free(source);
+    // 截在了一个占两个 UTF-16 单元的字符中间时去掉留下的半个：文件名里不能有落单的代理项。
+    if (builder.length > 0 && IS_HIGH_SURROGATE(builder.data[builder.length - 1])) builder.data[--builder.length] = 0;
     // 去掉首尾的空格和点。
     wchar_t *stem = builder.data;
     while (*stem == L' ' || *stem == L'.') stem++;

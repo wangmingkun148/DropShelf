@@ -159,6 +159,9 @@ static void test_shelf_item_text(void)
     CHECK(owned_text_is(format_size(1536), L"1.5 KB") && owned_text_is(format_size(5505024), L"5.3 MB") && owned_text_is(format_size(3LL << 30), L"3 GB"), "大小的写法不正确");
     CHECK(owned_text_is(text_summarize(L"  第一行  内容\n第二行", 60), L"第一行 内容"), "文本摘要没有只取第一行、合并空白");
     CHECK(owned_text_is(text_summarize(L"\n\n  abcdef", 3), L"abc…"), "长文本没有截断");
+    // 表情等字符占两个 UTF-16 单元：截断时不能只留下半个，完整地落在上限以内时照常保留。
+    CHECK(owned_text_is(text_summarize(L"ab\U0001F600cd", 3), L"ab…"), "截断时把表情字符截成了半个");
+    CHECK(owned_text_is(text_summarize(L"ab\U0001F600cd", 4), L"ab\U0001F600…"), "完整的表情字符被截掉了");
     CHECK(text_is_single_url(L"https://example.com/page") && text_is_single_url(L"HTTP://Example.com") && !text_is_single_url(L"file:///C:/x") &&
           !text_is_single_url(L"https://a b") && !text_is_single_url(L"ftp://example.com") && !text_is_single_url(L"https://a\nb"), "网址判断不正确");
     CHECK(owned_text_is(url_host(L"https://user@Example.COM:8080/x?y"), L"example.com") && url_host(L"mailto:a@b") == NULL, "主机名不正确");
@@ -220,6 +223,18 @@ static void test_shelf_item_text(void)
     shelf_item_release(bare);
     shelf_item_release(odd);
     shelf_item_release(reserved);
+
+    // 名称太长被截断时，不能把占两个 UTF-16 单元的字符截成半个（文件名里不能有落单的代理项）。
+    wchar_t long_title[64];
+    for (int index = 0; index < 39; index++) long_title[index] = L'a';
+    wcscpy_s(long_title + 39, 25, L"\U0001F600后面还有很多字");
+    ShelfItem *cut = shelf_item_new(ITEM_LINK, L"https://example.com/a", long_title, false);
+    wchar_t *cut_name = shelf_item_file_name(cut);
+    bool lone_surrogate = false;
+    for (const wchar_t *c = cut_name; *c; c++) lone_surrogate |= IS_HIGH_SURROGATE(*c) || IS_LOW_SURROGATE(*c);
+    CHECK(cut_name && !lone_surrogate && wcslen(cut_name) == 39 + 4, "截断后的文件名里留下了半个表情字符");
+    free(cut_name);
+    shelf_item_release(cut);
 }
 
 // ───────────── 置物架的内容 ─────────────
@@ -445,6 +460,15 @@ static void test_attachment_cache(void)
     wchar_t *shortened = attachment_safe_name(longer, &used);
     CHECK(wcslen(shortened) == 140 && wcscmp(path_extension(shortened), L".docx") == 0, "太长的名称没有截短");
     free(shortened);
+    // 截断处正好是一个表情字符的前一半时，整个字符一起去掉。
+    wchar_t emoji_name[200];
+    for (int index = 0; index < 135; index++) emoji_name[index] = L'e';
+    wcscpy_s(emoji_name + 135, 65, L"\U0001F600bbbbbbbbbb.txt");
+    wchar_t *emoji_shortened = attachment_safe_name(emoji_name, &used);
+    bool emoji_lone = false;
+    for (const wchar_t *c = emoji_shortened; *c; c++) emoji_lone |= IS_HIGH_SURROGATE(*c) || IS_LOW_SURROGATE(*c);
+    CHECK(!emoji_lone && wcslen(emoji_shortened) == 135 + 4 && wcscmp(path_extension(emoji_shortened), L".txt") == 0, "截短名称时把表情字符截成了半个");
+    free(emoji_shortened);
     strlist_clear(&used);
 
     wchar_t *cache = attachment_cache_create();

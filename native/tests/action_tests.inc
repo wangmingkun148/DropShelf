@@ -150,6 +150,41 @@ static void test_file_operations(void)
     wchar_t *junction = path_join(link_source, L"junction");
     make_junction(junction, linked);
     CHECK(path_is_directory(junction), "无法创建测试用的联接点");
+
+    // 联接点、符号链接和认不得的重解析点算链接；OneDrive 等按需下载的文件和文件夹（云文件、重复数据删除等）带着同样的属性，
+    // 却是真正的内容，不能当链接跳过（否则压缩时漏掉里面的文件、复制时报“含有链接”）。
+    WIN32_FIND_DATAW find_data = {0};
+    CHECK(!find_data_is_link(&find_data), "没有重解析点属性的项目被当成了链接");
+    find_data.dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    find_data.dwReserved0 = 0xA0000003u;    // 联接点
+    CHECK(find_data_is_link(&find_data), "联接点没有被当成链接");
+    find_data.dwReserved0 = 0xA000000Cu;    // 符号链接
+    CHECK(find_data_is_link(&find_data), "符号链接没有被当成链接");
+    find_data.dwReserved0 = 0x8000001Bu;    // 应用执行别名：读不了内容
+    CHECK(find_data_is_link(&find_data), "认不得的重解析点没有按链接处理");
+    find_data.dwReserved0 = 0;
+    CHECK(find_data_is_link(&find_data), "读不出标记的重解析点没有按链接处理");
+    find_data.dwReserved0 = 0x9000701Au;    // OneDrive 的云文件（CLOUD_7）
+    CHECK(!find_data_is_link(&find_data), "OneDrive 的占位文件夹被当成了链接");
+    find_data.dwReserved0 = 0x9000001Au;    // 云文件
+    CHECK(!find_data_is_link(&find_data), "云文件被当成了链接");
+    find_data.dwReserved0 = 0x80000013u;    // 重复数据删除
+    CHECK(!find_data_is_link(&find_data), "重复数据删除的文件被当成了链接");
+    wchar_t *junction_with_separator = path_join(junction, L"");
+    CHECK(path_is_link(junction) && path_is_link(junction_with_separator) && !path_is_link(link_source) && path_is_link(L"C:\\no\\such\\folder"),
+        "按路径判断是不是链接不对");
+    free(junction_with_separator);
+
+    // 删除带联接点的文件夹时只删联接点本身，不进去删它指向的内容。
+    wchar_t *doomed = test_folder(L"ops-link-doomed");
+    wchar_t *doomed_junction = path_join(doomed, L"junction");
+    make_junction(doomed_junction, linked);
+    wchar_t *linked_file = path_join(linked, L"inside.txt");
+    CHECK(directory_delete_tree(doomed) && !path_exists(doomed) && file_text_is(linked_file, "linked"), "删除带联接点的文件夹时误删了联接点指向的内容");
+    free(linked_file);
+    free(doomed_junction);
+    free(doomed);
+
     wchar_t *link_destination = test_folder(L"ops-link-destination");
     StrList link_list = {0};
     strlist_add(&link_list, link_source);

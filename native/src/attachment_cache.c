@@ -115,8 +115,9 @@ bool directory_delete_tree(const wchar_t *path)
         if (attributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path, attributes & ~FILE_ATTRIBUTE_READONLY);
         return DeleteFileW(path) != 0;
     }
-    // 联接点和符号链接只删除链接本身，不进去删里面的东西。
-    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    // 联接点和符号链接只删除链接本身，不进去删里面的东西。OneDrive 等按需下载的文件夹也带重解析点属性，
+    // 但是真正的文件夹：不进去删的话，移动文件夹时复制完了却删不掉原来的（见 find_data_is_link）。
+    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT) || !path_is_link(path))
     {
         wchar_t *pattern = path_join(path, L"*");
         WIN32_FIND_DATAW found;
@@ -361,6 +362,8 @@ wchar_t *attachment_safe_name(const wchar_t *supplied, StrList *used)
         size_t extension_length = wcslen(extension);
         size_t keep = 140 > extension_length ? 140 - extension_length : 1;
         if (keep < 1) keep = 1;
+        // 别截在一个占两个 UTF-16 单元的字符中间。
+        if (keep > 1 && IS_HIGH_SURROGATE(name[keep - 1])) keep--;
         WStr shortened = {0};
         wstr_append_n(&shortened, name, keep);
         wstr_append(&shortened, extension);

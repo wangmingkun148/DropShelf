@@ -71,6 +71,14 @@ bool path_exists(const wchar_t *path);
 bool path_is_directory(const wchar_t *path);
 bool directory_create(const wchar_t *path);             // 连同上级文件夹一起创建
 
+/// 目录项是符号链接、联接点这类“指向别处”的重解析点：复制、压缩、统计大小时不能当成里面的内容，也不能进去。
+/// OneDrive 等按需下载的占位文件和文件夹、重复数据删除和系统压缩的文件也带“重解析点”属性，
+/// 但它们是真正的内容，不算链接。认不得的重解析点按链接处理（和只看属性时一样保守）。
+bool find_data_is_link(const WIN32_FIND_DATAW *data);
+
+/// 路径本身是不是上面说的链接；读不到信息时按链接处理，不去动它。
+bool path_is_link(const wchar_t *path);
+
 /// 读取文本文件（UTF-8，认得 UTF-8 和 UTF-16 的 BOM）。文件不存在、读不了或超过 maximum 字节时返回 NULL。
 wchar_t *file_read_text(const wchar_t *path, size_t maximum);
 
