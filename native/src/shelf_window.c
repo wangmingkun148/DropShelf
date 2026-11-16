@@ -137,7 +137,7 @@ void shelf_update_window_size(ShelfWindow *shelf)
     if (rect.right - rect.left != pixel_width || rect.bottom - rect.top != pixel_height)
         SetWindowPos(shelf->handle, NULL, 0, 0, pixel_width, pixel_height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
-    if (IsWindowVisible(shelf->handle) && !shelf->sliding) shelf_keep_in_work_area(shelf);
+    if (IsWindowVisible(shelf->handle) && !shelf->sliding && !shelf->card) shelf_keep_in_work_area(shelf);
     ui_window_invalidate(shelf->ui);
 }
 

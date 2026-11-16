@@ -533,8 +533,8 @@ static void apply_window_size(ShelfWindow *shelf, Tween *tween, float t)
     int height = (int)lroundf(from[3] + (to[3] - from[3]) * t);
     UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
     int *last = tween->window_last;
-    // 正在滑入或退出时只改大小，不和滑入动画抢位置。
-    if (shelf->sliding || (x == last[0] && y == last[1]))
+    // 正在滑入、或有牌在替它出场离场时只改大小，不和它们抢位置。
+    if (shelf->sliding || shelf->card || (x == last[0] && y == last[1]))
     {
         flags |= SWP_NOMOVE;
         x = last[0];
