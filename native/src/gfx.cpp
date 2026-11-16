@@ -1281,9 +1281,15 @@ static ID2D1Brush *create_stripes(const ThemePattern *pattern)
     return gradient;
 }
 
+/// theme.h 在这里是 C++ 的声明，不调用 theme.c 里的函数，直接比较。
+static bool same_color(Color a, Color b)
+{
+    return a.a == b.a && a.r == b.r && a.g == b.g && a.b == b.b;
+}
+
 static bool same_pattern(const ThemePattern *a, const ThemePattern *b)
 {
-    return a->kind == b->kind && a->size == b->size && color_equal(a->fill, b->fill) && color_equal(a->line, b->line);
+    return a->kind == b->kind && a->size == b->size && same_color(a->fill, b->fill) && same_color(a->line, b->line);
 }
 
 /// 图案的画刷，从 (x, y) 开始铺；建不了时返回 NULL，调用方改用底色。

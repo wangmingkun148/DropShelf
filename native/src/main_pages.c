@@ -842,10 +842,11 @@ static void preview_box(GfxRect rect, float radius, uint32_t fill, uint32_t bord
     if (border) gfx_stroke_rounded(rect, radius, border_color, 1);
 }
 
-static GfxRect centered(GfxRect outer, float size)
+/// 预览中间那张竖放的牌。
+static GfxRect centered_card(GfxRect outer)
 {
-    float x = (outer.left + outer.right - size) / 2, y = (outer.top + outer.bottom - size) / 2;
-    return (GfxRect){ x, y, x + size, y + size };
+    float x = (outer.left + outer.right - 44) / 2, y = (outer.top + outer.bottom - 60) / 2;
+    return (GfxRect){ x, y, x + 44, y + 60 };
 }
 
 static void theme_tile_paint(UiElement *element, double time)
@@ -857,28 +858,33 @@ static void theme_tile_paint(UiElement *element, double time)
     if (element->hovered) gfx_fill_rounded(bounds, 10, theme_color(THEME_SUBTLE_HOVER));
     if (selected) gfx_stroke_rounded(bounds, 10, theme_color(THEME_ACCENT), 2);
     GfxRect preview = { bounds.left + 8, bounds.top + 8, bounds.left + 8 + 140, bounds.top + 8 + 92 };
+    // 主题预览：牌桌上放一张牌，跟随系统时左右各一半。
     switch (tile->theme)
     {
         case THEME_LIGHT:
-            preview_box(preview, 7, 0xFFF9F7F1, 0x14000000);
-            preview_box(centered(preview, 64), 8, 0xFFFFFFFF, 0x1A000000);
-            preview_box(centered(preview, 30), 5, 0xFFF9F7F1, 0x26000000);
+            preview_box(preview, 7, 0xFFE8E5DE, 0xFFD2CEC5);
+            preview_box(centered_card(preview), 5, 0xFFFBFAF6, 0xFF15171C);
             break;
         case THEME_DARK:
-            preview_box(preview, 7, 0xFF202020, 0x33FFFFFF);
-            preview_box(centered(preview, 64), 8, 0xFF2B2B2B, 0x26FFFFFF);
-            preview_box(centered(preview, 30), 5, 0xFF3B3B3B, 0x33FFFFFF);
+            preview_box(preview, 7, 0xFF1C1B19, 0xFF3A3834);
+            preview_box(centered_card(preview), 5, 0xFF262522, 0xFFA6A39C);
             break;
         default:
         {
-            // 跟随系统：左浅右深。
             float middle = (preview.left + preview.right) / 2;
             gfx_push_layer(preview, 7, 1);
-            gfx_fill_rect((GfxRect){ preview.left, preview.top, middle, preview.bottom }, COLOR_RGB(0xF9, 0xF7, 0xF1));
-            gfx_fill_rect((GfxRect){ middle, preview.top, preview.right, preview.bottom }, COLOR_RGB(0x20, 0x20, 0x20));
+            gfx_fill_rect((GfxRect){ preview.left, preview.top, middle, preview.bottom }, COLOR_RGB(0xE8, 0xE5, 0xDE));
+            gfx_fill_rect((GfxRect){ middle, preview.top, preview.right, preview.bottom }, COLOR_RGB(0x1C, 0x1B, 0x19));
             gfx_pop_layer();
-            preview_box(centered(preview, 64), 8, 0x80808080, 0);
-            preview_box(centered(preview, 30), 5, 0xFFFFFFFF, 0x33000000);
+            // 牌也是左右各一半：左边浅色的牌面配墨色的边，右边深色的牌面配浅灰的边。
+            GfxRect card = centered_card(preview);
+            float half = (card.left + card.right) / 2;
+            gfx_push_clip((GfxRect){ card.left, card.top, half, card.bottom });
+            preview_box(card, 5, 0xFFFBFAF6, 0xFF15171C);
+            gfx_pop_clip();
+            gfx_push_clip((GfxRect){ half, card.top, card.right, card.bottom });
+            preview_box(card, 5, 0xFF262522, 0xFFA6A39C);
+            gfx_pop_clip();
             break;
         }
     }
@@ -896,7 +902,6 @@ static void theme_tile_mouse(UiElement *element, const UiMouseEvent *event)
 
 static const UiElementType theme_tile_type = { theme_tile_measure, NULL, theme_tile_paint, theme_tile_mouse, NULL, true };
 
-/// 强调色色块：选中时外圈和对勾。index 为 -1 是跟随 Windows。
 /// 强调色色块的编号：先是默认的钴蓝、跟随 Windows，后面是 theme_accent_preset 的各个颜色。
 #define SWATCH_COBALT (-2)
 #define SWATCH_SYSTEM (-1)
