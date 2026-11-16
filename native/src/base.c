@@ -201,6 +201,56 @@ bool strlist_equal(const StrList *first, const StrList *second, bool ignore_case
     return true;
 }
 
+/// text 在集合里的位置；没有时是它该插入的位置。
+static int text_set_find(const TextSet *set, const wchar_t *text, bool *found)
+{
+    int low = 0, high = set->count;
+    *found = false;
+    while (low < high)
+    {
+        int middle = low + (high - low) / 2;
+        int order = set->ignore_case ? CompareStringOrdinal(set->items[middle], -1, text, -1, TRUE) - CSTR_EQUAL : wcscmp(set->items[middle], text);
+        if (order == 0)
+        {
+            *found = true;
+            return middle;
+        }
+        if (order < 0) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
+bool text_set_add(TextSet *set, const wchar_t *text)
+{
+    bool found;
+    int at = text_set_find(set, text, &found);
+    if (found) return false;
+    if (set->count == set->capacity)
+    {
+        set->capacity = set->capacity ? set->capacity * 2 : 64;
+        set->items = xrealloc((void *)set->items, (size_t)set->capacity * sizeof(const wchar_t *));
+    }
+    memmove(&set->items[at + 1], &set->items[at], (size_t)(set->count - at) * sizeof(const wchar_t *));
+    set->items[at] = text;
+    set->count++;
+    return true;
+}
+
+bool text_set_contains(const TextSet *set, const wchar_t *text)
+{
+    bool found;
+    text_set_find(set, text, &found);
+    return found;
+}
+
+void text_set_clear(TextSet *set)
+{
+    free((void *)set->items);
+    set->items = NULL;
+    set->count = set->capacity = 0;
+}
+
 char *utf8_from_wide(const wchar_t *text, size_t *length)
 {
     int source = (int)wcslen(text);

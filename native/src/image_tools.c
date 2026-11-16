@@ -1,6 +1,7 @@
 #define COBJMACROS
 #include "image_tools.h"
 #include "file_ops.h"
+#include "image_quality.h"
 #include "log.h"
 #include "settings.h"
 #include "shelf_item.h"
@@ -325,47 +326,76 @@ static HRESULT resize(IWICImagingFactory *factory, IWICBitmapSource **image, dou
     return S_OK;
 }
 
+typedef struct QualityProbe
+{
+    IWICImagingFactory *factory;
+    IWICBitmapSource *image;
+    long long maximum;
+    IStream *best, *candidate;      // 放得下的留在 best 里，新的一次写到 candidate
+    HRESULT result;
+} QualityProbe;
+
+static long long probe_quality(void *context, int quality)
+{
+    QualityProbe *probe = context;
+    probe->result = encode(probe->factory, probe->image, quality, probe->candidate);
+    if (FAILED(probe->result)) return -1;
+    long long size = (long long)stream_size(probe->candidate);
+    if (size <= probe->maximum)
+    {
+        IStream *swap = probe->best;
+        probe->best = probe->candidate;
+        probe->candidate = swap;
+    }
+    return size;
+}
+
 /// 找出不超过上限的最高画质；最低画质仍然过大时按比例缩小后重试。两个缓冲区轮流使用，一个存目前最好的结果，另一个写新的候选。
 /// 返回装着结果的那个（另一个调用方照常释放）。
+/// 每编码一次都要处理整张图片，所以能省就省：画质按估计的位置去试（见 image_quality_search）；
+/// 缩小以后先试最低画质——尺寸是按“最低画质刚好放得下”算的，最高画质几乎不可能放得下，不值得先花一次去试，
+/// 它留在搜索范围里，真放得下时照样会选到。
 static IStream *encode_within_limit(IWICImagingFactory *factory, IWICBitmapSource *image, long long maximum_bytes, IStream *best, IStream *candidate,
     HRESULT *result)
 {
     IWICBitmapSource *current = image;
     IWICBitmapSource_AddRef(current);
     IStream *found = NULL;
+    // 原尺寸下最高画质比最低画质大多少倍；缩小以后不再编码最高画质，按这个倍数估计。
+    double steepness = 0;
     for (int round = 0; round < 10 && SUCCEEDED(*result) && !found; round++)
     {
-        *result = encode(factory, current, MAXIMUM_QUALITY, best);
-        if (FAILED(*result)) break;
-        if ((long long)stream_size(best) <= maximum_bytes)
+        long long top_size = 0;
+        if (round == 0)
         {
-            found = best;
-            break;
+            *result = encode(factory, current, MAXIMUM_QUALITY, best);
+            if (FAILED(*result)) break;
+            top_size = (long long)stream_size(best);
+            if (top_size <= maximum_bytes)
+            {
+                found = best;
+                break;
+            }
         }
         *result = encode(factory, current, MINIMUM_QUALITY, best);
         if (FAILED(*result)) break;
-        if ((long long)stream_size(best) <= maximum_bytes)
+        long long low_size = (long long)stream_size(best);
+        if (low_size <= maximum_bytes)
         {
-            int low = MINIMUM_QUALITY, high = MAXIMUM_QUALITY - 1;
-            while (low < high && SUCCEEDED(*result))
-            {
-                int middle = (low + high + 1) / 2;
-                *result = encode(factory, current, middle, candidate);
-                if (FAILED(*result)) break;
-                if ((long long)stream_size(candidate) <= maximum_bytes)
-                {
-                    IStream *swap = best;
-                    best = candidate;
-                    candidate = swap;
-                    low = middle;
-                }
-                else high = middle - 1;
-            }
+            // 第一轮已经知道最高画质放不下；之后没有试过，把它也算进范围，大小用估计的。
+            int high = round == 0 ? MAXIMUM_QUALITY : MAXIMUM_QUALITY + 1;
+            long long high_size = round == 0 ? top_size : (long long)((double)low_size * steepness);
+            QualityProbe probe = { factory, current, maximum_bytes, best, candidate, S_OK };
+            if (image_quality_search(MINIMUM_QUALITY, low_size, high, high_size, maximum_bytes, probe_quality, &probe) < 0)
+                *result = FAILED(probe.result) ? probe.result : E_FAIL;
+            best = probe.best;
+            candidate = probe.candidate;
             found = best;
             break;
         }
+        if (round == 0 && low_size > 0) steepness = (double)top_size / (double)low_size;
         // 文件大小与像素数大致成正比，按面积比例缩小并多留一点余量。
-        double ratio = sqrt((double)maximum_bytes / (double)stream_size(best)) * 0.92;
+        double ratio = sqrt((double)maximum_bytes / (double)low_size) * 0.92;
         if (ratio < 0.2) ratio = 0.2;
         if (ratio > 0.92) ratio = 0.92;
         UINT width = 0, height = 0;

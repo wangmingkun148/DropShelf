@@ -22,13 +22,16 @@ static bool is_separator(wchar_t character)
 static StrList normalize_sources(const StrList *paths)
 {
     StrList sources = {0};
+    // 查重用排好序的集合：一次压缩几千个文件时不用两两比较。
+    TextSet seen = { .ignore_case = true };
     for (int index = 0; index < paths->count; index++)
     {
         if (!path_is_available(paths->items[index])) continue;
         wchar_t *full = path_full(paths->items[index]);
-        if (strlist_index_of(&sources, full, true) < 0) strlist_add_owned(&sources, full);
+        if (text_set_add(&seen, full)) strlist_add_owned(&sources, full);
         else free(full);
     }
+    text_set_clear(&seen);
     return sources;
 }
 
@@ -126,6 +129,34 @@ static time_t unix_time(FILETIME time)
     return (time_t)((value.QuadPart - 116444736000000000ull) / 10000000ull);
 }
 
+/// 这么大以上的文件先取样看值不值得压缩。
+#define SAMPLE_FROM_SIZE (1024 * 1024)
+#define SAMPLE_BYTES (32 * 1024)
+#define SAMPLE_COUNT 3
+
+/// 视频、照片、压缩包这类内容本身已经压缩过，再压一遍几乎不会变小，却要花掉绝大部分时间
+/// （压缩每秒只能处理几十 MB，原样存入只受磁盘速度限制）。在文件的 1/4、1/2、3/4 处各取一小段快速压一下，
+/// 合起来省不到 3% 就原样存入。小文件不取样，照常压缩；读不到样本时也照常压缩。
+static bool is_already_compressed(FileReader *reader, unsigned long long size)
+{
+    if (size < SAMPLE_FROM_SIZE) return false;
+    unsigned char *sample = xalloc(SAMPLE_BYTES), *packed = xalloc(SAMPLE_BYTES);
+    int flags = (int)tdefl_create_comp_flags_from_zip_params(MZ_BEST_SPEED, -MZ_DEFAULT_WINDOW_BITS, MZ_DEFAULT_STRATEGY);
+    size_t packed_total = 0;
+    bool read = true;
+    for (int index = 1; index <= SAMPLE_COUNT && read; index++)
+    {
+        unsigned long long offset = size / (SAMPLE_COUNT + 1) * (unsigned long long)index;
+        read = read_file_at(reader, offset, sample, SAMPLE_BYTES) == SAMPLE_BYTES;
+        // 压完比原来还大（缓冲区放不下）时返回 0。
+        size_t length = read ? tdefl_compress_mem_to_mem(packed, SAMPLE_BYTES, sample, SAMPLE_BYTES, flags) : 0;
+        packed_total += length ? length : SAMPLE_BYTES;
+    }
+    free(sample);
+    free(packed);
+    return read && packed_total >= (size_t)SAMPLE_BYTES * SAMPLE_COUNT * 97 / 100;
+}
+
 static bool add_file(mz_zip_archive *zip, const wchar_t *path, const wchar_t *entry_name)
 {
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
@@ -143,8 +174,9 @@ static bool add_file(mz_zip_archive *zip, const wchar_t *path, const wchar_t *en
         char *name = utf8_from_wide(entry_name, NULL);
         time_t modified = unix_time(written);
         FileReader reader = { file, 0 };
+        mz_uint level = is_already_compressed(&reader, (unsigned long long)size.QuadPart) ? MZ_NO_COMPRESSION : MZ_DEFAULT_LEVEL;
         ok = mz_zip_writer_add_read_buf_callback(zip, name, read_file_at, &reader, (mz_uint64)size.QuadPart, &modified, NULL, 0,
-            MZ_DEFAULT_LEVEL, NULL, 0, NULL, 0);
+            level, NULL, 0, NULL, 0);
         free(name);
     }
     CloseHandle(file);

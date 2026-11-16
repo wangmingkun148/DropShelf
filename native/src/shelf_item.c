@@ -528,6 +528,8 @@ static bool walk_folder(const wchar_t *path, FolderWalk *walk)
     return ok;
 }
 
+/// 第一层只列一遍：一边数有几项，一边累加大小（原来先列一遍数个数，再从头列一遍算大小）。
+/// 大小超出预算以后不再往子文件夹里走，但第一层照样数完。
 bool folder_measure(const wchar_t *path, int *children, bool *has_size, long long *size, volatile LONG *cancelled)
 {
     *children = 0;
@@ -545,20 +547,32 @@ bool folder_measure(const wchar_t *path, int *children, bool *has_size, long lon
         *has_size = true;
         return true;
     }
+    FolderWalk walk = { GetTickCount64(), 0, 0, false, cancelled };
+    bool ok = true;
     do
     {
         if (cancelled && *cancelled)
         {
-            FindClose(search);
-            return false;
+            ok = false;
+            break;
         }
         if (wcscmp(found.cFileName, L".") == 0 || wcscmp(found.cFileName, L"..") == 0) continue;
         (*children)++;
+        // 链接算一项，但不进去也不计大小。
+        if (walk.exceeded || find_data_is_link(&found)) continue;
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            wchar_t *child = path_join(path, found.cFileName);
+            ok = walk_folder(child, &walk);
+            free(child);
+            if (!ok) break;
+            continue;
+        }
+        walk.size += ((long long)found.nFileSizeHigh << 32) | found.nFileSizeLow;
+        if (++walk.files > FOLDER_MAXIMUM_FILES || GetTickCount64() - walk.started > FOLDER_SIZE_BUDGET_MS) walk.exceeded = true;
     } while (FindNextFileW(search, &found));
     FindClose(search);
-
-    FolderWalk walk = { GetTickCount64(), 0, 0, false, cancelled };
-    if (!walk_folder(path, &walk)) return false;
+    if (!ok) return false;
     *has_size = !walk.exceeded;
     *size = walk.exceeded ? 0 : walk.size;
     return true;

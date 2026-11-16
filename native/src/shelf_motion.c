@@ -549,14 +549,16 @@ static void remove_rows(ShelfWindow *shelf, ShelfItem **leaving, int count, Remo
     shelf->rows_before_y = xalloc((size_t)shelf->model->count * sizeof(float));
     shelf->rows_before_count = 0;
     GfxRect list = shelf->layout.list;
+    for (int index = 0; index < count; index++) leaving[index]->marked = true;
     for (int index = 0; index < shelf->model->count; index++)
     {
         ShelfItem *item = shelf->model->items[index];
         GfxRect row = shelf_row_rect(shelf, index);
-        if (listed(leaving, count, item) || row.bottom < list.top || row.top > list.bottom) continue;
+        if (item->marked || row.bottom < list.top || row.top > list.bottom) continue;
         shelf->rows_before[shelf->rows_before_count] = item;
         shelf->rows_before_y[shelf->rows_before_count++] = row.top - list.top;
     }
+    for (int index = 0; index < count; index++) leaving[index]->marked = false;
     remember_removal(shelf, leaving, count, kind, remains);
     shelf->cleanup |= CLEANUP_ITEM_MOTION;
     for (int index = 0; index < count; index++)
@@ -709,8 +711,17 @@ void shelf_remove_with_motion(ShelfWindow *shelf, ShelfItem **items, int count, 
     bool expanded_before = shelf->model->expanded;
     ShelfItem **leaving = xalloc((size_t)(count ? count : 1) * sizeof(ShelfItem *));
     int leaving_count = 0;
+    // 还在置物架上的才移除，重复传入的只算一次：置物架上的先做上记号，挑走一个去掉一个记号，
+    // 不用每一项都把置物架和已经挑出的找一遍（全选几千项再移除时是几百万次）。
+    ShelfModel *model = shelf->model;
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = true;
     for (int index = 0; index < count; index++)
-        if (shelf_model_contains(shelf->model, items[index]) && !listed(leaving, leaving_count, items[index])) leaving[leaving_count++] = items[index];
+    {
+        if (!items[index]->marked) continue;
+        items[index]->marked = false;
+        leaving[leaving_count++] = items[index];
+    }
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = false;
     if (!animate || !anim_enabled() || !shelf_window_is_visible(shelf) || leaving_count == 0)
         shelf_perform_remove(shelf, leaving, leaving_count, kind, expanded_before);
     else

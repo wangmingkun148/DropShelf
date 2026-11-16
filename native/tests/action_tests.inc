@@ -175,6 +175,23 @@ static void test_file_operations(void)
         "按路径判断是不是链接不对");
     free(junction_with_separator);
 
+    // 统计文件夹：联接点算一项，但不进去也不计大小；旁边的文件和子文件夹照常计入。
+    wchar_t *counted_file = test_file(link_source, L"beside.bin", "12345");
+    wchar_t *counted_folder = path_join(link_source, L"sub");
+    directory_create(counted_folder);
+    free(test_file(counted_folder, L"deep.bin", "123"));
+    int counted_children = 0;
+    bool counted_has_size = false;
+    long long counted_size = 0;
+    CHECK(folder_measure(link_source, &counted_children, &counted_has_size, &counted_size, NULL) && counted_children == 3 && counted_has_size &&
+          counted_size == 8, "统计带联接点的文件夹时项目数或大小不对");
+    volatile LONG stop = 1;
+    CHECK(!folder_measure(link_source, &counted_children, &counted_has_size, &counted_size, &stop), "取消后统计没有停下");
+    DeleteFileW(counted_file);
+    directory_delete_tree(counted_folder);
+    free(counted_file);
+    free(counted_folder);
+
     // 删除带联接点的文件夹时只删联接点本身，不进去删它指向的内容。
     wchar_t *doomed = test_folder(L"ops-link-doomed");
     wchar_t *doomed_junction = path_join(doomed, L"junction");
@@ -454,6 +471,97 @@ static void test_archive(void)
     free(escaped);
     free(unsafe_folder);
     free(root_entry);
+}
+
+/// 已经压缩过的内容（视频、照片、压缩包）原样存入，能压小的照常压缩；解压出来都和原来一样。
+static void test_archive_already_compressed(void)
+{
+    wchar_t *folder = test_folder(L"archive-stored");
+    const size_t size = 1536 * 1024;
+    char *noise = xalloc(size), *plain = xalloc(size);
+    unsigned state = 20240229;
+    for (size_t index = 0; index < size; index++)
+    {
+        state = state * 1664525u + 1013904223u;
+        noise[index] = (char)(state >> 24);
+        plain[index] = (char)('a' + index % 7);
+    }
+    wchar_t *noise_path = path_join(folder, L"video.bin"), *plain_path = path_join(folder, L"report.txt");
+    // 小文件不取样，杂乱的内容也照常压缩。
+    wchar_t *small_path = path_join(folder, L"small.bin");
+    CHECK(file_write_atomic(noise_path, noise, size) && file_write_atomic(plain_path, plain, size) && file_write_atomic(small_path, noise, 4096),
+        "无法写出测试文件");
+
+    StrList list = {0};
+    strlist_add(&list, noise_path);
+    strlist_add(&list, plain_path);
+    strlist_add(&list, small_path);
+    QuickActionResult result = {0};
+    archive_compress(&list, NULL, &result);
+    CHECK(result.succeeded && result.outputs.count == 1, "压缩失败");
+    if (result.succeeded && result.outputs.count == 1)
+    {
+        const wchar_t *zip_path = result.outputs.items[0];
+        long long zip_size = size_of(zip_path);
+        // 杂乱的那份几乎原样大小，重复的那份压得很小。
+        CHECK(zip_size > (long long)size && zip_size < (long long)size + 200 * 1024, "压缩包的大小不对");
+        char *bytes = zip_size > 0 ? xalloc((size_t)zip_size) : NULL;
+        HANDLE file = CreateFileW(zip_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        DWORD read = 0;
+        bool loaded = bytes && file != INVALID_HANDLE_VALUE && ReadFile(file, bytes, (DWORD)zip_size, &read, NULL) && read == (DWORD)zip_size;
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        mz_zip_archive reader;
+        memset(&reader, 0, sizeof(reader));
+        if (loaded && mz_zip_reader_init_mem(&reader, bytes, (size_t)zip_size, 0))
+        {
+            mz_zip_archive_file_stat stored, deflated, small;
+            int stored_at = mz_zip_reader_locate_file(&reader, "video.bin", NULL, 0);
+            int deflated_at = mz_zip_reader_locate_file(&reader, "report.txt", NULL, 0);
+            int small_at = mz_zip_reader_locate_file(&reader, "small.bin", NULL, 0);
+            bool found = stored_at >= 0 && deflated_at >= 0 && small_at >= 0 && mz_zip_reader_file_stat(&reader, (mz_uint)stored_at, &stored) &&
+                         mz_zip_reader_file_stat(&reader, (mz_uint)deflated_at, &deflated) && mz_zip_reader_file_stat(&reader, (mz_uint)small_at, &small);
+            CHECK(found, "压缩包里少了文件");
+            if (found)
+            {
+                CHECK(stored.m_method == 0 && stored.m_comp_size == size && stored.m_uncomp_size == size, "压不小的大文件没有原样存入");
+                CHECK(deflated.m_method == MZ_DEFLATED && deflated.m_comp_size < size / 20, "能压小的大文件没有压缩");
+                CHECK(small.m_method == MZ_DEFLATED, "小文件应照常压缩");
+                size_t out_size = 0;
+                void *out = mz_zip_reader_extract_to_heap(&reader, (mz_uint)stored_at, &out_size, 0);
+                CHECK(out && out_size == size && memcmp(out, noise, size) == 0, "原样存入的文件解出来和原来不一样");
+                mz_free(out);
+                out = mz_zip_reader_extract_to_heap(&reader, (mz_uint)deflated_at, &out_size, 0);
+                CHECK(out && out_size == size && memcmp(out, plain, size) == 0, "压缩的文件解出来和原来不一样");
+                mz_free(out);
+            }
+            mz_zip_reader_end(&reader);
+        }
+        else CHECK(false, "无法读取压缩包");
+        free(bytes);
+
+        // 自己解压一遍：原样存入的条目照常解出来。
+        StrList zips = {0};
+        strlist_add(&zips, zip_path);
+        QuickActionResult extracted = {0};
+        archive_run(&zips, NULL, &extracted);
+        CHECK(extracted.succeeded && extracted.outputs.count == 1, "含原样存入条目的压缩包解压失败");
+        if (extracted.succeeded && extracted.outputs.count == 1)
+        {
+            wchar_t *back = path_join(extracted.outputs.items[0], L"video.bin");
+            CHECK(size_of(back) == (long long)size, "解压出来的文件大小不对");
+            free(back);
+        }
+        quick_action_result_free(&extracted);
+        strlist_clear(&zips);
+    }
+    quick_action_result_free(&result);
+    strlist_clear(&list);
+    free(noise);
+    free(plain);
+    free(noise_path);
+    free(plain_path);
+    free(small_path);
+    free(folder);
 }
 
 // ───────────── 图片 ─────────────

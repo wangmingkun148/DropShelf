@@ -58,6 +58,20 @@ void strlist_clone(StrList *target, const StrList *source);
 int strlist_index_of(const StrList *list, const wchar_t *text, bool ignore_case);
 bool strlist_equal(const StrList *first, const StrList *second, bool ignore_case);
 
+/// 排好序的一组文字，用来在一大批里查重：逐个比较要比 n² 次，排好序以后每次只比十几次。
+/// 不拥有这些文字，它们要比集合活得久。ignore_case 时两段文字算不算相同和 wcs_equal_ignore_case 一致。用 {0} 初始化。
+typedef struct TextSet
+{
+    const wchar_t **items;
+    int count;
+    int capacity;
+    bool ignore_case;
+} TextSet;
+
+bool text_set_add(TextSet *set, const wchar_t *text);   // 已经有相同的就不加，返回 false
+bool text_set_contains(const TextSet *set, const wchar_t *text);
+void text_set_clear(TextSet *set);
+
 char *utf8_from_wide(const wchar_t *text, size_t *length);
 wchar_t *wide_from_utf8(const char *text, size_t length);
 

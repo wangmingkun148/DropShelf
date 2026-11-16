@@ -431,6 +431,96 @@ static void test_shelf_model(void)
 
 // ───────────── 拖出的规则 ─────────────
 
+/// 一次放入两万个文件：查重、全部移除和撤销都要很快做完（逐个两两比较时要几十秒，界面会一直卡着）。
+static void test_shelf_large_batch(void)
+{
+    enum { COUNT = 20000 };
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc(COUNT + 2, sizeof(DroppedEntry));
+    result->with_facts = true;
+    for (int index = 0; index < COUNT + 2; index++)
+    {
+        // 顺序打乱；最后两个是前面的重复：一个只是大小写不同，一个完全相同。
+        int number = index < COUNT ? (index * 7919) % COUNT : (5 * 7919) % COUNT;
+        wchar_t path[96];
+        swprintf(path, 96, index == COUNT ? L"c:\\dropshelf tests\\a fairly long folder name\\PHOTOS\\img_%05d.JPG"
+                                          : L"C:\\DropShelf Tests\\A Fairly Long Folder Name\\Photos\\IMG_%05d.jpg", number);
+        DroppedEntry *entry = &result->entries[index];
+        entry->kind = ITEM_FILE;
+        entry->value = wcs_dup(path);
+        entry->has_facts = true;
+        entry->facts.has_size = true;
+        entry->facts.size_bytes = 1;
+        entry->type_name = wcs_dup(L"JPG");
+    }
+    result->count = COUNT + 2;
+
+    ULONGLONG started = GetTickCount64();
+    ShelfModel *model = shelf_model_new(NULL);
+    ShelfAddSummary first = shelf_model_add(model, result);
+    CHECK(first.added == COUNT && first.duplicates == 2 && first.unavailable == 0 && model->count == COUNT, "大批量放入时的统计不正确");
+    ShelfAddSummary second = shelf_model_add(model, result);
+    CHECK(second.added == 0 && second.duplicates == COUNT + 2 && model->count == COUNT, "大批量重复放入时没有全部认出来");
+    bool in_order = model->count == COUNT;
+    for (int index = 0; index < COUNT && in_order; index++) in_order = wcscmp(model->items[index]->value, result->entries[index].value) == 0;
+    CHECK(in_order, "大批量放入后的顺序不是放入的顺序");
+
+    // 文本按内容区分大小写，和文件各查各的。
+    DropReadResult *texts = xcalloc(1, sizeof(DropReadResult));
+    texts->entries = xcalloc(40, sizeof(DroppedEntry));
+    for (int index = 0; index < 40; index++)
+    {
+        wchar_t text[32];
+        swprintf(text, 32, index % 2 ? L"note %d" : L"NOTE %d", index / 4);
+        texts->entries[index] = (DroppedEntry){ ITEM_TEXT, wcs_dup(text) };
+    }
+    texts->count = 40;
+    ShelfAddSummary noted = shelf_model_add(model, texts);
+    CHECK(noted.added == 20 && noted.duplicates == 20 && model->count == COUNT + 20, "大批量放入文本时的查重不正确");
+    drop_result_free(texts);
+
+    // 全部移除再撤销：回到原来的位置；只移除一部分时剩下的顺序不变。
+    int all_count = model->count;
+    ShelfItem **all = xalloc((size_t)all_count * sizeof(ShelfItem *));
+    memcpy(all, model->items, (size_t)all_count * sizeof(ShelfItem *));
+    ShelfRemoval *removal = shelf_model_remove(model, all, all_count);
+    CHECK(removal && removal->count == all_count && model->count == 0, "全部移除后还有剩下的");
+    bool unmarked = true;
+    for (int index = 0; index < all_count; index++) unmarked &= !all[index]->marked;
+    CHECK(unmarked, "移除后留下了临时记号");
+    CHECK(shelf_model_restore(model, removal, NULL) == all_count && model->count == all_count &&
+          memcmp(model->items, all, (size_t)all_count * sizeof(ShelfItem *)) == 0, "撤销后没有回到原来的位置");
+    CHECK(shelf_model_restore(model, removal, NULL) == 0 && model->count == all_count, "已经放回的又放了一次");
+    shelf_removal_free(removal);
+    ShelfItem **odd = xalloc((size_t)all_count * sizeof(ShelfItem *));
+    int odd_count = 0;
+    // 倒着传入，中间夹一个重复的：结果和顺序无关。
+    for (int index = all_count - 1; index >= 0; index--)
+        if (index % 2) odd[odd_count++] = all[index];
+    ShelfItem *spared = odd[odd_count / 2];
+    odd[odd_count / 2] = odd[0];
+    removal = shelf_model_remove(model, odd, odd_count);
+    bool kept_in_order = model->count == all_count - (odd_count - 1);
+    for (int index = 0, at = 0; index < all_count && kept_in_order; index++)
+    {
+        if (index % 2 && all[index] != spared) continue;
+        kept_in_order = !all[index]->marked && model->items[at++] == all[index];
+    }
+    CHECK(removal && removal->count == odd_count - 1 && kept_in_order, "移除一部分时的结果不正确");
+    bool ascending = true;
+    for (int index = 1; removal && index < removal->count; index++) ascending &= removal->indices[index] > removal->indices[index - 1];
+    CHECK(ascending, "移除记录里的位置不是从前到后");
+    shelf_removal_free(removal);
+    ULONGLONG elapsed = GetTickCount64() - started;
+    CHECK(elapsed < 5000, "大批量放入和移除花的时间太长");
+    if (elapsed >= 5000) printf("      用了 %llu 毫秒\n", elapsed);
+
+    free(odd);
+    free(all);
+    shelf_model_release(model);
+    drop_result_free(result);
+}
+
 static void test_drag_out_rules(void)
 {
     CHECK(drag_resolve(DRAGDROP_S_CANCEL, 0, -1, -1, false) == DRAG_OUT_CANCELLED, "取消没有识别");
