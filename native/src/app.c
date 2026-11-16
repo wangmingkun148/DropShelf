@@ -79,7 +79,6 @@ static wchar_t *language_pack_directory(void)
     return directory;
 }
 
-/// 设置变化后让各部分立即生效。置物架外观在后面的步骤接进来。
 /// 快速操作的布局、四个位置和自定义操作都没变。
 static bool quick_actions_settings_equal(const AppSettings *first, const AppSettings *second)
 {
@@ -91,6 +90,7 @@ static bool quick_actions_settings_equal(const AppSettings *first, const AppSett
     return true;
 }
 
+/// 设置变化后让各部分立即生效。
 static void apply_settings(const AppSettings *previous, const AppSettings *current)
 {
     if (previous->theme != current->theme || !wcs_equal(previous->accent_color, current->accent_color))

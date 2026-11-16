@@ -120,7 +120,7 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 
 ## 从源码构建
 
-发布的程序是 `native` 文件夹里的 C 版。需要 Visual Studio 2022 或 Build Tools 的“使用 C++ 的桌面开发”（自带 MSVC、CMake 和 Ninja）。下面的命令编译并运行测试，生成 `native\build\Release\DropShelf.exe`；加 `-NoTests` 只编译，加 `-Debug` 编译调试版：
+从 3.0.0 起，发布的程序是 `native` 文件夹里的 C 版（2.x 是 C# 版）。需要 Visual Studio 2022 或 Build Tools 的“使用 C++ 的桌面开发”（自带 MSVC、CMake 和 Ninja）。下面的命令编译并运行测试，生成 `native\build\Release\DropShelf.exe`；加 `-NoTests` 只编译，加 `-Debug` 编译调试版：
 
 ```powershell
 .\native\build.ps1

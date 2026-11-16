@@ -114,7 +114,7 @@ DropShelf installs to `%LOCALAPPDATA%\Programs\DropShelf` without admin rights; 
 
 ## Building from source
 
-The released program is the C version in the `native` folder. It needs Visual Studio 2022 or Build Tools with "Desktop development with C++" (which includes MSVC, CMake and Ninja). This builds it and runs the tests, producing `native\build\Release\DropShelf.exe`; add `-NoTests` to only build, or `-Debug` for a debug build:
+Since 3.0.0, the released program is the C version in the `native` folder (2.x was the C# version). It needs Visual Studio 2022 or Build Tools with "Desktop development with C++" (which includes MSVC, CMake and Ninja). This builds it and runs the tests, producing `native\build\Release\DropShelf.exe`; add `-NoTests` to only build, or `-Debug` for a debug build:
 
 ```powershell
 .\native\build.ps1
