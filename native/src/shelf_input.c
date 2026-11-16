@@ -723,15 +723,28 @@ static HRESULT STDMETHODCALLTYPE target_query_interface(IDropTarget *self, REFII
     return E_NOINTERFACE;
 }
 
-// 拖放目标跟着置物架：注销之后系统不会再调用，不用另外计数。
-static ULONG STDMETHODCALLTYPE target_add_ref(IDropTarget *self) { (void)self; return 2; }
-static ULONG STDMETHODCALLTYPE target_release(IDropTarget *self) { (void)self; return 1; }
+// 拖放目标嵌在置物架里，系统持有它时也就持有置物架：登记时系统留一份（注销时放掉），拖动经过时拖放循环也会另留一份。
+// 拖动进行中置物架关闭了，系统手上的那份直到拖动结束才放掉，这期间置物架还在，回调看到 closed 后什么都不做。
+static ULONG STDMETHODCALLTYPE target_add_ref(IDropTarget *self)
+{
+    ShelfWindow *shelf = target_shelf(self);
+    shelf_window_retain(shelf);
+    return (ULONG)shelf->references;
+}
+
+static ULONG STDMETHODCALLTYPE target_release(IDropTarget *self)
+{
+    ShelfWindow *shelf = target_shelf(self);
+    ULONG remaining = shelf->references > 1 ? (ULONG)shelf->references - 1 : 0;
+    shelf_window_release(shelf);
+    return remaining;
+}
 
 static HRESULT STDMETHODCALLTYPE target_drag_enter(IDropTarget *self, IDataObject *data, DWORD keys, POINTL point, DWORD *effect)
 {
     (void)keys;
     ShelfWindow *shelf = target_shelf(self);
-    if (shelf->closing)
+    if (shelf->closing || shelf->closed)
     {
         *effect = DROPEFFECT_NONE;
         return S_OK;
@@ -767,6 +780,11 @@ static HRESULT STDMETHODCALLTYPE target_drag_over(IDropTarget *self, DWORD keys,
 {
     (void)keys;
     ShelfWindow *shelf = target_shelf(self);
+    if (shelf->closed)
+    {
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
     shelf->last_drag_over = GetTickCount64();
     // 光标每动一下来源程序就问一次，间隔内的询问直接给出上次的结果。
     if (seconds_since(shelf->drag_over_handled) < DRAG_OVER_INTERVAL) *effect = shelf->drag_effects;
@@ -784,6 +802,7 @@ static bool cursor_inside(ShelfWindow *shelf)
 static HRESULT STDMETHODCALLTYPE target_drag_leave(IDropTarget *self)
 {
     ShelfWindow *shelf = target_shelf(self);
+    if (shelf->closed) return S_OK;
     bool inside = cursor_inside(shelf);
     if (!inside)
     {
@@ -800,6 +819,11 @@ static HRESULT STDMETHODCALLTYPE target_drop(IDropTarget *self, IDataObject *dat
 {
     (void)keys;
     ShelfWindow *shelf = target_shelf(self);
+    if (shelf->closed)
+    {
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
     float x, y;
     client_point(shelf, point, &x, &y);
     // 悬停的处理有间隔，松手时按松手的位置再判断一次落在哪张快速操作卡片上。

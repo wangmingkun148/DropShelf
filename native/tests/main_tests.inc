@@ -131,6 +131,43 @@ static void test_matrix_invert(void)
     CHECK(!gfx_matrix_invert((GfxMatrix){ 0, 0, 0, 1, 0, 0 }, &inverse), "缩放为 0 时没有逆");
 }
 
+static DWORD WINAPI release_image_elsewhere(void *parameter)
+{
+    gfx_image_release(parameter);
+    return 0;
+}
+
+/// 在别的线程上放掉图片的最后一个引用（缩略图缓存满了换掉旧的）：显卡上的位图不当场释放，留到界面线程下次开始画时。
+static void test_image_release_on_other_thread(void)
+{
+    unsigned char pixels[4 * 4 * 4];
+    memset(pixels, 0xFF, sizeof(pixels));
+    GfxImage *image = gfx_image_create(pixels, 4, 4, 16);
+    // 先画一次，显卡上才有对应的位图。
+    bool drawn = gfx_begin_image(8, 8, 96);
+    if (drawn)
+    {
+        gfx_draw_image(image, (GfxRect){ 0, 0, 8, 8 }, 1);
+        HBITMAP bitmap = gfx_end_image_bitmap();
+        if (bitmap) DeleteObject(bitmap);
+    }
+    CHECK(drawn, "没能画进图片");
+    int before = gfx_retired_bitmap_count();
+    HANDLE thread = CreateThread(NULL, 0, release_image_elsewhere, image, 0, NULL);
+    CHECK(thread != NULL, "没能开线程");
+    if (!thread) return;
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CHECK(gfx_retired_bitmap_count() == before + 1, "别的线程放掉图片时，显卡上的位图应留给界面线程释放");
+    // 界面线程开始画下一帧时释放。
+    if (gfx_begin_image(8, 8, 96))
+    {
+        HBITMAP bitmap = gfx_end_image_bitmap();
+        if (bitmap) DeleteObject(bitmap);
+    }
+    CHECK(gfx_retired_bitmap_count() == 0, "界面线程开始画时应释放留下的位图");
+}
+
 static void change_window_size(AppSettings *settings, void *context)
 {
     (void)context;
