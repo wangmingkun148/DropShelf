@@ -159,21 +159,50 @@ static bool is_held(const wchar_t *key)
     return false;
 }
 
+/// 删不掉时（多半是杀毒软件或资源管理器的预览正占着刚写的文件）隔这么久（毫秒）再试，都不行就留给下次启动时清理。
+static const unsigned retry_delays[] = { 500, 2000, 5000 };
+
+typedef struct Deletion
+{
+    wchar_t *directory;
+    int retries;                // 已经重试了几次
+    DWORD error;                // 这次没删掉的原因；删掉了或者又有人持有时为 0
+} Deletion;
+
 /// 后台删除：删之前在锁里重新确认没有人再次持有，删的过程中也拿着锁。
 static void delete_unheld(void *data)
 {
-    wchar_t *directory = data;
-    wchar_t *key = cache_key(directory);
+    Deletion *deletion = data;
+    wchar_t *key = cache_key(deletion->directory);
+    deletion->error = 0;
     AcquireSRWLockExclusive(&holders_lock);
-    if (!is_held(key) && !directory_delete_tree(directory) && path_exists(directory))
-        log_win32_error(L"清理临时附件失败", GetLastError());
+    if (!is_held(key) && !directory_delete_tree(deletion->directory))
+    {
+        DWORD error = GetLastError();
+        if (path_exists(deletion->directory)) deletion->error = error ? error : ERROR_SHARING_VIOLATION;
+    }
     ReleaseSRWLockExclusive(&holders_lock);
     free(key);
 }
 
-static void free_data(void *data)
+static void deletion_finished(void *data);
+
+static void start_deletion(void *data)
 {
-    free(data);
+    task_run(delete_unheld, deletion_finished, data);
+}
+
+static void deletion_finished(void *data)
+{
+    Deletion *deletion = data;
+    if (deletion->error && deletion->retries < (int)(sizeof(retry_delays) / sizeof(retry_delays[0])))
+    {
+        task_delay(retry_delays[deletion->retries++], start_deletion, deletion);
+        return;
+    }
+    if (deletion->error) log_win32_error(L"清理临时附件失败", deletion->error);
+    free(deletion->directory);
+    free(deletion);
 }
 
 void attachment_cache_release(const wchar_t *directory)
@@ -197,7 +226,9 @@ void attachment_cache_release(const wchar_t *directory)
     ReleaseSRWLockExclusive(&holders_lock);
     free(key);
     if (!last || !attachment_cache_is_owned(directory)) return;
-    task_run(delete_unheld, free_data, wcs_dup(directory));
+    Deletion *deletion = xcalloc(1, sizeof(Deletion));
+    deletion->directory = wcs_dup(directory);
+    start_deletion(deletion);
 }
 
 static void release_now(void *data)
