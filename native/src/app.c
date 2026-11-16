@@ -365,8 +365,14 @@ static LRESULT CALLBACK message_window_procedure(HWND window, UINT message, WPAR
         case WM_QUERYENDSESSION:
             return TRUE;
         case WM_ENDSESSION:
-            // 注销或关机：保存设置。
-            if (wparam) app_prepare_for_shutdown();
+            // 注销、关机，或者安装程序要替换正在运行的程序（重启管理器发来的，lparam 带 ENDSESSION_CLOSEAPP）：
+            // 保存设置、收拾好以后退出。注销和关机时系统随后也会结束进程；安装程序却要等进程真的退出才能替换文件，
+            // 只收拾不退出的话，进程连托盘图标都没了却还在，安装时替换不了 DropShelf.exe。
+            if (wparam)
+            {
+                app_prepare_for_shutdown();
+                PostQuitMessage(0);
+            }
             return 0;
     }
     if (hotkey_service_handle_message(message, wparam)) return 0;
