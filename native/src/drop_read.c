@@ -217,6 +217,30 @@ static bool write_all(HANDLE output, const void *bytes, DWORD count)
     return WriteFile(output, bytes, count, &written, NULL) && written == count;
 }
 
+/// 从文件句柄一直读到末尾写进去；读出错不能当成读完，否则会把只复制了一半的文件当成成功。
+static bool copy_handle(HANDLE input, HANDLE output, WriteBudget *budget)
+{
+    unsigned char *buffer = xalloc(COPY_BUFFER);
+    bool ok = true;
+    for (;;)
+    {
+        DWORD read = 0;
+        if (!ReadFile(input, buffer, COPY_BUFFER, &read, NULL))
+        {
+            ok = false;
+            break;
+        }
+        if (read == 0) break;
+        if ((budget && !budget_take(budget, read)) || !write_all(output, buffer, read))
+        {
+            ok = false;
+            break;
+        }
+    }
+    free(buffer);
+    return ok;
+}
+
 /// 来源文件此时可能已被删除，从仍然打开的句柄复制出来，修改时间也从句柄读。
 static void copy_snapshots(ReadJob *job)
 {
@@ -233,10 +257,7 @@ static void copy_snapshots(ReadJob *job)
         ok = output != INVALID_HANDLE_VALUE;
         if (ok)
         {
-            unsigned char *buffer = xalloc(COPY_BUFFER);
-            DWORD read;
-            while (ok && ReadFile(snapshot->file, buffer, COPY_BUFFER, &read, NULL) && read > 0) ok = write_all(output, buffer, read);
-            free(buffer);
+            ok = copy_handle(snapshot->file, output, NULL);
             FILETIME created, accessed, written;
             if (ok && GetFileTime(snapshot->file, &created, &accessed, &written)) SetFileTime(output, NULL, NULL, &written);
             CloseHandle(output);
@@ -332,11 +353,7 @@ static bool copy_virtual_file(VirtualFile *file, WriteBudget *budget)
             HANDLE input = file->medium.lpszFileName ? CreateFileW(file->medium.lpszFileName, GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL) : INVALID_HANDLE_VALUE;
             if (input == INVALID_HANDLE_VALUE) break;
-            unsigned char *buffer = xalloc(COPY_BUFFER);
-            DWORD read;
-            ok = true;
-            while (ok && ReadFile(input, buffer, COPY_BUFFER, &read, NULL) && read > 0) ok = budget_take(budget, read) && write_all(output, buffer, read);
-            free(buffer);
+            ok = copy_handle(input, output, budget);
             CloseHandle(input);
             break;
         }

@@ -2,6 +2,7 @@
 #include "attachment_cache.h"
 #include "clipboard.h"
 #include "log.h"
+#include "shelf_drag.h"
 #include "strings.h"
 #include "task.h"
 #include "thumbnail.h"
@@ -17,6 +18,8 @@
 /// 拖出后资源管理器可能还在后台移动大文件，过这么久再确认一次。
 #define REMOVE_WHEN_GONE_DELAY 2500
 #define MAXIMUM_STEM_LENGTH 40
+/// 每次项目变化时预先解析最近的这么多个文件（拖出用的缓存能放 256 个）。
+#define SHELF_PREFETCH_COUNT 64
 
 // ───────────── 基本 ─────────────
 
@@ -143,6 +146,12 @@ static void items_changed(ShelfModel *model)
     }
     changed(model, SHELF_CHANGED_ITEMS);
     shelf_model_update_thumbnails(model);
+    // 先把文件解析好，拖出时按下就能开始。只管最近放上来的一批，项目很多时不会把缓存挤满后来回重新解析。
+    StrList paths = {0};
+    for (int index = model->count - 1; index >= 0 && paths.count < SHELF_PREFETCH_COUNT; index--)
+        if (shelf_item_is_file_system(model->items[index])) strlist_add(&paths, model->items[index]->value);
+    shell_paths_prefetch(&paths);
+    strlist_clear(&paths);
 }
 
 static void adopt_cache(ShelfModel *model, const wchar_t *directory)
@@ -1184,6 +1193,7 @@ static void availability_done(void *data)
     ShelfModel *model = check->model;
     model->checking_availability = false;
     bool any = false;
+    StrList relocated = {0};
     for (int index = 0; index < check->count; index++)
     {
         ShelfItem *item = check->items[index];
@@ -1193,6 +1203,7 @@ static void availability_done(void *data)
             if (check->moved[index] && can_follow(model, item, check->moved[index]))
             {
                 shelf_item_relocate(item, check->moved[index]);
+                strlist_add(&relocated, item->value);
                 any = true;
             }
             else if (item->available != check->present[index])
@@ -1207,6 +1218,8 @@ static void availability_done(void *data)
         free(check->moved[index]);
     }
     if (any) changed(model, SHELF_CHANGED_ITEM_TEXT);
+    shell_paths_prefetch(&relocated);
+    strlist_clear(&relocated);
     free(check->items);
     free(check->kinds);
     free(check->paths);

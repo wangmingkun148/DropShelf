@@ -609,14 +609,40 @@ static TarRun run_tar(const wchar_t *tar, const wchar_t *const *arguments, int a
     WStr line = {0};
     wstr_appendf(&line, L"\"%ls\"", tar);
     for (int index = 0; index < argument_count; index++) append_argument(&line, arguments[index]);
-    STARTUPINFOW startup = { .cb = sizeof(startup) };
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = NULL;
-    startup.hStdOutput = capture_output ? out_write : null_device;
-    startup.hStdError = err_write;
+    STARTUPINFOEXW startup = { .StartupInfo.cb = sizeof(startup) };
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = NULL;
+    startup.StartupInfo.hStdOutput = capture_output ? out_write : null_device;
+    startup.StartupInfo.hStdError = err_write;
+    // 只让 tar 继承它自己的两个输出：同时解压两个 7z 文件时，另一个 tar 若也继承了这里的管道，
+    // 这边的 tar 结束后管道迟迟不断开，读取输出的线程就一直等着。
+    HANDLE inherited[2];
+    int inherited_count = 0;
+    if (startup.StartupInfo.hStdOutput && startup.StartupInfo.hStdOutput != INVALID_HANDLE_VALUE) inherited[inherited_count++] = startup.StartupInfo.hStdOutput;
+    inherited[inherited_count++] = err_write;
+    SIZE_T list_size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &list_size);
+    LPPROC_THREAD_ATTRIBUTE_LIST list = xalloc(list_size);
+    DWORD flags = CREATE_NO_WINDOW;
+    if (InitializeProcThreadAttributeList(list, 1, 0, &list_size))
+    {
+        if (UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, (SIZE_T)inherited_count * sizeof(HANDLE), NULL, NULL))
+        {
+            startup.lpAttributeList = list;
+            flags |= EXTENDED_STARTUPINFO_PRESENT;
+        }
+        else DeleteProcThreadAttributeList(list);
+    }
+    else
+    {
+        free(list);
+        list = NULL;
+    }
     PROCESS_INFORMATION process = {0};
-    run.started = CreateProcessW(tar, line.data, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &startup, &process) != 0;
+    run.started = CreateProcessW(tar, line.data, NULL, NULL, TRUE, flags, NULL, NULL, &startup.StartupInfo, &process) != 0;
     if (!run.started) log_win32_error(L"Windows 解压程序无法启动", GetLastError());
+    if (startup.lpAttributeList) DeleteProcThreadAttributeList(startup.lpAttributeList);
+    free(list);
     wstr_free(&line);
     CloseHandle(err_write);
     if (out_write) CloseHandle(out_write);
@@ -643,10 +669,11 @@ static TarRun run_tar(const wchar_t *tar, const wchar_t *const *arguments, int a
             break;
         }
         GetExitCodeProcess(process.hProcess, &run.exit_code);
+        // 读取线程用着这里栈上的 PipeReader，必须等它们真正结束；管道迟迟不断开时打断它们正在等的读取。
         for (int index = 0; index < 2; index++)
             if (threads[index])
             {
-                WaitForSingleObject(threads[index], 5000);
+                while (WaitForSingleObject(threads[index], 5000) == WAIT_TIMEOUT) CancelSynchronousIo(threads[index]);
                 CloseHandle(threads[index]);
             }
         CloseHandle(process.hProcess);

@@ -98,6 +98,9 @@ void ui_window_layout(UiWindow *window);
 /// 画的过程中调用：还有动画在进行，下一帧接着画。
 void ui_window_request_frame(UiWindow *window);
 
+/// 还在逐帧画（有动画在进行，或者排着等下一次刷新时画）。
+bool ui_window_is_animating(UiWindow *window);
+
 /// 窗口所在显示器的缩放比例（DPI / 96）。
 float ui_window_scale(UiWindow *window);
 

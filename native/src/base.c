@@ -324,6 +324,8 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
     {
         DWORD written = 0;
         succeeded = WriteFile(file, data, (DWORD)length, &written, NULL) && written == length;
+        // 先把内容写到磁盘上再换名字：否则突然断电时可能换名已经生效、内容却没写下去，留下一个空文件。
+        if (succeeded) succeeded = FlushFileBuffers(file) != 0;
         DWORD error = GetLastError();
         CloseHandle(file);
         if (succeeded)

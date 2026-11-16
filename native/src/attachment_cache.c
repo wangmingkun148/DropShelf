@@ -36,21 +36,32 @@ static void trim_separators(wchar_t *path)
     while (length > 3 && (path[length - 1] == L'\\' || path[length - 1] == L'/')) path[--length] = 0;
 }
 
-const wchar_t *attachment_cache_root(void)
+static INIT_ONCE root_once = INIT_ONCE_STATIC_INIT;
+static wchar_t *cache_root;
+
+/// 第一次用到时算出根目录。启动时后台的清理和界面线程可能同时第一次用到，只能算一次。
+static BOOL CALLBACK compute_root(PINIT_ONCE once, PVOID parameter, PVOID *context)
 {
-    static wchar_t *root;
-    if (root) return root;
+    (void)once;
+    (void)parameter;
+    (void)context;
     wchar_t temp[MAX_PATH + 1];
     DWORD length = GetTempPathW(MAX_PATH + 1, temp);
     if (!length || length > MAX_PATH) wcscpy_s(temp, MAX_PATH + 1, L"C:\\Windows\\Temp\\");
     wchar_t *drop = path_join(temp, L"DropShelf");
     wchar_t *joined = path_join(drop, L"Attachments");
     free(drop);
-    root = full_path(joined);
-    if (!root) root = joined;
+    cache_root = full_path(joined);
+    if (!cache_root) cache_root = joined;
     else free(joined);
-    trim_separators(root);
-    return root;
+    trim_separators(cache_root);
+    return TRUE;
+}
+
+const wchar_t *attachment_cache_root(void)
+{
+    InitOnceExecuteOnce(&root_once, compute_root, NULL, NULL);
+    return cache_root;
 }
 
 static wchar_t *cache_key(const wchar_t *directory)

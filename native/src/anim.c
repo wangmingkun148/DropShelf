@@ -135,10 +135,13 @@ bool anim_update(Anim *anim, double time)
 
 // ───────────── 逐帧回调 ─────────────
 // 一个后台线程用 DwmFlush 等屏幕的下一次刷新，然后给界面线程发一条消息；界面线程在这条消息里调用各个订阅者。
-// 上一条消息还没处理完时不再发，界面线程忙的时候不会积压。
+// 上一条消息处理完之前不再发：发来的消息排在鼠标和键盘之前处理，画一帧比刷新间隔慢时如果马上又来一条，
+// 界面线程会一直在画、顾不上鼠标（光标移动很久才有反应）；现在这时跳过一次刷新，中间先处理输入。
 
 #define FRAME_WINDOW_CLASS L"DropShelfFrameWindow"
 #define MESSAGE_FRAME (WM_APP + 20)
+/// 一条帧消息超过这么久还没处理完（回调里进了模态循环，如弹出菜单），照常再发，模态循环里的动画不停。
+#define FRAME_STUCK_MILLISECONDS 100
 
 typedef struct Subscriber
 {
@@ -151,7 +154,8 @@ static int subscriber_count;
 static HWND frame_window;
 static HANDLE frame_thread;
 static HANDLE frame_wake;           // 有订阅时置位，线程才开始等刷新
-static volatile LONG frame_pending; // 已经发出、还没处理的帧消息
+static volatile LONG frame_pending; // 已经发出、还没处理完的帧消息
+static volatile LONG64 frame_posted_at;
 static volatile LONG frame_stopping;
 
 double frames_time(void)
@@ -176,8 +180,11 @@ static DWORD WINAPI frame_thread_procedure(LPVOID parameter)
         if (frame_stopping) break;
         // 桌面合成不可用时（极少见）DwmFlush 立即返回失败，改为按 60Hz 等待。
         if (FAILED(DwmFlush())) Sleep(16);
-        if (InterlockedCompareExchange(&frame_pending, 1, 0) == 0 && !PostMessageW(frame_window, MESSAGE_FRAME, 0, 0))
-            InterlockedExchange(&frame_pending, 0);
+        LONG64 now = (LONG64)GetTickCount64();
+        bool stuck = frame_pending && now - frame_posted_at > FRAME_STUCK_MILLISECONDS;
+        if (InterlockedCompareExchange(&frame_pending, 1, 0) != 0 && !stuck) continue;
+        InterlockedExchange64(&frame_posted_at, now);
+        if (!PostMessageW(frame_window, MESSAGE_FRAME, 0, 0)) InterlockedExchange(&frame_pending, 0);
     }
     return 0;
 }
@@ -185,21 +192,24 @@ static DWORD WINAPI frame_thread_procedure(LPVOID parameter)
 static LRESULT CALLBACK frame_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     if (message != MESSAGE_FRAME) return DefWindowProcW(window, message, wparam, lparam);
-    InterlockedExchange(&frame_pending, 0);
     int count = subscriber_count;
-    if (count == 0) return 0;
-    // 回调里可能增减订阅，先留一份副本；调用前再确认它还在订阅。
-    double time = frames_time();
-    Subscriber *copy = xalloc((size_t)count * sizeof(Subscriber));
-    memcpy(copy, subscribers, (size_t)count * sizeof(Subscriber));
-    for (int index = 0; index < count; index++)
+    if (count > 0)
     {
-        bool still_subscribed = false;
-        for (int current = 0; current < subscriber_count && !still_subscribed; current++)
-            still_subscribed = subscribers[current].handler == copy[index].handler && subscribers[current].context == copy[index].context;
-        if (still_subscribed) copy[index].handler(copy[index].context, time);
+        // 回调里可能增减订阅，先留一份副本；调用前再确认它还在订阅。
+        double time = frames_time();
+        Subscriber *copy = xalloc((size_t)count * sizeof(Subscriber));
+        memcpy(copy, subscribers, (size_t)count * sizeof(Subscriber));
+        for (int index = 0; index < count; index++)
+        {
+            bool still_subscribed = false;
+            for (int current = 0; current < subscriber_count && !still_subscribed; current++)
+                still_subscribed = subscribers[current].handler == copy[index].handler && subscribers[current].context == copy[index].context;
+            if (still_subscribed) copy[index].handler(copy[index].context, time);
+        }
+        free(copy);
     }
-    free(copy);
+    // 都画完了才允许发下一条。
+    InterlockedExchange(&frame_pending, 0);
     return 0;
 }
 
