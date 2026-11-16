@@ -114,17 +114,10 @@ DropShelf installs to `%LOCALAPPDATA%\Programs\DropShelf` without admin rights; 
 
 ## Building from source
 
-Requires the .NET 10 SDK.
+Since 3.0.0, the released program is the C version in the `native` folder (2.x was the C# version). It needs Visual Studio 2022 or Build Tools with "Desktop development with C++" (which includes MSVC, CMake and Ninja). This builds it and runs the tests, producing `native\build\Release\DropShelf.exe`; add `-NoTests` to only build, or `-Debug` for a debug build:
 
 ```powershell
-dotnet build .\DropShelf.sln -c Release
-dotnet run --project .\src\DropShelf\DropShelf.csproj
-```
-
-Run the tests:
-
-```powershell
-dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
+.\native\build.ps1
 ```
 
 Build the portable version and installer (requires Inno Setup 6 or 7) into the `artifacts` folder:
@@ -133,9 +126,21 @@ Build the portable version and installer (requires Inno Setup 6 or 7) into the `
 .\installer\Build-Installer.ps1
 ```
 
+The original C# version is still in `src` and needs the .NET 10 SDK:
+
+```powershell
+dotnet build .\DropShelf.sln -c Release
+dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
+.\installer\Build-Installer.ps1 -DotNet
+```
+
 For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHELF_SETTINGS_PATH` and `DROPSHELF_LOG_DIRECTORY` to choose where settings and logs go.
 
 ## Project structure
+
+- `native`: the C version (the one that is released). `native/src` is the program and `native/tests` the tests; most files say at the top which part of the C# version they correspond to.
+
+The C# version:
 
 - `src/DropShelf/AppController.cs`: app controller.
 - `src/DropShelf/Services/Gestures`: shake detection and screen edge dwell.
@@ -152,7 +157,7 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish.
-3. GitHub Actions builds the installer and portable version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`.
+3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
 
 Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
 
