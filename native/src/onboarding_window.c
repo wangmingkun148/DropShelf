@@ -620,7 +620,7 @@ void onboarding_window_show(void)
     options.title = S(STR_OnboardingWelcomeTitle);
     options.width = WINDOW_WIDTH;
     options.height = WINDOW_HEIGHT;
-    options.backdrop = UI_BACKDROP_MICA;
+    options.backdrop = UI_BACKDROP_NONE;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
     options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));

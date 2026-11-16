@@ -650,27 +650,26 @@ static void host_arrange(UiElement *element)
 
 static const UiElementType host_type = { host_measure, host_arrange, NULL, NULL, NULL, false };
 
-/// 设置页那张牌：整张铺一层很淡的强调色，左上角稍浓；圆角 12，上下留一点空，滚动条不会伸进圆角。
+/// 设置页是翻过来的牌背：四周一圈牌背纹样，中间是牌面底色的页面，内容在里面滚动；圆角 12，上下留一点空，滚动条不会伸进圆角。
 static void sheet_paint(UiElement *element, double time)
 {
     (void)time;
     PageView *view = element->tag;
     GfxRect bounds = element->bounds;
-    float width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
-    GfxStop stops[2] = { { 0, theme_color(THEME_SHEET_GLOW) }, { 0.7f, theme_color(THEME_STACK_EDGE) } };
-    gfx_fill_rounded_radial(bounds, SHEET_RADIUS, bounds.left, bounds.top, width * 1.1f, height * 0.7f, stops, 2);
-    if (!view->sheet_border_hidden) gfx_stroke_rounded(bounds, SHEET_RADIUS, theme_color(THEME_SHEET_BORDER), 1);
+    gfx_fill_rounded(bounds, SHEET_RADIUS, theme_color(THEME_CARD));
+    ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+    if (!view->sheet_border_hidden) gfx_stroke_rounded_pattern(bounds, SHEET_RADIUS, &back, SHEET_BAND);
 }
 
 static void sheet_arrange(UiElement *element)
 {
     GfxRect bounds = element->bounds;
-    ui_arrange(element->children[0], (GfxRect){ bounds.left + 1, bounds.top + 1 + 6, bounds.right - 1, bounds.bottom - 1 - 6 });
+    ui_arrange(element->children[0], (GfxRect){ bounds.left + SHEET_BAND, bounds.top + SHEET_BAND + 6, bounds.right - SHEET_BAND, bounds.bottom - SHEET_BAND - 6 });
 }
 
 static GfxSize sheet_measure(UiElement *element, float available)
 {
-    ui_measure(element->children[0], available - 2);
+    ui_measure(element->children[0], available - 2 * SHEET_BAND);
     return (GfxSize){ available, 0 };
 }
 
@@ -698,7 +697,8 @@ static void build_page_frame(int page, float header_bottom)
     view->title = main_page_title(page);
     view->glyph = main_page_glyph(page);
     view->content = ui_stack(false, 0);
-    ui_stack_set_padding(view->content, 23, 12, 23, 24);
+    // 牌里的留白：两侧 14 加上 10 的牌背边框，正好等于 SHEET_PADDING，内容和概览页对齐。
+    ui_stack_set_padding(view->content, 14, 10, 14, 24);
     view->header = pages_build_header_row(page, header_bottom);
     ui_add(view->content, view->header);
     view->scroll = ui_scroll(view->content);
@@ -897,6 +897,10 @@ static void theme_tile_mouse(UiElement *element, const UiMouseEvent *event)
 static const UiElementType theme_tile_type = { theme_tile_measure, NULL, theme_tile_paint, theme_tile_mouse, NULL, true };
 
 /// 强调色色块：选中时外圈和对勾。index 为 -1 是跟随 Windows。
+/// 强调色色块的编号：先是默认的钴蓝、跟随 Windows，后面是 theme_accent_preset 的各个颜色。
+#define SWATCH_COBALT (-2)
+#define SWATCH_SYSTEM (-1)
+
 typedef struct Swatch
 {
     UiElement base;
@@ -907,34 +911,42 @@ static GfxSize swatch_measure(UiElement *element, float available)
 {
     (void)element;
     (void)available;
-    return (GfxSize){ 32, 32 };
+    return (GfxSize){ 30, 38 };
+}
+
+/// 色块代表的设置值：钴蓝是 NULL，跟随 Windows 是 "system"。
+static const wchar_t *swatch_value(const Swatch *swatch)
+{
+    if (swatch->index == SWATCH_COBALT) return NULL;
+    if (swatch->index == SWATCH_SYSTEM) return THEME_SYSTEM_ACCENT_VALUE;
+    return theme_accent_preset(swatch->index);
 }
 
 static bool swatch_selected(const Swatch *swatch)
 {
-    const wchar_t *accent = app_settings()->accent_color;
-    if (swatch->index < 0) return !accent || !*accent;
-    return accent && wcs_equal_ignore_case(accent, theme_accent_preset(swatch->index));
+    const wchar_t *accent = app_settings()->accent_color, *value = swatch_value(swatch);
+    if (!value) return !accent || !*accent;
+    return accent && wcs_equal_ignore_case(accent, value);
 }
 
+/// 强调色色块是一张小牌：选中时外圈和对勾，悬停时外圈淡淡显出。
 static void swatch_paint(UiElement *element, double time)
 {
     (void)time;
     Swatch *swatch = (Swatch *)element;
     GfxRect bounds = element->bounds;
-    float x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
     bool selected = swatch_selected(swatch);
     float ring = selected ? 1.0f : element->hovered ? 0.35f : 0;
     if (ring > 0)
     {
         Color color = theme_color(THEME_TEXT_PRIMARY);
         color.a = (uint8_t)(color.a * ring);
-        gfx_stroke_ellipse(x, y, 16, 16, color, 2);
+        gfx_stroke_rounded(bounds, 6, color, 2);
     }
-    Color fill = theme_color(THEME_SYSTEM_ACCENT);
+    Color fill = swatch->index == SWATCH_SYSTEM ? theme_color(THEME_SYSTEM_ACCENT) : THEME_COBALT;
     COLORREF rgb;
     if (swatch->index >= 0 && accent_color_parse(theme_accent_preset(swatch->index), &rgb)) fill = COLOR_RGB(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb));
-    gfx_fill_ellipse(x, y, 11, 11, fill);
+    gfx_fill_rounded((GfxRect){ bounds.left + 5, bounds.top + 5, bounds.right - 5, bounds.bottom - 5 }, 3, fill);
     if (selected)
     {
         GfxTextStyle check = { GFX_FONT_ICON, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
@@ -952,7 +964,7 @@ static void swatch_mouse(UiElement *element, const UiMouseEvent *event)
 {
     Swatch *swatch = (Swatch *)element;
     if (event->kind != UI_MOUSE_UP || !event->inside || event->right_button || swatch_selected(swatch)) return;
-    app_update_settings(change_accent, swatch->index >= 0 ? (void *)theme_accent_preset(swatch->index) : NULL);
+    app_update_settings(change_accent, (void *)swatch_value(swatch));
 }
 
 static const UiElementType swatch_type = { swatch_measure, NULL, swatch_paint, swatch_mouse, NULL, true };
@@ -990,12 +1002,13 @@ static void build_appearance_page(void)
     ui_add(texts, description);
     P.swatches = ui_stack(true, 4);
     ui_set_margin(P.swatches, -5, 10, 0, 0);
-    for (int index = -1; index < theme_accent_preset_count(); index++)
+    for (int index = SWATCH_COBALT; index < theme_accent_preset_count(); index++)
     {
         Swatch *swatch = (Swatch *)ui_element_new(&swatch_type, sizeof(Swatch));
         swatch->index = index;
+        if (index == SWATCH_COBALT) ui_set_tooltip(&swatch->base, UI_STR(STR_AccentCobalt));
         // 跟随 Windows 显示系统当前的强调色，并与固定颜色之间留出间隔。
-        if (index < 0)
+        if (index == SWATCH_SYSTEM)
         {
             ui_set_margin(&swatch->base, 0, 0, 12, 0);
             ui_set_tooltip(&swatch->base, UI_STR(STR_AccentFollowSystem));
@@ -1137,7 +1150,7 @@ void pages_refresh(void)
     quick_action_list_free(&visible);
     tile_set_summary(M->tiles[PAGE_ACTIONS], str_actions_summary(&labels));
     strlist_clear(&labels);
-    tile_set_summary(M->tiles[PAGE_APPEARANCE], str_appearance_summary(settings->theme, settings->accent_color != NULL));
+    tile_set_summary(M->tiles[PAGE_APPEARANCE], str_appearance_summary(settings->theme, settings->accent_color));
 
     // 常规。
     ui_segmented_set_selected(P.language, settings->language);

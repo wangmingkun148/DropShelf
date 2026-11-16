@@ -105,7 +105,7 @@ typedef struct AppSettings
     StrList blocked_apps;
 
     int theme;
-    wchar_t *accent_color;          // 自选的强调色（#RRGGBB）；NULL 时跟随 Windows
+    wchar_t *accent_color;          // 自选的强调色（#RRGGBB）；"system" 时跟随 Windows，NULL 时是默认的钴蓝
     int language;
     wchar_t *language_pack;         // 选用的语言包（文件名，不含扩展名）；NULL 时不使用
     bool start_with_windows;

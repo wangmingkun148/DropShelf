@@ -54,5 +54,9 @@ void shelf_history_add_listener(void (*listener)(void *context), void *context);
 wchar_t *shelf_history_entry_title(const ShelfHistoryEntry *entry);
 /// 关闭的时间：今天的写“14:05”，昨天的写“昨天 14:05”，更早的写日期。调用方负责 free。
 wchar_t *shelf_history_entry_time(const ShelfHistoryEntry *entry);
+
+/// 历史牌右上角：关闭的时刻（HH:mm），下面一行是今天、昨天或日期。
+wchar_t *shelf_history_entry_clock(const ShelfHistoryEntry *entry);
+wchar_t *shelf_history_entry_day(const ShelfHistoryEntry *entry);
 /// 提示里列出的名称：最多 8 个，每行一个，更多时最后一行是“…”。调用方负责 free。
 wchar_t *shelf_history_entry_preview(const ShelfHistoryEntry *entry);

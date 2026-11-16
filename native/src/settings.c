@@ -437,7 +437,8 @@ void settings_normalize(AppSettings *settings)
     if (!enum_is_defined(&trigger_table, settings->auto_open_trigger)) settings->auto_open_trigger = TRIGGER_BOTH;
     if (!enum_is_defined(&dwell_table, settings->edge_dwell)) settings->edge_dwell = DWELL_MEDIUM;
     if (!enum_is_defined(&theme_table, settings->theme)) settings->theme = THEME_SYSTEM;
-    if (!accent_color_parse(settings->accent_color, NULL))
+    // 跟随 Windows 存为 "system"，和 C# 版的 ThemeService.SystemAccent 相同。
+    if (!wcs_equal(settings->accent_color, L"system") && !accent_color_parse(settings->accent_color, NULL))
     {
         free(settings->accent_color);
         settings->accent_color = NULL;

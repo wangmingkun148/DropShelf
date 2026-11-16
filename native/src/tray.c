@@ -29,6 +29,7 @@ static HWND tray_window;
 static TrayActions tray_actions;
 static UINT taskbar_created_message;
 static HICON tray_icon;
+static HICON balloon_icon;      // 通知里用的大图标，第一次显示通知时取
 static bool tray_added;
 static bool tray_version_4;     // 系统接受了新版的通知方式（NOTIFYICON_VERSION_4）
 
@@ -88,7 +89,15 @@ void tray_show_notice(const wchar_t *title, const wchar_t *body)
     NOTIFYICONDATAW data = create_data(NIF_INFO);
     copy_text(data.szInfoTitle, ARRAYSIZE(data.szInfoTitle), title);
     copy_text(data.szInfo, ARRAYSIZE(data.szInfo), body);
-    data.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+    // 通知里放程序自己的大图标（内嵌的图标按系统大图标的尺寸取），不用系统的信息图标。
+    if (!balloon_icon)
+    {
+        int size = GetSystemMetrics(SM_CXICON);
+        if (size <= 0) size = 32;
+        balloon_icon = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+    }
+    data.hBalloonIcon = balloon_icon;
+    data.dwInfoFlags = (balloon_icon ? NIIF_USER | NIIF_LARGE_ICON : NIIF_INFO) | NIIF_RESPECT_QUIET_TIME;
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
@@ -106,7 +115,8 @@ void tray_destroy(void)
         tray_added = false;
     }
     if (tray_icon) DestroyIcon(tray_icon);
-    tray_icon = NULL;
+    if (balloon_icon) DestroyIcon(balloon_icon);
+    tray_icon = balloon_icon = NULL;
     tray_window = NULL;
 }
 

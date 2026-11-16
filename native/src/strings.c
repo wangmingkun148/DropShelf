@@ -224,6 +224,13 @@ wchar_t *str_history_entry_title(const wchar_t *first, int count)
 
 wchar_t *str_history_yesterday(const wchar_t *time) { return with_text(L"昨天 {0}", L"Yesterday {0}", time); }
 
+wchar_t *str_history_day(int days_ago, int month, int day)
+{
+    if (days_ago == 0) return wcs_dup(tr(L"今天", L"Today"));
+    if (days_ago == 1) return wcs_dup(tr(L"昨天", L"Yesterday"));
+    return str_history_date(month, day);
+}
+
 wchar_t *str_history_date(int month, int day)
 {
     static const wchar_t *const months[12] = { L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun", L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec" };
@@ -328,11 +335,12 @@ wchar_t *str_actions_summary(const StrList *labels)
     return wstr_take(&text);
 }
 
-wchar_t *str_appearance_summary(int theme, bool custom_accent)
+wchar_t *str_appearance_summary(int theme, const wchar_t *accent)
 {
     WStr text = {0};
     join_part(&text, theme == THEME_LIGHT ? S(STR_ThemeLight) : theme == THEME_DARK ? S(STR_ThemeDark) : tr(L"主题跟随系统", L"System theme"));
-    join_part(&text, custom_accent ? tr(L"自选强调色", L"Custom accent color") : tr(L"Windows 强调色", L"Windows accent color"));
+    join_part(&text, !accent ? S(STR_AccentCobalt) : wcs_equal(accent, L"system") ? tr(L"Windows 强调色", L"Windows accent color") :
+                     tr(L"自选强调色", L"Custom accent color"));
     return wstr_take(&text);
 }
 

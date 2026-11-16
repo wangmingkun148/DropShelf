@@ -88,6 +88,8 @@ static void call_parameterized(void)
     TAKE(str_images_already_format(L"x"));
     TAKE(str_images_already_small(L"x"));
     TAKE(str_history_yesterday(L"x"));
+    TAKE(str_history_day(0, 1, 1));
+    TAKE(str_history_day(1, 1, 1));
     TAKE(str_history_date(1, 1));
     TAKE(str_version(L"x"));
     TAKE(str_update_latest(L"x"));
@@ -111,8 +113,9 @@ static void call_parameterized(void)
     strlist_clear(&some);
     for (int theme = THEME_SYSTEM; theme <= THEME_DARK; theme++)
     {
-        TAKE(str_appearance_summary(theme, false));
-        TAKE(str_appearance_summary(theme, true));
+        TAKE(str_appearance_summary(theme, NULL));
+        TAKE(str_appearance_summary(theme, L"system"));
+        TAKE(str_appearance_summary(theme, L"#8764B8"));
     }
     TAKE(str_confirm_delete_action(L"x"));
     TAKE(str_image_size_invalid(1, 2));

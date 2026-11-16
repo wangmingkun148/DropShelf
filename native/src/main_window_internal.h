@@ -36,6 +36,8 @@ typedef enum MainPage
 #define STACK_ROOM 64.0f            // 牌底下留给其余几张牌的边
 #define SHEET_MAX_WIDTH 908.0f
 #define SHEET_RADIUS 12.0f
+/// 设置页四周牌背纹样的宽度：翻牌、抽牌途中由背面的轮廓画出这一圈。
+#define SHEET_BAND 10.0f
 #define TILE_RADIUS 8.0f
 #define MOTION_SECONDS 0.34
 #define MOTION_EASE EASE_OF(EASE_CUBIC_OUT)

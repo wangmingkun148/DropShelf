@@ -119,7 +119,7 @@ static void test_settings_round_trip(void)
     AppSettings defaults;
     settings_load(&defaults);
     CHECK(defaults.close_when_empty && defaults.show_getting_started && defaults.performance_mode == PERFORMANCE_AUTO, "默认开关不正确");
-    CHECK(defaults.accent_color == NULL, "默认强调色应跟随 Windows");
+    CHECK(defaults.accent_color == NULL, "默认强调色应为钴蓝");
     CHECK(defaults.quick_shelf_size == SHELF_SIZE_MEDIUM, "默认尺寸不是中档");
     CHECK(defaults.quick_action_layout == LAYOUT_FOUR &&
           list_is(&defaults.quick_action_slots, 4, L"CompressZip", L"CopyFullPath", L"MoveTo", L"Properties"), "默认快速操作不正确");
@@ -320,6 +320,13 @@ static void test_settings_normalization(void)
     CHECK(normalized.auto_open_trigger == TRIGGER_BOTH && normalized.edge_dwell == DWELL_MEDIUM, "异常呼出方式没有恢复默认值");
     CHECK(normalized.drag_out_mode == TRANSFER_MOVE, "异常拖出方式没有恢复默认值");
     CHECK(normalized.theme == THEME_SYSTEM && normalized.accent_color == NULL, "异常主题或强调色没有恢复默认值");
+    AppSettings follow = {0};
+    settings_init(&follow);
+    free(follow.accent_color);
+    follow.accent_color = wcs_dup(L"system");
+    settings_normalize(&follow);
+    CHECK(wcs_equal(follow.accent_color, L"system"), "跟随 Windows 的强调色不应被清除");
+    settings_free(&follow);
     CHECK(normalized.language == LANGUAGE_SYSTEM && normalized.quick_shelf_size == SHELF_SIZE_MEDIUM, "异常语言或尺寸没有恢复默认值");
     CHECK(normalized.quick_action_layout == LAYOUT_FOUR, "异常按钮数量没有恢复默认值");
     CHECK(list_is(&normalized.blocked_apps, 2, L"game.exe", L"paint.exe"), "屏蔽的应用没有去掉空白、路径和重复");
@@ -711,14 +718,27 @@ static void test_theme(void)
     Color dark[THEME_COLOR_COUNT], light[THEME_COLOR_COUNT];
     theme_build_palette(true, palette, dark);
     theme_build_palette(false, accent_palette_default(), light);
+    Color dark_background = COLOR_RGB(0x1C, 0x1B, 0x19);
     CHECK(color_equal(dark[THEME_TEXT_ON_ACCENT], COLOR_WHITE), "深色强调色上应使用白字");
-    CHECK(color_contrast_ratio(dark[THEME_ACCENT_TEXT], COLOR_RGB(0x20, 0x20, 0x20)) >= 4.5, "强调色文字对比度不足");
-    CHECK(color_equal(light[THEME_ACCENT], accent_palette_default().dark1) && color_equal(light[THEME_TEXT_ON_ACCENT], COLOR_WHITE), "默认浅色强调色不正确");
+    CHECK(color_contrast_ratio(dark[THEME_ACCENT_TEXT], dark_background) >= 4.5, "强调色文字对比度不足");
+    CHECK(color_equal(light[THEME_ACCENT], accent_palette_default().base) && color_equal(light[THEME_TEXT_ON_ACCENT], COLOR_WHITE), "默认浅色强调色不正确");
+    Color cobalt[THEME_COLOR_COUNT], dark_cobalt[THEME_COLOR_COUNT];
+    theme_build_palette(false, accent_palette_from_color(THEME_COBALT), cobalt);
+    theme_build_palette(true, accent_palette_from_color(THEME_COBALT), dark_cobalt);
+    CHECK(color_equal(cobalt[THEME_CARD_BACK_FILL], THEME_COBALT) && color_equal(cobalt[THEME_TABLE_TEXT], COLOR_WHITE), "钴蓝牌背或牌桌文字不正确");
+    CHECK(color_contrast_ratio(dark_cobalt[THEME_ACCENT_TEXT], dark_background) >= 4.5, "深色主题下钴蓝文字对比度不足");
     CHECK(color_prefers_dark_text(COLOR_RGB(0x99, 0xEB, 0xFF)), "浅色强调色上应使用黑字");
-    CHECK(light[THEME_WINDOW_BACKGROUND].r > light[THEME_WINDOW_BACKGROUND].b && light[THEME_SHELF_SOLID].r > light[THEME_SHELF_SOLID].b, "浅色背景应为象牙白");
-    CHECK(color_equal(light[THEME_ACCENT_HOVER], COLOR_ARGB(0xE6, 0x00, 0x67, 0xC0)) && color_equal(light[THEME_STACK_EDGE], COLOR_ARGB(0x0D, 0x00, 0x67, 0xC0)) &&
-          color_equal(light[THEME_SHEET_GLOW], COLOR_ARGB(0x19, 0x00, 0x67, 0xC0)) && color_equal(light[THEME_TEXT_PRIMARY], COLOR_ARGB(0xE4, 0, 0, 0)),
-        "浅色调色板与 C# 版算出来的不一致");
+    // 和 C# style 版 ThemeService.BuildPalette 算出来的一致。
+    CHECK(color_equal(cobalt[THEME_ACCENT_HOVER], COLOR_ARGB(0xE6, 0x2B, 0x4E, 0xFF)) && color_equal(cobalt[THEME_CARD_BACK_LINE], COLOR_RGB(0x20, 0x3A, 0xBF)) &&
+          color_equal(dark_cobalt[THEME_CARD_BACK_FILL], COLOR_RGB(0x18, 0x2B, 0x8C)) && color_equal(cobalt[THEME_TEXT_PRIMARY], COLOR_RGB(0x15, 0x17, 0x1C)) &&
+          color_equal(cobalt[THEME_WINDOW_BACKGROUND], COLOR_RGB(0xE8, 0xE5, 0xDE)) && color_equal(dark_cobalt[THEME_TABLE_TEXT], COLOR_RGB(0xED, 0xEA, 0xE3)),
+        "调色板与 C# style 版算出来的不一致");
+    ThemePattern patterns[THEME_PATTERN_COUNT];
+    theme_build_patterns(false, cobalt, patterns);
+    CHECK(patterns[THEME_PATTERN_SHEET_BORDER].kind == THEME_PATTERN_LATTICE && patterns[THEME_PATTERN_SHEET_BORDER].size == 8 &&
+          color_equal(patterns[THEME_PATTERN_SHEET_BORDER].line, COLOR_ARGB(0x29, 255, 255, 255)) &&
+          patterns[THEME_PATTERN_STACK_EDGE].kind == THEME_PATTERN_STRIPES && patterns[THEME_PATTERN_TABLE].size == 12,
+        "牌背、牌边或牌桌的图案不正确");
 
     AccentPalette custom = accent_palette_from_color(COLOR_RGB(0x87, 0x64, 0xB8));
     CHECK(color_equal(custom.base, COLOR_RGB(0x87, 0x64, 0xB8)) && custom.light1.r > custom.base.r && custom.dark1.r < custom.base.r, "由一个颜色生成的深浅不正确");
@@ -732,10 +752,11 @@ static void test_theme(void)
         "颜色叠加不正确");
 
     theme_set_mode(THEME_DARK, L"#8764B8");
-    CHECK(theme_is_dark() && color_equal(theme_accent().base, COLOR_RGB(0x87, 0x64, 0xB8)) && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0x2C, 0x2C, 0x2C)),
+    CHECK(theme_is_dark() && color_equal(theme_accent().base, COLOR_RGB(0x87, 0x64, 0xB8)) && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0x26, 0x25, 0x22)),
         "切换到深色和自选强调色后颜色不正确");
     theme_set_mode(THEME_LIGHT, NULL);
-    CHECK(!theme_is_dark() && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0xFD, 0xFC, 0xF8)), "切换回浅色后颜色不正确");
+    CHECK(!theme_is_dark() && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0xFB, 0xFA, 0xF6)) && color_equal(theme_accent().base, THEME_COBALT),
+        "切换回浅色后颜色不正确，或默认强调色不是钴蓝");
 }
 
 // ───────────── 动画 ─────────────

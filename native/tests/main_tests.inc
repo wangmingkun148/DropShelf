@@ -2,62 +2,64 @@
 
 static void test_update_check(void)
 {
+    // 这一版的发布标签以 style 开头（style-v3.0.1、style3.0.1），主线的 v3.0.1 是另一种外观，不算。
     int major = 0, minor = 0, patch = 0;
-    CHECK(update_parse_tag(L"v2.8.5", &major, &minor, &patch) && major == 2 && minor == 8 && patch == 5, "v2.8.5 没有读对");
-    CHECK(update_parse_tag(L"V3.0", &major, &minor, &patch) && major == 3 && minor == 0 && patch == 0, "两段的版本号应补成 3.0.0");
-    CHECK(!update_parse_tag(L"version-2", &major, &minor, &patch), "前缀后面不是数字的不算");
-    CHECK(!update_parse_tag(L"style-v2.8.5", &major, &minor, &patch), "别的前缀不算");
-    CHECK(!update_parse_tag(L"v2.8.5-beta", &major, &minor, &patch), "后面还有别的不算");
+    CHECK(update_parse_tag(L"style-v2.8.5", &major, &minor, &patch) && major == 2 && minor == 8 && patch == 5, "style-v2.8.5 没有读对");
+    CHECK(update_parse_tag(L"Style3.0", &major, &minor, &patch) && major == 3 && minor == 0 && patch == 0, "两段的版本号应补成 3.0.0");
+    CHECK(update_parse_tag(L"style2.8.0", &major, &minor, &patch) && major == 2 && minor == 8 && patch == 0, "style2.8.0 没有读对");
+    CHECK(!update_parse_tag(L"style-version-2", &major, &minor, &patch), "前缀后面不是数字的不算");
+    CHECK(!update_parse_tag(L"v2.8.5", &major, &minor, &patch), "主线的标签不算");
+    CHECK(!update_parse_tag(L"style-v2.8.5-beta", &major, &minor, &patch), "后面还有别的不算");
 
     const wchar_t *json =
-        L"[ { \"tag_name\": \"v2.9.0\", \"draft\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.9.0\" },"
-        L"  { \"tag_name\": \"v2.8.9\", \"prerelease\": true },"
-        L"  { \"tag_name\": \"v2.8.4\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.8.4\" },"
-        L"  { \"tag_name\": \"style-v9.0.0\" },"
-        L"  { \"tag_name\": \"v2.8.3\", \"html_url\": \"https://evil.example/x\" } ]";
+        L"[ { \"tag_name\": \"style-v2.9.0\", \"draft\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.9.0\" },"
+        L"  { \"tag_name\": \"style-v2.8.9\", \"prerelease\": true },"
+        L"  { \"tag_name\": \"style-v2.8.4\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.8.4\" },"
+        L"  { \"tag_name\": \"v9.0.0\" },"
+        L"  { \"tag_name\": \"style-v2.8.3\", \"html_url\": \"https://evil.example/x\" } ]";
     UpdateInfo info;
     CHECK(update_find_newer(json, 2, 8, 2, &info) == UPDATE_NEWER && info.major == 2 && info.minor == 8 && info.patch == 4, "应找到 2.8.4");
-    CHECK(info.url && wcscmp(info.url, L"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.8.4") == 0, "下载页没有读对");
+    CHECK(info.url && wcscmp(info.url, L"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.8.4") == 0, "下载页没有读对");
     free(info.url);
-    CHECK(update_find_newer(L"[ { \"tag_name\": \"v2.8.3\", \"html_url\": \"https://evil.example/x\" } ]", 2, 8, 2, &info) == UPDATE_NEWER &&
+    CHECK(update_find_newer(L"[ { \"tag_name\": \"style-v2.8.3\", \"html_url\": \"https://evil.example/x\" } ]", 2, 8, 2, &info) == UPDATE_NEWER &&
               wcscmp(info.url, UPDATE_RELEASES_PAGE) == 0, "别的网站的地址应换成发布页");
     free(info.url);
     CHECK(update_find_newer(json, 2, 8, 4, &info) == UPDATE_LATEST, "已经是最新时应返回 LATEST");
     CHECK(update_find_newer(L"{ \"message\": \"rate limited\" }", 2, 8, 2, &info) == UPDATE_ERROR, "不是发布列表时应返回 ERROR");
 
-    // 与 C# 版 TestUpdateChecker 相同的发布列表：版本号按数字比较，别的前缀、草稿、预发布和没有标签的都不算。
-    CHECK(!update_parse_tag(L"style2.8.5", &major, &minor, &patch) && !update_parse_tag(L"vnext", &major, &minor, &patch) &&
-          !update_parse_tag(L"v", &major, &minor, &patch) && !update_parse_tag(NULL, &major, &minor, &patch), "别的前缀或不是版本号的标签被当成了版本");
+    // 与 C# style 版 TestUpdateChecker 相同的发布列表：版本号按数字比较，别的前缀、草稿、预发布和没有标签的都不算。
+    CHECK(!update_parse_tag(L"v2.8.5", &major, &minor, &patch) && !update_parse_tag(L"stylenext", &major, &minor, &patch) &&
+          !update_parse_tag(L"style-v", &major, &minor, &patch) && !update_parse_tag(NULL, &major, &minor, &patch), "别的前缀或不是版本号的标签被当成了版本");
     const wchar_t *releases =
-        L"[ { \"tag_name\": \"style9.9.9\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style9.9.9\" },"
-        L"  { \"tag_name\": \"v9.0.0\", \"draft\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v9.0.0\" },"
-        L"  { \"tag_name\": \"v8.0.0\", \"prerelease\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v8.0.0\" },"
-        L"  { \"tag_name\": \"v2.9.1\", \"draft\": false, \"prerelease\": false, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.9.1\" },"
-        L"  { \"tag_name\": \"vTAG\", \"html_url\": \"https://example.com/elsewhere\" },"
-        L"  { \"tag_name\": \"v2.8.0\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.8.0\" },"
+        L"[ { \"tag_name\": \"v9.9.9\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/v9.9.9\" },"
+        L"  { \"tag_name\": \"style-v9.0.0\", \"draft\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v9.0.0\" },"
+        L"  { \"tag_name\": \"style-v8.0.0\", \"prerelease\": true, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v8.0.0\" },"
+        L"  { \"tag_name\": \"style-v2.9.1\", \"draft\": false, \"prerelease\": false, \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.9.1\" },"
+        L"  { \"tag_name\": \"style-vTAG\", \"html_url\": \"https://example.com/elsewhere\" },"
+        L"  { \"tag_name\": \"style-v2.8.0\", \"html_url\": \"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.8.0\" },"
         L"  { \"name\": \"没有标签\" } ]";
-    // vTAG 是占位：一份换成 v2.10.0，另一份换成 v2.1.0。
+    // TAG 是占位：一份换成 2.10.0，另一份换成 2.1.0。
     WStr newer_list = {0}, older_list = {0};
-    const wchar_t *mark = wcsstr(releases, L"vTAG");
+    const wchar_t *mark = wcsstr(releases, L"TAG");
     wstr_append_n(&newer_list, releases, (size_t)(mark - releases));
-    wstr_append(&newer_list, L"v2.10.0");
-    wstr_append(&newer_list, mark + 4);
+    wstr_append(&newer_list, L"2.10.0");
+    wstr_append(&newer_list, mark + 3);
     wstr_append_n(&older_list, releases, (size_t)(mark - releases));
-    wstr_append(&older_list, L"v2.1.0");
-    wstr_append(&older_list, mark + 4);
+    wstr_append(&older_list, L"2.1.0");
+    wstr_append(&older_list, mark + 3);
     CHECK(update_find_newer(newer_list.data, 2, 8, 5, &info) == UPDATE_NEWER && info.major == 2 && info.minor == 10 && info.patch == 0 &&
               wcscmp(info.url, UPDATE_RELEASES_PAGE) == 0, "没有找到最新的正式版本");
     free(info.url);
     CHECK(update_find_newer(newer_list.data, 2, 9, 0, &info) == UPDATE_NEWER && info.minor == 10, "版本号没有按数字比较");
     free(info.url);
     CHECK(update_find_newer(older_list.data, 2, 8, 5, &info) == UPDATE_NEWER && info.minor == 9 && info.patch == 1 &&
-              wcscmp(info.url, L"https://github.com/wangmingkun148/dropshelf/releases/tag/v2.9.1") == 0, "下载页的地址不对");
+              wcscmp(info.url, L"https://github.com/wangmingkun148/dropshelf/releases/tag/style-v2.9.1") == 0, "下载页的地址不对");
     free(info.url);
     CHECK(update_find_newer(newer_list.data, 2, 10, 0, &info) == UPDATE_LATEST && update_find_newer(L"[]", 1, 0, 0, &info) == UPDATE_LATEST,
         "已经是最新版本时仍然提示有更新");
     wstr_free(&newer_list);
     wstr_free(&older_list);
-    CHECK(update_parse_tag(L"v" DROPSHELF_VERSION, &major, &minor, &patch) && major >= 2, "当前版本号不正确");
+    CHECK(update_parse_tag(L"style-v" DROPSHELF_VERSION, &major, &minor, &patch) && major >= 2, "当前版本号不正确");
 }
 
 static void test_main_strings(void)
@@ -678,7 +680,8 @@ static void test_main_window_settings(void)
     for (int index = 0; index < theme_accent_preset_count(); index++)
         if (wcs_equal_ignore_case(theme_accent_preset(index), L"#038387")) accent = index;
     UiElement *swatches = pages_control(PAGES_SWATCHES);
-    CHECK(accent >= 0 && accent + 1 < swatches->child_count && click_element(swatches->children[accent + 1]), "强调色点不到");
+    // 色块依次是默认的钴蓝、跟随 Windows，然后才是各个颜色。
+    CHECK(accent >= 0 && accent + 2 < swatches->child_count && click_element(swatches->children[accent + 2]), "强调色点不到");
 
     // 概览页卡片上的摘要、快速操作页的位置和更多操作。
     actions_assign_slot(1, L"Reveal");

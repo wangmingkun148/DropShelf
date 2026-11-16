@@ -108,10 +108,12 @@ struct GfxSurface
 };
 
 static void release_shadow_templates(void);
+static void release_pattern_brushes(void);
 
 static void release_device_resources(void)
 {
     release_shadow_templates();
+    release_pattern_brushes();
     release(template_shadow);
     release(template_brush);
     release(template_context);
@@ -1205,6 +1207,139 @@ void gfx_stroke_rounded_open_top(GfxRect rect, float top, float bottom, Color co
     release(path);
 }
 
+// ───────────── 图案 ─────────────
+// 斜格纹按一格画一张小位图，平铺成画刷；条纹是重复的线性渐变。画刷按图案和缩放比例留几份，设备重建时一起释放。
+
+struct PatternBrush
+{
+    ThemePattern pattern;
+    float dpi;
+    ID2D1Brush *brush;
+};
+
+#define PATTERN_CACHE_SIZE 6
+static PatternBrush pattern_cache[PATTERN_CACHE_SIZE];
+static int pattern_next;
+
+static void release_pattern_brushes(void)
+{
+    for (int index = 0; index < PATTERN_CACHE_SIZE; index++) release(pattern_cache[index].brush);
+    memset(pattern_cache, 0, sizeof(pattern_cache));
+    pattern_next = 0;
+}
+
+static D2D1_COLOR_F color_f(Color color)
+{
+    return D2D1::ColorF(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+}
+
+/// 一格斜格纹：底色上画两条对角线，平铺后连成菱形格子。在模板的上下文里画，正在画的这一帧不受影响。
+static ID2D1Brush *create_lattice(const ThemePattern *pattern, float dpi)
+{
+    if (!template_context || pattern->size <= 0) return nullptr;
+    // 按显示比例取整到像素，再把位图的 DPI 调到正好是 size 个 DIP 宽。
+    UINT32 pixels = (UINT32)lroundf(pattern->size * dpi / 96);
+    if (pixels < 2) pixels = 2;
+    float tile_dpi = pixels * 96.0f / pattern->size;
+    ID2D1Bitmap1 *tile = nullptr;
+    D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), tile_dpi, tile_dpi);
+    if (FAILED(template_context->CreateBitmap(D2D1::SizeU(pixels, pixels), nullptr, 0, &properties, &tile))) return nullptr;
+    float size = pattern->size;
+    template_context->SetTarget(tile);
+    template_context->SetDpi(tile_dpi, tile_dpi);
+    template_context->BeginDraw();
+    template_context->SetTransform(D2D1::Matrix3x2F::Identity());
+    Color fill = pattern->fill;
+    float alpha = fill.a / 255.0f;
+    template_context->Clear(D2D1::ColorF(fill.r / 255.0f * alpha, fill.g / 255.0f * alpha, fill.b / 255.0f * alpha, alpha));
+    template_brush->SetColor(color_f(pattern->line));
+    template_context->DrawLine(D2D1::Point2F(0, 0), D2D1::Point2F(size, size), template_brush, 1);
+    template_context->DrawLine(D2D1::Point2F(size, 0), D2D1::Point2F(0, size), template_brush, 1);
+    HRESULT result = template_context->EndDraw();
+    template_context->SetTarget(nullptr);
+    template_context->SetDpi(96, 96);
+    ID2D1BitmapBrush1 *tiled = nullptr;
+    if (SUCCEEDED(result))
+        context->CreateBitmapBrush(tile, D2D1::BitmapBrushProperties1(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP,
+            D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR), &tiled);
+    release(tile);
+    return tiled;
+}
+
+/// 45° 的条纹，两种颜色各 2 DIP 宽：重复的线性渐变，从 (0, 0) 到 (2.83, 2.83) 正好一个周期。
+static ID2D1Brush *create_stripes(const ThemePattern *pattern)
+{
+    D2D1_GRADIENT_STOP stops[4] = {
+        { 0, color_f(pattern->fill) }, { 0.5f, color_f(pattern->fill) }, { 0.5f, color_f(pattern->line) }, { 1, color_f(pattern->line) }
+    };
+    ID2D1GradientStopCollection *collection = nullptr;
+    ID2D1LinearGradientBrush *gradient = nullptr;
+    if (SUCCEEDED(context->CreateGradientStopCollection(stops, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &collection)))
+        context->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(2.83f, 2.83f)), collection, &gradient);
+    release(collection);
+    return gradient;
+}
+
+static bool same_pattern(const ThemePattern *a, const ThemePattern *b)
+{
+    return a->kind == b->kind && a->size == b->size && color_equal(a->fill, b->fill) && color_equal(a->line, b->line);
+}
+
+/// 图案的画刷，从 (x, y) 开始铺；建不了时返回 NULL，调用方改用底色。
+static ID2D1Brush *use_pattern(const ThemePattern *pattern, float x, float y)
+{
+    float dpi_x, dpi_y;
+    context->GetDpi(&dpi_x, &dpi_y);
+    float dpi = pattern->kind == THEME_PATTERN_LATTICE ? dpi_x : 0;
+    ID2D1Brush *found = nullptr;
+    for (int index = 0; index < PATTERN_CACHE_SIZE && !found; index++)
+        if (pattern_cache[index].brush && pattern_cache[index].dpi == dpi && same_pattern(&pattern_cache[index].pattern, pattern))
+            found = pattern_cache[index].brush;
+    if (!found)
+    {
+        found = pattern->kind == THEME_PATTERN_LATTICE ? create_lattice(pattern, dpi) : create_stripes(pattern);
+        if (!found) return nullptr;
+        PatternBrush *slot = &pattern_cache[pattern_next];
+        pattern_next = (pattern_next + 1) % PATTERN_CACHE_SIZE;
+        release(slot->brush);
+        *slot = { *pattern, dpi, found };
+    }
+    found->SetTransform(D2D1::Matrix3x2F::Translation(x, y));
+    return found;
+}
+
+void gfx_fill_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern)
+{
+    if (!drawing || rect.right <= rect.left || rect.bottom <= rect.top) return;
+    ID2D1Brush *fill = use_pattern(pattern, rect.left, rect.top);
+    if (!fill) fill = use_color(pattern->fill);
+    if (radius <= 0) context->FillRectangle(to_rect(rect), fill);
+    else context->FillRoundedRectangle(D2D1::RoundedRect(to_rect(rect), radius, radius), fill);
+}
+
+void gfx_stroke_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern, float width)
+{
+    if (!drawing || width <= 0 || rect.right <= rect.left || rect.bottom <= rect.top) return;
+    ID2D1Brush *stroke = use_pattern(pattern, rect.left, rect.top);
+    if (!stroke) stroke = use_color(pattern->fill);
+    float inset = width / 2;
+    D2D1_RECT_F inner = D2D1::RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset);
+    if (inner.right < inner.left || inner.bottom < inner.top) return;
+    float inner_radius = radius > inset ? radius - inset : 0;
+    if (inner_radius <= 0) context->DrawRectangle(inner, stroke, width);
+    else context->DrawRoundedRectangle(D2D1::RoundedRect(inner, inner_radius, inner_radius), stroke, width);
+}
+
+void gfx_fill_rounded_corners_pattern(GfxRect rect, float top, float bottom, const ThemePattern *pattern)
+{
+    if (!drawing) return;
+    ID2D1PathGeometry *path = corner_path(to_rect(rect), top, bottom, false, true);
+    ID2D1Brush *fill = path ? use_pattern(pattern, rect.left, rect.top) : nullptr;
+    if (path) context->FillGeometry(path, fill ? fill : use_color(pattern->fill));
+    release(path);
+}
+
 static ID2D1StrokeStyle *round_stroke(void)
 {
     static ID2D1StrokeStyle *style;
@@ -1268,6 +1403,12 @@ static bool font_exists(const wchar_t *family)
 
 static const wchar_t *font_family(GfxFont font)
 {
+    if (font == GFX_FONT_NUMBER || font == GFX_FONT_RANK)
+    {
+        static const wchar_t *numbers;
+        if (!numbers) numbers = font_exists(L"Bahnschrift") ? L"Bahnschrift" : L"Segoe UI";
+        return numbers;
+    }
     if (font != GFX_FONT_ICON) return L"Segoe UI";
     // Segoe Fluent Icons 是 Windows 11 才有的，Windows 10 上用图形相同的 Segoe MDL2 Assets。
     static const wchar_t *icons;
@@ -1284,8 +1425,9 @@ static IDWriteTextFormat *text_format(GfxFont font, float size, int weight)
     wchar_t locale[LOCALE_NAME_MAX_LENGTH] = L"";
     if (!GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH)) wcscpy_s(locale, L"en-us");
     IDWriteTextFormat *format = nullptr;
+    DWRITE_FONT_STRETCH stretch = font == GFX_FONT_RANK ? DWRITE_FONT_STRETCH_CONDENSED : DWRITE_FONT_STRETCH_NORMAL;
     if (FAILED(dwrite_factory->CreateTextFormat(font_family(font), nullptr, (DWRITE_FONT_WEIGHT)weight, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, size, locale, &format)))
+            stretch, size, locale, &format)))
         return nullptr;
     // 缓存满了就从头覆盖：用到的字号和粗细组合很少，正常情况下到不了这里。
     int slot = format_count < FORMAT_CACHE_SIZE ? format_count++ : 0;

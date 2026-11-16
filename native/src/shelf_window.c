@@ -814,8 +814,6 @@ static void paint(UiWindow *window, void *context, double time)
     (void)window;
     shelf_layout(shelf);
     const ShelfLayout *layout = &shelf->layout;
-    if (ui_window_has_backdrop(shelf->ui))
-        gfx_fill_rect((GfxRect){ 0, 0, layout->width, layout->height }, theme_color(THEME_SHELF_ACRYLIC_TINT));
 
     // 整个内容一起缩放、淡入淡出（出场和离场），背景不动。
     float origin_x = layout->width * shelf->origin_x, origin_y = layout->height * shelf->origin_y;
@@ -1014,7 +1012,7 @@ ShelfWindow *shelf_window_create(void)
     options.width = width;
     options.height = height;
     options.frameless = true;
-    options.backdrop = UI_BACKDROP_ACRYLIC;
+    options.backdrop = UI_BACKDROP_NONE;
     options.background = THEME_SHELF_SOLID;
     options.context = shelf;
     options.paint = paint;

@@ -23,9 +23,9 @@ typedef struct UpdateInfo
 /// 在后台访问发布列表，做完在界面线程调用 done；info 在 done 之后释放。
 void update_check_start(void (*done)(const UpdateInfo *info, void *context), void *context);
 
-/// 从发布列表里找比 current 新的最新正式版本：只看以 v 开头的标签，草稿和预发布不算。
+/// 从发布列表里找比 current 新的最新正式版本：只看以 style 开头的标签，草稿和预发布不算。
 /// 返回 UPDATE_NEWER 时 info 里是版本和下载页（url 由调用方 free）。内容不是发布列表时返回 UPDATE_ERROR。
 UpdateOutcome update_find_newer(const wchar_t *json, int major, int minor, int patch, UpdateInfo *info);
 
-/// v2.8.5 → 2.8.5；前缀不对或不是版本号时返回 false。
+/// style-v2.8.5、style2.8.5 → 2.8.5；前缀不对或不是版本号时返回 false。
 bool update_parse_tag(const wchar_t *tag, int *major, int *minor, int *patch);

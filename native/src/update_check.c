@@ -15,10 +15,16 @@
 #define RELEASES_PATH L"/repos/wangmingkun148/dropshelf/releases?per_page=30"
 #define TIMEOUT_MILLISECONDS 10000
 
+/// 发布标签的前缀：这一版是 style 开头的标签（如 style-v3.0.1），主线的 v3.0.1 是另一种外观，不混在一起比较。
+#define TAG_PREFIX L"style"
+
 bool update_parse_tag(const wchar_t *tag, int *major, int *minor, int *patch)
 {
-    if (!tag || (tag[0] != L'v' && tag[0] != L'V')) return false;
-    const wchar_t *text = tag + 1;
+    size_t prefix = wcslen(TAG_PREFIX);
+    if (!tag || _wcsnicmp(tag, TAG_PREFIX, prefix) != 0) return false;
+    const wchar_t *text = tag + prefix;
+    if (*text == L'-') text++;
+    if (*text == L'v' || *text == L'V') text++;
     // 前缀后面必须直接是数字：别的前缀（比如同样以 v 开头的单词）不算。
     if (*text < L'0' || *text > L'9') return false;
     int parts[4] = { 0, 0, 0, 0 }, count = 0;

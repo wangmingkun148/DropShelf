@@ -1086,7 +1086,7 @@ void main_window_show(void)
     options.minimum_width = 640;
     options.minimum_height = 520;
     options.resizable = true;
-    options.backdrop = UI_BACKDROP_MICA;
+    options.backdrop = UI_BACKDROP_NONE;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
     options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));

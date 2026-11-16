@@ -167,6 +167,15 @@ void gfx_stroke_rounded_corners(GfxRect rect, float top, float bottom, Color col
 /// 只描左、右、下三条边（上沿被前一张牌盖住），圆角同上。
 void gfx_stroke_rounded_open_top(GfxRect rect, float top, float bottom, Color color, float width);
 
+// ───────────── 图案（牌背、牌桌） ─────────────
+// 图案从 rect 的左上角开始铺，跟着当前的变换一起移动、转动，和 WPF 里平铺的画刷一样。
+
+void gfx_fill_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern);
+/// 画在矩形以内、宽 width 的一圈（和 WPF 的 Border 一样，外圈圆角 radius，里圈圆角减去 width）。
+void gfx_stroke_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern, float width);
+/// 上下圆角不同的圆角矩形（牌堆露出的边），见 gfx_fill_rounded_corners。
+void gfx_fill_rounded_corners_pattern(GfxRect rect, float top, float bottom, const ThemePattern *pattern);
+
 /// 由 count 个点 (x, y) 围成的多边形：先填充 fill，再沿边描 stroke（圆角连接）。不要的传全透明。
 void gfx_polygon(const float *points, int count, Color fill, Color stroke, float stroke_width);
 
@@ -178,7 +187,9 @@ void gfx_polyline(const float *points, int count, Color color, float width);
 typedef enum GfxFont
 {
     GFX_FONT_TEXT,      // Segoe UI，中文等由系统回退到相应字体（微软雅黑 UI）
-    GFX_FONT_ICON       // Segoe Fluent Icons，没有时用 Segoe MDL2 Assets
+    GFX_FONT_ICON,      // Segoe Fluent Icons，没有时用 Segoe MDL2 Assets
+    GFX_FONT_NUMBER,    // 版本号、键帽等的数字：Windows 自带的 Bahnschrift，没有时用 Segoe UI
+    GFX_FONT_RANK       // 牌角上的数字：Bahnschrift 窄体
 } GfxFont;
 
 typedef enum GfxAlign

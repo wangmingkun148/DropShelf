@@ -209,7 +209,6 @@ static void pad_paint(UiWindow *window, void *context, double time)
     running |= anim_update(&pad.fill, time);
     if (running) ui_window_request_frame(window);
     GfxSize size = ui_window_size(window);
-    if (ui_window_has_backdrop(window)) gfx_fill_rect((GfxRect){ 0, 0, size.width, size.height }, theme_color(THEME_SHELF_ACRYLIC_TINT));
     float opacity = (float)pad.opacity.value;
     if (opacity <= 0.001f) return;
     gfx_push_transform(gfx_matrix_translate(0, (float)pad.offset.value));
@@ -339,7 +338,7 @@ static bool ensure_pad(void)
     options.height = PAD_HEIGHT;
     options.frameless = true;
     options.no_activate = true;
-    options.backdrop = UI_BACKDROP_ACRYLIC;
+    options.backdrop = UI_BACKDROP_NONE;
     options.background = THEME_SHELF_SOLID;
     options.paint = pad_paint;
     options.animate = pad_animate;

@@ -383,7 +383,7 @@ void about_window_show(HWND owner)
     options.width = WINDOW_WIDTH;
     options.height = 400;
     options.resizable = false;
-    options.backdrop = UI_BACKDROP_MICA;
+    options.backdrop = UI_BACKDROP_NONE;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
     options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));
