@@ -76,7 +76,11 @@ GfxImage *gfx_image_create(const void *pixels, int width, int height, int stride
 /// 把图标（LoadImage 按需要的大小取出的）转成图片；失败时返回 NULL。只在界面线程调用。
 GfxImage *gfx_image_from_icon(HICON icon);
 GfxImage *gfx_image_retain(GfxImage *image);
-void gfx_image_release(GfxImage *image);        // 可以在任何线程调用；可以是 NULL
+/// 可以在任何线程调用；可以是 NULL。在界面线程以外放掉最后一个引用时，显卡上的位图留到界面线程下次开始画时释放。
+void gfx_image_release(GfxImage *image);
+
+/// 诊断和测试用：在别的线程上放掉、还等着界面线程释放的显卡位图有几张。
+int gfx_retired_bitmap_count(void);
 int gfx_image_width(const GfxImage *image);
 int gfx_image_height(const GfxImage *image);
 

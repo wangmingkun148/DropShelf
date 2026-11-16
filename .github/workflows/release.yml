@@ -27,6 +27,11 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      # 先编译并跑一遍测试，没通过就不发布；下一步生成安装包时接着用这次的编译结果，不会重新编译一遍。
+      - name: 编译并运行测试
+        shell: pwsh
+        run: .\native\build.ps1
+
       - name: 安装 Inno Setup
         shell: pwsh
         run: |

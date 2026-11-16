@@ -1519,6 +1519,7 @@ int main(int argc, char **argv)
     run("main window strings", test_main_strings);
     run("language template", test_language_template);
     run("matrix invert", test_matrix_invert);
+    run("image release on other thread", test_image_release_on_other_thread);
     run("main window", test_main_window);
     run("main window settings", test_main_window_settings);
     run("calibration dialog", test_calibration_dialog);

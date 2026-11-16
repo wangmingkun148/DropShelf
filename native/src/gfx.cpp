@@ -39,6 +39,58 @@ static IDCompositionDevice *composition;
 static unsigned device_generation;
 static GfxSurface *drawing;     // 正在画的画面，gfx_begin 和 gfx_end 之间不为空
 
+/// 界面线程：Direct2D 的工厂是单线程的，设备和它建出来的东西只能在这个线程上用和释放。
+static DWORD ui_thread;
+
+// ───────────── 等界面线程释放的位图 ─────────────
+// 图片的最后一个引用可能在别的线程上放掉（图片处理线程的缩略图缓存满了换掉旧的）。那时显卡上的位图不能当场释放：
+// 界面线程可能正用同一个设备在画。先记在这里，界面线程下次开始画时一起释放。
+
+struct RetiredBitmap
+{
+    ID2D1Bitmap1 *bitmap;
+    RetiredBitmap *next;
+};
+
+static SRWLOCK retired_lock = SRWLOCK_INIT;
+static RetiredBitmap *retired_bitmaps;
+static volatile LONG retired_count;
+
+static void retire_bitmap(ID2D1Bitmap1 *bitmap)
+{
+    RetiredBitmap *entry = (RetiredBitmap *)malloc(sizeof(RetiredBitmap));
+    if (!entry) abort();
+    entry->bitmap = bitmap;
+    AcquireSRWLockExclusive(&retired_lock);
+    entry->next = retired_bitmaps;
+    retired_bitmaps = entry;
+    InterlockedIncrement(&retired_count);
+    ReleaseSRWLockExclusive(&retired_lock);
+}
+
+/// 只在界面线程调用。
+static void release_retired_bitmaps(void)
+{
+    if (retired_count == 0) return;
+    AcquireSRWLockExclusive(&retired_lock);
+    RetiredBitmap *entry = retired_bitmaps;
+    retired_bitmaps = nullptr;
+    InterlockedExchange(&retired_count, 0);
+    ReleaseSRWLockExclusive(&retired_lock);
+    while (entry)
+    {
+        RetiredBitmap *next = entry->next;
+        entry->bitmap->Release();
+        free(entry);
+        entry = next;
+    }
+}
+
+int gfx_retired_bitmap_count(void)
+{
+    return (int)retired_count;
+}
+
 struct GfxSurface
 {
     HWND window;
@@ -92,6 +144,7 @@ static bool create_device_resources(void)
 
 bool gfx_initialize(void)
 {
+    if (!ui_thread) ui_thread = GetCurrentThreadId();
     if (!d2d_factory)
     {
         D2D1_FACTORY_OPTIONS options = {};
@@ -264,6 +317,7 @@ bool gfx_begin(GfxSurface *surface, int width, int height, float dpi)
 {
     if (!surface || width <= 0 || height <= 0 || drawing) return false;
     if (!gfx_initialize()) return false;
+    release_retired_bitmaps();
     if (!prepare_surface(surface, width, height, dpi))
     {
         // 可能是设备丢失：重建后再试一次。
@@ -306,6 +360,7 @@ static float image_dpi;
 bool gfx_begin_image(int width, int height, float dpi)
 {
     if (width <= 0 || height <= 0 || drawing || !gfx_initialize()) return false;
+    release_retired_bitmaps();
     D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
     if (FAILED(context->CreateBitmap(D2D1::SizeU((UINT32)width, (UINT32)height), nullptr, 0, &properties, &image_target))) return false;
@@ -465,8 +520,13 @@ GfxImage *gfx_image_retain(GfxImage *image)
 void gfx_image_release(GfxImage *image)
 {
     if (!image || InterlockedDecrement(&image->references) > 0) return;
-    // 显卡上的位图只在界面线程上建过；最后一个引用通常也在界面线程上放掉。
-    release(image->bitmap);
+    // 显卡上的位图只在界面线程上建过，也只能在界面线程上释放；在别的线程上时交给界面线程下次开始画时释放。
+    if (image->bitmap)
+    {
+        if (GetCurrentThreadId() == ui_thread) release(image->bitmap);
+        else retire_bitmap(image->bitmap);
+        image->bitmap = nullptr;
+    }
     free(image->pixels);
     free(image);
 }
@@ -500,6 +560,7 @@ void gfx_draw_image(GfxImage *image, GfxRect rect, float opacity)
 
 void gfx_shutdown(void)
 {
+    release_retired_bitmaps();
     layout_cache_clear();
     for (int index = 0; index < format_count; index++) release(format_cache[index].format);
     format_count = 0;
