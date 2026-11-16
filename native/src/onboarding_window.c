@@ -106,12 +106,12 @@ static Color with_opacity(Color color, double opacity)
     return color;
 }
 
-/// 小置物架：预制的阴影，圆角 14。
+/// 小置物架：预制的阴影，圆角 8，描置物架的边框色。
 static void mini_shelf(GfxRect rect)
 {
-    gfx_shadow(rect, 14, 24, 0, 6, COLOR_ARGB(46, 0, 0, 0));
-    gfx_fill_rounded(rect, 14, theme_color(THEME_SHELF_SOLID));
-    gfx_stroke_rounded(rect, 14, theme_color(THEME_CARD_BORDER), 1);
+    gfx_shadow(rect, 8, 24, 0, 6, COLOR_ARGB(46, 0, 0, 0));
+    gfx_fill_rounded(rect, 8, theme_color(THEME_SHELF_SOLID));
+    gfx_stroke_rounded(rect, 8, theme_color(THEME_SHELF_BORDER), 1);
 }
 
 static void glyph(const wchar_t *text, GfxRect rect, float size, Color color)
@@ -126,13 +126,13 @@ static void text(const wchar_t *value, GfxRect rect, float size, int weight, Col
     gfx_text_draw(value, rect, &style, color);
 }
 
-/// 一张小卡片（58 × 58），中间一个图标；绕中心转 angle 度。
+/// 一张小牌（58 × 58，圆角 4），中间一个图标；绕中心转 angle 度。
 static void mini_card(float center_x, float center_y, float size, const wchar_t *icon, float icon_size, float angle)
 {
     GfxRect rect = { center_x - size / 2, center_y - size / 2, center_x + size / 2, center_y + size / 2 };
     if (angle != 0) gfx_push_transform(gfx_matrix_rotate(angle, center_x, center_y));
-    gfx_fill_rounded(rect, 8, theme_color(THEME_SHELF_TILE));
-    gfx_stroke_rounded(rect, 8, theme_color(THEME_SHELF_TILE_BORDER), 1);
+    gfx_fill_rounded(rect, 4, theme_color(THEME_SHELF_TILE));
+    gfx_stroke_rounded(rect, 4, theme_color(THEME_SHELF_TILE_BORDER), 1.2f);
     glyph(icon, rect, icon_size, theme_color(THEME_ACCENT_TEXT));
     if (angle != 0) gfx_pop_transform();
 }
@@ -150,10 +150,11 @@ static void cursor(float x, float y)
     gfx_polygon(points, 7, COLOR_WHITE, COLOR_BLACK, 1.2f);
 }
 
-static void dashed(GfxRect rect, float radius, ThemeColor stroke, ThemeColor fill, float width, double opacity)
+/// 虚线框：放置区域是圆角 6、3 2 的短虚线，和置物架里拖入时的虚线牌一样；拖出那一步的空框仍是圆角 10、4 3。
+static void dashed(GfxRect rect, float radius, ThemeColor stroke, ThemeColor fill, float width, float dash, float gap, double opacity)
 {
     gfx_fill_rounded(rect, radius, with_opacity(theme_color(fill), opacity));
-    gfx_stroke_rounded_dashed(rect, radius, with_opacity(theme_color(stroke), opacity), width, 4, 3);
+    gfx_stroke_rounded_dashed(rect, radius, with_opacity(theme_color(stroke), opacity), width, dash, gap);
 }
 
 // ───────────── 四步的演示 ─────────────
@@ -217,7 +218,7 @@ static void paint_step2(float x, float y, double time)
         gfx_push_opacity((float)shelf_opacity);
         mini_shelf(shelf);
         GfxRect zone = { shelf.left + 14, shelf.top + 14 + 22, shelf.right - 14, shelf.bottom - 14 };
-        dashed(zone, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, 1);
+        dashed(zone, 6, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, 3, 2, 1);
         Color accent = theme_color(THEME_ACCENT_TEXT);
         GfxTextStyle hint = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_END };
         float hint_height = gfx_text_measure(S(STR_ReleaseToHold), &hint, 0).height;
@@ -245,7 +246,8 @@ static void paint_step3(float x, float y, double time)
 
     GfxRect shelf = { x + 70, y + 34, x + 70 + 170, y + 34 + 194 };
     mini_shelf(shelf);
-    dashed((GfxRect){ shelf.left + 14, shelf.top + 34, shelf.right - 14, shelf.bottom - 40 }, 10, THEME_CONTROL_STRONG_BORDER, THEME_TRANSPARENT, 1.2f, 0.4);
+    dashed((GfxRect){ shelf.left + 14, shelf.top + 34, shelf.right - 14, shelf.bottom - 40 }, 10, THEME_CONTROL_STRONG_BORDER, THEME_TRANSPARENT, 1.2f, 4, 3,
+        0.4);
     if (FRAMES(stack_opacity, time) > 0.5)
         mini_card((shelf.left + shelf.right) / 2, (shelf.top + shelf.bottom) / 2 - 3, 58, L"\xE8B9", 26, 0);
 
@@ -305,7 +307,7 @@ static void paint_step4(float x, float y, double time)
     if (zone > 0.001)
     {
         gfx_push_opacity((float)zone);
-        dashed(upper, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, FRAMES(frame_opacity, time));
+        dashed(upper, 6, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, 3, 2, FRAMES(frame_opacity, time));
         float middle = (upper.top + upper.bottom) / 2;
         glyph(L"\xE896", (GfxRect){ upper.left, middle - 26, upper.right, middle - 2 }, 18, accent);
         text(S(STR_ReleaseToHold), (GfxRect){ upper.left, middle + 2, upper.right, middle + 18 }, 11, 400, accent, GFX_ALIGN_CENTER);
@@ -339,9 +341,9 @@ static void paint_step4(float x, float y, double time)
         for (int index = 0; index < 4; index++)
         {
             GfxRect tile = { inner.left + cell * index + 2, inner.bottom - 62, inner.left + cell * (index + 1) - 2, inner.bottom };
-            gfx_fill_rounded(tile, 8, theme_color(THEME_CARD));
-            gfx_stroke_rounded(tile, 8, theme_color(THEME_CARD_BORDER), 1);
-            if (index == 0) gfx_fill_rounded(tile, 8, with_opacity(theme_color(THEME_ACCENT), FRAMES(highlight, time)));
+            gfx_fill_rounded(tile, 6, theme_color(THEME_CARD));
+            gfx_stroke_rounded(tile, 6, theme_color(THEME_SHELF_UNDER_CARD_BORDER), 1);
+            if (index == 0) gfx_fill_rounded(tile, 6, with_opacity(theme_color(THEME_ACCENT), FRAMES(highlight, time)));
             float middle = (tile.top + tile.bottom) / 2;
             glyph(icons[index], (GfxRect){ tile.left, middle - 20, tile.right, middle + 1 }, 16, primary);
             text(S(labels[index]), (GfxRect){ tile.left + 2, middle + 4, tile.right - 2, middle + 18 }, 10, 400, primary, GFX_ALIGN_CENTER);
@@ -535,8 +537,8 @@ static void root_paint(UiElement *element, double time)
     GfxTextStyle caption = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
     gfx_text_draw(S(STR_OnboardingWelcomeTitle), (GfxRect){ 18, 0, bounds.right - 60, CAPTION_HEIGHT }, &caption, theme_color(THEME_TEXT_PRIMARY));
     GfxRect art = { 24, CAPTION_HEIGHT, bounds.right - 24, CAPTION_HEIGHT + ART_HEIGHT };
-    gfx_fill_rounded(art, 12, theme_color(THEME_LAYER));
-    gfx_push_layer((GfxRect){ art.left + 1, art.top + 1, art.right - 1, art.bottom - 1 }, 11, 1);
+    gfx_fill_rounded(art, 8, theme_color(THEME_CARD));
+    gfx_push_layer((GfxRect){ art.left + 1, art.top + 1, art.right - 1, art.bottom - 1 }, 7, 1);
     // 画布 552 × 262 放在中间。
     float x = (art.left + art.right - ART_WIDTH) / 2, y = art.top;
     for (int index = 0; index < STEP_COUNT; index++)
@@ -555,7 +557,7 @@ static void root_paint(UiElement *element, double time)
         gfx_pop_layer();
     }
     gfx_pop_layer();
-    gfx_stroke_rounded(art, 12, theme_color(THEME_CARD_BORDER), 1);
+    gfx_stroke_rounded(art, 8, theme_color(THEME_CARD_BORDER), 1);
 
     // 底部的指示点。
     float dot_x = 34, dot_y = nav->bounds.top + (nav->bounds.bottom - nav->bounds.top) / 2;

@@ -1081,7 +1081,7 @@ void shelf_deal_in(ShelfWindow *shelf, POINT cursor)
     shelf->surface_opacity = 1;
     shelf->surface_scale = 1;
     shelf->surface_dx = shelf->surface_dy = 0;
-    RECT rect;
+    RECT rect = {0};
     GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
     ShelfCard *card = face ? shelf_card_rent() : NULL;
     if (!card)
@@ -1143,7 +1143,7 @@ static void exit_finished(void *context)
 
 bool shelf_play_exit(ShelfWindow *shelf)
 {
-    RECT rect;
+    RECT rect = {0};
     GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
     ShelfCard *card = face ? shelf_card_rent() : NULL;
     if (!card)
