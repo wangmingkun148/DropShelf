@@ -290,6 +290,9 @@ void ui_window_cancel_press(UiWindow *window);
 /// 光标现在在哪个元素上（悬停状态按这个算）；元素树变了以后调用，不必等光标移动。
 void ui_window_update_hover(UiWindow *window);
 
+/// 自己画的最大化按钮。Windows 11 上光标在它上面时按系统的最大化按钮报告命中，悬停时照常弹出贴靠布局。
+void ui_window_set_maximize_button(UiWindow *window, UiElement *button);
+
 /// 把窗口里的点换算成屏幕像素。
 POINT ui_window_to_screen(UiWindow *window, float x, float y);
 

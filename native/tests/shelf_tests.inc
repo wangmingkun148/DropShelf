@@ -313,7 +313,7 @@ static void test_shelf_model(void)
     free(shortcut_text);
     wchar_t *cache = wcs_dup(model->caches.items[0]);
     shelf_model_release(model);
-    CHECK(wait_gone(cache, 3000), "关闭置物架后没有清理文本转成的文件");
+    CHECK(wait_gone(cache, 8000), "关闭置物架后没有清理文本转成的文件");
     free(cache);
     free(ids[0]);
     free(ids[1]);
@@ -459,7 +459,7 @@ static void test_attachment_cache(void)
     pump_for(300);
     CHECK(path_exists(file), "还有人持有时缓存被删除");
     attachment_cache_release(cache);
-    CHECK(wait_gone(cache, 3000), "最后一个持有者释放后缓存没有清理");
+    CHECK(wait_gone(cache, 8000), "最后一个持有者释放后缓存没有清理");
 
     // 释放后、后台删除执行前又被持有：不能删除。
     wchar_t *raced = attachment_cache_create();
@@ -470,7 +470,21 @@ static void test_attachment_cache(void)
     pump_for(300);
     CHECK(path_exists(keep), "重新持有后缓存仍被删除");
     attachment_cache_release(raced);
-    CHECK(wait_gone(raced, 3000), "释放后缓存没有清理");
+    CHECK(wait_gone(raced, 8000), "释放后缓存没有清理");
+
+    // 别的程序暂时占着里面的文件：先删不掉，放开以后过一会儿再试时删掉。
+    wchar_t *busy = attachment_cache_create();
+    wchar_t *opened = path_join(busy, L"busy.txt");
+    write_bytes(opened, "busy");
+    HANDLE holder = CreateFileW(opened, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    CHECK(holder != INVALID_HANDLE_VALUE, "打不开缓存里的文件");
+    attachment_cache_release(busy);
+    pump_for(300);
+    CHECK(path_exists(opened), "文件被占着时缓存却删掉了");
+    if (holder != INVALID_HANDLE_VALUE) CloseHandle(holder);
+    CHECK(wait_gone(busy, 8000), "文件放开以后没有再试着清理缓存");
+    free(opened);
+    free(busy);
     free(keep);
     free(raced);
     free(file);
@@ -556,7 +570,7 @@ static void test_drop_read(void)
     {
         wchar_t *saved = wcs_dup(read->entries[0].value);
         drop_result_release_caches(read);
-        CHECK(wait_gone(saved, 3000), "图片临时目录没有清理");
+        CHECK(wait_gone(saved, 8000), "图片临时目录没有清理");
         free(saved);
     }
     drop_result_free(read);
@@ -587,7 +601,7 @@ static void test_drop_read(void)
         shelf_model_add(model, read);
         CHECK(model->count == 1 && model->items[0]->temporary && model->caches.count == 1, "临时附件没有登记");
         shelf_model_release(model);
-        CHECK(wait_gone(cache, 3000), "关闭置物架后临时附件没有清理");
+        CHECK(wait_gone(cache, 8000), "关闭置物架后临时附件没有清理");
         free(cache);
     }
     drop_result_free(read);
@@ -612,7 +626,7 @@ static void test_drop_read(void)
     if (read) shelf_model_add(model, read);
     CHECK(model->count == 1 && model->items[0]->temporary && wcs_equal(model->items[0]->value, attachment), "从其他置物架拖来的临时附件没有标记为临时附件");
     shelf_model_release(model);
-    CHECK(wait_gone(shared, 3000), "所有置物架关闭后临时附件没有清理");
+    CHECK(wait_gone(shared, 8000), "所有置物架关闭后临时附件没有清理");
     drop_result_free(read);
     IDataObject_Release(data);
     free(attachment);

@@ -50,8 +50,10 @@ struct UiWindow
     UiElement *hovered;         // 光标下的元素
     UiElement *captured;        // 按下鼠标时的元素，松开之前事件都交给它
     UiElement *focused;         // 有键盘焦点的元素
+    UiElement *maximize_button; // 自己画的最大化按钮：Windows 11 上按系统的最大化按钮报告命中，悬停时照常弹出贴靠布局
     bool swallow_char;          // 按着 Alt 的按键已经由元素处理，随后的 WM_SYSCHAR 不要再交给系统（会响一声）
     bool tracking_mouse;        // 已经请求了“光标离开窗口”的通知
+    bool tracking_nonclient;    // 已经请求了“光标离开最大化按钮”的通知（按钮上算非客户区）
     bool active;
     UiBackdrop applied_backdrop;
     bool backdrop_active;
@@ -455,12 +457,14 @@ static UiElement *element_at(UiWindow *window, float x, float y)
     return window->root ? ui_hit_test(window->root, x, y) : NULL;
 }
 
-static void on_mouse_move(UiWindow *window, LPARAM lparam)
+/// nonclient：光标在最大化按钮上，系统按非客户区发来的消息，离开时的通知也要按非客户区请求。
+static void on_mouse_move(UiWindow *window, LPARAM lparam, bool nonclient)
 {
-    if (!window->tracking_mouse)
+    bool *tracking = nonclient ? &window->tracking_nonclient : &window->tracking_mouse;
+    if (!*tracking)
     {
-        TRACKMOUSEEVENT track = { sizeof(track), TME_LEAVE, window->handle, 0 };
-        window->tracking_mouse = TrackMouseEvent(&track) != 0;
+        TRACKMOUSEEVENT track = { sizeof(track), TME_LEAVE | (nonclient ? TME_NONCLIENT : 0), window->handle, 0 };
+        *tracking = TrackMouseEvent(&track) != 0;
     }
     UiMouseEvent event = make_mouse_event(window, UI_MOUSE_MOVE, lparam);
     if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
@@ -476,7 +480,25 @@ static void on_mouse_leave(UiWindow *window)
     window->tracking_mouse = false;
     UiMouseEvent event = { .kind = UI_MOUSE_LEAVE, .x = -1, .y = -1 };
     if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
-    if (!window->captured) set_hovered(window, NULL, &event);
+    // 从客户区移到最大化按钮上时，离开的通知可能晚于按钮上的移动，这时按钮仍算悬停。
+    if (!window->captured && !(window->tracking_nonclient && window->hovered && window->hovered == window->maximize_button))
+        set_hovered(window, NULL, &event);
+}
+
+/// 光标离开最大化按钮（非客户区），或在非客户区里移到了按钮以外。
+static void leave_maximize_button(UiWindow *window)
+{
+    if (window->captured || !window->hovered || window->hovered != window->maximize_button) return;
+    UiMouseEvent event = { .kind = UI_MOUSE_LEAVE, .x = -1, .y = -1 };
+    set_hovered(window, NULL, &event);
+}
+
+/// 非客户区消息带的是屏幕坐标，换成客户区坐标交给和客户区一样的处理。
+static LPARAM client_lparam(HWND handle, LPARAM lparam)
+{
+    POINT point = { GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+    ScreenToClient(handle, &point);
+    return MAKELPARAM((WORD)(short)point.x, (WORD)(short)point.y);
 }
 
 static void on_mouse_down(UiWindow *window, LPARAM lparam, bool right)
@@ -565,6 +587,7 @@ void ui_window_forget(UiWindow *window, UiElement *element)
     if (!window) return;
     if (window->focused == element) window->focused = NULL;
     if (window->hovered == element) window->hovered = NULL;
+    if (window->maximize_button == element) window->maximize_button = NULL;
     if (window->captured == element)
     {
         window->captured = NULL;
@@ -602,7 +625,9 @@ static LRESULT hit_test(UiWindow *window, LPARAM lparam)
     }
     float scale = ui_window_scale(window);
     float x = point.x / scale, y = point.y / scale;
-    if (y < window->options.caption_height && !element_at(window, x, y)) return HTCAPTION;
+    UiElement *under = element_at(window, x, y);
+    if (under && under == window->maximize_button && !under->disabled && is_windows_11()) return HTMAXBUTTON;
+    if (y < window->options.caption_height && !under) return HTCAPTION;
     return HTCLIENT;
 }
 
@@ -623,7 +648,7 @@ static void destroy_window_state(UiWindow *window)
     }
     UiElement *root = window->root;
     window->root = NULL;
-    window->hovered = window->captured = window->focused = NULL;
+    window->hovered = window->captured = window->focused = window->maximize_button = NULL;
     window->handle = NULL;
     if (root) ui_element_destroy(root);
     gfx_surface_destroy(window->surface);
@@ -746,10 +771,29 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             if (window->options.activated) window->options.activated(window, window->options.context, window->active);
             return 0;
         case WM_MOUSEMOVE:
-            on_mouse_move(window, lparam);
+            on_mouse_move(window, lparam, false);
             return 0;
         case WM_MOUSELEAVE:
             on_mouse_leave(window);
+            return 0;
+        // 光标在最大化按钮上时（见 hit_test）收到的是非客户区消息，悬停、按下和点击照客户区处理。
+        case WM_NCMOUSEMOVE:
+            if (wparam == HTMAXBUTTON) on_mouse_move(window, client_lparam(handle, lparam), true);
+            else leave_maximize_button(window);
+            // 照常交给系统，Windows 11 据此弹出贴靠布局。
+            break;
+        case WM_NCMOUSELEAVE:
+            window->tracking_nonclient = false;
+            leave_maximize_button(window);
+            break;
+        case WM_NCLBUTTONDOWN:
+        case WM_NCLBUTTONDBLCLK:
+            if (wparam != HTMAXBUTTON) break;
+            on_mouse_down(window, client_lparam(handle, lparam), false);
+            return 0;
+        case WM_NCLBUTTONUP:
+            if (wparam != HTMAXBUTTON) break;
+            on_mouse_up(window, client_lparam(handle, lparam), false);
             return 0;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
@@ -797,7 +841,7 @@ static LRESULT handle_message(UiWindow *window, HWND handle, UINT message, WPARA
             return 0;
         }
         case WM_SETCURSOR:
-            if (LOWORD(lparam) == HTCLIENT)
+            if (LOWORD(lparam) == HTCLIENT || LOWORD(lparam) == HTMAXBUTTON)
             {
                 if (window->options.cursor)
                 {
@@ -1037,7 +1081,7 @@ void ui_window_set_root(UiWindow *window, UiElement *root)
 {
     UiElement *previous = window->root;
     window->root = NULL;
-    window->hovered = window->captured = window->focused = NULL;
+    window->hovered = window->captured = window->focused = window->maximize_button = NULL;
     if (previous) ui_element_destroy(previous);
     window->root = root;
     if (root) ui_element_attach(root, window);
@@ -1097,6 +1141,11 @@ void ui_window_set_border_color(UiWindow *window, const Color *color)
     if (!window || !window->handle || !is_windows_11()) return;
     COLORREF value = color ? RGB(color->r, color->g, color->b) : 0xFFFFFFFF;    // DWMWA_COLOR_DEFAULT
     DwmSetWindowAttribute(window->handle, ATTRIBUTE_BORDER_COLOR, &value, sizeof(value));
+}
+
+void ui_window_set_maximize_button(UiWindow *window, UiElement *button)
+{
+    if (window) window->maximize_button = button;
 }
 
 void ui_window_begin_move(UiWindow *window)

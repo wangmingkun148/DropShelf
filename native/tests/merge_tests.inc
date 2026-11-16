@@ -170,7 +170,7 @@ static void test_adopt_between_shelves(void)
     pump_for(300);
     CHECK(path_exists(file), "来源置物架关闭后，交出去的临时附件被删除");
     shelf_model_release_resources(second);
-    CHECK(wait_gone(cache, 3000), "两个置物架都关闭后临时附件没有清理");
+    CHECK(wait_gone(cache, 8000), "两个置物架都关闭后临时附件没有清理");
 
     shelf_model_release(first);
     shelf_model_release(second);

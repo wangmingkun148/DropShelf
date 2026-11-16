@@ -1116,6 +1116,7 @@ void main_window_show(void)
     }
 
     ui_window_set_root(M->window, build_root());
+    ui_window_set_maximize_button(M->window, maximize_button);
     main_window_refresh();
     fan_refresh(false);
     flip_show_page(PAGE_OVERVIEW);
