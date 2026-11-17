@@ -74,6 +74,17 @@ bool shelf_model_contains(const ShelfModel *model, const ShelfItem *item)
     return shelf_model_index_of(model, item) >= 0;
 }
 
+bool shelf_model_all_items_in(const ShelfModel *model, ShelfItem *const *items, int count)
+{
+    if (count < model->count) return false;
+    // 用项目指针判断，重复项和其他置物架上的项目都不能代替这一架上的项目。
+    for (int index = 0; index < count; index++) items[index]->marked = true;
+    bool all = true;
+    for (int index = 0; index < model->count && all; index++) all = model->items[index]->marked;
+    for (int index = 0; index < count; index++) items[index]->marked = false;
+    return all;
+}
+
 ShelfItem *shelf_model_from_end(const ShelfModel *model, int position)
 {
     return model->count >= position ? model->items[model->count - position] : NULL;
@@ -101,13 +112,17 @@ void shelf_model_set_busy(ShelfModel *model, const wchar_t *text)
     changed(model, SHELF_CHANGED_BUSY);
 }
 
+static void reserve_items(ShelfModel *model, int count)
+{
+    if (count <= model->capacity) return;
+    int capacity = model->capacity ? model->capacity * 2 : 8;
+    model->capacity = count > capacity ? count : capacity;
+    model->items = xrealloc(model->items, (size_t)model->capacity * sizeof(ShelfItem *));
+}
+
 static void insert_item(ShelfModel *model, int index, ShelfItem *item)
 {
-    if (model->count == model->capacity)
-    {
-        model->capacity = model->capacity ? model->capacity * 2 : 8;
-        model->items = xrealloc(model->items, (size_t)model->capacity * sizeof(ShelfItem *));
-    }
+    reserve_items(model, model->count + 1);
     if (index < 0 || index > model->count) index = model->count;
     memmove(&model->items[index + 1], &model->items[index], (size_t)(model->count - index) * sizeof(ShelfItem *));
     model->items[index] = item;
@@ -488,6 +503,23 @@ void shelf_removal_free(ShelfRemoval *removal)
     free(removal);
 }
 
+static void insert_restored_items(ShelfModel *model, ShelfItem *const *items, const int *positions, int count)
+{
+    int kept = model->count;
+    reserve_items(model, kept + count);
+    // 位置从前到后排列。从尾部合并，原有项目只需搬一次，也不会覆盖还没搬的项目。
+    for (int index = count - 1; index >= 0; index--)
+    {
+        int at = positions[index];
+        int before = at - index;    // 减去排在前面的恢复项，剩下的是原有项目的数量。
+        if (kept > before)
+            memmove(&model->items[at + 1], &model->items[before], (size_t)(kept - before) * sizeof(ShelfItem *));
+        model->items[at] = items[index];
+        kept = before;
+    }
+    model->count += count;
+}
+
 int shelf_model_restore(ShelfModel *model, const ShelfRemoval *removal, ShelfItem ***restored)
 {
     if (restored) *restored = NULL;
@@ -496,16 +528,22 @@ int shelf_model_restore(ShelfModel *model, const ShelfRemoval *removal, ShelfIte
     ShelfItem **back = xalloc((size_t)(removal->count ? removal->count : 1) * sizeof(ShelfItem *));
     ValueIndex existing;
     value_index_begin(&existing, model, removal->count);
+    // 大批量时查重用独立的索引，可以先记录位置再合并。少量时仍直接放回，在原列表中查重。
+    int *positions = existing.sorted ? xalloc((size_t)removal->count * sizeof(int)) : NULL;
     for (int index = 0; index < removal->count; index++)
     {
         ShelfItem *item = removal->items[index];
         // 项目本身还在置物架上时，它的内容当然也在，不用另外按项目再找一遍。
         if (value_index_has(&existing, item->value, shelf_item_is_file_system(item))) continue;
-        int at = removal->indices[index] < model->count ? removal->indices[index] : model->count;
-        insert_item(model, at, shelf_item_retain(item));
+        int length = model->count + (positions ? count : 0);
+        int at = removal->indices[index] < length ? removal->indices[index] : length;
+        if (positions) positions[count] = at;
+        else insert_item(model, at, item);
         value_index_add(&existing, item);
-        back[count++] = item;
+        back[count++] = shelf_item_retain(item);
     }
+    if (positions && count > 0) insert_restored_items(model, back, positions, count);
+    free(positions);
     value_index_end(&existing);
     if (count > 0)
     {
