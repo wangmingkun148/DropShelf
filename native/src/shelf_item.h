@@ -48,6 +48,7 @@ typedef struct ShelfItem
     bool selected;
     bool thumbnail_wanted;      // 正在取或已经取到缩略图
     unsigned thumbnail_request; // 每次请求加一，回来的结果对不上就丢掉
+    volatile LONG *thumbnail_cancel;    // 正在排队取的那次请求的撤销标记，不再要时置 1；没有在取时为 NULL
     bool measuring;             // 正在统计文件夹
     bool marked;                // 成批处理时临时做的记号（省掉逐个查找），用完就清掉，平时都是 false
     ShelfItemMotion motion;

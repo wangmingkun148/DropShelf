@@ -23,6 +23,7 @@ typedef struct ThumbnailJob
 {
     wchar_t *path;
     int size;
+    volatile LONG *cancelled;
     ThumbnailReady ready;
     void *context;
     GfxImage *image;
@@ -72,6 +73,9 @@ static GfxImage *load_from_windows(const wchar_t *path, int size)
 static void load(void *data)
 {
     ThumbnailJob *job = data;
+    // 排队期间已经不要了（滚过去了、置物架关了）：外壳取一张缩略图要几毫秒到上百毫秒，
+    // 快速滚过很长的列表时排进来的大多是这种，不取的话后面真正要显示的那几行得等它们全部取完。
+    if (job->cancelled && *job->cancelled) return;
     WIN32_FILE_ATTRIBUTE_DATA attributes = {0};
     io_get_attributes_ex(job->path, GetFileExInfoStandard, &attributes);
     // 文件被修改后键随之改变，旧的缩略图自然被挤出。
@@ -113,11 +117,12 @@ static void loaded(void *data)
     free(job);
 }
 
-void thumbnail_load(const wchar_t *path, int size, ThumbnailReady ready, void *context)
+void thumbnail_load(const wchar_t *path, int size, volatile LONG *cancelled, ThumbnailReady ready, void *context)
 {
     ThumbnailJob *job = xcalloc(1, sizeof(ThumbnailJob));
     job->path = wcs_dup(path);
     job->size = size > 0 ? size : 128;
+    job->cancelled = cancelled;
     job->ready = ready;
     job->context = context;
     task_run_imaging(load, loaded, job);

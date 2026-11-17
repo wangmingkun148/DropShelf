@@ -194,13 +194,26 @@ static bool add_folder_entry(mz_zip_archive *zip, const wchar_t *entry_name)
     return ok;
 }
 
+/// 压缩包最外层已经用过的名称（不分大小写）。names 拥有这些文字；查重用排好序的 set，一次压缩几千个文件时不用两两比较。
+typedef struct UsedNames
+{
+    StrList names;
+    TextSet set;
+} UsedNames;
+
+static void used_names_clear(UsedNames *used)
+{
+    text_set_clear(&used->set);
+    strlist_clear(&used->names);
+}
+
 /// 压缩包里还没用过的名称：重名时加 (2)、(3)，分隔符换成 /。
-static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
+static wchar_t *available_entry_name(const wchar_t *requested, UsedNames *used)
 {
     wchar_t *candidate = wcs_dup(requested);
     wchar_t *stem, *extension;
     path_split_name(requested, &stem, &extension);
-    for (int suffix = 2; strlist_index_of(used, candidate, true) >= 0; suffix++)
+    for (int suffix = 2; text_set_contains(&used->set, candidate); suffix++)
     {
         free(candidate);
         WStr next = {0};
@@ -209,7 +222,8 @@ static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
     }
     free(stem);
     free(extension);
-    strlist_add(used, candidate);
+    strlist_add(&used->names, candidate);
+    text_set_add(&used->set, used->names.items[used->names.count - 1]);
     for (wchar_t *cursor = candidate; *cursor; cursor++)
         if (*cursor == L'\\') *cursor = L'/';
     return candidate;
@@ -218,7 +232,7 @@ static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
 /// 整棵目录树只走一遍：每个文件夹列一次，文件直接写入，子文件夹排队，什么都没有的文件夹留一个空条目。
 /// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。OneDrive 等按需下载的文件和文件夹也带重解析点属性，
 /// 但是真正的内容，照常压缩（见 find_data_is_link）。
-static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList *used)
+static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, UsedNames *used)
 {
     wchar_t *folder_name = path_folder_name(directory);
     wchar_t *root_name = available_entry_name(folder_name, used);
@@ -318,7 +332,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
         zip.m_pWrite = write_archive;
         zip.m_pIO_opaque = &writer;
         ok = mz_zip_writer_init_v2(&zip, 0, 0);
-        StrList used = {0};
+        UsedNames used = { .set = { .ignore_case = true } };
         for (int index = 0; ok && index < sources.count; index++)
         {
             const wchar_t *source = sources.items[index];
@@ -330,7 +344,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
                 free(entry);
             }
         }
-        strlist_clear(&used);
+        used_names_clear(&used);
         if (ok) ok = mz_zip_writer_finalize_archive(&zip);
         if (!ok) log_error(L"写入压缩文件失败：%hs", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
         mz_zip_writer_end(&zip);
@@ -758,6 +772,8 @@ static bool listing_is_safe(const char *listing, const wchar_t *destination)
     return safe;
 }
 
+/// 解出来的东西里有没有符号链接、联接点。OneDrive 等按需下载的文件和文件夹也带重解析点属性，但是真正的内容，不算
+/// （见 find_data_is_link）：解压到 OneDrive 同步的文件夹（桌面、文档）时，刚解出的文件可能已经被同步加上了这种标记。
 static bool contains_links(const wchar_t *directory)
 {
     StrList pending = {0};
@@ -775,7 +791,7 @@ static bool contains_links(const wchar_t *directory)
             do
             {
                 if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
-                if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) found = true;
+                if (find_data_is_link(&data)) found = true;
                 else if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) strlist_add_owned(&pending, path_join(current, data.cFileName));
             } while (!found && FindNextFileW(find, &data));
             FindClose(find);

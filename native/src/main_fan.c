@@ -150,7 +150,7 @@ static void probed_folder(void *data)
     thumb->known = true;
     if (M->window) main_repaint();
     // 再取缩略图（和资源管理器里看到的一样）。
-    thumbnail_load(thumb->path, 96, on_thumbnail, thumb);
+    thumbnail_load(thumb->path, 96, NULL, on_thumbnail, thumb);
 }
 
 static Thumb *thumb_create(const wchar_t *path)

@@ -840,12 +840,15 @@ void quick_action_execute(QuickActionRequest *request, QuickActionDone done, voi
     job->done = done;
     job->context = context;
 
-    StrList available = {0};
-    for (int index = 0; index < job->request.paths.count; index++)
-        if (path_is_available(job->request.paths.items[index])) strlist_add(&available, job->request.paths.items[index]);
-    strlist_clear(&job->request.paths);
-    job->request.paths = available;
-    if (available.count == 0)
+    if (!job->request.paths_checked)
+    {
+        StrList available = {0};
+        for (int index = 0; index < job->request.paths.count; index++)
+            if (path_is_available(job->request.paths.items[index])) strlist_add(&available, job->request.paths.items[index]);
+        strlist_clear(&job->request.paths);
+        job->request.paths = available;
+    }
+    if (job->request.paths.count == 0)
     {
         quick_action_result_fail(&job->result, STR_NoFilesToProcess);
         finish_soon(job);

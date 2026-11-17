@@ -106,9 +106,28 @@ static HRESULT apply_transform(IWICImagingFactory *factory, IWICBitmapSource **s
     return S_OK;
 }
 
+/// 整张解码进内存，换掉 source。
+static HRESULT buffer_in_memory(IWICImagingFactory *factory, IWICBitmapSource **source)
+{
+    IWICBitmap *bitmap = NULL;
+    HRESULT result = IWICImagingFactory_CreateBitmapFromSource(factory, *source, WICBitmapCacheOnLoad, &bitmap);
+    if (FAILED(result)) return result;
+    IWICBitmapSource_Release(*source);
+    *source = (IWICBitmapSource *)bitmap;
+    return S_OK;
+}
+
 /// 按 EXIF 方向值转正：2/4 为镜像，3 为旋转 180°，5–8 为旋转 90° 的组合（先转再左右翻转）。
+/// 需要转时先把图整张解码进内存：旋转组件按像素向上游要数据，解码器却只能一行行从头往下解，
+/// 直接接在解码器后面时，每取一段结果都要把整张图重新解一遍（WIC 文档对 IWICBitmapFlipRotator 的说明）。
+/// 手机竖拍的照片（方向 6、8）最常见，正好都要转 90°。
 static HRESULT apply_orientation(IWICImagingFactory *factory, IWICBitmapSource **source, int orientation)
 {
+    if (orientation >= 2 && orientation <= 8)
+    {
+        HRESULT result = buffer_in_memory(factory, source);
+        if (FAILED(result)) return result;
+    }
     switch (orientation)
     {
         case 2: return apply_transform(factory, source, WICBitmapTransformFlipHorizontal);
@@ -319,12 +338,14 @@ static HRESULT resize(IWICImagingFactory *factory, IWICBitmapSource **image, dou
     IWICBitmapSource *scaled = *image;
     IWICBitmapSource_AddRef(scaled);
     result = scale_to(factory, &scaled, scaled_width, scaled_height);
-    IWICBitmap *bitmap = NULL;
-    if (SUCCEEDED(result)) result = IWICImagingFactory_CreateBitmapFromSource(factory, scaled, WICBitmapCacheOnLoad, &bitmap);
-    IWICBitmapSource_Release(scaled);
-    if (FAILED(result)) return result;
+    if (SUCCEEDED(result)) result = buffer_in_memory(factory, &scaled);
+    if (FAILED(result))
+    {
+        IWICBitmapSource_Release(scaled);
+        return result;
+    }
     IWICBitmapSource_Release(*image);
-    *image = (IWICBitmapSource *)bitmap;
+    *image = scaled;
     return S_OK;
 }
 

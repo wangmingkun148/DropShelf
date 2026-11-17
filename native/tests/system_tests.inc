@@ -157,11 +157,17 @@ static void test_shell_thumbnail(void)
     wchar_t *folder = test_folder(L"shell-thumbnail");
     wchar_t *path = test_file(folder, L"preview.txt", "thumbnail preview");
     ThumbnailWait wait = {0};
-    thumbnail_load(path, 96, on_test_thumbnail, &wait);
+    thumbnail_load(path, 96, NULL, on_test_thumbnail, &wait);
     pump_until(&wait.done, 10000);
     CHECK(wait.done && wait.image && gfx_image_width(wait.image) > 0, "没有获取到缩略图");
     CHECK(wait.image && gfx_image_width(wait.image) <= 96 && gfx_image_height(wait.image) <= 96, "缩略图大于需要的尺寸");
     gfx_image_release(wait.image);
+    // 排队期间已经不要了的请求不再去取（缓存里有也不取），直接回来空的。
+    volatile LONG cancelled = 1;
+    ThumbnailWait skipped = {0};
+    thumbnail_load(path, 96, &cancelled, on_test_thumbnail, &skipped);
+    pump_until(&skipped.done, 10000);
+    CHECK(skipped.done && !skipped.image, "已经撤销的缩略图请求仍然取了缩略图");
     wchar_t *type = file_type_name(path);
     CHECK(type && !wcs_is_blank(type), "没有获取到文件类型名称");
     free(type);

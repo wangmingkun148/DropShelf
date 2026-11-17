@@ -24,8 +24,8 @@ static void make_junction(const wchar_t *link, const wchar_t *target)
     _wsystem(command);
 }
 
-/// 一张满是杂色的 PNG（压不小），用 WIC 写出来。
-static bool write_noisy_png(const wchar_t *path, UINT width, UINT height)
+/// 一张满是杂色的图片（压不小），用 WIC 写出来。orientation 不为 0 时写进 EXIF 的拍摄方向（只有 JPG 有）。
+static bool write_noisy_image(const wchar_t *path, UINT width, UINT height, const GUID *container, int orientation)
 {
     IWICImagingFactory *factory = NULL;
     if (FAILED(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (void **)&factory))) return false;
@@ -43,10 +43,21 @@ static bool write_noisy_png(const wchar_t *path, UINT width, UINT height)
     HRESULT result = IWICImagingFactory_CreateBitmapFromMemory(factory, width, height, &GUID_WICPixelFormat24bppBGR, width * 3, width * height * 3, pixels, &bitmap);
     if (SUCCEEDED(result)) result = IWICImagingFactory_CreateStream(factory, &stream);
     if (SUCCEEDED(result)) result = IWICStream_InitializeFromFilename(stream, path, GENERIC_WRITE);
-    if (SUCCEEDED(result)) result = IWICImagingFactory_CreateEncoder(factory, &GUID_ContainerFormatPng, NULL, &encoder);
+    if (SUCCEEDED(result)) result = IWICImagingFactory_CreateEncoder(factory, container, NULL, &encoder);
     if (SUCCEEDED(result)) result = IWICBitmapEncoder_Initialize(encoder, (IStream *)stream, WICBitmapEncoderNoCache);
     if (SUCCEEDED(result)) result = IWICBitmapEncoder_CreateNewFrame(encoder, &frame, NULL);
     if (SUCCEEDED(result)) result = IWICBitmapFrameEncode_Initialize(frame, NULL);
+    if (SUCCEEDED(result) && orientation)
+    {
+        IWICMetadataQueryWriter *writer = NULL;
+        result = IWICBitmapFrameEncode_GetMetadataQueryWriter(frame, &writer);
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        value.vt = VT_UI2;
+        value.uiVal = (USHORT)orientation;
+        if (SUCCEEDED(result)) result = IWICMetadataQueryWriter_SetMetadataByName(writer, L"/app1/ifd/{ushort=274}", &value);
+        if (writer) IWICMetadataQueryWriter_Release(writer);
+    }
     if (SUCCEEDED(result)) result = IWICBitmapFrameEncode_WriteSource(frame, (IWICBitmapSource *)bitmap, NULL);
     if (SUCCEEDED(result)) result = IWICBitmapFrameEncode_Commit(frame);
     if (SUCCEEDED(result)) result = IWICBitmapEncoder_Commit(encoder);
@@ -57,6 +68,11 @@ static bool write_noisy_png(const wchar_t *path, UINT width, UINT height)
     IWICImagingFactory_Release(factory);
     free(pixels);
     return SUCCEEDED(result);
+}
+
+static bool write_noisy_png(const wchar_t *path, UINT width, UINT height)
+{
+    return write_noisy_image(path, width, height, &GUID_ContainerFormatPng, 0);
 }
 
 /// 图片的容器格式和尺寸。
@@ -409,6 +425,45 @@ static void test_archive(void)
     quick_action_result_free(&pair);
     strlist_clear(&list);
 
+    // 很多同名文件（大小写也不同）：依次改成 (2)、(3)…，一个不少。
+    for (int index = 0; index < 24; index++)
+    {
+        wchar_t name[40];
+        swprintf(name, 40, L"archive-many-%02d", index);
+        wchar_t *many_folder = test_folder(name);
+        strlist_add_owned(&list, test_file(many_folder, index % 2 ? L"Same.TXT" : L"same.txt", "same"));
+        free(many_folder);
+    }
+    QuickActionResult many = {0};
+    archive_run(&list, output_folder, &many);
+    CHECK(many.succeeded, "压缩很多同名文件失败");
+    if (many.succeeded)
+    {
+        mz_zip_archive reader;
+        memset(&reader, 0, sizeof(reader));
+        bool names_ok = false;
+        HANDLE file = CreateFileW(many.outputs.items[0], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        LARGE_INTEGER size;
+        char *bytes = NULL;
+        if (file != INVALID_HANDLE_VALUE && GetFileSizeEx(file, &size))
+        {
+            bytes = xalloc((size_t)size.QuadPart);
+            DWORD read = 0;
+            ReadFile(file, bytes, (DWORD)size.QuadPart, &read, NULL);
+            names_ok = mz_zip_reader_init_mem(&reader, bytes, (size_t)size.QuadPart, 0) && mz_zip_reader_get_num_files(&reader) == 24 &&
+                       mz_zip_reader_locate_file(&reader, "same.txt", NULL, MZ_ZIP_FLAG_CASE_SENSITIVE) >= 0 &&
+                       mz_zip_reader_locate_file(&reader, "Same (2).TXT", NULL, MZ_ZIP_FLAG_CASE_SENSITIVE) >= 0 &&
+                       mz_zip_reader_locate_file(&reader, "same (3).txt", NULL, MZ_ZIP_FLAG_CASE_SENSITIVE) >= 0 &&
+                       mz_zip_reader_locate_file(&reader, "Same (24).TXT", NULL, MZ_ZIP_FLAG_CASE_SENSITIVE) >= 0;
+            mz_zip_reader_end(&reader);
+        }
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        free(bytes);
+        CHECK(names_ok, "很多同名文件压缩后名称不对或有遗漏");
+    }
+    quick_action_result_free(&many);
+    strlist_clear(&list);
+
     // 不安全的路径不解压，外面什么也不写。
     wchar_t *unsafe = path_join(folder, L"unsafe.zip");
     const char *unsafe_names[] = { "../escaped.txt" };
@@ -638,6 +693,19 @@ static void test_image_tools(void)
     CHECK(image_convert(text, IMAGE_FORMAT_PNG, NULL, &unused) == IMAGE_NOT_IMAGE, "非图片文件没有跳过");
     wchar_t *broken_webp = test_file(folder, L"broken.webp", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
     CHECK(image_convert(broken_webp, IMAGE_FORMAT_PNG, NULL, &unused) == IMAGE_FAILED, "损坏的图片没有报告失败");
+
+    // 手机竖拍的照片：横着存、EXIF 里写着要顺时针转 90°（方向 6）。转换和压缩的结果都按方向转正。
+    wchar_t *portrait = path_join(folder, L"portrait.jpg");
+    CHECK(write_noisy_image(portrait, 300, 200, &GUID_ContainerFormatJpeg, 6), "无法生成带拍摄方向的测试图片");
+    wchar_t *upright = NULL;
+    CHECK(image_convert(portrait, IMAGE_FORMAT_PNG, NULL, &upright) == IMAGE_DONE && upright && image_info(upright, &container, &width, &height) &&
+          width == 200 && height == 300, "转换时没有按拍摄方向转正");
+    wchar_t *upright_small = NULL;
+    CHECK(image_compress(portrait, 8 * 1024, NULL, &upright_small) == IMAGE_DONE && upright_small &&
+          image_info(upright_small, &container, &width, &height) && width < height, "压缩时没有按拍摄方向转正");
+    free(upright_small);
+    free(upright);
+    free(portrait);
     wchar_t *pattern = path_join(folder, L".dropshelf-*");
     WIN32_FIND_DATAW data;
     HANDLE find = FindFirstFileW(pattern, &data);
@@ -974,6 +1042,31 @@ static void test_quick_actions(void)
     run_on_model(model, &move_to, &model_wait);
     wchar_t *renamed = path_join(target, L"move (2).txt");
     CHECK(model_wait.succeeded && !path_exists(renamed), "已在目标文件夹中的项目被重命名");
+    shelf_model_release_resources(model);
+    shelf_model_release(model);
+
+    // 一次移动很多项（按排好序的索引找回项目）：每一项都指向新位置。
+    wchar_t *many_source = test_folder(L"move-many-source");
+    wchar_t *many_target = test_folder(L"move-many-target");
+    StrList many = {0};
+    for (int index = 0; index < 40; index++)
+    {
+        wchar_t name[32];
+        swprintf(name, 32, L"file-%02d.txt", index);
+        strlist_add_owned(&many, test_file(many_source, name, "many"));
+    }
+    model = shelf_model_new(&events);
+    shelf_model_add_files(model, &many);
+    strlist_clear(&many);
+    free(move_to.custom.folder);
+    move_to.custom.folder = wcs_dup(many_target);
+    run_on_model(model, &move_to, &model_wait);
+    bool all_moved = model_wait.succeeded && model->count == 40;
+    for (int index = 0; index < model->count && all_moved; index++)
+        all_moved = path_is_direct_child(model->items[index]->value, many_target) && path_exists(model->items[index]->value);
+    CHECK(all_moved, "一次移动很多项后，置物架上有项目没有指向新位置");
+    free(many_source);
+    free(many_target);
     free(move_to.custom.folder);
     move_to.custom.folder = path_join(target, L"gone");
     execute_and_wait(&move_to, copy_source, NULL, &wait);

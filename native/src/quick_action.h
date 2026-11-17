@@ -74,6 +74,7 @@ typedef struct QuickActionRequest
 {
     QuickAction action;         // 副本，执行完释放
     StrList paths;
+    bool paths_checked;         // 调用方刚逐个确认过这些路径都在，不再在界面线程上查第二遍
     bool has_temporary_files;
     HWND owner;
     wchar_t *folder;            // “移动到”选好的文件夹；NULL 表示取消了

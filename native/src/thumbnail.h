@@ -8,4 +8,6 @@
 typedef void (*ThumbnailReady)(GfxImage *image, void *context);
 
 /// size 是需要的像素大小（正方形，按比例缩进去）。
-void thumbnail_load(const wchar_t *path, int size, ThumbnailReady ready, void *context);
+/// cancelled 可以是 NULL；不是时，轮到这个请求时先看它，已经变为非零就不取了，ready 收到 NULL。
+/// 它要一直有效到 ready 被调用（通常放在 context 里）。
+void thumbnail_load(const wchar_t *path, int size, volatile LONG *cancelled, ThumbnailReady ready, void *context);

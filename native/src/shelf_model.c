@@ -114,6 +114,15 @@ static void insert_item(ShelfModel *model, int index, ShelfItem *item)
     model->count++;
 }
 
+/// 不再要这一项的缩略图：已经排队的请求轮到时直接跳过，回来的结果也丢掉。
+static void drop_thumbnail_request(ShelfItem *item)
+{
+    item->thumbnail_wanted = false;
+    item->thumbnail_request++;
+    if (item->thumbnail_cancel) InterlockedExchange(item->thumbnail_cancel, 1);
+    item->thumbnail_cancel = NULL;
+}
+
 /// 从各个附带的记录里去掉这一项（拖出用的文件、等着移走的）。
 static void forget_item(ShelfModel *model, ShelfItem *item)
 {
@@ -131,8 +140,7 @@ static void forget_item(ShelfModel *model, ShelfItem *item)
         model->leaving[index] = model->leaving[--model->leaving_count];
         break;
     }
-    item->thumbnail_wanted = false;
-    item->thumbnail_request++;
+    drop_thumbnail_request(item);
     item->selected = false;
 }
 
@@ -261,7 +269,7 @@ static bool has_value(const ShelfModel *model, const wchar_t *value, bool file_s
     return false;
 }
 
-/// 一次放入的项目达到这么多时，查重改用排好序的集合。
+/// 一批项目达到这么多时，按路径查找改用排好序的集合（放入时查重、快速操作做完后找对应的项目）。
 #define SORTED_FROM_COUNT 16
 
 /// 放入一批项目期间用来查重：置物架上已经有没有同样的路径（不分大小写）或同样的文本、链接。
@@ -957,6 +965,43 @@ static int index_of_path(const ShelfModel *model, const wchar_t *path)
     return -1;
 }
 
+typedef struct PathPosition
+{
+    const wchar_t *path;
+    int index;
+} PathPosition;
+
+static int compare_path_positions(const void *first, const void *second)
+{
+    return CompareStringOrdinal(((const PathPosition *)first)->path, -1, ((const PathPosition *)second)->path, -1, TRUE) - CSTR_EQUAL;
+}
+
+/// paths 的前 count 个各在置物架上的哪个位置（不分大小写），不在的是 -1。调用方 free。
+/// 一批很多时先把置物架上的路径排好序，再逐个二分查找：逐个扫一遍要比 n×m 次路径，
+/// 全选几千项再“移动到”时界面会卡住。置物架上同一路径只有一项（放入时去过重）。
+static int *positions_of_paths(const ShelfModel *model, const StrList *paths, int count)
+{
+    int *positions = xalloc((size_t)(count > 0 ? count : 1) * sizeof(int));
+    if (count < SORTED_FROM_COUNT)
+    {
+        for (int index = 0; index < count; index++) positions[index] = index_of_path(model, paths->items[index]);
+        return positions;
+    }
+    PathPosition *sorted = xalloc((size_t)(model->count > 0 ? model->count : 1) * sizeof(PathPosition));
+    int sorted_count = 0;
+    for (int index = 0; index < model->count; index++)
+        if (shelf_item_is_file_system(model->items[index])) sorted[sorted_count++] = (PathPosition){ model->items[index]->value, index };
+    qsort(sorted, (size_t)sorted_count, sizeof(PathPosition), compare_path_positions);
+    for (int index = 0; index < count; index++)
+    {
+        PathPosition key = { paths->items[index], -1 };
+        const PathPosition *found = bsearch(&key, sorted, (size_t)sorted_count, sizeof(PathPosition), compare_path_positions);
+        positions[index] = found ? found->index : -1;
+    }
+    free(sorted);
+    return positions;
+}
+
 // ───────────── 跟着改名和移动 ─────────────
 
 /// 原来的路径找不到时，按文件标识找它现在的路径（在别处被改名，或在同一个磁盘里被移动）；
@@ -1009,11 +1054,14 @@ void shelf_model_relink(ShelfModel *model, ShelfItem *const *items, int count)
 /// 移动之后，置物架上的项目跟着指向新位置；缩略图、大小这些不变。
 static void apply_moves(ShelfModel *model, const StrList *sources, const StrList *destinations)
 {
+    int count = sources->count < destinations->count ? sources->count : destinations->count;
+    // 先找好全部位置再改路径。改过的项目路径已经变了，同一来源重复出现时不会再改一次。
+    int *positions = positions_of_paths(model, sources, count);
     bool any = false;
-    for (int index = 0; index < sources->count && index < destinations->count; index++)
+    for (int index = 0; index < count; index++)
     {
-        int at = index_of_path(model, sources->items[index]);
-        if (at < 0) continue;
+        int at = positions[index];
+        if (at < 0 || !wcs_equal_ignore_case(model->items[at]->value, sources->items[index])) continue;
         ShelfItem *item = model->items[at];
         free(item->value);
         item->value = wcs_dup(destinations->items[index]);
@@ -1024,18 +1072,23 @@ static void apply_moves(ShelfModel *model, const StrList *sources, const StrList
         shelf_item_text_changed(item);
         any = true;
     }
+    free(positions);
     if (any) changed(model, SHELF_CHANGED_ITEM_TEXT);
 }
 
 /// 用处理后的文件替换置物架中的原项目；原项目不在置物架上时（直接拖到按钮上）把新文件放进来。
 static void apply_replacements(ShelfModel *model, const StrList *sources, const StrList *outputs)
 {
+    int count = sources->count < outputs->count ? sources->count : outputs->count;
+    // 先找好全部位置再替换，同 apply_moves。
+    int *positions = positions_of_paths(model, sources, count);
+    int *existing = positions_of_paths(model, outputs, count);
     StrList additions = {0};
     bool replaced = false;
-    for (int index = 0; index < sources->count && index < outputs->count; index++)
+    for (int index = 0; index < count; index++)
     {
-        int at = index_of_path(model, sources->items[index]);
-        if (at < 0 || index_of_path(model, outputs->items[index]) >= 0)
+        int at = positions[index];
+        if (at < 0 || existing[index] >= 0 || !wcs_equal_ignore_case(model->items[at]->value, sources->items[index]))
         {
             strlist_add(&additions, outputs->items[index]);
             continue;
@@ -1054,6 +1107,8 @@ static void apply_replacements(ShelfModel *model, const StrList *sources, const 
         shelf_item_release(old);
         replaced = true;
     }
+    free(positions);
+    free(existing);
     if (replaced) items_changed(model);
     if (additions.count > 0) shelf_model_add_files(model, &additions);
     strlist_clear(&additions);
@@ -1095,7 +1150,8 @@ static void action_done(QuickActionResult *result, void *context)
     free(run);
 }
 
-static void run_core(ShelfModel *model, const QuickAction *action, StrList *paths, bool temporary, HWND owner,
+/// paths_checked：paths 刚逐个确认过都在（shelf_model_run_action），执行时不用再查一遍。
+static void run_core(ShelfModel *model, const QuickAction *action, StrList *paths, bool paths_checked, bool temporary, HWND owner,
     ShelfActionFinished finished, void *context)
 {
     model->has_interacted = true;
@@ -1111,6 +1167,7 @@ static void run_core(ShelfModel *model, const QuickAction *action, StrList *path
     quick_action_clone(&request.action, action);
     request.paths = *paths;
     *paths = (StrList){0};
+    request.paths_checked = paths_checked;
     request.has_temporary_files = temporary;
     request.owner = owner;
     // “移动到”先弹出文件夹选择，选好后才显示进度。
@@ -1177,7 +1234,7 @@ void shelf_model_run_action(ShelfModel *model, const QuickAction *action, ShelfI
         finish_without_running(model, model->count == 0 ? STR_AddFilesFirst : STR_FilesAndFoldersOnly, finished, context);
         return;
     }
-    run_core(model, action, &paths, temporary, owner, finished, context);
+    run_core(model, action, &paths, true, temporary, owner, finished, context);
 }
 
 void shelf_model_run_action_on_dropped(ShelfModel *model, const QuickAction *action, DropReadResult *result, HWND owner,
@@ -1208,7 +1265,7 @@ void shelf_model_run_action_on_dropped(ShelfModel *model, const QuickAction *act
         else finish_without_running(model, STR_FilesAndFoldersOnly, finished, context);
         return;
     }
-    run_core(model, action, &paths, temporary, owner, finished, context);
+    run_core(model, action, &paths, false, temporary, owner, finished, context);
 }
 
 // ───────────── 检查是否还在 ─────────────
@@ -1360,12 +1417,14 @@ typedef struct ThumbnailRequest
     ShelfModel *model;
     ShelfItem *item;
     unsigned request;
+    volatile LONG cancelled;    // 不再要了：图片处理线程轮到它时跳过
 } ThumbnailRequest;
 
 static void thumbnail_ready(GfxImage *image, void *context)
 {
     ThumbnailRequest *request = context;
     ShelfItem *item = request->item;
+    if (item->thumbnail_cancel == &request->cancelled) item->thumbnail_cancel = NULL;
     if (image && !request->model->released && item->thumbnail_wanted && item->thumbnail_request == request->request)
     {
         shelf_item_set_thumbnail(item, image);
@@ -1392,8 +1451,7 @@ void shelf_model_update_thumbnails(ShelfModel *model)
         if (!wanted)
         {
             if (!item->thumbnail_wanted) continue;
-            item->thumbnail_wanted = false;
-            item->thumbnail_request++;
+            drop_thumbnail_request(item);
             shelf_item_set_thumbnail(item, NULL);
             continue;
         }
@@ -1404,7 +1462,8 @@ void shelf_model_update_thumbnails(ShelfModel *model)
         request->model = shelf_model_retain(model);
         request->item = shelf_item_retain(item);
         request->request = ++item->thumbnail_request;
-        thumbnail_load(item->value, model->thumbnail_size, thumbnail_ready, request);
+        item->thumbnail_cancel = &request->cancelled;
+        thumbnail_load(item->value, model->thumbnail_size, &request->cancelled, thumbnail_ready, request);
     }
 }
 
