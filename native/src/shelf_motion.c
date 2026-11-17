@@ -52,11 +52,6 @@ static double max_of(double a, double b)
     return a > b ? a : b;
 }
 
-static float clampf(float value, float low, float high)
-{
-    return value < low ? low : value > high ? high : value;
-}
-
 static CardPose lerp_pose(CardPose from, CardPose to, float t)
 {
     return (CardPose){ from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, from.angle + (to.angle - from.angle) * t,

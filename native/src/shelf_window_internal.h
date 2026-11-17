@@ -216,6 +216,8 @@ struct ShelfWindow
     bool rank_rolling;          // 牌角的数字从下面滚上来
     MotionClock rank_clock;
     float rank_shift, rank_opacity;
+    FileSuit rank_suit;         // 牌角的花色；要把全部项目看一遍，只在项目变了以后重算
+    bool rank_suit_known;
     bool fan_held;              // 松手后、读完拖入的内容之前，堆叠停在拖入时摊开的样子
     CardPose fan_poses[2];      // 摊开的两张牌在堆叠画布上的姿态
     bool fan_valid[2];

@@ -620,7 +620,12 @@ static void paint_rank(ShelfWindow *shelf, float opacity)
     const ShelfLayout *layout = &shelf->layout;
     wchar_t count[16];
     swprintf(count, ARRAYSIZE(count), L"%d", shelf->model->count);
-    FileSuit suit = shelf_model_suit(shelf->model);
+    if (!shelf->rank_suit_known)
+    {
+        shelf->rank_suit = shelf_model_suit(shelf->model);
+        shelf->rank_suit_known = true;
+    }
+    FileSuit suit = shelf->rank_suit;
     gfx_push_transform(gfx_matrix_multiply(gfx_matrix_scale(layout->canvas_scale, layout->canvas_scale, 0, 0),
         gfx_matrix_translate(layout->canvas_x, layout->canvas_y)));
     GfxRect card = { 48, 12, 48 + SHELF_CARD_WIDTH, 12 + SHELF_CARD_HEIGHT };
@@ -1040,6 +1045,7 @@ static void on_model_changed(void *context, ShelfChange change)
     switch (change)
     {
         case SHELF_CHANGED_ITEMS:
+            shelf->rank_suit_known = false;
             if (shelf->model->count != shelf->shown_count)
             {
                 // 新牌落进这一摞：牌角的数字从下面滚上来。
@@ -1058,6 +1064,8 @@ static void on_model_changed(void *context, ShelfChange change)
             shelf_update_busy_overlay(shelf, false);
             break;
         case SHELF_CHANGED_ITEM_TEXT:
+            // 移动、改名或转成文件以后扩展名可能变了。
+            shelf->rank_suit_known = false;
             shelf_repaint(shelf);
             break;
     }
