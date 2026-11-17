@@ -1142,7 +1142,8 @@ static void open_shelf_menu(ShelfWindow *shelf)
 {
     ShelfModel *model = shelf->model;
     int count;
-    set_menu_items(shelf, target_items(shelf, &count), count);
+    ShelfItem **targets = target_items(shelf, &count);
+    set_menu_items(shelf, targets, count);
     bool has_items = model->count > 0, file_system = false, text = false;
     for (int index = 0; index < shelf->menu_count; index++)
     {
@@ -1179,7 +1180,8 @@ static void open_shelf_menu(ShelfWindow *shelf)
 static void open_item_menu(ShelfWindow *shelf)
 {
     int count;
-    set_menu_items(shelf, selected_items(shelf, &count), count);
+    ShelfItem **selected = selected_items(shelf, &count);
+    set_menu_items(shelf, selected, count);
     ShelfItem *single = count == 1 ? shelf->menu_items[0] : NULL;
     bool file_system = false, text = false;
     for (int index = 0; index < count; index++)
