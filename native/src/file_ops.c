@@ -304,6 +304,9 @@ static DWORD copy_one(const wchar_t *source, const wchar_t *target)
     return path_is_directory(source) ? copy_directory(source, target) : copy_file(source, target);
 }
 
+/// move_one 的结果：已经完整复制到新位置，原来的却没能全部删掉。用应用自定义错误码的那一位，不会和系统的错误码重复。
+#define SOURCE_LEFT_BEHIND ((DWORD)0x20000001)
+
 static DWORD move_one(const wchar_t *source, const wchar_t *target)
 {
     bool folder = path_is_directory(source);
@@ -313,8 +316,12 @@ static DWORD move_one(const wchar_t *source, const wchar_t *target)
     if (error == ERROR_ACCESS_DENIED) return error;
     error = copy_one(source, target);
     if (error != ERROR_SUCCESS) return error;
-    if (folder) return directory_delete_tree(source) ? ERROR_SUCCESS : ERROR_SHARING_VIOLATION;
-    return DeleteFileW(source) ? ERROR_SUCCESS : GetLastError();
+    // 新位置已经是完整的一份。原来的删不干净（里面有文件被别的程序占着）时也算移动成功，只提示原位置有残留：
+    // 报失败的话两边各有一份，用户分不清哪份是全的，置物架也还指着删了一半的原位置。
+    bool removed = folder ? directory_delete_tree(source) : DeleteFileW(source) != 0;
+    if (removed) return ERROR_SUCCESS;
+    log_win32_error(L"移动后没能删干净原来的文件", GetLastError());
+    return SOURCE_LEFT_BEHIND;
 }
 
 typedef DWORD (*Operation)(const wchar_t *source, const wchar_t *target);
@@ -362,9 +369,12 @@ static FileOpResults run_each(const StrList *sources, const wchar_t *destination
             free(trimmed);
             error = result->destination ? operation(source, result->destination) : ERROR_FILE_EXISTS;
         }
+        result->source_left = error == SOURCE_LEFT_BEHIND;
+        if (result->source_left) error = ERROR_SUCCESS;
         result->succeeded = error == ERROR_SUCCESS;
         result->error = result->succeeded ? STR_OperationIncomplete : message_for(error);
-        if (result->succeeded) log_info(L"%ls完成：%ls -> %ls", verb, source, result->destination);
+        if (result->source_left) log_error(L"%ls完成，但原位置没能删干净：%ls -> %ls", verb, source, result->destination);
+        else if (result->succeeded) log_info(L"%ls完成：%ls -> %ls", verb, source, result->destination);
         else log_error(L"%ls失败：%ls\r\n错误 %lu", verb, source, (unsigned long)error);
     }
     return results;

@@ -143,6 +143,22 @@ static void test_file_operations(void)
     CloseHandle(lock);
     strlist_clear(&locked_list);
 
+    // 别的程序只读着、不让删：复制得过去，原来的删不掉。新位置是完整的一份，按移动成功算，标出原位置有残留。
+    wchar_t *reading = test_file(source_folder, L"reading.txt", "reading");
+    HANDLE reader = CreateFileW(reading, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    StrList reading_list = {0};
+    strlist_add(&reading_list, reading);
+    results = file_ops_move(&reading_list, destination);
+    CHECK(results.count == 1 && results.items[0].succeeded && results.items[0].source_left && path_exists(reading) &&
+          results.items[0].destination && file_text_is(results.items[0].destination, "reading"), "原来的删不掉时没有按移动成功并标出残留");
+    file_op_results_free(&results);
+    if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+    results = file_ops_move(&reading_list, destination);
+    CHECK(results.count == 1 && results.items[0].succeeded && !results.items[0].source_left && !path_exists(reading), "能删掉时不应标出残留");
+    file_op_results_free(&results);
+    strlist_clear(&reading_list);
+    free(reading);
+
     // 含联接点的文件夹在复制之前报错，什么都不留下。
     wchar_t *link_source = test_folder(L"ops-link-source");
     wchar_t *linked = test_folder(L"ops-link-target");
@@ -757,8 +773,10 @@ static void test_quick_actions(void)
     CHECK(owned_text_is(moved_message, L"Moved 1 item to Docs"), "英文的移动提示不对");
     CHECK(owned_text_is(str_images_skipped_small(1), L", 1 already fits") && owned_text_is(str_images_skipped_small(2), L", 2 already fit"),
         "英文的单复数不对");
+    CHECK(owned_text_is(str_move_left_behind(1), L"; 1 item couldn't be fully removed from the old location"), "英文的残留提示不对");
     language_set_mode(LANGUAGE_CHINESE);
     CHECK(owned_text_is(str_opened_with(2, L"画图"), L"已用 画图 打开 2 项"), "用程序打开的提示不对");
+    CHECK(owned_text_is(str_move_left_behind(2), L"，2 项没能从原位置删干净"), "残留的提示不对");
 
     StrList arguments = {0};
     strlist_add(&arguments, L"C:\\a b\\x.png");
