@@ -223,6 +223,9 @@ struct ShelfWindow
     ShelfItem **returning_items;
     int returning_count;
     ShelfLayout layout;
+    unsigned label_generation;
+    float mode_widths[2];       // DIP，复制和移动分别量一次。
+    wchar_t *stack_caption, *stack_detail;    // 多个项目的汇总；单项直接用项目自己的文字。
 
     // 鼠标
     ShelfTarget hovered;

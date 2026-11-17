@@ -281,8 +281,33 @@ static GfxRect row_remove_rect(GfxRect row)
     return rect_of(row.right - 6 - 26, row.top + 5 + 3, 26, 26);
 }
 
+static void clear_stack_summary(ShelfWindow *shelf)
+{
+    free(shelf->stack_caption);
+    free(shelf->stack_detail);
+    shelf->stack_caption = shelf->stack_detail = NULL;
+}
+
+static float mode_width(ShelfWindow *shelf)
+{
+    float *cached = &shelf->mode_widths[shelf->move_mode];
+    if (*cached > 0) return *cached;
+    float icon = text_width(shelf->move_mode ? GLYPH_MOVE : GLYPH_COPY, 12, 400, GFX_FONT_ICON);
+    float label = text_width(S(shelf->move_mode ? STR_TransferMove : STR_TransferCopy), 12, 400, GFX_FONT_TEXT);
+    float width = ceilf(1 + 6 + icon + 5 + label + 8 + 1);
+    if (icon > 0 && label > 0) *cached = width;
+    return width;
+}
+
 void shelf_layout(ShelfWindow *shelf)
 {
+    unsigned generation = language_generation();
+    if (shelf->label_generation != generation)
+    {
+        shelf->label_generation = generation;
+        clear_stack_summary(shelf);
+        shelf->mode_widths[0] = shelf->mode_widths[1] = 0;
+    }
     ShelfLayout *layout = &shelf->layout;
     GfxSize size = ui_window_size(shelf->ui);
     float width = size.width, height = size.height;
@@ -291,9 +316,7 @@ void shelf_layout(ShelfWindow *shelf)
 
     // 标题栏：外边距 4，左边是置顶和移动/复制，右边是切换视图、更多和关闭，标题在中间。
     layout->pin = rect_of(4, 7, 28, 30);
-    const wchar_t *mode_text = S(shelf->move_mode ? STR_TransferMove : STR_TransferCopy);
-    float chip = 1 + 6 + text_width(shelf->move_mode ? GLYPH_MOVE : GLYPH_COPY, 12, 400, GFX_FONT_ICON) + 5 + text_width(mode_text, 12, 400, GFX_FONT_TEXT) + 8 + 1;
-    layout->mode = rect_of(4 + 28 + 2, 10, ceilf(chip), 24);
+    layout->mode = rect_of(4 + 28 + 2, 10, mode_width(shelf), 24);
     layout->close = rect_of(width - 4 - 28, 7, 28, 30);
     layout->more = rect_of(layout->close.left - 28, 7, 28, 30);
     bool has_items = shelf->model->count > 0;
@@ -551,14 +574,27 @@ static void paint_stack(ShelfWindow *shelf, float opacity)
     paint_badge(shelf, shelf->mark_opacity);
     if (shelf->mark_opacity > 0)
     {
-        wchar_t *caption = shelf_model_stack_caption(shelf->model);
-        wchar_t *detail = shelf_model_stack_detail(shelf->model);
+        const wchar_t *caption, *detail;
+        if (shelf->model->count == 1)
+        {
+            ShelfItem *item = shelf->model->items[0];
+            caption = shelf_item_display_name(item);
+            detail = shelf_item_detail(item);
+        }
+        else
+        {
+            if (!shelf->stack_caption)
+            {
+                shelf->stack_caption = shelf_model_stack_caption(shelf->model);
+                shelf->stack_detail = shelf_model_stack_detail(shelf->model);
+            }
+            caption = shelf->stack_caption;
+            detail = shelf->stack_detail;
+        }
         GfxTextStyle style = text_style(13, 600, GFX_ALIGN_CENTER);
         gfx_text_draw(caption, shelf->layout.caption, &style, faded(theme_color(THEME_TEXT_PRIMARY), shelf->mark_opacity));
         style = text_style(11, 400, GFX_ALIGN_CENTER);
         gfx_text_draw(detail, shelf->layout.detail, &style, faded(theme_color(THEME_TEXT_SECONDARY), shelf->mark_opacity));
-        free(caption);
-        free(detail);
     }
     if (opacity < 0.999f) gfx_pop_layer();
 }
@@ -908,6 +944,7 @@ static void on_model_changed(void *context, ShelfChange change)
     switch (change)
     {
         case SHELF_CHANGED_ITEMS:
+            clear_stack_summary(shelf);
             if (shelf->model->count != shelf->shown_count)
             {
                 shelf->shown_count = shelf->model->count;
@@ -924,6 +961,7 @@ static void on_model_changed(void *context, ShelfChange change)
             shelf_update_busy_overlay(shelf, false);
             break;
         case SHELF_CHANGED_ITEM_TEXT:
+            clear_stack_summary(shelf);
             shelf_repaint(shelf);
             break;
     }
@@ -1050,6 +1088,7 @@ void shelf_window_release(ShelfWindow *shelf)
 {
     if (!shelf || --shelf->references > 0) return;
     shelf_model_release(shelf->model);
+    clear_stack_summary(shelf);
     free(shelf->tweens);
     free(shelf->removing);
     free(shelf->rows_before);

@@ -834,6 +834,32 @@ static void test_drop_read(void)
 
 // ───────────── 置物架窗口 ─────────────
 
+static void test_stack_labels(ShelfWindow *shelf)
+{
+    CHECK(wcs_equal(shelf->stack_caption, L"2 个文件") && wcs_equal(shelf->stack_detail, L"3 B"), "堆叠汇总不正确");
+    bool moving = shelf->move_mode;
+    LanguagePack *pack = language_pack_parse(L"test", L"{\"from\":\"zh\",\"strings\":{"
+        L"\"{0} 个文件\":\"Files: {0}\",\"复制\":\"Copy\",\"移动\":\"Move to another folder\"}}");
+    language_set_pack(pack);
+    shelf->move_mode = false;
+    ui_window_warm(shelf->ui);
+    float copy_width = shelf->layout.mode.right - shelf->layout.mode.left;
+    CHECK(wcs_equal(shelf->stack_caption, L"Files: 2"), "换语言包后堆叠汇总没有更新");
+    shelf->move_mode = true;
+    shelf_layout(shelf);
+    CHECK(shelf->layout.mode.right - shelf->layout.mode.left > copy_width, "切换移动模式后按钮没有随文字变宽");
+
+    add_entry(shelf->model, ITEM_TEXT, L"note", NULL);
+    ui_window_warm(shelf->ui);
+    CHECK(wcs_equal(shelf->stack_caption, L"Files: 2 · 1 段文本"), "放入文本后仍显示旧的堆叠汇总");
+
+    shelf->move_mode = moving;
+    language_set_pack(NULL);
+    language_pack_free(pack);
+    ui_window_warm(shelf->ui);
+    CHECK(wcs_equal(shelf->stack_caption, L"2 个文件 · 1 段文本"), "移除语言包后仍显示旧译文");
+}
+
 static void test_shelf_window(void)
 {
     language_set_mode(LANGUAGE_CHINESE);
@@ -861,6 +887,7 @@ static void test_shelf_window(void)
         CHECK(path_exists(first), "置物架的画面没有画出来");
         free(first);
         free(image);
+        test_stack_labels(shelf);
         // 手势打开的空置物架被复用，不会越开越多；松开鼠标后没放东西的会自动关闭。
         ShelfWindow *gesture = shelves_open_at((POINT){ 900, 400 }, true, false, EDGE_LEFT);
         ShelfWindow *reused = shelves_open_at((POINT){ 1000, 400 }, true, false, EDGE_NONE);

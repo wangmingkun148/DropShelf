@@ -133,13 +133,20 @@ typedef struct Listener
 static int current_mode = LANGUAGE_SYSTEM;
 static int current_is_chinese = -1;     // -1：还没有判断过
 static LanguagePack *current_pack;
+static unsigned generation;
 static LanguagePack **available_packs;
 static int available_count;
 static Listener *listeners;
 static int listener_count;
 
+unsigned language_generation(void)
+{
+    return generation;
+}
+
 static void notify_language_changed(void)
 {
+    generation++;
     // 处理过程中可能增减监听者，先留一份副本。
     int count = listener_count;
     if (count == 0) return;
@@ -246,6 +253,7 @@ static void load_packs_from(const wchar_t *directory)
 
 void language_packs_reload(const wchar_t *user_directory)
 {
+    if (current_pack) generation++;
     current_pack = NULL;
     for (int index = 0; index < available_count; index++) language_pack_free(available_packs[index]);
     free(available_packs);

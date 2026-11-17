@@ -48,6 +48,7 @@ bool language_resolve_is_chinese(int mode, LANGID ui_language);
 /// 选用语言包；NULL 表示不使用。
 void language_set_pack(LanguagePack *pack);
 LanguagePack *language_current_pack(void);
+unsigned language_generation(void);    // 语言或当前语言包改变后，用于刷新缓存的文字和尺寸。
 
 /// 语言或语言包变化后调用 handler，已显示的文字需要重新读取。
 typedef void (*LanguageChangedHandler)(void *context);
