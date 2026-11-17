@@ -62,14 +62,6 @@ static void add_entry(DropReadResult *result, ShelfItemKind kind, const wchar_t 
     result->entries[result->count++] = (DroppedEntry){ kind, wcs_dup(value), wcs_is_blank(title) ? NULL : wcs_dup(title), temporary };
 }
 
-static DropReadResult *failed_result(StringId message)
-{
-    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
-    result->failed = 1;
-    result->error = wcs_dup(S(message));
-    return result;
-}
-
 /// 后台读好文件信息：是不是文件夹（文件夹的类型随之改过来）、多大、什么类型。
 static void read_facts(DropReadResult *result)
 {

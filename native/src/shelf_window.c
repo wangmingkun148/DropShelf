@@ -215,11 +215,6 @@ static GfxRect rect_of(float left, float top, float width, float height)
     return (GfxRect){ left, top, left + width, top + height };
 }
 
-static bool contains(GfxRect rect, float x, float y)
-{
-    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
-}
-
 // ───────────── 排版 ─────────────
 
 CardPose shelf_card_home(int card)
