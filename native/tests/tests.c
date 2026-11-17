@@ -1663,6 +1663,7 @@ int main(int argc, char **argv)
     run("archive", test_archive);
     run("archive already compressed", test_archive_already_compressed);
     run("image tools", test_image_tools);
+    run("long paths", test_long_paths);
     run("quick actions", test_quick_actions);
     run("shelf actions", test_shelf_actions);
     run("follow renamed", test_follow_renamed);

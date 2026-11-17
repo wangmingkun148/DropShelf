@@ -208,7 +208,9 @@ static HRESULT load(IWICImagingFactory *factory, const wchar_t *path, bool flatt
 {
     *image = NULL;
     IStream *stream = NULL;
-    HRESULT result = SHCreateStreamOnFileEx(path, STGM_READ | STGM_SHARE_DENY_NONE, FILE_ATTRIBUTE_NORMAL, FALSE, NULL, &stream);
+    wchar_t *target = path_for_io(path);
+    HRESULT result = SHCreateStreamOnFileEx(target, STGM_READ | STGM_SHARE_DENY_NONE, FILE_ATTRIBUTE_NORMAL, FALSE, NULL, &stream);
+    free(target);
     IWICBitmapDecoder *decoder = NULL;
     if (SUCCEEDED(result)) result = IWICImagingFactory_CreateDecoderFromStream(factory, stream, NULL, WICDecodeMetadataCacheOnDemand, &decoder);
     IWICBitmapFrameDecode *frame = NULL;
@@ -434,14 +436,14 @@ static bool save_stream(IStream *stream, const wchar_t *directory, const wchar_t
     wstr_free(&name);
     free(guid);
     bool ok = false;
-    HANDLE file = CreateFileW(temporary, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = io_create_file(temporary, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file != INVALID_HANDLE_VALUE)
     {
         DWORD written = 0;
         ok = size < 0xFFFFFFFFull && WriteFile(file, bytes, (DWORD)size, &written, NULL) && written == size;
         CloseHandle(file);
-        if (ok) ok = MoveFileExW(temporary, output, 0) != 0;
-        if (!ok) DeleteFileW(temporary);
+        if (ok) ok = io_move_file(temporary, output, 0) != 0;
+        if (!ok) io_delete_file(temporary);
     }
     GlobalUnlock(memory);
     if (!ok) log_win32_error(L"保存图片失败", GetLastError());
@@ -469,7 +471,7 @@ static IWICImagingFactory *create_factory(void)
 
 static bool is_file(const wchar_t *path)
 {
-    DWORD attributes = GetFileAttributesW(path);
+    DWORD attributes = io_get_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 

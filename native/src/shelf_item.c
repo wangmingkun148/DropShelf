@@ -388,7 +388,7 @@ const wchar_t *shelf_item_glyph(const ShelfItem *item)
 bool shelf_item_exists_on_disk(ShelfItemKind kind, const wchar_t *value)
 {
     if (kind != ITEM_FILE && kind != ITEM_FOLDER) return true;
-    DWORD attributes = GetFileAttributesW(value);
+    DWORD attributes = io_get_attributes(value);
     if (attributes == INVALID_FILE_ATTRIBUTES) return false;
     return kind == ITEM_FOLDER ? (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 : (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
@@ -410,7 +410,7 @@ bool shelf_item_refresh_availability(ShelfItem *item)
 bool file_size_of(const wchar_t *path, long long *size)
 {
     WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &data) || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (!io_get_attributes_ex(path, GetFileExInfoStandard, &data) || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
     *size = ((long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
     return true;
 }
@@ -420,7 +420,7 @@ bool file_facts_read(const wchar_t *path, FileFacts *facts)
     *facts = (FileFacts){0};
     if (wcs_is_blank(path)) return false;
     WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &data)) return false;
+    if (!io_get_attributes_ex(path, GetFileExInfoStandard, &data)) return false;
     facts->is_folder = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     if (!facts->is_folder)
     {
@@ -496,7 +496,7 @@ static bool walk_folder(const wchar_t *path, FolderWalk *walk)
 {
     wchar_t *pattern = path_join(path, L"*");
     WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     free(pattern);
     if (search == INVALID_HANDLE_VALUE) return true;
     bool ok = true;
@@ -537,7 +537,7 @@ bool folder_measure(const wchar_t *path, int *children, bool *has_size, long lon
     *size = 0;
     wchar_t *pattern = path_join(path, L"*");
     WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     free(pattern);
     if (search == INVALID_HANDLE_VALUE)
     {

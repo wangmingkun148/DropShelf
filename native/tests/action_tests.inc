@@ -746,6 +746,124 @@ static void run_on_model(ShelfModel *model, const QuickAction *action, ModelWait
     pump_until(&wait->done, 20000);
 }
 
+/// 超过 260 个字符的路径：建文件夹、读写、统计大小、复制、移动、压缩和解压、图片转换、删除都照常工作。
+/// 测试程序没有声明支持长路径，靠的是 path_for_io 加上的 \\?\。
+static void test_long_paths(void)
+{
+    HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    // 6 层，每层 50 多个字符。
+    WStr chain = {0};
+    for (int index = 0; index < 6; index++) wstr_appendf(&chain, L"\\%02d-深层文件夹-a-rather-long-folder-name-for-path-tests", index);
+    wchar_t *base = test_folder(L"long-paths");
+    WStr builder = {0};
+    wstr_appendf(&builder, L"%ls%ls", base, chain.data);
+    wchar_t *deep = wstr_take(&builder);
+    const wchar_t *second = wcschr(chain.data + 1, L'\\');
+    wchar_t *top_name = wcs_dup_n(chain.data + 1, (size_t)(second - chain.data - 1));
+    wchar_t *top = path_join(base, top_name);
+    CHECK(wcslen(deep) > 330, "测试用的路径不够长");
+
+    // 短的不动；长的先整理成完整路径再加 \\?\；网络路径换成 \\?\UNC\。
+    CHECK(owned_text_is(path_for_io(L"C:\\a\\..\\b.txt"), L"C:\\a\\..\\b.txt"), "短路径不应改动");
+    wchar_t *prefixed = path_for_io(deep);
+    CHECK(prefixed && wcsncmp(prefixed, L"\\\\?\\", 4) == 0 && wcscmp(prefixed + 4, deep) == 0, "长路径没有加上 \\\\?\\");
+    free(prefixed);
+    WStr messy = {0}, expected = {0};
+    wstr_appendf(&messy, L"%ls/x/../y.txt", deep);
+    wstr_appendf(&expected, L"\\\\?\\%ls\\y.txt", deep);
+    CHECK(owned_text_is(path_for_io(messy.data), expected.data), "长路径没有先整理成完整路径");
+    wstr_free(&messy);
+    wstr_free(&expected);
+    WStr unc = {0}, unc_expected = {0};
+    wstr_appendf(&unc, L"\\\\server\\share%ls\\a.txt", chain.data);
+    wstr_appendf(&unc_expected, L"\\\\?\\UNC\\server\\share%ls\\a.txt", chain.data);
+    CHECK(owned_text_is(path_for_io(unc.data), unc_expected.data), "长的网络路径没有换成 \\\\?\\UNC\\ 的形式");
+    wstr_free(&unc);
+    wstr_free(&unc_expected);
+
+    // 建文件夹、读写文件、文件信息、统计大小。
+    CHECK(directory_create(deep) && path_is_directory(deep), "建不了长路径的文件夹");
+    wchar_t *text = test_file(deep, L"说明.txt", "long text");
+    CHECK(path_exists(text) && file_text_is(text, "long text"), "长路径的文件读写不正常");
+    FileFacts facts;
+    CHECK(file_facts_read(text, &facts) && !facts.is_folder && facts.has_size && facts.size_bytes == 9, "读不到长路径文件的信息");
+    int children = 0;
+    bool has_size = false;
+    long long size = 0;
+    CHECK(folder_measure(base, &children, &has_size, &size, NULL) && children == 1 && has_size && size == 9, "统计不了长路径里的大小");
+
+    // 复制文件和整个文件夹（复制出来的路径同样很长）。
+    wchar_t *outside = test_folder(L"long-paths-out");
+    StrList list = {0};
+    strlist_add(&list, text);
+    FileOpResults results = file_ops_copy(&list, outside);
+    CHECK(results.count == 1 && results.items[0].succeeded && results.items[0].destination && file_text_is(results.items[0].destination, "long text"),
+        "长路径里的文件复制不出来");
+    file_op_results_free(&results);
+    strlist_clear(&list);
+    strlist_add(&list, top);
+    results = file_ops_copy(&list, outside);
+    WStr copied = {0};
+    wstr_appendf(&copied, L"%ls%ls\\说明.txt", outside, chain.data);
+    CHECK(results.count == 1 && results.items[0].succeeded && file_text_is(copied.data, "long text"), "长路径的文件夹复制不过去");
+    file_op_results_free(&results);
+    wstr_free(&copied);
+
+    // 压缩成 ZIP，再解压出来（解压出来的路径也很长）。
+    QuickActionResult zipped = {0};
+    archive_compress(&list, outside, &zipped);
+    CHECK(zipped.succeeded && zipped.outputs.count == 1, "长路径的文件夹压缩失败");
+    if (zipped.succeeded && zipped.outputs.count == 1)
+    {
+        StrList zips = {0};
+        strlist_add(&zips, zipped.outputs.items[0]);
+        QuickActionResult unzipped = {0};
+        archive_run(&zips, NULL, &unzipped);
+        int unzipped_children = 0;
+        bool unzipped_has_size = false;
+        long long unzipped_size = 0;
+        CHECK(unzipped.succeeded && unzipped.outputs.count == 1 &&
+              folder_measure(unzipped.outputs.items[0], &unzipped_children, &unzipped_has_size, &unzipped_size, NULL) && unzipped_has_size &&
+              unzipped_size == 9, "长路径的文件解压不出来");
+        quick_action_result_free(&unzipped);
+        strlist_clear(&zips);
+    }
+    quick_action_result_free(&zipped);
+
+    // 图片转换：读和写都在长路径里。
+    wchar_t *picture = path_join(deep, L"photo.png");
+    wchar_t *picture_io = path_for_io(picture);
+    CHECK(write_noisy_png(picture_io, 64, 48), "无法在长路径里生成测试图片");
+    wchar_t *jpg = NULL;
+    CHECK(image_convert(picture, IMAGE_FORMAT_JPEG, NULL, &jpg) == IMAGE_DONE && jpg && path_exists(jpg), "长路径里的图片没有转成 JPG");
+    free(jpg);
+    free(picture_io);
+    free(picture);
+
+    // 移动整个文件夹，最后连同里面的长路径一起删掉。
+    wchar_t *moved_to = test_folder(L"long-paths-moved");
+    results = file_ops_move(&list, moved_to);
+    WStr moved = {0};
+    wstr_appendf(&moved, L"%ls%ls\\说明.txt", moved_to, chain.data);
+    CHECK(results.count == 1 && results.items[0].succeeded && !path_exists(top) && file_text_is(moved.data, "long text"), "长路径的文件夹移动失败");
+    file_op_results_free(&results);
+    wstr_free(&moved);
+    CHECK(directory_delete_tree(moved_to) && !path_exists(moved_to) && directory_delete_tree(outside) && !path_exists(outside),
+        "删不掉含长路径的文件夹");
+
+    strlist_clear(&list);
+    directory_delete_tree(base);
+    free(moved_to);
+    free(outside);
+    free(text);
+    free(top);
+    free(top_name);
+    free(deep);
+    free(base);
+    wstr_free(&chain);
+    if (SUCCEEDED(com)) CoUninitialize();
+}
+
 static void test_quick_actions(void)
 {
     language_set_mode(LANGUAGE_CHINESE);

@@ -108,12 +108,12 @@ wchar_t *attachment_cache_create(void)
 
 bool directory_delete_tree(const wchar_t *path)
 {
-    DWORD attributes = GetFileAttributesW(path);
+    DWORD attributes = io_get_attributes(path);
     if (attributes == INVALID_FILE_ATTRIBUTES) return true;
     if (!(attributes & FILE_ATTRIBUTE_DIRECTORY))
     {
-        if (attributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path, attributes & ~FILE_ATTRIBUTE_READONLY);
-        return DeleteFileW(path) != 0;
+        if (attributes & FILE_ATTRIBUTE_READONLY) io_set_attributes(path, attributes & ~FILE_ATTRIBUTE_READONLY);
+        return io_delete_file(path) != 0;
     }
     // 联接点和符号链接只删除链接本身，不进去删里面的东西。OneDrive 等按需下载的文件夹也带重解析点属性，
     // 但是真正的文件夹：不进去删的话，移动文件夹时复制完了却删不掉原来的（见 find_data_is_link）。
@@ -121,7 +121,7 @@ bool directory_delete_tree(const wchar_t *path)
     {
         wchar_t *pattern = path_join(path, L"*");
         WIN32_FIND_DATAW found;
-        HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
         free(pattern);
         if (search != INVALID_HANDLE_VALUE)
         {
@@ -135,8 +135,8 @@ bool directory_delete_tree(const wchar_t *path)
             FindClose(search);
         }
     }
-    if (attributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path, attributes & ~FILE_ATTRIBUTE_READONLY);
-    return RemoveDirectoryW(path) != 0;
+    if (attributes & FILE_ATTRIBUTE_READONLY) io_set_attributes(path, attributes & ~FILE_ATTRIBUTE_READONLY);
+    return io_remove_directory(path) != 0;
 }
 
 bool attachment_cache_is_owned(const wchar_t *path)
@@ -281,7 +281,7 @@ static void cleanup_stale(void *data)
     const wchar_t *root = attachment_cache_root();
     wchar_t *pattern = path_join(root, L"*");
     WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, 0);
+    HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, 0);
     free(pattern);
     if (search == INVALID_HANDLE_VALUE) return;
     FILETIME now;
@@ -389,7 +389,7 @@ char *zone_identifier_read(const wchar_t *path, size_t *length)
     *length = 0;
     WStr stream = {0};
     wstr_appendf(&stream, L"%ls:Zone.Identifier", path);
-    HANDLE file = CreateFileW(stream.data, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    HANDLE file = io_create_file(stream.data, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
     wstr_free(&stream);
     if (file == INVALID_HANDLE_VALUE) return NULL;
     LARGE_INTEGER size;
@@ -418,7 +418,7 @@ void zone_identifier_write(const wchar_t *path, const char *zone, size_t length)
     if (!zone || length == 0) return;
     WStr stream = {0};
     wstr_appendf(&stream, L"%ls:Zone.Identifier", path);
-    HANDLE file = CreateFileW(stream.data, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    HANDLE file = io_create_file(stream.data, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     wstr_free(&stream);
     if (file == INVALID_HANDLE_VALUE)
     {

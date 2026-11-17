@@ -253,7 +253,7 @@ static void copy_snapshots(ReadJob *job)
         wchar_t *destination = path_join(job->snapshot_cache, name);
         free(name);
         bool ok = !cancelled(job);
-        HANDLE output = ok ? CreateFileW(destination, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_SEQUENTIAL_SCAN, NULL) : INVALID_HANDLE_VALUE;
+        HANDLE output = ok ? io_create_file(destination, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_SEQUENTIAL_SCAN, NULL) : INVALID_HANDLE_VALUE;
         ok = output != INVALID_HANDLE_VALUE;
         if (ok)
         {
@@ -274,7 +274,7 @@ static void copy_snapshots(ReadJob *job)
         {
             // 复制失败时保留原路径，文件只要还在就仍然可用。
             log_error(L"保存来源程序的临时文件失败：%ls", entry->value);
-            DeleteFileW(destination);
+            io_delete_file(destination);
             free(destination);
         }
         CloseHandle(snapshot->file);
@@ -318,7 +318,7 @@ static bool copy_stream(IStream *input, HANDLE output, WriteBudget *budget)
 
 static bool copy_virtual_file(VirtualFile *file, WriteBudget *budget)
 {
-    HANDLE output = CreateFileW(file->destination, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    HANDLE output = io_create_file(file->destination, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (output == INVALID_HANDLE_VALUE) return false;
     bool ok = false;
     switch (file->medium.tymed)
@@ -350,7 +350,7 @@ static bool copy_virtual_file(VirtualFile *file, WriteBudget *budget)
         }
         case TYMED_FILE:
         {
-            HANDLE input = file->medium.lpszFileName ? CreateFileW(file->medium.lpszFileName, GENERIC_READ,
+            HANDLE input = file->medium.lpszFileName ? io_create_file(file->medium.lpszFileName, GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL) : INVALID_HANDLE_VALUE;
             if (input == INVALID_HANDLE_VALUE) break;
             ok = copy_handle(input, output, budget);
@@ -369,7 +369,7 @@ static void work_virtual(ReadJob *job)
     HRESULT initialized = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     ULARGE_INTEGER free_bytes;
     WriteBudget budget = { LLONG_MAX, job };
-    if (GetDiskFreeSpaceExW(job->cache, &free_bytes, NULL, NULL)) budget.remaining = (long long)free_bytes.QuadPart - DISK_RESERVE;
+    if (io_disk_free_space(job->cache, &free_bytes, NULL, NULL)) budget.remaining = (long long)free_bytes.QuadPart - DISK_RESERVE;
     for (int index = 0; index < job->file_count; index++)
     {
         VirtualFile *file = &job->files[index];
@@ -381,7 +381,7 @@ static void work_virtual(ReadJob *job)
         }
         job->result->failed++;
         log_error(L"无法写入虚拟附件 %ls", path_file_name(file->destination));
-        DeleteFileW(file->destination);
+        io_delete_file(file->destination);
     }
     if (job->result->count == 0)
     {
@@ -429,7 +429,7 @@ static void work_image(ReadJob *job)
     bool ok;
     if (job->image_encoded)
     {
-        HANDLE output = CreateFileW(job->image_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        HANDLE output = io_create_file(job->image_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
         ok = output != INVALID_HANDLE_VALUE && write_all(output, job->image_bytes, (DWORD)job->image_size);
         if (output != INVALID_HANDLE_VALUE) CloseHandle(output);
     }
@@ -440,7 +440,7 @@ static void work_image(ReadJob *job)
         return;
     }
     log_error(L"保存拖入的图片失败：%ls", job->image_path);
-    DeleteFileW(job->image_path);
+    io_delete_file(job->image_path);
     drop_result_release_caches(job->result);
     job->result->failed = 1;
     job->result->error = wcs_dup(S(STR_ImageSaveFailed));
@@ -536,7 +536,7 @@ static int begin_files(ReadJob *job, IDataObject *data)
         }
         if (entry->kind != ITEM_FILE || !job->volatile_paths[index]) continue;
         // 来源程序放在临时文件夹里的文件会在拖放结束后被删除，必须在松手的回调返回前打开。
-        HANDLE file = CreateFileW(entry->value, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+        HANDLE file = io_create_file(entry->value, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
             FILE_FLAG_SEQUENTIAL_SCAN, NULL);
         if (file == INVALID_HANDLE_VALUE) continue;
         LARGE_INTEGER size;

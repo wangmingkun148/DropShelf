@@ -18,7 +18,7 @@ static bool is_local_path(const wchar_t *path)
 /// 只读属性（FILE_READ_ATTRIBUTES），不涉及文件内容，别的程序独占打开着的文件也能取到；打开文件夹需要 BACKUP_SEMANTICS。
 static HANDLE open_attributes(const wchar_t *path)
 {
-    return CreateFileW(path, FILE_READ_ATTRIBUTES, SHARE_ALL, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    return io_create_file(path, FILE_READ_ATTRIBUTES, SHARE_ALL, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
 }
 
 static bool read_identity(HANDLE handle, FileIdentity *identity)

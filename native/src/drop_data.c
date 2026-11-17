@@ -144,7 +144,7 @@ bool drop_can_provide_files(DropContentKind kind)
 
 static bool file_exists(const wchar_t *path)
 {
-    DWORD attributes = GetFileAttributesW(path);
+    DWORD attributes = io_get_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
@@ -155,7 +155,7 @@ wchar_t *drop_read_single_file_name(IDataObject *data)
     wchar_t *path = drop_has_format(data, unicode) ? drop_read_unicode(data, unicode)
                   : drop_has_format(data, ansi) ? drop_read_ansi(data, ansi)
                   : NULL;
-    if (!wcs_is_blank(path) && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return path;
+    if (!wcs_is_blank(path) && io_get_attributes(path) != INVALID_FILE_ATTRIBUTES) return path;
     free(path);
     return NULL;
 }

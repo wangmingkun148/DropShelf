@@ -312,14 +312,158 @@ wchar_t *path_file_stem(const wchar_t *path)
     return dot ? wcs_dup_n(name, (size_t)(dot - name)) : wcs_dup(name);
 }
 
+// ───────────── 长路径 ─────────────
+
+/// 这么长以上的路径换成 \\?\ 的形式：建文件夹的上限是 MAX_PATH - 12（要给 8.3 短名留位置），其他操作是 MAX_PATH - 1。
+#define LONG_PATH_FROM 248
+
+wchar_t *path_for_io(const wchar_t *path)
+{
+    if (!path) return NULL;
+    // 已经是 \\?\ 或 \\.\ 开头的不再换。
+    if (wcslen(path) < LONG_PATH_FROM || wcsncmp(path, L"\\\\?\\", 4) == 0 || wcsncmp(path, L"\\\\.\\", 4) == 0) return wcs_dup(path);
+    // 换成 \\?\ 以后系统不再整理路径（. 和 ..、/、末尾的空格和点），所以先展开成完整路径，和不加前缀时系统做的一样。
+    DWORD needed = GetFullPathNameW(path, 0, NULL, NULL);
+    if (!needed) return wcs_dup(path);
+    wchar_t *full = xalloc((size_t)needed * sizeof(wchar_t));
+    DWORD length = GetFullPathNameW(path, needed, full, NULL);
+    if (!length || length >= needed)
+    {
+        free(full);
+        return wcs_dup(path);
+    }
+    WStr result = {0};
+    if (full[0] == L'\\' && full[1] == L'\\')
+    {
+        // \\服务器\共享\... → \\?\UNC\服务器\共享\...
+        wstr_append(&result, L"\\\\?\\UNC\\");
+        wstr_append(&result, full + 2);
+    }
+    else if (full[0] && full[1] == L':' && full[2] == L'\\')
+    {
+        wstr_append(&result, L"\\\\?\\");
+        wstr_append(&result, full);
+    }
+    else wstr_append(&result, full);
+    free(full);
+    return wstr_take(&result);
+}
+
+/// 文件函数用完换过的路径以后放掉它，GetLastError() 保持文件函数留下的值。
+static void release_io_path(wchar_t *target)
+{
+    DWORD error = GetLastError();
+    free(target);
+    SetLastError(error);
+}
+
+HANDLE io_create_file(const wchar_t *path, DWORD access, DWORD share, SECURITY_ATTRIBUTES *security, DWORD disposition, DWORD flags, HANDLE template_file)
+{
+    wchar_t *target = path_for_io(path);
+    HANDLE handle = CreateFileW(target, access, share, security, disposition, flags, template_file);
+    release_io_path(target);
+    return handle;
+}
+
+DWORD io_get_attributes(const wchar_t *path)
+{
+    wchar_t *target = path_for_io(path);
+    DWORD attributes = GetFileAttributesW(target);
+    release_io_path(target);
+    return attributes;
+}
+
+BOOL io_get_attributes_ex(const wchar_t *path, GET_FILEEX_INFO_LEVELS level, void *information)
+{
+    wchar_t *target = path_for_io(path);
+    BOOL ok = GetFileAttributesExW(target, level, information);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_set_attributes(const wchar_t *path, DWORD attributes)
+{
+    wchar_t *target = path_for_io(path);
+    BOOL ok = SetFileAttributesW(target, attributes);
+    release_io_path(target);
+    return ok;
+}
+
+HANDLE io_find_first(const wchar_t *pattern, FINDEX_INFO_LEVELS level, void *data, FINDEX_SEARCH_OPS search, void *filter, DWORD flags)
+{
+    wchar_t *target = path_for_io(pattern);
+    HANDLE find = FindFirstFileExW(target, level, data, search, filter, flags);
+    release_io_path(target);
+    return find;
+}
+
+BOOL io_create_directory(const wchar_t *path, SECURITY_ATTRIBUTES *security)
+{
+    wchar_t *target = path_for_io(path);
+    BOOL ok = CreateDirectoryW(target, security);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_remove_directory(const wchar_t *path)
+{
+    wchar_t *target = path_for_io(path);
+    BOOL ok = RemoveDirectoryW(target);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_delete_file(const wchar_t *path)
+{
+    wchar_t *target = path_for_io(path);
+    BOOL ok = DeleteFileW(target);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_move_file(const wchar_t *from, const wchar_t *to, DWORD flags)
+{
+    wchar_t *source = path_for_io(from), *target = path_for_io(to);
+    BOOL ok = MoveFileExW(source, target, flags);
+    release_io_path(source);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_copy_file(const wchar_t *from, const wchar_t *to, BOOL fail_if_exists)
+{
+    wchar_t *source = path_for_io(from), *target = path_for_io(to);
+    BOOL ok = CopyFileW(source, target, fail_if_exists);
+    release_io_path(source);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_copy_file_ex(const wchar_t *from, const wchar_t *to, LPPROGRESS_ROUTINE progress, void *data, BOOL *cancel, DWORD flags)
+{
+    wchar_t *source = path_for_io(from), *target = path_for_io(to);
+    BOOL ok = CopyFileExW(source, target, progress, data, cancel, flags);
+    release_io_path(source);
+    release_io_path(target);
+    return ok;
+}
+
+BOOL io_disk_free_space(const wchar_t *directory, ULARGE_INTEGER *available, ULARGE_INTEGER *total, ULARGE_INTEGER *free_bytes)
+{
+    wchar_t *target = path_for_io(directory);
+    BOOL ok = GetDiskFreeSpaceExW(target, available, total, free_bytes);
+    release_io_path(target);
+    return ok;
+}
+
 bool path_exists(const wchar_t *path)
 {
-    return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+    return io_get_attributes(path) != INVALID_FILE_ATTRIBUTES;
 }
 
 bool path_is_directory(const wchar_t *path)
 {
-    DWORD attributes = GetFileAttributesW(path);
+    DWORD attributes = io_get_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
@@ -355,7 +499,7 @@ bool path_is_link(const wchar_t *path)
     size_t length = wcslen(trimmed);
     while (length > 3 && is_separator(trimmed[length - 1])) trimmed[--length] = 0;
     WIN32_FIND_DATAW data;
-    HANDLE find = FindFirstFileW(trimmed, &data);
+    HANDLE find = io_find_first(trimmed, FindExInfoStandard, &data, FindExSearchNameMatch, NULL, 0);
     free(trimmed);
     if (find == INVALID_HANDLE_VALUE) return true;
     FindClose(find);
@@ -369,12 +513,12 @@ bool directory_create(const wchar_t *path)
     wchar_t *parent = path_directory(path);
     if (parent && wcscmp(parent, path) != 0 && !path_is_directory(parent)) directory_create(parent);
     free(parent);
-    return CreateDirectoryW(path, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+    return io_create_directory(path, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 wchar_t *file_read_text(const wchar_t *path, size_t maximum)
 {
-    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = io_create_file(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return NULL;
     wchar_t *text = NULL;
     LARGE_INTEGER size;
@@ -416,7 +560,7 @@ void file_keep_unreadable(const wchar_t *path)
 {
     WStr backup = {0};
     wstr_appendf(&backup, L"%ls.bad", path);
-    if (CopyFileW(path, backup.data, FALSE)) log_error(L"原来的文件已另存为 %ls", backup.data);
+    if (io_copy_file(path, backup.data, FALSE)) log_error(L"原来的文件已另存为 %ls", backup.data);
     else log_win32_error(L"无法另存读不懂的文件", GetLastError());
     wstr_free(&backup);
 }
@@ -431,7 +575,7 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
     wstr_append(&temporary, path);
     wstr_append(&temporary, L".tmp");
     bool succeeded = false;
-    HANDLE file = CreateFileW(temporary.data, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = io_create_file(temporary.data, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file != INVALID_HANDLE_VALUE)
     {
         DWORD written = 0;
@@ -442,12 +586,12 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
         CloseHandle(file);
         if (succeeded)
         {
-            succeeded = MoveFileExW(temporary.data, path, MOVEFILE_REPLACE_EXISTING) != 0;
+            succeeded = io_move_file(temporary.data, path, MOVEFILE_REPLACE_EXISTING) != 0;
             error = GetLastError();
         }
         if (!succeeded)
         {
-            DeleteFileW(temporary.data);
+            io_delete_file(temporary.data);
             SetLastError(error);
         }
     }

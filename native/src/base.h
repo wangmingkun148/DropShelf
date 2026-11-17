@@ -93,6 +93,25 @@ bool find_data_is_link(const WIN32_FIND_DATAW *data);
 /// 路径本身是不是上面说的链接；读不到信息时按链接处理，不去动它。
 bool path_is_link(const wchar_t *path);
 
+/// 交给文件函数的路径：248 个字符以上时展开成完整路径，换成 \\?\C:\... 或 \\?\UNC\服务器\共享\... 的形式，
+/// 绕开 260 个字符的限制（和 .NET 的做法一样，不用用户打开系统的长路径设置）；更短的原样复制。调用方负责 free。
+wchar_t *path_for_io(const wchar_t *path);
+
+/// 下面这些和同名的 Windows 函数参数、返回值、GetLastError() 都一样，只是路径先经过 path_for_io，长路径也能用。
+/// 程序里打开、查看、建立、删除、复制、移动文件和文件夹都用它们。
+HANDLE io_create_file(const wchar_t *path, DWORD access, DWORD share, SECURITY_ATTRIBUTES *security, DWORD disposition, DWORD flags, HANDLE template_file);
+DWORD io_get_attributes(const wchar_t *path);
+BOOL io_get_attributes_ex(const wchar_t *path, GET_FILEEX_INFO_LEVELS level, void *information);
+BOOL io_set_attributes(const wchar_t *path, DWORD attributes);
+HANDLE io_find_first(const wchar_t *pattern, FINDEX_INFO_LEVELS level, void *data, FINDEX_SEARCH_OPS search, void *filter, DWORD flags);
+BOOL io_create_directory(const wchar_t *path, SECURITY_ATTRIBUTES *security);
+BOOL io_remove_directory(const wchar_t *path);
+BOOL io_delete_file(const wchar_t *path);
+BOOL io_move_file(const wchar_t *from, const wchar_t *to, DWORD flags);
+BOOL io_copy_file(const wchar_t *from, const wchar_t *to, BOOL fail_if_exists);
+BOOL io_copy_file_ex(const wchar_t *from, const wchar_t *to, LPPROGRESS_ROUTINE progress, void *data, BOOL *cancel, DWORD flags);
+BOOL io_disk_free_space(const wchar_t *directory, ULARGE_INTEGER *available, ULARGE_INTEGER *total, ULARGE_INTEGER *free_bytes);
+
 /// 文件名会被 Windows 当成设备（CON、NUL、COM1 这些）。Windows 10 及更早只看第一个点之前、去掉末尾空格的部分，
 /// 所以 NUL.tar.gz、“CON .txt” 也是设备：写进去的内容会丢掉，或者根本打不开。
 bool file_name_is_reserved(const wchar_t *name);

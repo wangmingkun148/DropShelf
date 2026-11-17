@@ -512,7 +512,7 @@ static void show_properties(HWND owner, const StrList *paths, QuickActionResult 
 static void open_with(const CustomAction *custom, const wchar_t *label, const StrList *paths, QuickActionResult *result)
 {
     const wchar_t *program = custom->program_path ? custom->program_path : L"";
-    DWORD attributes = GetFileAttributesW(program);
+    DWORD attributes = io_get_attributes(program);
     if (wcs_is_blank(program) || attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
     {
         quick_action_result_set(result, false, str_program_missing(label));

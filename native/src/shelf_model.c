@@ -628,14 +628,14 @@ static wchar_t *write_item_file(const ShelfItem *item, const wchar_t *directory)
         length = text_length + 3;
         free(text);
     }
-    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = io_create_file(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     DWORD written = 0;
     bool ok = file != INVALID_HANDLE_VALUE && WriteFile(file, bytes, (DWORD)length, &written, NULL) && written == length;
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     free(bytes);
     if (ok) return path;
     log_win32_error(L"把文本或链接写成文件失败", GetLastError());
-    DeleteFileW(path);
+    io_delete_file(path);
     free(path);
     return NULL;
 }
