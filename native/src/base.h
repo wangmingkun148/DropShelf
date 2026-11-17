@@ -93,8 +93,15 @@ bool find_data_is_link(const WIN32_FIND_DATAW *data);
 /// 路径本身是不是上面说的链接；读不到信息时按链接处理，不去动它。
 bool path_is_link(const wchar_t *path);
 
+/// 文件名会被 Windows 当成设备（CON、NUL、COM1 这些）。Windows 10 及更早只看第一个点之前、去掉末尾空格的部分，
+/// 所以 NUL.tar.gz、“CON .txt” 也是设备：写进去的内容会丢掉，或者根本打不开。
+bool file_name_is_reserved(const wchar_t *name);
+
 /// 读取文本文件（UTF-8，认得 UTF-8 和 UTF-16 的 BOM）。文件不存在、读不了或超过 maximum 字节时返回 NULL。
 wchar_t *file_read_text(const wchar_t *path, size_t maximum);
+
+/// 读不懂的设置或记录文件被默认值覆盖之前，复制一份到旁边的 .bad（已有的换成这次的），手改坏了还能找回来。
+void file_keep_unreadable(const wchar_t *path);
 
 /// 先写到旁边的 .tmp 再替换原文件，中途出错时原文件不受影响。失败时返回 false，错误码在 GetLastError()。
 bool file_write_atomic(const wchar_t *path, const void *data, size_t length);

@@ -563,12 +563,7 @@ wchar_t *shelf_item_file_name(const ShelfItem *item)
     if (length == 0) wstr_append(&name, S(shortcut ? STR_LinkFileName : STR_TextFileName));
     else
     {
-        static const wchar_t *const reserved[] = {
-            L"CON", L"PRN", L"AUX", L"NUL", L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7", L"COM8", L"COM9",
-            L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"
-        };
-        for (size_t index = 0; index < sizeof(reserved) / sizeof(reserved[0]); index++)
-            if (wcs_equal_ignore_case(stem, reserved[index])) wstr_append_char(&name, L'_');
+        if (file_name_is_reserved(stem)) wstr_append_char(&name, L'_');
         wstr_append(&name, stem);
     }
     wstr_append(&name, shortcut ? L".url" : L".txt");

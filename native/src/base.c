@@ -398,6 +398,29 @@ wchar_t *file_read_text(const wchar_t *path, size_t maximum)
     return text;
 }
 
+bool file_name_is_reserved(const wchar_t *name)
+{
+    static const wchar_t *const devices[] = { L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$" };
+    size_t length = wcscspn(name, L".");
+    while (length > 0 && name[length - 1] == L' ') length--;
+    for (size_t index = 0; index < sizeof(devices) / sizeof(devices[0]); index++)
+        if (wcslen(devices[index]) == length && CompareStringOrdinal(name, (int)length, devices[index], (int)length, TRUE) == CSTR_EQUAL) return true;
+    // COM0–COM9、LPT0–LPT9；数字也可以是上标的 ¹ ² ³。
+    if (length != 4 || (CompareStringOrdinal(name, 3, L"COM", 3, TRUE) != CSTR_EQUAL && CompareStringOrdinal(name, 3, L"LPT", 3, TRUE) != CSTR_EQUAL))
+        return false;
+    wchar_t digit = name[3];
+    return (digit >= L'0' && digit <= L'9') || digit == 0x00B9 || digit == 0x00B2 || digit == 0x00B3;
+}
+
+void file_keep_unreadable(const wchar_t *path)
+{
+    WStr backup = {0};
+    wstr_appendf(&backup, L"%ls.bad", path);
+    if (CopyFileW(path, backup.data, FALSE)) log_error(L"原来的文件已另存为 %ls", backup.data);
+    else log_win32_error(L"无法另存读不懂的文件", GetLastError());
+    wstr_free(&backup);
+}
+
 bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
 {
     wchar_t *directory = path_directory(path);

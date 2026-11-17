@@ -215,14 +215,17 @@ static void test_shelf_item_text(void)
     ShelfItem *bare = shelf_item_new(ITEM_LINK, L"https://example.com/a", NULL, false);
     ShelfItem *odd = shelf_item_new(ITEM_TEXT, L"???", NULL, false);
     ShelfItem *reserved = shelf_item_new(ITEM_TEXT, L"con", NULL, false);
+    ShelfItem *dotted = shelf_item_new(ITEM_TEXT, L"aux.c", NULL, false);
     CHECK(owned_text_is(shelf_item_file_name(notes), L"会议纪要：a b.txt"), "文本的文件名不正确");
     CHECK(owned_text_is(shelf_item_file_name(titled), L"示例 首页.url") && owned_text_is(shelf_item_file_name(bare), L"example.com.url"), "链接的文件名不正确");
-    CHECK(owned_text_is(shelf_item_file_name(odd), L"文本.txt") && owned_text_is(shelf_item_file_name(reserved), L"_con.txt"), "无法使用的文件名没有换掉");
+    CHECK(owned_text_is(shelf_item_file_name(odd), L"文本.txt") && owned_text_is(shelf_item_file_name(reserved), L"_con.txt") &&
+          owned_text_is(shelf_item_file_name(dotted), L"_aux.c.txt"), "无法使用的文件名没有换掉");
     shelf_item_release(notes);
     shelf_item_release(titled);
     shelf_item_release(bare);
     shelf_item_release(odd);
     shelf_item_release(reserved);
+    shelf_item_release(dotted);
 
     // 名称太长被截断时，不能把占两个 UTF-16 单元的字符截成半个（文件名里不能有落单的代理项）。
     wchar_t long_title[64];
@@ -543,6 +546,9 @@ static void test_attachment_cache(void)
     CHECK(owned_text_is(attachment_safe_name(L"a/b\\c.txt", &used), L"c.txt"), "名称里的路径没有去掉");
     CHECK(owned_text_is(attachment_safe_name(L"  bad:name?.txt ", &used), L"bad_name_.txt"), "不能用的字符没有换掉");
     CHECK(owned_text_is(attachment_safe_name(L"con.txt", &used), L"_con.txt") && owned_text_is(attachment_safe_name(L"...", &used), L"attachment"), "保留名或空名称没有换掉");
+    // Windows 10 只看第一个点之前：NUL.tar.gz 也是设备。
+    CHECK(owned_text_is(attachment_safe_name(L"NUL.tar.gz", &used), L"_NUL.tar.gz") && owned_text_is(attachment_safe_name(L"com1", &used), L"_com1") &&
+          owned_text_is(attachment_safe_name(L"console.log", &used), L"console.log"), "有多个点的保留名没有换掉");
     CHECK(owned_text_is(attachment_safe_name(L"C.TXT", &used), L"C (2).TXT") && owned_text_is(attachment_safe_name(L"c.txt", &used), L"c (3).txt"), "同名时没有加序号");
     wchar_t longer[220];
     for (int index = 0; index < 200; index++) longer[index] = L'a';

@@ -314,20 +314,6 @@ static bool is_invalid_name_character(wchar_t c)
     return c < 32 || c == L'"' || c == L'<' || c == L'>' || c == L'|' || c == L':' || c == L'*' || c == L'?' || c == L'\\' || c == L'/';
 }
 
-static bool is_reserved_name(const wchar_t *stem, size_t length)
-{
-    static const wchar_t *const reserved[] = {
-        L"CON", L"PRN", L"AUX", L"NUL", L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7", L"COM8", L"COM9",
-        L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"
-    };
-    for (size_t index = 0; index < sizeof(reserved) / sizeof(reserved[0]); index++)
-    {
-        size_t reserved_length = wcslen(reserved[index]);
-        if (reserved_length == length && CompareStringOrdinal(stem, (int)length, reserved[index], (int)length, TRUE) == CSTR_EQUAL) return true;
-    }
-    return false;
-}
-
 /// 扩展名的起点（最后一个点）；没有时指向末尾。
 static const wchar_t *extension_of(const wchar_t *name)
 {
@@ -374,7 +360,7 @@ wchar_t *attachment_safe_name(const wchar_t *supplied, StrList *used)
     const wchar_t *extension = extension_of(name);
     size_t stem_length = (size_t)(extension - name);
     WStr stem = {0};
-    if (is_reserved_name(name, stem_length)) wstr_append_char(&stem, L'_');
+    if (file_name_is_reserved(name)) wstr_append_char(&stem, L'_');
     wstr_append_n(&stem, name, stem_length);
     wchar_t *extension_copy = wcs_dup(extension);
     free(name);

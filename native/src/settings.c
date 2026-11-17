@@ -770,6 +770,8 @@ void settings_load(AppSettings *settings)
         if (!text || !settings_parse(text, settings))
         {
             log_error(L"读取设置失败，已使用默认值\r\n%ls", text ? L"设置文件的格式不正确" : L"无法读取设置文件");
+            // 下次保存时会用默认值覆盖它；先留一份，手改坏了的自定义操作还能找回来。
+            file_keep_unreadable(path);
             settings_free(settings);
             settings_init(settings);
         }

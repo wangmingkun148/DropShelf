@@ -380,6 +380,16 @@ static void test_settings_migration(void)
     load_from_text(&migrated, L"{ \"Theme\": \"Dark\"");
     CHECK(migrated.theme == THEME_SYSTEM, "格式不对的设置文件没有改用默认值");
     settings_free(&migrated);
+    // 作废之前留了一份，内容是读不懂的那份（上一次作废留下的被换掉）。
+    wchar_t *settings_file = settings_path();
+    WStr bad_path = {0};
+    wstr_appendf(&bad_path, L"%ls.bad", settings_file);
+    wchar_t *bad = file_read_text(bad_path.data, 4096);
+    CHECK(bad && wcscmp(bad, L"{ \"Theme\": \"Dark\"") == 0, "读不懂的设置文件没有另存一份");
+    free(bad);
+    DeleteFileW(bad_path.data);
+    wstr_free(&bad_path);
+    free(settings_file);
 
     // C# 版写出的文件：中文写成 \uXXXX，取值不区分大小写，自定义操作里多两个只读属性。
     load_from_text(&migrated,
@@ -812,6 +822,10 @@ static void test_paths(void)
     free(directory);
     free(root);
     free(stem);
+    CHECK(file_name_is_reserved(L"nul") && file_name_is_reserved(L"CON .txt") && file_name_is_reserved(L"aux.tar.gz") &&
+          file_name_is_reserved(L"Com9.log") && file_name_is_reserved(L"lpt\x00B2") && file_name_is_reserved(L"CONOUT$.txt"), "设备名没有认出来");
+    CHECK(!file_name_is_reserved(L"console") && !file_name_is_reserved(L"com10") && !file_name_is_reserved(L".nul") &&
+          !file_name_is_reserved(L"nul_") && !file_name_is_reserved(L"") && !file_name_is_reserved(L"LPT"), "普通名称被当成了设备名");
     wchar_t *first = new_guid_text(), *second = new_guid_text();
     CHECK(wcslen(first) == 32 && wcscmp(first, second) != 0, "新的标识不正确");
     free(first);

@@ -514,7 +514,7 @@ static void test_archive_already_compressed(void)
         memset(&reader, 0, sizeof(reader));
         if (loaded && mz_zip_reader_init_mem(&reader, bytes, (size_t)zip_size, 0))
         {
-            mz_zip_archive_file_stat stored, deflated, tiny;
+            mz_zip_archive_file_stat stored = {0}, deflated = {0}, tiny = {0};
             int stored_at = mz_zip_reader_locate_file(&reader, "video.bin", NULL, 0);
             int deflated_at = mz_zip_reader_locate_file(&reader, "report.txt", NULL, 0);
             int small_at = mz_zip_reader_locate_file(&reader, "small.bin", NULL, 0);
