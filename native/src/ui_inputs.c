@@ -14,11 +14,6 @@ static float maximum(float first, float second)
     return first > second ? first : second;
 }
 
-static float minimum(float first, float second)
-{
-    return first < second ? first : second;
-}
-
 static float clampf(float value, float low, float high)
 {
     return value < low ? low : value > high ? high : value;
@@ -76,7 +71,6 @@ static void grid_arrange(UiElement *element)
     UiGrid *grid = (UiGrid *)element;
     float column = grid_column_width(grid, element->bounds.right - element->bounds.left);
     float top = element->bounds.top;
-    int visible = 0;
     // 先量出每一行的高度，同一行的一样高。
     for (int start = 0; start < element->child_count;)
     {
@@ -98,7 +92,6 @@ static void grid_arrange(UiElement *element)
             ui_arrange(child, (GfxRect){ left + child->margin_left, top + child->margin_top, left + column - child->margin_right,
                 top + row - child->margin_bottom });
             slot++;
-            visible++;
         }
         top += row + grid->row_gap;
         start = end;
