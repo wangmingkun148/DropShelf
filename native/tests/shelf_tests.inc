@@ -285,6 +285,15 @@ static void test_shelf_model(void)
     add_paths(model, (const wchar_t *const *)paths, 5);
     ShelfItem *order[5];
     memcpy(order, model->items, sizeof(order));
+    ShelfItem *other = shelf_item_copy(order[0]);
+    ShelfItem *moving[] = { order[4], order[3], order[2], order[1], order[4], other };
+    CHECK(!shelf_model_all_items_in(model, moving, ARRAYSIZE(moving)), "重复或其他置物架上的项目不能算作全部移出");
+    moving[4] = order[0];
+    CHECK(shelf_model_all_items_in(model, moving, ARRAYSIZE(moving)), "逆序移出全部项目没有被认出来");
+    bool marks_cleared = !other->marked;
+    for (int index = 0; index < model->count; index++) marks_cleared &= !model->items[index]->marked;
+    CHECK(marks_cleared, "判断是否全部移出后留下了临时记号");
+    shelf_item_release(other);
     ShelfItem *pick[2] = { order[3], order[1] };
     ShelfRemoval *removal = shelf_model_remove(model, pick, 2);
     CHECK(removal && removal->count == 2 && removal->indices[0] == 1 && removal->indices[1] == 3 && model->count == 3, "移除记录里的位置不是从前到后");
@@ -513,6 +522,13 @@ static void test_shelf_large_batch(void)
     bool ascending = true;
     for (int index = 1; removal && index < removal->count; index++) ascending &= removal->indices[index] > removal->indices[index - 1];
     CHECK(ascending, "移除记录里的位置不是从前到后");
+    ShelfItem **restored = NULL;
+    int restored_count = shelf_model_restore(model, removal, &restored);
+    CHECK(restored_count == odd_count - 1 && model->count == all_count &&
+          memcmp(model->items, all, (size_t)all_count * sizeof(ShelfItem *)) == 0, "撤销部分批量移除后没有回到原来的位置");
+    CHECK(removal && restored && restored_count == removal->count &&
+          memcmp(restored, removal->items, (size_t)restored_count * sizeof(ShelfItem *)) == 0, "返回的恢复项目顺序不正确");
+    free(restored);
     shelf_removal_free(removal);
     ULONGLONG elapsed = GetTickCount64() - started;
     CHECK(elapsed < 5000, "大批量放入和移除花的时间太长");

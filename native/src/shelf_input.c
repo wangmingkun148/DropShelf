@@ -304,14 +304,8 @@ void shelf_remove_items(ShelfWindow *shelf, ShelfItem **items, int count)
 {
     if (count == 0) return;
     shelf->model->has_interacted = true;
-    bool all = true;
-    for (int index = 0; index < shelf->model->count && all; index++)
-    {
-        bool listed = false;
-        for (int at = 0; at < count && !listed; at++) listed = items[at] == shelf->model->items[index];
-        all = listed;
-    }
-    shelf_remove_with_motion(shelf, items, count, REMOVE_VISIBLY, !(close_when_empty() && all));
+    bool close_directly = close_when_empty() && shelf_model_all_items_in(shelf->model, items, count);
+    shelf_remove_with_motion(shelf, items, count, REMOVE_VISIBLY, !close_directly);
 }
 
 void shelf_remove_visibly(void *context, ShelfItem **items, int count)

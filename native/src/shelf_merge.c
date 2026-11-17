@@ -108,15 +108,8 @@ int shelf_receive(ShelfWindow *shelf, ShelfItem **items, int count, ShelfModel *
 
 void shelf_let_go(ShelfWindow *shelf, ShelfItem **items, int count)
 {
-    bool all = true;
-    for (int index = 0; index < shelf->model->count && all; index++)
-    {
-        bool listed = false;
-        for (int at = 0; at < count && !listed; at++) listed = items[at] == shelf->model->items[index];
-        all = listed;
-    }
     // 全部交出去且设置为自动关闭时，带着原来的样子淡出关闭（不先变成空置物架，也不记进最近关闭）。
-    if (close_when_empty() && all)
+    if (close_when_empty() && shelf_model_all_items_in(shelf->model, items, count))
     {
         shelf->merged_away = true;
         shelf_window_close_animated(shelf);

@@ -66,6 +66,7 @@ void shelf_model_release(ShelfModel *model);
 
 bool shelf_model_contains(const ShelfModel *model, const ShelfItem *item);
 int shelf_model_index_of(const ShelfModel *model, const ShelfItem *item);
+bool shelf_model_all_items_in(const ShelfModel *model, ShelfItem *const *items, int count);
 
 /// 第 position 新的项目（1 是最新的）；不够时返回 NULL。
 ShelfItem *shelf_model_from_end(const ShelfModel *model, int position);
