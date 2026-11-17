@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 自己用的两个错误：用 Windows 留给程序自定义的范围（第 29 位）。
+// 自己用的几个错误码：用 Windows 留给程序自定义的范围（第 29 位），彼此不能重复。
 #define ERROR_INTO_ITSELF 0x20000001u
 #define ERROR_CONTAINS_LINKS 0x20000002u
+/// move_one 的结果：已经完整复制到新位置，原来的却没能全部删掉；算成功，只标出原位置有残留。
+#define SOURCE_LEFT_BEHIND 0x20000003u
 
 static bool is_separator(wchar_t character)
 {
@@ -303,9 +305,6 @@ static DWORD copy_one(const wchar_t *source, const wchar_t *target)
 {
     return path_is_directory(source) ? copy_directory(source, target) : copy_file(source, target);
 }
-
-/// move_one 的结果：已经完整复制到新位置，原来的却没能全部删掉。用应用自定义错误码的那一位，不会和系统的错误码重复。
-#define SOURCE_LEFT_BEHIND ((DWORD)0x20000001)
 
 static DWORD move_one(const wchar_t *source, const wchar_t *target)
 {
