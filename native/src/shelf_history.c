@@ -305,6 +305,7 @@ void shelf_history_load(const wchar_t *path)
     if (!root || root->type != JSON_ARRAY)
     {
         log_error(L"读取最近关闭的置物架失败\r\n%ls", root ? L"文件的格式不正确" : L"无法读取或解析文件");
+        file_keep_unreadable(history_path);
         json_free(root);
         return;
     }

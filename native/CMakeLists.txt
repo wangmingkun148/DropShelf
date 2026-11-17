@@ -44,6 +44,7 @@ add_library(dropshelf_core STATIC
     src/gfx.cpp
     src/hotkey.c
     src/history_menu.c
+    src/image_quality.c
     src/image_tools.c
     src/json.c
     src/lang.c

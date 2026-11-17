@@ -22,13 +22,16 @@ static bool is_separator(wchar_t character)
 static StrList normalize_sources(const StrList *paths)
 {
     StrList sources = {0};
+    // 查重用排好序的集合：一次压缩几千个文件时不用两两比较。
+    TextSet seen = { .ignore_case = true };
     for (int index = 0; index < paths->count; index++)
     {
         if (!path_is_available(paths->items[index])) continue;
         wchar_t *full = path_full(paths->items[index]);
-        if (strlist_index_of(&sources, full, true) < 0) strlist_add_owned(&sources, full);
+        if (text_set_add(&seen, full)) strlist_add_owned(&sources, full);
         else free(full);
     }
+    text_set_clear(&seen);
     return sources;
 }
 
@@ -126,9 +129,37 @@ static time_t unix_time(FILETIME time)
     return (time_t)((value.QuadPart - 116444736000000000ull) / 10000000ull);
 }
 
+/// 这么大以上的文件先取样看值不值得压缩。
+#define SAMPLE_FROM_SIZE (1024 * 1024)
+#define SAMPLE_BYTES (32 * 1024)
+#define SAMPLE_COUNT 3
+
+/// 视频、照片、压缩包这类内容本身已经压缩过，再压一遍几乎不会变小，却要花掉绝大部分时间
+/// （压缩每秒只能处理几十 MB，原样存入只受磁盘速度限制）。在文件的 1/4、1/2、3/4 处各取一小段快速压一下，
+/// 合起来省不到 3% 就原样存入。小文件不取样，照常压缩；读不到样本时也照常压缩。
+static bool is_already_compressed(FileReader *reader, unsigned long long size)
+{
+    if (size < SAMPLE_FROM_SIZE) return false;
+    unsigned char *sample = xalloc(SAMPLE_BYTES), *packed = xalloc(SAMPLE_BYTES);
+    int flags = (int)tdefl_create_comp_flags_from_zip_params(MZ_BEST_SPEED, -MZ_DEFAULT_WINDOW_BITS, MZ_DEFAULT_STRATEGY);
+    size_t packed_total = 0;
+    bool read = true;
+    for (int index = 1; index <= SAMPLE_COUNT && read; index++)
+    {
+        unsigned long long offset = size / (SAMPLE_COUNT + 1) * (unsigned long long)index;
+        read = read_file_at(reader, offset, sample, SAMPLE_BYTES) == SAMPLE_BYTES;
+        // 压完比原来还大（缓冲区放不下）时返回 0。
+        size_t length = read ? tdefl_compress_mem_to_mem(packed, SAMPLE_BYTES, sample, SAMPLE_BYTES, flags) : 0;
+        packed_total += length ? length : SAMPLE_BYTES;
+    }
+    free(sample);
+    free(packed);
+    return read && packed_total >= (size_t)SAMPLE_BYTES * SAMPLE_COUNT * 97 / 100;
+}
+
 static bool add_file(mz_zip_archive *zip, const wchar_t *path, const wchar_t *entry_name)
 {
-    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+    HANDLE file = io_create_file(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
         FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
@@ -143,8 +174,9 @@ static bool add_file(mz_zip_archive *zip, const wchar_t *path, const wchar_t *en
         char *name = utf8_from_wide(entry_name, NULL);
         time_t modified = unix_time(written);
         FileReader reader = { file, 0 };
+        mz_uint level = is_already_compressed(&reader, (unsigned long long)size.QuadPart) ? MZ_NO_COMPRESSION : MZ_DEFAULT_LEVEL;
         ok = mz_zip_writer_add_read_buf_callback(zip, name, read_file_at, &reader, (mz_uint64)size.QuadPart, &modified, NULL, 0,
-            MZ_DEFAULT_LEVEL, NULL, 0, NULL, 0);
+            level, NULL, 0, NULL, 0);
         free(name);
     }
     CloseHandle(file);
@@ -184,7 +216,8 @@ static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
 }
 
 /// 整棵目录树只走一遍：每个文件夹列一次，文件直接写入，子文件夹排队，什么都没有的文件夹留一个空条目。
-/// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。
+/// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。OneDrive 等按需下载的文件和文件夹也带重解析点属性，
+/// 但是真正的内容，照常压缩（见 find_data_is_link）。
 static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList *used)
 {
     wchar_t *folder_name = path_folder_name(directory);
@@ -203,7 +236,7 @@ static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList
         bool empty = true;
         wchar_t *pattern = path_join(current, L"*");
         WIN32_FIND_DATAW data;
-        HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        HANDLE find = io_find_first(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
         free(pattern);
         if (find == INVALID_HANDLE_VALUE)
         {
@@ -219,7 +252,7 @@ static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList
             {
                 if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
                 empty = false;
-                if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+                if (find_data_is_link(&data)) continue;
                 WStr name = {0};
                 wstr_appendf(&name, L"%ls/%ls", current_name, data.cFileName);
                 wchar_t *full = path_join(current, data.cFileName);
@@ -273,7 +306,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
     HANDLE file = INVALID_HANDLE_VALUE;
     if (ok)
     {
-        file = CreateFileW(temporary, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        file = io_create_file(temporary, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
         ok = file != INVALID_HANDLE_VALUE;
         if (!ok) log_win32_error(L"无法创建压缩文件", GetLastError());
     }
@@ -302,7 +335,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
         if (!ok) log_error(L"写入压缩文件失败：%hs", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
         mz_zip_writer_end(&zip);
         CloseHandle(file);
-        if (ok && !MoveFileExW(temporary, output, 0))
+        if (ok && !io_move_file(temporary, output, 0))
         {
             log_win32_error(L"无法保存压缩文件", GetLastError());
             ok = false;
@@ -315,7 +348,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
     }
     else
     {
-        if (temporary && file != INVALID_HANDLE_VALUE) DeleteFileW(temporary);
+        if (temporary && file != INVALID_HANDLE_VALUE) io_delete_file(temporary);
         log_error(L"快速压缩失败");
         quick_action_result_fail(result, STR_CompressFailed);
     }
@@ -403,7 +436,7 @@ static size_t write_limited(void *opaque, mz_uint64 offset, const void *buffer, 
 
 static bool extract_zip_safely(const wchar_t *source, const wchar_t *destination)
 {
-    HANDLE file = CreateFileW(source, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    HANDLE file = io_create_file(source, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
         log_win32_error(L"无法打开压缩包", GetLastError());
@@ -469,7 +502,7 @@ static bool extract_zip_safely(const wchar_t *source, const wchar_t *destination
         wchar_t *parent = path_directory(target);
         if (parent) ok = directory_create(parent);
         free(parent);
-        HANDLE output = ok ? CreateFileW(target, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL) : INVALID_HANDLE_VALUE;
+        HANDLE output = ok ? io_create_file(target, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL) : INVALID_HANDLE_VALUE;
         if (output == INVALID_HANDLE_VALUE)
         {
             if (ok) log_win32_error(L"解压时无法创建文件", GetLastError());
@@ -501,7 +534,7 @@ static bool extract_zip_safely(const wchar_t *source, const wchar_t *destination
 static void finish_extraction(const wchar_t *source, wchar_t *temporary, const wchar_t *destination, QuickActionResult *result)
 {
     zone_identifier_propagate(source, temporary);
-    if (MoveFileExW(temporary, destination, 0))
+    if (io_move_file(temporary, destination, 0))
     {
         strlist_add(&result->outputs, destination);
         quick_action_result_set(result, true, str_extracted_to(path_file_name(destination)));
@@ -517,7 +550,7 @@ static void extract_zip(const wchar_t *source, const wchar_t *output_directory, 
     wchar_t *destination = parent ? path_available(parent, stem, L"") : NULL;
     wchar_t *temporary = parent ? temporary_name(parent, L"") : NULL;
     free(stem);
-    bool created = destination && CreateDirectoryW(temporary, NULL);
+    bool created = destination && io_create_directory(temporary, NULL);
     if (created && extract_zip_safely(source, temporary)) finish_extraction(source, temporary, destination, result);
     if (!result->succeeded)
     {
@@ -604,7 +637,7 @@ static TarRun run_tar(const wchar_t *tar, const wchar_t *const *arguments, int a
         }
         SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0);
     }
-    else null_device = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, NULL);
+    else null_device = io_create_file(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, NULL);
 
     WStr line = {0};
     wstr_appendf(&line, L"\"%ls\"", tar);
@@ -735,7 +768,7 @@ static bool contains_links(const wchar_t *directory)
         wchar_t *current = pending.items[--pending.count];
         wchar_t *pattern = path_join(current, L"*");
         WIN32_FIND_DATAW data;
-        HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, 0);
+        HANDLE find = io_find_first(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, 0);
         free(pattern);
         if (find != INVALID_HANDLE_VALUE)
         {
@@ -768,7 +801,7 @@ static void extract_7zip(const wchar_t *source, const wchar_t *output_directory,
     wchar_t *destination = parent ? path_available(parent, stem, L"") : NULL;
     wchar_t *temporary = parent ? temporary_name(parent, L"") : NULL;
     free(stem);
-    bool created = destination && CreateDirectoryW(temporary, NULL);
+    bool created = destination && io_create_directory(temporary, NULL);
     if (created)
     {
         const wchar_t *list_arguments[] = { L"-tf", source };
@@ -848,7 +881,7 @@ void zone_identifier_propagate(const wchar_t *archive, const wchar_t *directory)
         wchar_t *current = pending.items[--pending.count];
         wchar_t *pattern = path_join(current, L"*");
         WIN32_FIND_DATAW data;
-        HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        HANDLE find = io_find_first(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
         free(pattern);
         if (find != INVALID_HANDLE_VALUE)
         {

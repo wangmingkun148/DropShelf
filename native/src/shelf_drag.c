@@ -143,7 +143,7 @@ static void pidl_cache_store(const wchar_t *path, PCIDLIST_ABSOLUTE pidl, const 
 static PIDLIST_ABSOLUTE parse_path(const wchar_t *path, bool *from_cache)
 {
     WIN32_FILE_ATTRIBUTE_DATA data;
-    bool has_data = GetFileAttributesExW(path, GetFileExInfoStandard, &data) != FALSE;
+    bool has_data = io_get_attributes_ex(path, GetFileExInfoStandard, &data) != FALSE;
     if (from_cache) *from_cache = false;
     if (has_data)
     {

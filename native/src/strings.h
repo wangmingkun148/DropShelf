@@ -64,6 +64,7 @@ wchar_t *str_copied_to(int count, const wchar_t *folder);       // 已复制 3 �
 wchar_t *str_moved_to(int count, const wchar_t *folder);
 wchar_t *str_copied_partially(int copied, int failed);
 wchar_t *str_moved_partially(int moved, int failed);
+wchar_t *str_move_left_behind(int count);                       // ，1 项没能从原位置删干净
 wchar_t *str_images_converted(int count, const wchar_t *format);
 wchar_t *str_images_compressed(int count, const wchar_t *size);
 wchar_t *str_images_skipped_same_format(int count, const wchar_t *format);  // ，2 张本来就是 PNG

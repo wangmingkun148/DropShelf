@@ -512,7 +512,7 @@ static void show_properties(HWND owner, const StrList *paths, QuickActionResult 
 static void open_with(const CustomAction *custom, const wchar_t *label, const StrList *paths, QuickActionResult *result)
 {
     const wchar_t *program = custom->program_path ? custom->program_path : L"";
-    DWORD attributes = GetFileAttributesW(program);
+    DWORD attributes = io_get_attributes(program);
     if (wcs_is_blank(program) || attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
     {
         quick_action_result_set(result, false, str_program_missing(label));
@@ -575,12 +575,13 @@ static void move_to_folder(const StrList *paths, const wchar_t *destination, Qui
         else strlist_add(&pending, paths->items[index]);
     }
     FileOpResults results = file_ops_move(&pending, destination);
-    int moved = 0;
+    int moved = 0, left = 0;
     for (int index = 0; index < results.count; index++)
     {
         FileOpResult *item = &results.items[index];
         if (!item->succeeded || !item->destination) continue;
         moved++;
+        left += item->source_left;
         strlist_add(&result->move_sources, item->source);
         strlist_add(&result->move_destinations, item->destination);
         strlist_add(&result->outputs, item->destination);
@@ -588,6 +589,17 @@ static void move_to_folder(const StrList *paths, const wchar_t *destination, Qui
     int done = moved + already, failed = results.count - moved;
     wchar_t *folder = path_folder_name(destination);
     wchar_t *message = failed == 0 ? str_moved_to(done, folder) : done == 0 ? wcs_dup(S(STR_MoveFailed)) : str_moved_partially(done, failed);
+    if (left > 0)
+    {
+        // 移过去了，但原位置还有残留：照样算成功，提示用户去原位置看看。
+        WStr text = {0};
+        wstr_append(&text, message);
+        free(message);
+        wchar_t *part = str_move_left_behind(left);
+        wstr_append(&text, part);
+        free(part);
+        message = wstr_take(&text);
+    }
     quick_action_result_set(result, done > 0, message);
     free(folder);
     file_op_results_free(&results);

@@ -1160,6 +1160,7 @@ ShelfWindow *shelf_window_create(void)
     if (!shelf->ui)
     {
         shelf_model_release(shelf->model);
+        quick_action_list_free(&shelf->actions);
         free(shelf);
         return NULL;
     }
@@ -1192,6 +1193,9 @@ void shelf_window_release(ShelfWindow *shelf)
     free(shelf->toast_text);
     for (int index = 0; index < shelf->convert_count; index++) shelf_item_release(shelf->convert_items[index]);
     free(shelf->convert_items);
+    // 撤销后还没来得及播放飞回动画就关闭了：刷新被跳过，放回的项目的引用在这里放掉。
+    for (int index = 0; index < shelf->returning_count; index++) shelf_item_release(shelf->returning_items[index]);
+    free(shelf->returning_items);
     for (int index = 0; index < shelf->menu_count; index++) shelf_item_release(shelf->menu_items[index]);
     free(shelf->menu_items);
     for (int index = 0; index < shelf->dimmed_count; index++) shelf_item_release(shelf->dimmed[index]);

@@ -491,7 +491,7 @@ static void side_panel_paint_over(UiElement *element, double time)
     (void)time;
     // 页面名称：裁在自己的一行里，从上方滚下来。
     float opacity = (float)panel.name_opacity.value;
-    if (opacity <= 0.001f || panel.header_page == PAGE_OVERVIEW && opacity <= 0.001f) return;
+    if (opacity <= 0.001f) return;
     GfxRect rect = panel_name->bounds;
     gfx_push_clip(rect);
     GfxTextStyle style = { GFX_FONT_TEXT, 28, 600, false, true, GFX_ALIGN_START, GFX_ALIGN_START };

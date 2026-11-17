@@ -50,6 +50,7 @@ static void call_parameterized(void)
         TAKE(str_moved_to(count, L"x"));
         TAKE(str_copied_partially(count, count));
         TAKE(str_moved_partially(count, count));
+        TAKE(str_move_left_behind(count));
         TAKE(str_images_converted(count, L"x"));
         TAKE(str_images_compressed(count, L"x"));
         TAKE(str_images_skipped_same_format(count, L"x"));

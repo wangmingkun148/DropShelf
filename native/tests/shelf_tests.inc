@@ -159,6 +159,9 @@ static void test_shelf_item_text(void)
     CHECK(owned_text_is(format_size(1536), L"1.5 KB") && owned_text_is(format_size(5505024), L"5.3 MB") && owned_text_is(format_size(3LL << 30), L"3 GB"), "大小的写法不正确");
     CHECK(owned_text_is(text_summarize(L"  第一行  内容\n第二行", 60), L"第一行 内容"), "文本摘要没有只取第一行、合并空白");
     CHECK(owned_text_is(text_summarize(L"\n\n  abcdef", 3), L"abc…"), "长文本没有截断");
+    // 表情等字符占两个 UTF-16 单元：截断时不能只留下半个，完整地落在上限以内时照常保留。
+    CHECK(owned_text_is(text_summarize(L"ab\U0001F600cd", 3), L"ab…"), "截断时把表情字符截成了半个");
+    CHECK(owned_text_is(text_summarize(L"ab\U0001F600cd", 4), L"ab\U0001F600…"), "完整的表情字符被截掉了");
     CHECK(text_is_single_url(L"https://example.com/page") && text_is_single_url(L"HTTP://Example.com") && !text_is_single_url(L"file:///C:/x") &&
           !text_is_single_url(L"https://a b") && !text_is_single_url(L"ftp://example.com") && !text_is_single_url(L"https://a\nb"), "网址判断不正确");
     CHECK(owned_text_is(url_host(L"https://user@Example.COM:8080/x?y"), L"example.com") && url_host(L"mailto:a@b") == NULL, "主机名不正确");
@@ -212,14 +215,29 @@ static void test_shelf_item_text(void)
     ShelfItem *bare = shelf_item_new(ITEM_LINK, L"https://example.com/a", NULL, false);
     ShelfItem *odd = shelf_item_new(ITEM_TEXT, L"???", NULL, false);
     ShelfItem *reserved = shelf_item_new(ITEM_TEXT, L"con", NULL, false);
+    ShelfItem *dotted = shelf_item_new(ITEM_TEXT, L"aux.c", NULL, false);
     CHECK(owned_text_is(shelf_item_file_name(notes), L"会议纪要：a b.txt"), "文本的文件名不正确");
     CHECK(owned_text_is(shelf_item_file_name(titled), L"示例 首页.url") && owned_text_is(shelf_item_file_name(bare), L"example.com.url"), "链接的文件名不正确");
-    CHECK(owned_text_is(shelf_item_file_name(odd), L"文本.txt") && owned_text_is(shelf_item_file_name(reserved), L"_con.txt"), "无法使用的文件名没有换掉");
+    CHECK(owned_text_is(shelf_item_file_name(odd), L"文本.txt") && owned_text_is(shelf_item_file_name(reserved), L"_con.txt") &&
+          owned_text_is(shelf_item_file_name(dotted), L"_aux.c.txt"), "无法使用的文件名没有换掉");
     shelf_item_release(notes);
     shelf_item_release(titled);
     shelf_item_release(bare);
     shelf_item_release(odd);
     shelf_item_release(reserved);
+    shelf_item_release(dotted);
+
+    // 名称太长被截断时，不能把占两个 UTF-16 单元的字符截成半个（文件名里不能有落单的代理项）。
+    wchar_t long_title[64];
+    for (int index = 0; index < 39; index++) long_title[index] = L'a';
+    wcscpy_s(long_title + 39, 25, L"\U0001F600后面还有很多字");
+    ShelfItem *cut = shelf_item_new(ITEM_LINK, L"https://example.com/a", long_title, false);
+    wchar_t *cut_name = shelf_item_file_name(cut);
+    bool lone_surrogate = false;
+    for (const wchar_t *c = cut_name; *c; c++) lone_surrogate |= IS_HIGH_SURROGATE(*c) || IS_LOW_SURROGATE(*c);
+    CHECK(cut_name && !lone_surrogate && wcslen(cut_name) == 39 + 4, "截断后的文件名里留下了半个表情字符");
+    free(cut_name);
+    shelf_item_release(cut);
 }
 
 // ───────────── 置物架的内容 ─────────────
@@ -416,6 +434,96 @@ static void test_shelf_model(void)
 
 // ───────────── 拖出的规则 ─────────────
 
+/// 一次放入两万个文件：查重、全部移除和撤销都要很快做完（逐个两两比较时要几十秒，界面会一直卡着）。
+static void test_shelf_large_batch(void)
+{
+    enum { COUNT = 20000 };
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc(COUNT + 2, sizeof(DroppedEntry));
+    result->with_facts = true;
+    for (int index = 0; index < COUNT + 2; index++)
+    {
+        // 顺序打乱；最后两个是前面的重复：一个只是大小写不同，一个完全相同。
+        int number = index < COUNT ? (index * 7919) % COUNT : (5 * 7919) % COUNT;
+        wchar_t path[96];
+        swprintf(path, 96, index == COUNT ? L"c:\\dropshelf tests\\a fairly long folder name\\PHOTOS\\img_%05d.JPG"
+                                          : L"C:\\DropShelf Tests\\A Fairly Long Folder Name\\Photos\\IMG_%05d.jpg", number);
+        DroppedEntry *entry = &result->entries[index];
+        entry->kind = ITEM_FILE;
+        entry->value = wcs_dup(path);
+        entry->has_facts = true;
+        entry->facts.has_size = true;
+        entry->facts.size_bytes = 1;
+        entry->type_name = wcs_dup(L"JPG");
+    }
+    result->count = COUNT + 2;
+
+    ULONGLONG started = GetTickCount64();
+    ShelfModel *model = shelf_model_new(NULL);
+    ShelfAddSummary first = shelf_model_add(model, result);
+    CHECK(first.added == COUNT && first.duplicates == 2 && first.unavailable == 0 && model->count == COUNT, "大批量放入时的统计不正确");
+    ShelfAddSummary second = shelf_model_add(model, result);
+    CHECK(second.added == 0 && second.duplicates == COUNT + 2 && model->count == COUNT, "大批量重复放入时没有全部认出来");
+    bool in_order = model->count == COUNT;
+    for (int index = 0; index < COUNT && in_order; index++) in_order = wcscmp(model->items[index]->value, result->entries[index].value) == 0;
+    CHECK(in_order, "大批量放入后的顺序不是放入的顺序");
+
+    // 文本按内容区分大小写，和文件各查各的。
+    DropReadResult *texts = xcalloc(1, sizeof(DropReadResult));
+    texts->entries = xcalloc(40, sizeof(DroppedEntry));
+    for (int index = 0; index < 40; index++)
+    {
+        wchar_t text[32];
+        swprintf(text, 32, index % 2 ? L"note %d" : L"NOTE %d", index / 4);
+        texts->entries[index] = (DroppedEntry){ ITEM_TEXT, wcs_dup(text) };
+    }
+    texts->count = 40;
+    ShelfAddSummary noted = shelf_model_add(model, texts);
+    CHECK(noted.added == 20 && noted.duplicates == 20 && model->count == COUNT + 20, "大批量放入文本时的查重不正确");
+    drop_result_free(texts);
+
+    // 全部移除再撤销：回到原来的位置；只移除一部分时剩下的顺序不变。
+    int all_count = model->count;
+    ShelfItem **all = xalloc((size_t)all_count * sizeof(ShelfItem *));
+    memcpy(all, model->items, (size_t)all_count * sizeof(ShelfItem *));
+    ShelfRemoval *removal = shelf_model_remove(model, all, all_count);
+    CHECK(removal && removal->count == all_count && model->count == 0, "全部移除后还有剩下的");
+    bool unmarked = true;
+    for (int index = 0; index < all_count; index++) unmarked &= !all[index]->marked;
+    CHECK(unmarked, "移除后留下了临时记号");
+    CHECK(shelf_model_restore(model, removal, NULL) == all_count && model->count == all_count &&
+          memcmp(model->items, all, (size_t)all_count * sizeof(ShelfItem *)) == 0, "撤销后没有回到原来的位置");
+    CHECK(shelf_model_restore(model, removal, NULL) == 0 && model->count == all_count, "已经放回的又放了一次");
+    shelf_removal_free(removal);
+    ShelfItem **odd = xalloc((size_t)all_count * sizeof(ShelfItem *));
+    int odd_count = 0;
+    // 倒着传入，中间夹一个重复的：结果和顺序无关。
+    for (int index = all_count - 1; index >= 0; index--)
+        if (index % 2) odd[odd_count++] = all[index];
+    ShelfItem *spared = odd[odd_count / 2];
+    odd[odd_count / 2] = odd[0];
+    removal = shelf_model_remove(model, odd, odd_count);
+    bool kept_in_order = model->count == all_count - (odd_count - 1);
+    for (int index = 0, at = 0; index < all_count && kept_in_order; index++)
+    {
+        if (index % 2 && all[index] != spared) continue;
+        kept_in_order = !all[index]->marked && model->items[at++] == all[index];
+    }
+    CHECK(removal && removal->count == odd_count - 1 && kept_in_order, "移除一部分时的结果不正确");
+    bool ascending = true;
+    for (int index = 1; removal && index < removal->count; index++) ascending &= removal->indices[index] > removal->indices[index - 1];
+    CHECK(ascending, "移除记录里的位置不是从前到后");
+    shelf_removal_free(removal);
+    ULONGLONG elapsed = GetTickCount64() - started;
+    CHECK(elapsed < 5000, "大批量放入和移除花的时间太长");
+    if (elapsed >= 5000) printf("      用了 %llu 毫秒\n", elapsed);
+
+    free(odd);
+    free(all);
+    shelf_model_release(model);
+    drop_result_free(result);
+}
+
 static void test_drag_out_rules(void)
 {
     CHECK(drag_resolve(DRAGDROP_S_CANCEL, 0, -1, -1, false) == DRAG_OUT_CANCELLED, "取消没有识别");
@@ -438,6 +546,9 @@ static void test_attachment_cache(void)
     CHECK(owned_text_is(attachment_safe_name(L"a/b\\c.txt", &used), L"c.txt"), "名称里的路径没有去掉");
     CHECK(owned_text_is(attachment_safe_name(L"  bad:name?.txt ", &used), L"bad_name_.txt"), "不能用的字符没有换掉");
     CHECK(owned_text_is(attachment_safe_name(L"con.txt", &used), L"_con.txt") && owned_text_is(attachment_safe_name(L"...", &used), L"attachment"), "保留名或空名称没有换掉");
+    // Windows 10 只看第一个点之前：NUL.tar.gz 也是设备。
+    CHECK(owned_text_is(attachment_safe_name(L"NUL.tar.gz", &used), L"_NUL.tar.gz") && owned_text_is(attachment_safe_name(L"com1", &used), L"_com1") &&
+          owned_text_is(attachment_safe_name(L"console.log", &used), L"console.log"), "有多个点的保留名没有换掉");
     CHECK(owned_text_is(attachment_safe_name(L"C.TXT", &used), L"C (2).TXT") && owned_text_is(attachment_safe_name(L"c.txt", &used), L"c (3).txt"), "同名时没有加序号");
     wchar_t longer[220];
     for (int index = 0; index < 200; index++) longer[index] = L'a';
@@ -445,6 +556,15 @@ static void test_attachment_cache(void)
     wchar_t *shortened = attachment_safe_name(longer, &used);
     CHECK(wcslen(shortened) == 140 && wcscmp(path_extension(shortened), L".docx") == 0, "太长的名称没有截短");
     free(shortened);
+    // 截断处正好是一个表情字符的前一半时，整个字符一起去掉。
+    wchar_t emoji_name[200];
+    for (int index = 0; index < 135; index++) emoji_name[index] = L'e';
+    wcscpy_s(emoji_name + 135, 65, L"\U0001F600bbbbbbbbbb.txt");
+    wchar_t *emoji_shortened = attachment_safe_name(emoji_name, &used);
+    bool emoji_lone = false;
+    for (const wchar_t *c = emoji_shortened; *c; c++) emoji_lone |= IS_HIGH_SURROGATE(*c) || IS_LOW_SURROGATE(*c);
+    CHECK(!emoji_lone && wcslen(emoji_shortened) == 135 + 4 && wcscmp(path_extension(emoji_shortened), L".txt") == 0, "截短名称时把表情字符截成了半个");
+    free(emoji_shortened);
     strlist_clear(&used);
 
     wchar_t *cache = attachment_cache_create();

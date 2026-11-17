@@ -629,22 +629,26 @@ static void remove_tiles(ShelfWindow *shelf, ShelfItem **leaving, int count, Rem
     shelf->rows_before_y = xalloc(capacity * sizeof(float));
     shelf->rows_before_count = 0;
     GfxRect list = shelf->layout.list;
+    // 要移除的先做上记号，不用每一张都去 leaving 里找（全选几千项再移除时是几百万次）。
+    for (int index = 0; index < count; index++) leaving[index]->marked = true;
     for (int index = first; index <= last; index++)
     {
         ShelfItem *item = shelf->model->items[index];
-        if (listed(leaving, count, item)) continue;
+        if (item->marked) continue;
         GfxRect slot = shelf_tile_rect(shelf, index);
         shelf->rows_before[shelf->rows_before_count] = item;
         shelf->rows_before_x[shelf->rows_before_count] = slot.left - list.left;
         shelf->rows_before_y[shelf->rows_before_count++] = slot.top - list.top;
     }
+    for (int index = 0; index < count; index++) leaving[index]->marked = false;
     remember_removal(shelf, leaving, count, kind, remains);
     shelf->cleanup |= CLEANUP_ITEM_MOTION;
+    // 只有生成出来的牌播放离开的动画：这回给它们做记号，按传入的顺序交替往两边转，不用逐个查在第几张。
+    for (int index = first; index <= last; index++) shelf->model->items[index]->marked = true;
     int order = 0;
     for (int index = 0; index < count; index++)
     {
-        int at = shelf_model_index_of(shelf->model, leaving[index]);
-        if (at < first || at > last) continue;
+        if (!leaving[index]->marked) continue;
         Tween tween = make_tween(0, REMOVE_DURATION, apply_tile_leave);
         tween.item = leaving[index];
         tween.a = order % 2 == 0 ? -1.0f : 1.0f;
@@ -652,6 +656,7 @@ static void remove_tiles(ShelfWindow *shelf, ShelfItem **leaving, int count, Rem
         start_tween(shelf, tween);
         order++;
     }
+    for (int index = first; index <= last; index++) shelf->model->items[index]->marked = false;
     shelf_finish_after(shelf, REMOVE_DURATION);
 }
 
@@ -800,8 +805,17 @@ void shelf_remove_with_motion(ShelfWindow *shelf, ShelfItem **items, int count, 
     bool expanded_before = shelf->model->expanded;
     ShelfItem **leaving = xalloc((size_t)(count ? count : 1) * sizeof(ShelfItem *));
     int leaving_count = 0;
+    // 还在置物架上的才移除，重复传入的只算一次：置物架上的先做上记号，挑走一个去掉一个记号，
+    // 不用每一项都把置物架和已经挑出的找一遍（全选几千项再移除时是几百万次）。
+    ShelfModel *model = shelf->model;
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = true;
     for (int index = 0; index < count; index++)
-        if (shelf_model_contains(shelf->model, items[index]) && !listed(leaving, leaving_count, items[index])) leaving[leaving_count++] = items[index];
+    {
+        if (!items[index]->marked) continue;
+        items[index]->marked = false;
+        leaving[leaving_count++] = items[index];
+    }
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = false;
     if (!animate || !anim_enabled() || !shelf_window_is_visible(shelf) || leaving_count == 0)
         shelf_perform_remove(shelf, leaving, leaving_count, kind, expanded_before);
     else
