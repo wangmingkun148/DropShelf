@@ -73,7 +73,7 @@ static void load(void *data)
 {
     ThumbnailJob *job = data;
     WIN32_FILE_ATTRIBUTE_DATA attributes = {0};
-    GetFileAttributesExW(job->path, GetFileExInfoStandard, &attributes);
+    io_get_attributes_ex(job->path, GetFileExInfoStandard, &attributes);
     // 文件被修改后键随之改变，旧的缩略图自然被挤出。
     WStr key = {0};
     wstr_appendf(&key, L"%d|%lu.%lu|%ls", job->size, attributes.ftLastWriteTime.dwHighDateTime, attributes.ftLastWriteTime.dwLowDateTime, job->path);

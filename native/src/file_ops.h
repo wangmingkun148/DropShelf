@@ -12,6 +12,7 @@ typedef struct FileOpResult
     wchar_t *source;
     wchar_t *destination;       // 新位置；还没算出来就失败时是 NULL
     bool succeeded;
+    bool source_left;           // 移动时新位置已经是完整的一份，但原来的没能全部删掉（被占用等）；仍算成功
     StringId error;             // 失败时给用户看的原因
 } FileOpResult;
 
@@ -24,7 +25,8 @@ typedef struct FileOpResults
 /// 逐个复制到 destination 文件夹（不存在时创建），重名时加 (2)、(3)。连同下载来源标记、属性和修改时间一起保留。
 FileOpResults file_ops_copy(const StrList *sources, const wchar_t *destination);
 
-/// 逐个移动；不能直接移动（跨磁盘、被占用）时先复制再删除原来的。
+/// 逐个移动；不能直接移动（跨磁盘、被占用）时先复制再删除原来的。复制完了原来的却删不干净时，
+/// 新位置的那份是完整的，按成功算，source_left 标出原位置还有残留。
 FileOpResults file_ops_move(const StrList *sources, const wchar_t *destination);
 
 void file_op_results_free(FileOpResults *results);

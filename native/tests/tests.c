@@ -6,6 +6,7 @@
 #include "attachment_cache.h"
 #include "file_identity.h"
 #include "file_ops.h"
+#include "image_quality.h"
 #include "image_tools.h"
 #include "miniz.h"
 #include "quick_action.h"
@@ -110,6 +111,131 @@ static void test_json(void)
     CHECK(wcscmp(text, L"{\r\n  \"Version\": 3,\r\n  \"Left\": \"NaN\",\r\n  \"Width\": 860,\r\n  \"Top\": 160.5,\r\n  \"Empty\": [],\r\n"
         L"  \"List\": [\r\n    \"a\\\"b\"\r\n  ],\r\n  \"None\": null\r\n}") == 0, "写出的 JSON 格式不正确");
     free(text);
+}
+
+// ───────────── 查重用的文字集合 ─────────────
+
+static void test_text_set(void)
+{
+    TextSet paths = { .ignore_case = true };
+    CHECK(text_set_add(&paths, L"C:\\b\\Photo.JPG") && text_set_add(&paths, L"C:\\a\\x.txt") && text_set_add(&paths, L"C:\\c\\文件.txt"), "没有加进去");
+    CHECK(!text_set_add(&paths, L"c:\\B\\photo.jpg") && paths.count == 3, "只是大小写不同的路径加了两次");
+    CHECK(text_set_contains(&paths, L"C:\\A\\X.TXT") && text_set_contains(&paths, L"c:\\c\\文件.TXT") && !text_set_contains(&paths, L"C:\\a\\x.tx"), "查找的结果不对");
+    text_set_clear(&paths);
+
+    TextSet texts = {0};
+    CHECK(text_set_add(&texts, L"Hello") && text_set_add(&texts, L"hello") && !text_set_add(&texts, L"Hello") && texts.count == 2, "文本应区分大小写");
+    CHECK(!text_set_contains(&texts, L"HELLO") && text_set_contains(&texts, L"hello"), "文本的查找结果不对");
+    text_set_clear(&texts);
+
+    // 乱序加入几千个，再逐个核对：和逐个比较的结果一样。
+    enum { COUNT = 3000 };
+    wchar_t (*names)[24] = xalloc(sizeof(wchar_t[24]) * COUNT);
+    TextSet many = { .ignore_case = true };
+    bool all_added = true, all_found = true;
+    for (int index = 0; index < COUNT; index++)
+    {
+        swprintf(names[index], 24, L"File-%05d.dat", (index * 7919) % COUNT);
+        all_added &= text_set_add(&many, names[index]);
+    }
+    for (int index = 0; index < COUNT; index++)
+    {
+        wchar_t probe[24];
+        swprintf(probe, 24, L"FILE-%05d.DAT", index);
+        all_found &= text_set_contains(&many, probe) && !text_set_add(&many, probe);
+    }
+    CHECK(all_added && all_found && many.count == COUNT && !text_set_contains(&many, L"File-03000.dat"), "大批量时查重的结果不对");
+    text_set_clear(&many);
+    free(names);
+}
+
+// ───────────── 压缩图片时找画质 ─────────────
+
+typedef struct QualityCurve
+{
+    long long sizes[101];
+    int measured;
+    int fail_at;        // 试到这个画质时报告失败，0 表示不失败
+} QualityCurve;
+
+static long long measure_curve(void *context, int quality)
+{
+    QualityCurve *curve = context;
+    curve->measured++;
+    if (quality == curve->fail_at) return -1;
+    return curve->sizes[quality];
+}
+
+/// 画质 40–91 里逐个看，大小不超过上限的最高画质。
+static int best_quality(const QualityCurve *curve, int high, long long maximum)
+{
+    int best = 40;
+    for (int quality = 40; quality < high; quality++)
+        if (curve->sizes[quality] <= maximum) best = quality;
+    return best;
+}
+
+static void test_image_quality_search(void)
+{
+    // 一张 1600×1200 的照片用 libjpeg 按画质 40–92 编码出来的大小。
+    static const long long photo[] = {
+        73630, 76288, 78176, 79232, 81407, 83076, 85270, 85522, 87733, 91160, 91173, 91202, 95326, 97543, 98034, 99901, 102740, 104958,
+        107967, 110005, 112008, 115545, 116657, 120526, 122919, 126786, 129006, 132074, 137921, 140590, 145988, 150510, 153737, 159229,
+        167636, 168478, 173984, 183889, 190966, 197093, 204333, 215611, 222689, 236134, 244674, 254038, 270040, 280954, 299727, 315423,
+        342106, 367068, 391886
+    };
+    QualityCurve curve = {0};
+    for (int quality = 40; quality <= 92; quality++) curve.sizes[quality] = photo[quality - 40];
+
+    // 上限从刚好放得下最低画质到差一点放得下最高画质：结果和逐个试出来的一样，次数比对半分（6 次）少得多。
+    int wrong = 0, total = 0, most = 0, cases = 0;
+    for (long long maximum = curve.sizes[40]; maximum < curve.sizes[92]; maximum += 797)
+    {
+        curve.measured = 0;
+        int found = image_quality_search(40, curve.sizes[40], 92, curve.sizes[92], maximum, measure_curve, &curve);
+        if (found != best_quality(&curve, 92, maximum)) wrong++;
+        total += curve.measured;
+        if (curve.measured > most) most = curve.measured;
+        cases++;
+    }
+    CHECK(wrong == 0, "找到的不是放得下的最高画质");
+    CHECK(total <= cases * 7 / 2 && most <= 9, "找画质时编码的次数太多");
+    if (total > cases * 7 / 2 || most > 9) printf("      平均 %.2f 次，最多 %d 次\n", (double)total / cases, most);
+
+    // 缩小以后最高画质没有编码过：把它算进范围，大小给估计值（估得不准、不给，结果都一样），真放得下时选到它。
+    wrong = 0;
+    for (long long maximum = curve.sizes[40]; maximum < curve.sizes[92] + 2000; maximum += 1511)
+    {
+        int expected = best_quality(&curve, 93, maximum);
+        if (image_quality_search(40, curve.sizes[40], 93, curve.sizes[40] * 5, maximum, measure_curve, &curve) != expected) wrong++;
+        if (image_quality_search(40, curve.sizes[40], 93, curve.sizes[40] * 2, maximum, measure_curve, &curve) != expected) wrong++;
+        if (image_quality_search(40, curve.sizes[40], 93, 0, maximum, measure_curve, &curve) != expected) wrong++;
+    }
+    CHECK(wrong == 0, "最高画质的大小只是估计时结果不对");
+    curve.measured = 0;
+    CHECK(image_quality_search(40, curve.sizes[40], 93, curve.sizes[40] * 2, curve.sizes[92], measure_curve, &curve) == 92 && curve.measured <= 2,
+        "最高画质放得下时没有直接选到它");
+
+    // 大小不按预想变化（到某个画质突然变大）：估计帮不上忙，结果仍然对，次数也有限。
+    QualityCurve step = {0};
+    wrong = most = 0;
+    for (int jump = 41; jump <= 92; jump++)
+    {
+        for (int quality = 40; quality <= 92; quality++) step.sizes[quality] = 1000 + quality + (quality >= jump ? 500000 : 0);
+        step.measured = 0;
+        if (image_quality_search(40, step.sizes[40], 92, step.sizes[92], 100000, measure_curve, &step) != (jump > 91 ? 91 : jump - 1)) wrong++;
+        if (step.measured > most) most = step.measured;
+    }
+    CHECK(wrong == 0 && most <= 10, "大小突变时结果不对或试的次数太多");
+
+    // 相邻的两个画质之间不用再试；编码失败时报告失败。
+    curve.measured = 0;
+    CHECK(image_quality_search(40, curve.sizes[40], 41, curve.sizes[41], curve.sizes[40], measure_curve, &curve) == 40 && curve.measured == 0, "只有一个画质可选时不应再编码");
+    curve.fail_at = 60;
+    bool failed = false;
+    for (long long maximum = curve.sizes[40]; maximum < curve.sizes[92]; maximum += 5003)
+        if (image_quality_search(40, curve.sizes[40], 92, curve.sizes[92], maximum, measure_curve, &curve) < 0) failed = true;
+    CHECK(failed, "编码失败时没有报告失败");
 }
 
 // ───────────── 设置 ─────────────
@@ -254,6 +380,16 @@ static void test_settings_migration(void)
     load_from_text(&migrated, L"{ \"Theme\": \"Dark\"");
     CHECK(migrated.theme == THEME_SYSTEM, "格式不对的设置文件没有改用默认值");
     settings_free(&migrated);
+    // 作废之前留了一份，内容是读不懂的那份（上一次作废留下的被换掉）。
+    wchar_t *settings_file = settings_path();
+    WStr bad_path = {0};
+    wstr_appendf(&bad_path, L"%ls.bad", settings_file);
+    wchar_t *bad = file_read_text(bad_path.data, 4096);
+    CHECK(bad && wcscmp(bad, L"{ \"Theme\": \"Dark\"") == 0, "读不懂的设置文件没有另存一份");
+    free(bad);
+    DeleteFileW(bad_path.data);
+    wstr_free(&bad_path);
+    free(settings_file);
 
     // C# 版写出的文件：中文写成 \uXXXX，取值不区分大小写，自定义操作里多两个只读属性。
     load_from_text(&migrated,
@@ -686,6 +822,10 @@ static void test_paths(void)
     free(directory);
     free(root);
     free(stem);
+    CHECK(file_name_is_reserved(L"nul") && file_name_is_reserved(L"CON .txt") && file_name_is_reserved(L"aux.tar.gz") &&
+          file_name_is_reserved(L"Com9.log") && file_name_is_reserved(L"lpt\x00B2") && file_name_is_reserved(L"CONOUT$.txt"), "设备名没有认出来");
+    CHECK(!file_name_is_reserved(L"console") && !file_name_is_reserved(L"com10") && !file_name_is_reserved(L".nul") &&
+          !file_name_is_reserved(L"nul_") && !file_name_is_reserved(L"") && !file_name_is_reserved(L"LPT"), "普通名称被当成了设备名");
     wchar_t *first = new_guid_text(), *second = new_guid_text();
     CHECK(wcslen(first) == 32 && wcscmp(first, second) != 0, "新的标识不正确");
     free(first);
@@ -1482,6 +1622,8 @@ int main(int argc, char **argv)
 
     run("json", test_json);
     run("paths", test_paths);
+    run("text set", test_text_set);
+    run("image quality search", test_image_quality_search);
     run("settings round trip", test_settings_round_trip);
     run("settings migration", test_settings_migration);
     run("settings normalization", test_settings_normalization);
@@ -1508,6 +1650,7 @@ int main(int argc, char **argv)
     run("drop classify", test_drop_classify);
     run("shelf item text", test_shelf_item_text);
     run("shelf model", test_shelf_model);
+    run("shelf large batch", test_shelf_large_batch);
     run("drag out rules", test_drag_out_rules);
     run("attachment cache", test_attachment_cache);
     run("drop read", test_drop_read);
@@ -1518,7 +1661,9 @@ int main(int argc, char **argv)
     run("shell thumbnail and imaging thread", test_shell_thumbnail);
     run("file operations", test_file_operations);
     run("archive", test_archive);
+    run("archive already compressed", test_archive_already_compressed);
     run("image tools", test_image_tools);
+    run("long paths", test_long_paths);
     run("quick actions", test_quick_actions);
     run("shelf actions", test_shelf_actions);
     run("follow renamed", test_follow_renamed);

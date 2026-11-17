@@ -143,6 +143,22 @@ static void test_file_operations(void)
     CloseHandle(lock);
     strlist_clear(&locked_list);
 
+    // 别的程序只读着、不让删：复制得过去，原来的删不掉。新位置是完整的一份，按移动成功算，标出原位置有残留。
+    wchar_t *reading = test_file(source_folder, L"reading.txt", "reading");
+    HANDLE reader = CreateFileW(reading, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    StrList reading_list = {0};
+    strlist_add(&reading_list, reading);
+    results = file_ops_move(&reading_list, destination);
+    CHECK(results.count == 1 && results.items[0].succeeded && results.items[0].source_left && path_exists(reading) &&
+          results.items[0].destination && file_text_is(results.items[0].destination, "reading"), "原来的删不掉时没有按移动成功并标出残留");
+    file_op_results_free(&results);
+    if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+    results = file_ops_move(&reading_list, destination);
+    CHECK(results.count == 1 && results.items[0].succeeded && !results.items[0].source_left && !path_exists(reading), "能删掉时不应标出残留");
+    file_op_results_free(&results);
+    strlist_clear(&reading_list);
+    free(reading);
+
     // 含联接点的文件夹在复制之前报错，什么都不留下。
     wchar_t *link_source = test_folder(L"ops-link-source");
     wchar_t *linked = test_folder(L"ops-link-target");
@@ -150,6 +166,58 @@ static void test_file_operations(void)
     wchar_t *junction = path_join(link_source, L"junction");
     make_junction(junction, linked);
     CHECK(path_is_directory(junction), "无法创建测试用的联接点");
+
+    // 联接点、符号链接和认不得的重解析点算链接；OneDrive 等按需下载的文件和文件夹（云文件、重复数据删除等）带着同样的属性，
+    // 却是真正的内容，不能当链接跳过（否则压缩时漏掉里面的文件、复制时报“含有链接”）。
+    WIN32_FIND_DATAW find_data = {0};
+    CHECK(!find_data_is_link(&find_data), "没有重解析点属性的项目被当成了链接");
+    find_data.dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    find_data.dwReserved0 = 0xA0000003u;    // 联接点
+    CHECK(find_data_is_link(&find_data), "联接点没有被当成链接");
+    find_data.dwReserved0 = 0xA000000Cu;    // 符号链接
+    CHECK(find_data_is_link(&find_data), "符号链接没有被当成链接");
+    find_data.dwReserved0 = 0x8000001Bu;    // 应用执行别名：读不了内容
+    CHECK(find_data_is_link(&find_data), "认不得的重解析点没有按链接处理");
+    find_data.dwReserved0 = 0;
+    CHECK(find_data_is_link(&find_data), "读不出标记的重解析点没有按链接处理");
+    find_data.dwReserved0 = 0x9000701Au;    // OneDrive 的云文件（CLOUD_7）
+    CHECK(!find_data_is_link(&find_data), "OneDrive 的占位文件夹被当成了链接");
+    find_data.dwReserved0 = 0x9000001Au;    // 云文件
+    CHECK(!find_data_is_link(&find_data), "云文件被当成了链接");
+    find_data.dwReserved0 = 0x80000013u;    // 重复数据删除
+    CHECK(!find_data_is_link(&find_data), "重复数据删除的文件被当成了链接");
+    wchar_t *junction_with_separator = path_join(junction, L"");
+    CHECK(path_is_link(junction) && path_is_link(junction_with_separator) && !path_is_link(link_source) && path_is_link(L"C:\\no\\such\\folder"),
+        "按路径判断是不是链接不对");
+    free(junction_with_separator);
+
+    // 统计文件夹：联接点算一项，但不进去也不计大小；旁边的文件和子文件夹照常计入。
+    wchar_t *counted_file = test_file(link_source, L"beside.bin", "12345");
+    wchar_t *counted_folder = path_join(link_source, L"sub");
+    directory_create(counted_folder);
+    free(test_file(counted_folder, L"deep.bin", "123"));
+    int counted_children = 0;
+    bool counted_has_size = false;
+    long long counted_size = 0;
+    CHECK(folder_measure(link_source, &counted_children, &counted_has_size, &counted_size, NULL) && counted_children == 3 && counted_has_size &&
+          counted_size == 8, "统计带联接点的文件夹时项目数或大小不对");
+    volatile LONG stop = 1;
+    CHECK(!folder_measure(link_source, &counted_children, &counted_has_size, &counted_size, &stop), "取消后统计没有停下");
+    DeleteFileW(counted_file);
+    directory_delete_tree(counted_folder);
+    free(counted_file);
+    free(counted_folder);
+
+    // 删除带联接点的文件夹时只删联接点本身，不进去删它指向的内容。
+    wchar_t *doomed = test_folder(L"ops-link-doomed");
+    wchar_t *doomed_junction = path_join(doomed, L"junction");
+    make_junction(doomed_junction, linked);
+    wchar_t *linked_file = path_join(linked, L"inside.txt");
+    CHECK(directory_delete_tree(doomed) && !path_exists(doomed) && file_text_is(linked_file, "linked"), "删除带联接点的文件夹时误删了联接点指向的内容");
+    free(linked_file);
+    free(doomed_junction);
+    free(doomed);
+
     wchar_t *link_destination = test_folder(L"ops-link-destination");
     StrList link_list = {0};
     strlist_add(&link_list, link_source);
@@ -421,6 +489,97 @@ static void test_archive(void)
     free(root_entry);
 }
 
+/// 已经压缩过的内容（视频、照片、压缩包）原样存入，能压小的照常压缩；解压出来都和原来一样。
+static void test_archive_already_compressed(void)
+{
+    wchar_t *folder = test_folder(L"archive-stored");
+    const size_t size = 1536 * 1024;
+    char *noise = xalloc(size), *plain = xalloc(size);
+    unsigned state = 20240229;
+    for (size_t index = 0; index < size; index++)
+    {
+        state = state * 1664525u + 1013904223u;
+        noise[index] = (char)(state >> 24);
+        plain[index] = (char)('a' + index % 7);
+    }
+    wchar_t *noise_path = path_join(folder, L"video.bin"), *plain_path = path_join(folder, L"report.txt");
+    // 小文件不取样，杂乱的内容也照常压缩。
+    wchar_t *small_path = path_join(folder, L"small.bin");
+    CHECK(file_write_atomic(noise_path, noise, size) && file_write_atomic(plain_path, plain, size) && file_write_atomic(small_path, noise, 4096),
+        "无法写出测试文件");
+
+    StrList list = {0};
+    strlist_add(&list, noise_path);
+    strlist_add(&list, plain_path);
+    strlist_add(&list, small_path);
+    QuickActionResult result = {0};
+    archive_compress(&list, NULL, &result);
+    CHECK(result.succeeded && result.outputs.count == 1, "压缩失败");
+    if (result.succeeded && result.outputs.count == 1)
+    {
+        const wchar_t *zip_path = result.outputs.items[0];
+        long long zip_size = size_of(zip_path);
+        // 杂乱的那份几乎原样大小，重复的那份压得很小。
+        CHECK(zip_size > (long long)size && zip_size < (long long)size + 200 * 1024, "压缩包的大小不对");
+        char *bytes = zip_size > 0 ? xalloc((size_t)zip_size) : NULL;
+        HANDLE file = CreateFileW(zip_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        DWORD read = 0;
+        bool loaded = bytes && file != INVALID_HANDLE_VALUE && ReadFile(file, bytes, (DWORD)zip_size, &read, NULL) && read == (DWORD)zip_size;
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        mz_zip_archive reader;
+        memset(&reader, 0, sizeof(reader));
+        if (loaded && mz_zip_reader_init_mem(&reader, bytes, (size_t)zip_size, 0))
+        {
+            mz_zip_archive_file_stat stored = {0}, deflated = {0}, tiny = {0};
+            int stored_at = mz_zip_reader_locate_file(&reader, "video.bin", NULL, 0);
+            int deflated_at = mz_zip_reader_locate_file(&reader, "report.txt", NULL, 0);
+            int small_at = mz_zip_reader_locate_file(&reader, "small.bin", NULL, 0);
+            bool found = stored_at >= 0 && deflated_at >= 0 && small_at >= 0 && mz_zip_reader_file_stat(&reader, (mz_uint)stored_at, &stored) &&
+                         mz_zip_reader_file_stat(&reader, (mz_uint)deflated_at, &deflated) && mz_zip_reader_file_stat(&reader, (mz_uint)small_at, &tiny);
+            CHECK(found, "压缩包里少了文件");
+            if (found)
+            {
+                CHECK(stored.m_method == 0 && stored.m_comp_size == size && stored.m_uncomp_size == size, "压不小的大文件没有原样存入");
+                CHECK(deflated.m_method == MZ_DEFLATED && deflated.m_comp_size < size / 20, "能压小的大文件没有压缩");
+                CHECK(tiny.m_method == MZ_DEFLATED, "小文件应照常压缩");
+                size_t out_size = 0;
+                void *out = mz_zip_reader_extract_to_heap(&reader, (mz_uint)stored_at, &out_size, 0);
+                CHECK(out && out_size == size && memcmp(out, noise, size) == 0, "原样存入的文件解出来和原来不一样");
+                mz_free(out);
+                out = mz_zip_reader_extract_to_heap(&reader, (mz_uint)deflated_at, &out_size, 0);
+                CHECK(out && out_size == size && memcmp(out, plain, size) == 0, "压缩的文件解出来和原来不一样");
+                mz_free(out);
+            }
+            mz_zip_reader_end(&reader);
+        }
+        else CHECK(false, "无法读取压缩包");
+        free(bytes);
+
+        // 自己解压一遍：原样存入的条目照常解出来。
+        StrList zips = {0};
+        strlist_add(&zips, zip_path);
+        QuickActionResult extracted = {0};
+        archive_run(&zips, NULL, &extracted);
+        CHECK(extracted.succeeded && extracted.outputs.count == 1, "含原样存入条目的压缩包解压失败");
+        if (extracted.succeeded && extracted.outputs.count == 1)
+        {
+            wchar_t *back = path_join(extracted.outputs.items[0], L"video.bin");
+            CHECK(size_of(back) == (long long)size, "解压出来的文件大小不对");
+            free(back);
+        }
+        quick_action_result_free(&extracted);
+        strlist_clear(&zips);
+    }
+    quick_action_result_free(&result);
+    strlist_clear(&list);
+    free(noise);
+    free(plain);
+    free(noise_path);
+    free(plain_path);
+    free(small_path);
+    free(folder);
+}
+
 // ───────────── 图片 ─────────────
 
 static void test_image_tools(void)
@@ -587,6 +746,124 @@ static void run_on_model(ShelfModel *model, const QuickAction *action, ModelWait
     pump_until(&wait->done, 20000);
 }
 
+/// 超过 260 个字符的路径：建文件夹、读写、统计大小、复制、移动、压缩和解压、图片转换、删除都照常工作。
+/// 测试程序没有声明支持长路径，靠的是 path_for_io 加上的 \\?\。
+static void test_long_paths(void)
+{
+    HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    // 6 层，每层 50 多个字符。
+    WStr chain = {0};
+    for (int index = 0; index < 6; index++) wstr_appendf(&chain, L"\\%02d-深层文件夹-a-rather-long-folder-name-for-path-tests", index);
+    wchar_t *base = test_folder(L"long-paths");
+    WStr builder = {0};
+    wstr_appendf(&builder, L"%ls%ls", base, chain.data);
+    wchar_t *deep = wstr_take(&builder);
+    const wchar_t *second = wcschr(chain.data + 1, L'\\');
+    wchar_t *top_name = wcs_dup_n(chain.data + 1, (size_t)(second - chain.data - 1));
+    wchar_t *top = path_join(base, top_name);
+    CHECK(wcslen(deep) > 330, "测试用的路径不够长");
+
+    // 短的不动；长的先整理成完整路径再加 \\?\；网络路径换成 \\?\UNC\。
+    CHECK(owned_text_is(path_for_io(L"C:\\a\\..\\b.txt"), L"C:\\a\\..\\b.txt"), "短路径不应改动");
+    wchar_t *prefixed = path_for_io(deep);
+    CHECK(prefixed && wcsncmp(prefixed, L"\\\\?\\", 4) == 0 && wcscmp(prefixed + 4, deep) == 0, "长路径没有加上 \\\\?\\");
+    free(prefixed);
+    WStr messy = {0}, expected = {0};
+    wstr_appendf(&messy, L"%ls/x/../y.txt", deep);
+    wstr_appendf(&expected, L"\\\\?\\%ls\\y.txt", deep);
+    CHECK(owned_text_is(path_for_io(messy.data), expected.data), "长路径没有先整理成完整路径");
+    wstr_free(&messy);
+    wstr_free(&expected);
+    WStr unc = {0}, unc_expected = {0};
+    wstr_appendf(&unc, L"\\\\server\\share%ls\\a.txt", chain.data);
+    wstr_appendf(&unc_expected, L"\\\\?\\UNC\\server\\share%ls\\a.txt", chain.data);
+    CHECK(owned_text_is(path_for_io(unc.data), unc_expected.data), "长的网络路径没有换成 \\\\?\\UNC\\ 的形式");
+    wstr_free(&unc);
+    wstr_free(&unc_expected);
+
+    // 建文件夹、读写文件、文件信息、统计大小。
+    CHECK(directory_create(deep) && path_is_directory(deep), "建不了长路径的文件夹");
+    wchar_t *text = test_file(deep, L"说明.txt", "long text");
+    CHECK(path_exists(text) && file_text_is(text, "long text"), "长路径的文件读写不正常");
+    FileFacts facts;
+    CHECK(file_facts_read(text, &facts) && !facts.is_folder && facts.has_size && facts.size_bytes == 9, "读不到长路径文件的信息");
+    int children = 0;
+    bool has_size = false;
+    long long size = 0;
+    CHECK(folder_measure(base, &children, &has_size, &size, NULL) && children == 1 && has_size && size == 9, "统计不了长路径里的大小");
+
+    // 复制文件和整个文件夹（复制出来的路径同样很长）。
+    wchar_t *outside = test_folder(L"long-paths-out");
+    StrList list = {0};
+    strlist_add(&list, text);
+    FileOpResults results = file_ops_copy(&list, outside);
+    CHECK(results.count == 1 && results.items[0].succeeded && results.items[0].destination && file_text_is(results.items[0].destination, "long text"),
+        "长路径里的文件复制不出来");
+    file_op_results_free(&results);
+    strlist_clear(&list);
+    strlist_add(&list, top);
+    results = file_ops_copy(&list, outside);
+    WStr copied = {0};
+    wstr_appendf(&copied, L"%ls%ls\\说明.txt", outside, chain.data);
+    CHECK(results.count == 1 && results.items[0].succeeded && file_text_is(copied.data, "long text"), "长路径的文件夹复制不过去");
+    file_op_results_free(&results);
+    wstr_free(&copied);
+
+    // 压缩成 ZIP，再解压出来（解压出来的路径也很长）。
+    QuickActionResult zipped = {0};
+    archive_compress(&list, outside, &zipped);
+    CHECK(zipped.succeeded && zipped.outputs.count == 1, "长路径的文件夹压缩失败");
+    if (zipped.succeeded && zipped.outputs.count == 1)
+    {
+        StrList zips = {0};
+        strlist_add(&zips, zipped.outputs.items[0]);
+        QuickActionResult unzipped = {0};
+        archive_run(&zips, NULL, &unzipped);
+        int unzipped_children = 0;
+        bool unzipped_has_size = false;
+        long long unzipped_size = 0;
+        CHECK(unzipped.succeeded && unzipped.outputs.count == 1 &&
+              folder_measure(unzipped.outputs.items[0], &unzipped_children, &unzipped_has_size, &unzipped_size, NULL) && unzipped_has_size &&
+              unzipped_size == 9, "长路径的文件解压不出来");
+        quick_action_result_free(&unzipped);
+        strlist_clear(&zips);
+    }
+    quick_action_result_free(&zipped);
+
+    // 图片转换：读和写都在长路径里。
+    wchar_t *picture = path_join(deep, L"photo.png");
+    wchar_t *picture_io = path_for_io(picture);
+    CHECK(write_noisy_png(picture_io, 64, 48), "无法在长路径里生成测试图片");
+    wchar_t *jpg = NULL;
+    CHECK(image_convert(picture, IMAGE_FORMAT_JPEG, NULL, &jpg) == IMAGE_DONE && jpg && path_exists(jpg), "长路径里的图片没有转成 JPG");
+    free(jpg);
+    free(picture_io);
+    free(picture);
+
+    // 移动整个文件夹，最后连同里面的长路径一起删掉。
+    wchar_t *moved_to = test_folder(L"long-paths-moved");
+    results = file_ops_move(&list, moved_to);
+    WStr moved = {0};
+    wstr_appendf(&moved, L"%ls%ls\\说明.txt", moved_to, chain.data);
+    CHECK(results.count == 1 && results.items[0].succeeded && !path_exists(top) && file_text_is(moved.data, "long text"), "长路径的文件夹移动失败");
+    file_op_results_free(&results);
+    wstr_free(&moved);
+    CHECK(directory_delete_tree(moved_to) && !path_exists(moved_to) && directory_delete_tree(outside) && !path_exists(outside),
+        "删不掉含长路径的文件夹");
+
+    strlist_clear(&list);
+    directory_delete_tree(base);
+    free(moved_to);
+    free(outside);
+    free(text);
+    free(top);
+    free(top_name);
+    free(deep);
+    free(base);
+    wstr_free(&chain);
+    if (SUCCEEDED(com)) CoUninitialize();
+}
+
 static void test_quick_actions(void)
 {
     language_set_mode(LANGUAGE_CHINESE);
@@ -614,8 +891,10 @@ static void test_quick_actions(void)
     CHECK(owned_text_is(moved_message, L"Moved 1 item to Docs"), "英文的移动提示不对");
     CHECK(owned_text_is(str_images_skipped_small(1), L", 1 already fits") && owned_text_is(str_images_skipped_small(2), L", 2 already fit"),
         "英文的单复数不对");
+    CHECK(owned_text_is(str_move_left_behind(1), L"; 1 item couldn't be fully removed from the old location"), "英文的残留提示不对");
     language_set_mode(LANGUAGE_CHINESE);
     CHECK(owned_text_is(str_opened_with(2, L"画图"), L"已用 画图 打开 2 项"), "用程序打开的提示不对");
+    CHECK(owned_text_is(str_move_left_behind(2), L"，2 项没能从原位置删干净"), "残留的提示不对");
 
     StrList arguments = {0};
     strlist_add(&arguments, L"C:\\a b\\x.png");

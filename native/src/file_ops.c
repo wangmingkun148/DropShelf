@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 自己用的两个错误：用 Windows 留给程序自定义的范围（第 29 位）。
+// 自己用的几个错误码：用 Windows 留给程序自定义的范围（第 29 位），彼此不能重复。
 #define ERROR_INTO_ITSELF 0x20000001u
 #define ERROR_CONTAINS_LINKS 0x20000002u
+/// move_one 的结果：已经完整复制到新位置，原来的却没能全部删掉；算成功，只标出原位置有残留。
+#define SOURCE_LEFT_BEHIND 0x20000003u
 
 static bool is_separator(wchar_t character)
 {
@@ -133,14 +135,16 @@ static wchar_t *resolve_links(const wchar_t *path)
     WStr tail = {0};
     for (;;)
     {
-        HANDLE handle = CreateFileW(existing, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+        HANDLE handle = io_create_file(existing, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (handle != INVALID_HANDLE_VALUE)
         {
-            wchar_t final_path[1024];
-            DWORD length = GetFinalPathNameByHandleW(handle, final_path, 1024, VOLUME_NAME_DOS);
+            // 长路径也能解析：先问要多长再取。
+            DWORD needed = GetFinalPathNameByHandleW(handle, NULL, 0, VOLUME_NAME_DOS);
+            wchar_t *final_path = needed ? xalloc((size_t)needed * sizeof(wchar_t)) : NULL;
+            DWORD length = final_path ? GetFinalPathNameByHandleW(handle, final_path, needed, VOLUME_NAME_DOS) : 0;
             CloseHandle(handle);
-            if (length > 0 && length < 1024)
+            if (length > 0 && length < needed)
             {
                 const wchar_t *start = final_path;
                 WStr resolved = {0};
@@ -152,6 +156,7 @@ static wchar_t *resolve_links(const wchar_t *path)
                 else if (wcsncmp(start, L"\\\\?\\", 4) == 0) start += 4;
                 wstr_append(&resolved, start);
                 if (tail.length > 0) wstr_append(&resolved, tail.data);
+                free(final_path);
                 free(existing);
                 wstr_free(&tail);
                 wchar_t *result = wstr_take(&resolved);
@@ -159,6 +164,7 @@ static wchar_t *resolve_links(const wchar_t *path)
                 free(result);
                 return trimmed;
             }
+            free(final_path);
             break;
         }
         wchar_t *parent = path_directory(existing);
@@ -185,7 +191,7 @@ long long disk_available(const wchar_t *directory)
 {
     ULARGE_INTEGER available;
     wchar_t *full = path_full(directory);
-    bool ok = GetDiskFreeSpaceExW(full, &available, NULL, NULL);
+    bool ok = io_disk_free_space(full, &available, NULL, NULL);
     free(full);
     return ok ? (long long)available.QuadPart : -1;
 }
@@ -232,10 +238,11 @@ static StringId message_for(DWORD error)
 /// 由系统复制，连同下载来源标记（Zone.Identifier 等备用数据流）、文件属性和修改时间一起保留。
 static DWORD copy_file(const wchar_t *source, const wchar_t *target)
 {
-    return CopyFileExW(source, target, NULL, NULL, NULL, COPY_FILE_FAIL_IF_EXISTS) ? ERROR_SUCCESS : GetLastError();
+    return io_copy_file_ex(source, target, NULL, NULL, NULL, COPY_FILE_FAIL_IF_EXISTS) ? ERROR_SUCCESS : GetLastError();
 }
 
 /// 联接点和目录符号链接无法原样复制，跳过又会让移动后删掉源文件夹时丢失它们；扫描时一并检查，发现就在复制之前报错。
+/// OneDrive 等按需下载的文件夹也带重解析点属性，但是真正的文件夹，照常复制（见 find_data_is_link）。
 static DWORD copy_directory(const wchar_t *source, const wchar_t *destination)
 {
     StrList directories = {0}, files = {0}, pending = {0};
@@ -246,7 +253,7 @@ static DWORD copy_directory(const wchar_t *source, const wchar_t *destination)
         wchar_t *current = pending.items[--pending.count];
         wchar_t *pattern = path_join(current, L"*");
         WIN32_FIND_DATAW data;
-        HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        HANDLE find = io_find_first(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
         free(pattern);
         if (find == INVALID_HANDLE_VALUE)
         {
@@ -260,7 +267,7 @@ static DWORD copy_directory(const wchar_t *source, const wchar_t *destination)
             if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
             wchar_t *full = path_join(current, data.cFileName);
             if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) strlist_add_owned(&files, full);
-            else if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            else if (find_data_is_link(&data))
             {
                 free(full);
                 error = ERROR_CONTAINS_LINKS;
@@ -306,14 +313,18 @@ static DWORD copy_one(const wchar_t *source, const wchar_t *target)
 static DWORD move_one(const wchar_t *source, const wchar_t *target)
 {
     bool folder = path_is_directory(source);
-    if (MoveFileExW(source, target, folder ? 0 : MOVEFILE_COPY_ALLOWED)) return ERROR_SUCCESS;
+    if (io_move_file(source, target, folder ? 0 : MOVEFILE_COPY_ALLOWED)) return ERROR_SUCCESS;
     DWORD error = GetLastError();
     // 没有权限时复制也不会成功；其余情况（跨磁盘、被占用）先复制再删除原来的。
     if (error == ERROR_ACCESS_DENIED) return error;
     error = copy_one(source, target);
     if (error != ERROR_SUCCESS) return error;
-    if (folder) return directory_delete_tree(source) ? ERROR_SUCCESS : ERROR_SHARING_VIOLATION;
-    return DeleteFileW(source) ? ERROR_SUCCESS : GetLastError();
+    // 新位置已经是完整的一份。原来的删不干净（里面有文件被别的程序占着）时也算移动成功，只提示原位置有残留：
+    // 报失败的话两边各有一份，用户分不清哪份是全的，置物架也还指着删了一半的原位置。
+    bool removed = folder ? directory_delete_tree(source) : io_delete_file(source) != 0;
+    if (removed) return ERROR_SUCCESS;
+    log_win32_error(L"移动后没能删干净原来的文件", GetLastError());
+    return SOURCE_LEFT_BEHIND;
 }
 
 typedef DWORD (*Operation)(const wchar_t *source, const wchar_t *target);
@@ -361,9 +372,12 @@ static FileOpResults run_each(const StrList *sources, const wchar_t *destination
             free(trimmed);
             error = result->destination ? operation(source, result->destination) : ERROR_FILE_EXISTS;
         }
+        result->source_left = error == SOURCE_LEFT_BEHIND;
+        if (result->source_left) error = ERROR_SUCCESS;
         result->succeeded = error == ERROR_SUCCESS;
         result->error = result->succeeded ? STR_OperationIncomplete : message_for(error);
-        if (result->succeeded) log_info(L"%ls完成：%ls -> %ls", verb, source, result->destination);
+        if (result->source_left) log_error(L"%ls完成，但原位置没能删干净：%ls -> %ls", verb, source, result->destination);
+        else if (result->succeeded) log_info(L"%ls完成：%ls -> %ls", verb, source, result->destination);
         else log_error(L"%ls失败：%ls\r\n错误 %lu", verb, source, (unsigned long)error);
     }
     return results;

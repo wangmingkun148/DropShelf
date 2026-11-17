@@ -155,6 +155,8 @@ wchar_t *text_summarize(const wchar_t *text, int maximum)
         if ((int)builder.length > maximum)
         {
             builder.length = (size_t)maximum;
+            // 表情等字符占两个 UTF-16 单元，别把它们截成半个（留下的半个会显示成方框，写进文件名也不合法）。
+            if (builder.length > 0 && IS_HIGH_SURROGATE(builder.data[builder.length - 1])) builder.length--;
             builder.data[builder.length] = 0;
             wstr_append(&builder, L"…");
             break;
@@ -386,7 +388,7 @@ const wchar_t *shelf_item_glyph(const ShelfItem *item)
 bool shelf_item_exists_on_disk(ShelfItemKind kind, const wchar_t *value)
 {
     if (kind != ITEM_FILE && kind != ITEM_FOLDER) return true;
-    DWORD attributes = GetFileAttributesW(value);
+    DWORD attributes = io_get_attributes(value);
     if (attributes == INVALID_FILE_ATTRIBUTES) return false;
     return kind == ITEM_FOLDER ? (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 : (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
@@ -408,7 +410,7 @@ bool shelf_item_refresh_availability(ShelfItem *item)
 bool file_size_of(const wchar_t *path, long long *size)
 {
     WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &data) || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (!io_get_attributes_ex(path, GetFileExInfoStandard, &data) || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
     *size = ((long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
     return true;
 }
@@ -418,7 +420,7 @@ bool file_facts_read(const wchar_t *path, FileFacts *facts)
     *facts = (FileFacts){0};
     if (wcs_is_blank(path)) return false;
     WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &data)) return false;
+    if (!io_get_attributes_ex(path, GetFileExInfoStandard, &data)) return false;
     facts->is_folder = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     if (!facts->is_folder)
     {
@@ -489,12 +491,12 @@ typedef struct FolderWalk
     volatile LONG *cancelled;
 } FolderWalk;
 
-/// 递归累加文件大小。联接点和符号链接不进去也不计入，没有权限的子文件夹跳过。
+/// 递归累加文件大小。联接点和符号链接不进去也不计入（OneDrive 等按需下载的文件和文件夹照常计入），没有权限的子文件夹跳过。
 static bool walk_folder(const wchar_t *path, FolderWalk *walk)
 {
     wchar_t *pattern = path_join(path, L"*");
     WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     free(pattern);
     if (search == INVALID_HANDLE_VALUE) return true;
     bool ok = true;
@@ -505,7 +507,7 @@ static bool walk_folder(const wchar_t *path, FolderWalk *walk)
             ok = false;
             break;
         }
-        if (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        if (find_data_is_link(&found)) continue;
         if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
         {
             if (wcscmp(found.cFileName, L".") == 0 || wcscmp(found.cFileName, L"..") == 0) continue;
@@ -526,6 +528,8 @@ static bool walk_folder(const wchar_t *path, FolderWalk *walk)
     return ok;
 }
 
+/// 第一层只列一遍：一边数有几项，一边累加大小（原来先列一遍数个数，再从头列一遍算大小）。
+/// 大小超出预算以后不再往子文件夹里走，但第一层照样数完。
 bool folder_measure(const wchar_t *path, int *children, bool *has_size, long long *size, volatile LONG *cancelled)
 {
     *children = 0;
@@ -533,7 +537,7 @@ bool folder_measure(const wchar_t *path, int *children, bool *has_size, long lon
     *size = 0;
     wchar_t *pattern = path_join(path, L"*");
     WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileExW(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+    HANDLE search = io_find_first(pattern, FindExInfoBasic, &found, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     free(pattern);
     if (search == INVALID_HANDLE_VALUE)
     {
@@ -543,20 +547,32 @@ bool folder_measure(const wchar_t *path, int *children, bool *has_size, long lon
         *has_size = true;
         return true;
     }
+    FolderWalk walk = { GetTickCount64(), 0, 0, false, cancelled };
+    bool ok = true;
     do
     {
         if (cancelled && *cancelled)
         {
-            FindClose(search);
-            return false;
+            ok = false;
+            break;
         }
         if (wcscmp(found.cFileName, L".") == 0 || wcscmp(found.cFileName, L"..") == 0) continue;
         (*children)++;
+        // 链接算一项，但不进去也不计大小。
+        if (walk.exceeded || find_data_is_link(&found)) continue;
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            wchar_t *child = path_join(path, found.cFileName);
+            ok = walk_folder(child, &walk);
+            free(child);
+            if (!ok) break;
+            continue;
+        }
+        walk.size += ((long long)found.nFileSizeHigh << 32) | found.nFileSizeLow;
+        if (++walk.files > FOLDER_MAXIMUM_FILES || GetTickCount64() - walk.started > FOLDER_SIZE_BUDGET_MS) walk.exceeded = true;
     } while (FindNextFileW(search, &found));
     FindClose(search);
-
-    FolderWalk walk = { GetTickCount64(), 0, 0, false, cancelled };
-    if (!walk_folder(path, &walk)) return false;
+    if (!ok) return false;
     *has_size = !walk.exceeded;
     *size = walk.exceeded ? 0 : walk.size;
     return true;

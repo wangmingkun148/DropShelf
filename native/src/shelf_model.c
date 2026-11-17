@@ -250,9 +250,8 @@ static void measure_folder(ShelfModel *model, ShelfItem *item)
 
 // ───────────── 放入 ─────────────
 
-static bool has_value(const ShelfModel *model, const ShelfItem *candidate_kind_owner, const wchar_t *value, bool file_system)
+static bool has_value(const ShelfModel *model, const wchar_t *value, bool file_system)
 {
-    (void)candidate_kind_owner;
     for (int index = 0; index < model->count; index++)
     {
         const ShelfItem *item = model->items[index];
@@ -262,6 +261,44 @@ static bool has_value(const ShelfModel *model, const ShelfItem *candidate_kind_o
     return false;
 }
 
+/// 一次放入的项目达到这么多时，查重改用排好序的集合。
+#define SORTED_FROM_COUNT 16
+
+/// 放入一批项目期间用来查重：置物架上已经有没有同样的路径（不分大小写）或同样的文本、链接。
+/// 一两项时逐个比较就够了；一次放入几千个文件时逐个比较要比几百万次路径，界面会卡住，
+/// 所以数量多时先把已有的排好序，之后每项只比十几次。期间放入的用 value_index_add 记进去，
+/// 项目的 value 在这期间不能变。
+typedef struct ValueIndex
+{
+    const ShelfModel *model;
+    bool sorted;
+    TextSet paths, texts;
+} ValueIndex;
+
+static void value_index_add(ValueIndex *index, const ShelfItem *item)
+{
+    if (index->sorted) text_set_add(shelf_item_is_file_system(item) ? &index->paths : &index->texts, item->value);
+}
+
+static void value_index_begin(ValueIndex *index, const ShelfModel *model, int incoming)
+{
+    *index = (ValueIndex){ .model = model, .sorted = incoming >= SORTED_FROM_COUNT };
+    index->paths.ignore_case = true;
+    for (int at = 0; index->sorted && at < model->count; at++) value_index_add(index, model->items[at]);
+}
+
+static bool value_index_has(const ValueIndex *index, const wchar_t *value, bool file_system)
+{
+    if (!index->sorted) return has_value(index->model, value, file_system);
+    return text_set_contains(file_system ? &index->paths : &index->texts, value);
+}
+
+static void value_index_end(ValueIndex *index)
+{
+    text_set_clear(&index->paths);
+    text_set_clear(&index->texts);
+}
+
 ShelfAddSummary shelf_model_add(ShelfModel *model, DropReadResult *result)
 {
     ShelfAddSummary summary = { 0, 0, 0 };
@@ -269,22 +306,26 @@ ShelfAddSummary shelf_model_add(ShelfModel *model, DropReadResult *result)
     strlist_clear(&result->caches);
     if (model->released) return summary;
 
+    ValueIndex existing;
+    value_index_begin(&existing, model, result->count);
     for (int index = 0; index < result->count; index++)
     {
         DroppedEntry *entry = &result->entries[index];
         if (wcs_is_blank(entry->value)) continue;
         if (entry->kind == ITEM_TEXT || entry->kind == ITEM_LINK)
         {
-            if (has_value(model, NULL, entry->value, false))
+            if (value_index_has(&existing, entry->value, false))
             {
                 summary.duplicates++;
                 continue;
             }
-            insert_item(model, -1, shelf_item_new(entry->kind, entry->value, entry->title, false));
+            ShelfItem *text = shelf_item_new(entry->kind, entry->value, entry->title, false);
+            insert_item(model, -1, text);
+            value_index_add(&existing, text);
             summary.added++;
             continue;
         }
-        if (has_value(model, NULL, entry->value, true))
+        if (value_index_has(&existing, entry->value, true))
         {
             summary.duplicates++;
             continue;
@@ -307,9 +348,11 @@ ShelfAddSummary shelf_model_add(ShelfModel *model, DropReadResult *result)
             item->type_name = entry->type_name ? wcs_dup(entry->type_name) : file_type_name(entry->value);
         }
         insert_item(model, -1, item);
+        value_index_add(&existing, item);
         if (facts.is_folder) measure_folder(model, item);
         summary.added++;
     }
+    value_index_end(&existing);
     if (summary.added > 0)
     {
         model->has_interacted = true;
@@ -378,16 +421,20 @@ int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, She
     if (from && from->delay_cache_cleanup) model->delay_cache_cleanup = true;
 
     int added = 0;
+    ValueIndex existing;
+    value_index_begin(&existing, model, count);
     for (int index = 0; index < count; index++)
     {
         ShelfItem *item = items[index];
-        if (has_value(model, NULL, item->value, shelf_item_is_file_system(item))) continue;
+        if (value_index_has(&existing, item->value, shelf_item_is_file_system(item))) continue;
         ShelfItem *copy = shelf_item_copy(item);
         insert_item(model, -1, copy);
+        value_index_add(&existing, copy);
         // 对方关闭时会取消还没做完的统计，这边接着做。
         if (copy->kind == ITEM_FOLDER && copy->child_count < 0) measure_folder(model, copy);
         added++;
     }
+    value_index_end(&existing);
     if (added > 0)
     {
         model->has_interacted = true;
@@ -398,25 +445,21 @@ int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, She
 
 // ───────────── 移除和撤销 ─────────────
 
-static bool listed(ShelfItem *const *items, int count, const ShelfItem *item)
-{
-    for (int index = 0; index < count; index++)
-        if (items[index] == item) return true;
-    return false;
-}
-
 ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int count)
 {
     ShelfRemoval *removal = NULL;
     int kept = 0;
+    // 要移除的先做上记号，置物架从头到尾只走一遍；不用每一项都去 items 里找（全选几千项再移除时是几百万次）。
+    for (int index = 0; index < count; index++) items[index]->marked = true;
     for (int index = 0; index < model->count; index++)
     {
         ShelfItem *item = model->items[index];
-        if (!listed(items, count, item))
+        if (!item->marked)
         {
             model->items[kept++] = item;
             continue;
         }
+        item->marked = false;
         if (!removal)
         {
             removal = xcalloc(1, sizeof(ShelfRemoval));
@@ -428,6 +471,8 @@ ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int
         removal->items[removal->count] = item;
         removal->indices[removal->count++] = index;
     }
+    // 不在置物架上的也把记号清掉。
+    for (int index = 0; index < count; index++) items[index]->marked = false;
     if (!removal) return NULL;
     model->count = kept;
     items_changed(model);
@@ -449,15 +494,19 @@ int shelf_model_restore(ShelfModel *model, const ShelfRemoval *removal, ShelfIte
     if (model->released || !removal) return 0;
     int count = 0;
     ShelfItem **back = xalloc((size_t)(removal->count ? removal->count : 1) * sizeof(ShelfItem *));
+    ValueIndex existing;
+    value_index_begin(&existing, model, removal->count);
     for (int index = 0; index < removal->count; index++)
     {
         ShelfItem *item = removal->items[index];
-        bool file_system = shelf_item_is_file_system(item);
-        if (has_value(model, NULL, item->value, file_system) || shelf_model_contains(model, item)) continue;
+        // 项目本身还在置物架上时，它的内容当然也在，不用另外按项目再找一遍。
+        if (value_index_has(&existing, item->value, shelf_item_is_file_system(item))) continue;
         int at = removal->indices[index] < model->count ? removal->indices[index] : model->count;
         insert_item(model, at, shelf_item_retain(item));
+        value_index_add(&existing, item);
         back[count++] = item;
     }
+    value_index_end(&existing);
     if (count > 0)
     {
         model->has_interacted = true;
@@ -503,6 +552,8 @@ wchar_t *shelf_item_file_name(const ShelfItem *item)
         if (builder.length == MAXIMUM_STEM_LENGTH) break;
     }
     free(source);
+    // 截在了一个占两个 UTF-16 单元的字符中间时去掉留下的半个：文件名里不能有落单的代理项。
+    if (builder.length > 0 && IS_HIGH_SURROGATE(builder.data[builder.length - 1])) builder.data[--builder.length] = 0;
     // 去掉首尾的空格和点。
     wchar_t *stem = builder.data;
     while (*stem == L' ' || *stem == L'.') stem++;
@@ -512,12 +563,7 @@ wchar_t *shelf_item_file_name(const ShelfItem *item)
     if (length == 0) wstr_append(&name, S(shortcut ? STR_LinkFileName : STR_TextFileName));
     else
     {
-        static const wchar_t *const reserved[] = {
-            L"CON", L"PRN", L"AUX", L"NUL", L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7", L"COM8", L"COM9",
-            L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"
-        };
-        for (size_t index = 0; index < sizeof(reserved) / sizeof(reserved[0]); index++)
-            if (wcs_equal_ignore_case(stem, reserved[index])) wstr_append_char(&name, L'_');
+        if (file_name_is_reserved(stem)) wstr_append_char(&name, L'_');
         wstr_append(&name, stem);
     }
     wstr_append(&name, shortcut ? L".url" : L".txt");
@@ -582,14 +628,14 @@ static wchar_t *write_item_file(const ShelfItem *item, const wchar_t *directory)
         length = text_length + 3;
         free(text);
     }
-    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = io_create_file(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     DWORD written = 0;
     bool ok = file != INVALID_HANDLE_VALUE && WriteFile(file, bytes, (DWORD)length, &written, NULL) && written == length;
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     free(bytes);
     if (ok) return path;
     log_win32_error(L"把文本或链接写成文件失败", GetLastError());
-    DeleteFileW(path);
+    io_delete_file(path);
     free(path);
     return NULL;
 }
@@ -689,8 +735,11 @@ static void remove_shown(ShelfModel *model, ShelfItem *const *items, int count)
 {
     ShelfItem **removing = xalloc((size_t)(count ? count : 1) * sizeof(ShelfItem *));
     int removing_count = 0;
+    // 置物架上的先做上记号，再按传入的顺序挑出还在的。
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = true;
     for (int index = 0; index < count; index++)
-        if (shelf_model_contains(model, items[index])) removing[removing_count++] = items[index];
+        if (items[index]->marked) removing[removing_count++] = items[index];
+    for (int index = 0; index < model->count; index++) model->items[index]->marked = false;
     if (removing_count > 0)
     {
         if (model->events.remove_visibly && !model->released) model->events.remove_visibly(model->events.context, removing, removing_count);

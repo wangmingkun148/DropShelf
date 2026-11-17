@@ -49,6 +49,7 @@ typedef struct ShelfItem
     bool thumbnail_wanted;      // 正在取或已经取到缩略图
     unsigned thumbnail_request; // 每次请求加一，回来的结果对不上就丢掉
     bool measuring;             // 正在统计文件夹
+    bool marked;                // 成批处理时临时做的记号（省掉逐个查找），用完就清掉，平时都是 false
     ShelfItemMotion motion;
     Anim dim;                   // 拖出期间被拖的牌或行变淡（1 是原样）
 } ShelfItem;

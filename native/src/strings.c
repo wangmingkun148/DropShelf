@@ -175,6 +175,10 @@ wchar_t *str_moved_to(int count, const wchar_t *folder)
 
 wchar_t *str_copied_partially(int copied, int failed) { return counted_pair(L"已复制 {0} 项，{1} 项未能复制", L"Copied {0}; {1} couldn't be copied", copied, failed); }
 wchar_t *str_moved_partially(int moved, int failed) { return counted_pair(L"已移动 {0} 项，{1} 项未能移动", L"Moved {0}; {1} couldn't be moved", moved, failed); }
+wchar_t *str_move_left_behind(int count)
+{
+    return counted(L"，{0} 项没能从原位置删干净", L"; {0} couldn't be fully removed from the old location", count, L"item", L"items");
+}
 
 wchar_t *str_images_converted(int count, const wchar_t *format)
 {
