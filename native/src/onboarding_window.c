@@ -1,4 +1,5 @@
-// 第一次运行时的引导：四步，每步上面是一段循环播放的演示，下面是说明。和 C# 版 OnboardingWindow 对应，演示的关键帧相同。
+// 第一次运行时的引导：五步，每步上面是一段循环播放的演示，下面是说明。和 C# 版 OnboardingWindow 对应，前四步演示的关键帧相同。
+// 最后一步问要不要观察文件夹；升级来的老用户只看这一步（onboarding_window_show_watch）。
 #include "onboarding_window.h"
 #include "app.h"
 #include "main_window.h"
@@ -14,7 +15,8 @@
 #define WINDOW_WIDTH 600.0f
 #define WINDOW_HEIGHT 560.0f
 #define CAPTION_HEIGHT 40.0f
-#define STEP_COUNT 4
+#define STEP_COUNT 5
+#define WATCH_STEP (STEP_COUNT - 1)
 #define ART_WIDTH 552.0f
 #define ART_HEIGHT 262.0f
 #define LOOP_SECONDS 3.8
@@ -23,11 +25,13 @@
 static UiWindow *window;
 static int step;
 static bool step_shown;
+static bool watch_only;             // 只问观察文件夹的那一步
 static double story_start[STEP_COUNT];
 static Anim art_opacity[STEP_COUNT];
 static Anim text_opacity, text_shift;
 static Anim dot_width[STEP_COUNT], dot_opacity[STEP_COUNT];
 static UiElement *title_label, *body_label, *skip_button, *back_button, *next_button, *close_button, *text_stack, *nav;
+static UiElement *no_thanks_button, *add_folder_button;
 
 bool onboarding_window_is_open(void)
 {
@@ -51,7 +55,17 @@ const wchar_t *onboarding_window_body_text(void)
 
 const wchar_t *onboarding_window_next_text(void)
 {
-    return window ? ui_button_text(next_button) : NULL;
+    return window && !next_button->hidden ? ui_button_text(next_button) : NULL;
+}
+
+const wchar_t *onboarding_window_add_folder_text(void)
+{
+    return window && !add_folder_button->hidden ? ui_button_text(add_folder_button) : NULL;
+}
+
+bool onboarding_window_is_watch_only(void)
+{
+    return window && watch_only;
 }
 
 // ───────────── 关键帧 ─────────────
@@ -376,8 +390,87 @@ static void paint_step4(float x, float y, double time)
     }
 }
 
-/// 关闭了动画效果时各步演示停在这一刻：画面里该有的都在。
-static const double still_frames[STEP_COUNT] = { 0, 2, 1.3, 1.1 };
+/// 第 5 步：新文件落进下载文件夹 → 右边缘探出置物架的一角 → 光标移过去，角再伸出一点 → 点一下，置物架带着文件伸出来。
+static void paint_step5(float x, float y, double time)
+{
+    KeyFrame drop_y[] = { DISCRETE(0, -70), EASED(0.55, 0, EASE_OF(EASE_CUBIC_IN)) };
+    static const KeyFrame drop_opacity[] = { DISCRETE(0, 0), LINEAR(0.15, 1), LINEAR(0.45, 1), LINEAR(0.6, 0) };
+    static const KeyFrame folder_scale[] = { DISCRETE(0, 1), LINEAR(0.55, 1), LINEAR(0.7, 1.12), LINEAR(0.95, 1) };
+    KeyFrame peek[] = { DISCRETE(0, 0), LINEAR(0.85, 0), EASED(1.25, 1, EASE_BACK_OF(0.35)), LINEAR(2.0, 1), DISCRETE(2.05, 0) };
+    KeyFrame hover[] = { DISCRETE(0, 0), LINEAR(1.6, 0), EASED(1.78, 1, EASE_OF(EASE_CUBIC_OUT)) };
+    KeyFrame cursor_x[] = { DISCRETE(0, 300), LINEAR(1.15, 300), EASED(1.7, 528, cubic_in_out()) };
+    KeyFrame cursor_y[] = { DISCRETE(0, 196), LINEAR(1.15, 196), EASED(1.7, 132, cubic_in_out()) };
+    static const KeyFrame cursor_opacity[] = { DISCRETE(0, 0), LINEAR(1.0, 0), LINEAR(1.15, 1), LINEAR(2.2, 1), LINEAR(2.4, 0) };
+    static const KeyFrame press[] = { DISCRETE(0, 0), LINEAR(1.9, 0), LINEAR(1.96, 1), LINEAR(2.05, 0) };
+    KeyFrame shelf_x[] = { DISCRETE(0, 220), LINEAR(2.05, 220), EASED(2.5, 0, EASE_OF(EASE_QUINTIC_OUT)) };
+    static const KeyFrame shelf_opacity[] = { DISCRETE(0, 0), DISCRETE(2.05, 1), LINEAR(3.35, 1), LINEAR(3.65, 0) };
+    float right = x + ART_WIDTH;
+    Color accent = theme_color(THEME_ACCENT_TEXT), primary = theme_color(THEME_TEXT_PRIMARY);
+
+    // 下载文件夹：文件落进去时跳一下。
+    float zoom = (float)FRAMES(folder_scale, time);
+    GfxTextStyle name_style = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_START };
+    GfxTextStyle folder_style = { GFX_FONT_ICON, 64, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_START };
+    GfxSize folder_size = gfx_text_measure(L"\xE8B7", &folder_style, 0);
+    GfxSize name_size = gfx_text_measure(S(STR_OnboardingSampleDownloads), &name_style, 0);
+    float width = folder_size.width > name_size.width ? folder_size.width : name_size.width;
+    float left = x + 96, top = y + 96, height = folder_size.height + 4 + name_size.height;
+    double drop = FRAMES(drop_opacity, time);
+    if (drop > 0.001)
+    {
+        gfx_push_opacity((float)drop);
+        mini_card(left + width / 2, top + 14 + (float)FRAMES(drop_y, time), 44, L"\xE8A5", 20, 0);
+        gfx_pop_layer();
+    }
+    gfx_push_transform(gfx_matrix_scale(zoom, zoom, left + width / 2, top + height / 2));
+    gfx_text_draw(L"\xE8B7", (GfxRect){ left, top, left + width, top + folder_size.height }, &folder_style, COLOR_RGB(0xE8, 0xA9, 0x3B));
+    glyph(L"\xE896", (GfxRect){ left, top + 18, left + width, top + folder_size.height - 2 }, 20, COLOR_RGB(0x7A, 0x4E, 0x00));
+    gfx_text_draw(S(STR_OnboardingSampleDownloads), (GfxRect){ left, top + folder_size.height + 4, left + width, top + height }, &name_style,
+        theme_color(THEME_TEXT_SECONDARY));
+    gfx_pop_transform();
+
+    // 探出的角：贴边的一侧伸到画面外面，像是从屏幕边缘后面探出来。
+    double out = FRAMES(peek, time);
+    if (out > 0.001)
+    {
+        float visible = (float)(out * 40 + FRAMES(hover, time) * 8);
+        GfxRect tab = { right - visible, y + 100, right + 14, y + 100 + 64 };
+        gfx_shadow(tab, 10, 12, 0, 2, COLOR_ARGB(60, 0, 0, 0));
+        Color fill = color_over(with_opacity(theme_color(THEME_SUBTLE_PRESSED), FRAMES(press, time)), theme_color(THEME_SHELF_SOLID));
+        gfx_fill_rounded(tab, 10, fill);
+        gfx_stroke_rounded(tab, 10, theme_color(THEME_CARD_BORDER), 1);
+        float inner = tab.left;
+        glyph(L"\xE8A5", (GfxRect){ inner + 4, tab.top + 22, inner + 36, tab.bottom - 4 }, 18, accent);
+        float badge_x = inner + 14, badge_y = tab.top + 12;
+        gfx_fill_ellipse(badge_x, badge_y, 8, 8, theme_color(THEME_ACCENT));
+        text(L"1", (GfxRect){ badge_x - 8, badge_y - 8, badge_x + 8, badge_y + 7 }, 10, 600, theme_color(THEME_TEXT_ON_ACCENT), GFX_ALIGN_CENTER);
+    }
+
+    // 点开后伸出来的置物架，里面就是刚才的文件。
+    double shelf_shown = FRAMES(shelf_opacity, time);
+    if (shelf_shown > 0.001)
+    {
+        gfx_push_opacity((float)shelf_shown);
+        float shelf_left = right - 24 - 180 + (float)FRAMES(shelf_x, time);
+        GfxRect shelf = { shelf_left, y + 32, shelf_left + 180, y + 32 + 196 };
+        mini_shelf(shelf);
+        float middle_x = (shelf.left + shelf.right) / 2, middle_y = shelf.top + 92;
+        mini_card(middle_x, middle_y, 58, L"\xE8A5", 26, 0);
+        text(S(STR_OnboardingSampleFile), (GfxRect){ shelf.left, middle_y + 42, shelf.right, middle_y + 58 }, 11, 600, primary, GFX_ALIGN_CENTER);
+        gfx_pop_layer();
+    }
+
+    double pointer = FRAMES(cursor_opacity, time);
+    if (pointer > 0.001)
+    {
+        gfx_push_opacity((float)pointer);
+        cursor(x + (float)FRAMES(cursor_x, time), y + (float)FRAMES(cursor_y, time));
+        gfx_pop_layer();
+    }
+}
+
+/// 关闭了动画效果时各步演示停在这一刻：画面里该有的都在。第 5 步停在光标移到探出的角上。
+static const double still_frames[STEP_COUNT] = { 0, 2, 1.3, 1.1, 1.8 };
 
 static double story_time(int index, double time)
 {
@@ -406,6 +499,10 @@ static void update_step_text(void)
             ui_label_set_text(title_label, UI_STR(STR_OnboardingStackTitle));
             ui_label_set_text(body_label, UI_STR(STR_OnboardingStackBody));
             break;
+        case WATCH_STEP:
+            ui_label_set_text(title_label, UI_STR(STR_OnboardingWatchTitle));
+            ui_label_set_text(body_label, UI_STR(STR_OnboardingWatchBody));
+            break;
         default:
         {
             ui_label_set_text(title_label, UI_STR(STR_OnboardingActionsTitle));
@@ -417,14 +514,14 @@ static void update_step_text(void)
             break;
         }
     }
-    ui_button_set_text(next_button, UI_STR(step == STEP_COUNT - 1 ? STR_GetStarted : STR_Next));
+    ui_button_set_text(next_button, UI_STR(STR_Next));
 }
 
 /// 换到第 next 步：旧的演示淡出、新的淡入，说明文字从前进的方向滑入，指示点变宽变色。第一次显示和关闭了动画效果时直接到位。
 static void show_step(int next)
 {
     int previous = step;
-    step = next < 0 ? 0 : next >= STEP_COUNT ? STEP_COUNT - 1 : next;
+    step = watch_only ? WATCH_STEP : next < 0 ? 0 : next >= STEP_COUNT ? STEP_COUNT - 1 : next;
     bool animate = step_shown && previous != step && anim_enabled();
     step_shown = true;
     double now = frames_time();
@@ -459,8 +556,13 @@ static void show_step(int next)
         anim_set(&text_shift, 14 * (step > previous ? 1 : -1));
         anim_start(&text_shift, 0, STEP_FADE, EASE_OF(EASE_CUBIC_OUT));
     }
-    back_button->hidden = step == 0;
-    skip_button->hidden = step == STEP_COUNT - 1;
+    // 最后一步不再是“下一步”，而是问要不要观察文件夹。
+    bool asking = step == WATCH_STEP;
+    back_button->hidden = step == 0 || watch_only;
+    skip_button->hidden = asking;
+    next_button->hidden = asking;
+    no_thanks_button->hidden = !asking;
+    add_folder_button->hidden = !asking;
     ui_window_invalidate(window);
     ui_window_request_frame(window);
 }
@@ -475,6 +577,19 @@ static void on_next(void *context)
     (void)context;
     if (step >= STEP_COUNT - 1) onboarding_window_close();
     else show_step(step + 1);
+}
+
+static void on_add_folder(void *context)
+{
+    (void)context;
+    // 选好了就关掉引导；取消时留在这一步。
+    if (app_choose_watch_folder(ui_window_handle(window))) onboarding_window_close();
+}
+
+static void on_no_thanks(void *context)
+{
+    (void)context;
+    onboarding_window_close();
 }
 
 static void on_back(void *context)
@@ -499,13 +614,14 @@ static bool on_key(UiWindow *target, void *context, unsigned key)
             if (step < STEP_COUNT - 1) show_step(step + 1);
             return true;
         case VK_LEFT:
-            if (step > 0) show_step(step - 1);
+            if (step > 0 && !watch_only) show_step(step - 1);
             return true;
         case VK_ESCAPE:
             onboarding_window_close();
             return true;
         case VK_RETURN:
-            on_next(NULL);
+            if (step == WATCH_STEP) on_add_folder(NULL);
+            else on_next(NULL);
             return true;
         default:
             return false;
@@ -533,7 +649,8 @@ static void root_paint(UiElement *element, double time)
 {
     GfxRect bounds = element->bounds;
     GfxTextStyle caption = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
-    gfx_text_draw(S(STR_OnboardingWelcomeTitle), (GfxRect){ 18, 0, bounds.right - 60, CAPTION_HEIGHT }, &caption, theme_color(THEME_TEXT_PRIMARY));
+    gfx_text_draw(watch_only ? L"DropShelf" : S(STR_OnboardingWelcomeTitle), (GfxRect){ 18, 0, bounds.right - 60, CAPTION_HEIGHT }, &caption,
+        theme_color(THEME_TEXT_PRIMARY));
     GfxRect art = { 24, CAPTION_HEIGHT, bounds.right - 24, CAPTION_HEIGHT + ART_HEIGHT };
     gfx_fill_rounded(art, 12, theme_color(THEME_LAYER));
     gfx_push_layer((GfxRect){ art.left + 1, art.top + 1, art.right - 1, art.bottom - 1 }, 11, 1);
@@ -550,16 +667,17 @@ static void root_paint(UiElement *element, double time)
             case 0: paint_step1(x, y, t); break;
             case 1: paint_step2(x, y, t); break;
             case 2: paint_step3(x, y, t); break;
-            default: paint_step4(x, y, t); break;
+            case 3: paint_step4(x, y, t); break;
+            default: paint_step5(x, y, t); break;
         }
         gfx_pop_layer();
     }
     gfx_pop_layer();
     gfx_stroke_rounded(art, 12, theme_color(THEME_CARD_BORDER), 1);
 
-    // 底部的指示点。
+    // 底部的指示点；只问观察文件夹时没有。
     float dot_x = 34, dot_y = nav->bounds.top + (nav->bounds.bottom - nav->bounds.top) / 2;
-    for (int index = 0; index < STEP_COUNT; index++)
+    for (int index = 0; index < STEP_COUNT && !watch_only; index++)
     {
         float width = (float)dot_width[index].value;
         Color color = theme_color(index == step ? THEME_ACCENT : THEME_CONTROL_STRONG_BORDER);
@@ -599,8 +717,12 @@ static void on_closed(UiWindow *closed, void *context)
     (void)context;
     power_hold(&window, false);
     window = NULL;
+    watch_only = false;
     title_label = body_label = skip_button = back_button = next_button = close_button = text_stack = nav = NULL;
+    no_thanks_button = add_folder_button = NULL;
     if (!app_settings()->has_completed_first_run) app_update_settings(change_first_run, NULL);
+    // 不管是选了、点了“不用了”还是跳过了引导，都算问过，以后不再单独问。
+    app_mark_folder_watch_asked();
 }
 
 static void on_close(void *context)
@@ -609,15 +731,16 @@ static void on_close(void *context)
     onboarding_window_close();
 }
 
-void onboarding_window_show(void)
+static void open_window(bool only_watch)
 {
     if (window)
     {
         ui_window_show(window);
         return;
     }
+    watch_only = only_watch;
     UiWindowOptions options = { 0 };
-    options.title = S(STR_OnboardingWelcomeTitle);
+    options.title = only_watch ? L"DropShelf" : S(STR_OnboardingWelcomeTitle);
     options.width = WINDOW_WIDTH;
     options.height = WINDOW_HEIGHT;
     options.backdrop = UI_BACKDROP_MICA;
@@ -652,17 +775,23 @@ void onboarding_window_show(void)
     back_button->minimum_width = 88;
     next_button = ui_button(UI_BUTTON_ACCENT, UI_STR(STR_Next), on_next, NULL);
     next_button->minimum_width = 104;
+    no_thanks_button = ui_button(UI_BUTTON_STANDARD, UI_STR(STR_NoThanks), on_no_thanks, NULL);
+    no_thanks_button->minimum_width = 88;
+    add_folder_button = ui_button(UI_BUTTON_ACCENT, UI_STR(STR_AddFolder), on_add_folder, NULL);
+    add_folder_button->minimum_width = 104;
     ui_add(nav, skip_button);
     ui_add(nav, back_button);
     ui_add(nav, next_button);
+    ui_add(nav, no_thanks_button);
+    ui_add(nav, add_folder_button);
     ui_add(root, nav);
     ui_window_set_root(window, root);
 
-    step = 0;
+    step = only_watch ? WATCH_STEP : 0;
     step_shown = false;
     anim_set(&text_opacity, 1);
     anim_set(&text_shift, 0);
-    show_step(0);
+    show_step(step);
 
     // 主窗口开着时放在它中间，否则放在屏幕中央。
     UiWindow *main = main_window_ui();
@@ -677,6 +806,16 @@ void onboarding_window_show(void)
     else ui_window_center(window);
     power_hold(&window, true);
     ui_window_show(window);
+}
+
+void onboarding_window_show(void)
+{
+    open_window(false);
+}
+
+void onboarding_window_show_watch(void)
+{
+    open_window(true);
 }
 
 void onboarding_window_close(void)

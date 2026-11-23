@@ -59,6 +59,7 @@ static void call_parameterized(void)
         TAKE(str_opened_with(count, L"x"));
         TAKE(str_opened_properties_for(count));
         TAKE(str_saved_to_downloads(count));
+        TAKE(str_watch_peek_tooltip(count));
         TAKE(str_history_entry_title(L"x", count));
         TAKE(str_restored(count, count));
         TAKE(str_merged_shelves(count));
@@ -97,7 +98,8 @@ static void call_parameterized(void)
     {
         TAKE(str_status_running_detail(trigger, NULL));
         TAKE(str_status_running_detail(trigger, L"x"));
-        for (int mode = TRANSFER_MOVE; mode <= TRANSFER_COPY; mode++) TAKE(str_shelf_summary(trigger, mode));
+        for (int mode = TRANSFER_MOVE; mode <= TRANSFER_COPY; mode++)
+            for (int watched = 0; watched <= 2; watched++) TAKE(str_shelf_summary(trigger, mode, watched));
     }
     for (int language = LANGUAGE_SYSTEM; language <= LANGUAGE_ENGLISH; language++)
     {

@@ -216,6 +216,10 @@ wchar_t *str_opened_with(int count, const wchar_t *name)
 
 wchar_t *str_opened_properties_for(int count) { return numbered(L"已打开 {0} 个项目的属性", L"Opened properties for {0} items", count); }
 wchar_t *str_saved_to_downloads(int count) { return counted(L"已保存 {0} 项到下载文件夹", L"Saved {0} to Downloads", count, L"item", L"items"); }
+wchar_t *str_watch_peek_tooltip(int count)
+{
+    return counted(L"{0} 个新文件 · 点击打开，右键收起", L"{0} · Click to open, right-click to dismiss", count, L"new file", L"new files");
+}
 
 // ───────────── 最近关闭的置物架、合并 ─────────────
 
@@ -309,13 +313,19 @@ wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_
     return wstr_take(&text);
 }
 
-wchar_t *str_shelf_summary(int trigger, int drag_out_mode)
+wchar_t *str_shelf_summary(int trigger, int drag_out_mode, int watched_folders)
 {
     WStr text = {0};
     join_part(&text, trigger == TRIGGER_SHAKE ? tr(L"晃动呼出", L"Shake to open")
                    : trigger == TRIGGER_EDGE ? tr(L"屏幕边缘呼出", L"Pause at edge to open")
                                              : tr(L"晃动或屏幕边缘呼出", L"Shake or pause at edge to open"));
     join_part(&text, drag_out_mode == TRANSFER_COPY ? tr(L"拖出时复制", L"Drag out to copy") : tr(L"拖出时移动", L"Drag out to move"));
+    if (watched_folders > 0)
+    {
+        wchar_t *watching = counted(L"观察 {0} 个文件夹", L"Watching {0}", watched_folders, L"folder", L"folders");
+        join_part(&text, watching);
+        free(watching);
+    }
     return wstr_take(&text);
 }
 

@@ -3,6 +3,7 @@
 #include "archive.h"
 #include "clipboard.h"
 #include "file_ops.h"
+#include "folder_watch.h"
 #include "image_tools.h"
 #include "log.h"
 #include "shelf_drag.h"
@@ -550,6 +551,13 @@ typedef struct Job
 static void job_finished(void *data)
 {
     Job *job = data;
+    // 写出的文件可能就在观察的文件夹里，告诉观察那边这些是自己写的，不要提示。
+    StrList written = {0};
+    strlist_clone(&written, &job->result.outputs);
+    for (int index = 0; index < job->result.move_destinations.count; index++) strlist_add(&written, job->result.move_destinations.items[index]);
+    for (int index = 0; index < job->result.replaced_outputs.count; index++) strlist_add(&written, job->result.replaced_outputs.items[index]);
+    folder_watch_release(&written);
+    strlist_clear(&written);
     job->done(&job->result, job->context);
     quick_action_result_free(&job->result);
     quick_action_free(&job->request.action);
@@ -610,7 +618,11 @@ static void copy_to_folder(const StrList *paths, const wchar_t *destination, Qui
 {
     FileOpResults results = file_ops_copy(paths, destination);
     int copied = 0;
-    for (int index = 0; index < results.count; index++) copied += results.items[index].succeeded;
+    for (int index = 0; index < results.count; index++)
+    {
+        copied += results.items[index].succeeded;
+        if (results.items[index].succeeded && results.items[index].destination) strlist_add(&result->outputs, results.items[index].destination);
+    }
     int failed = results.count - copied;
     wchar_t *folder = path_folder_name(destination);
     wchar_t *message = failed == 0 ? str_copied_to(copied, folder) : copied == 0 ? wcs_dup(S(STR_CopyFailed)) : str_copied_partially(copied, failed);
@@ -837,6 +849,7 @@ void quick_action_execute(QuickActionRequest *request, QuickActionDone done, voi
     Job *job = xcalloc(1, sizeof(Job));
     job->request = *request;
     *request = (QuickActionRequest){0};
+    folder_watch_hold();
     job->done = done;
     job->context = context;
 

@@ -8,10 +8,13 @@
 typedef struct ShelfWindow ShelfWindow;
 typedef struct ShelfHistoryEntry ShelfHistoryEntry;
 
-/// 在 center（屏幕像素）打开置物架。by_gesture：由拖动手势呼出，edge 不是 EDGE_NONE 时从那条屏幕边缘滑入。
+/// 在 center（屏幕像素）打开置物架。by_gesture：由拖动手势呼出。edge 不是 EDGE_NONE 时从那条屏幕边缘滑入。
 /// activate：成为当前窗口（快捷键、托盘菜单打开时）。返回打开的置物架；创建失败时返回 NULL。
 ShelfWindow *shelves_open_at(POINT center, bool by_gesture, bool activate, ScreenEdge edge);
 ShelfWindow *shelves_open_at_cursor(bool activate);
+
+/// 从屏幕边缘 edge 滑出一个放着 paths 的置物架（观察的文件夹里出现了新文件，点开探出的角时）。不抢当前程序的焦点。
+ShelfWindow *shelves_open_with_paths(POINT center, ScreenEdge edge, const StrList *paths);
 
 /// 在 anchor 窗口旁边打开（右边放不下就放左边）；anchor 为 NULL 时在光标处。
 ShelfWindow *shelves_open_next_to(HWND anchor, bool activate);

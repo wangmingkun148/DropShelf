@@ -6,6 +6,7 @@
 #include "attachment_cache.h"
 #include "file_identity.h"
 #include "file_ops.h"
+#include "folder_watch.h"
 #include "image_quality.h"
 #include "image_tools.h"
 #include "miniz.h"
@@ -14,6 +15,7 @@
 #include "drop_read.h"
 #include "shelf_drag.h"
 #include "shelf_history.h"
+#include "shelf_peek.h"
 #include "shelf_model.h"
 #include "shelf_window.h"
 #include "task.h"
@@ -255,6 +257,7 @@ static void test_settings_round_trip(void)
     CHECK(defaults.drag_out_mode == TRANSFER_MOVE, "默认拖出方式应为移动");
     CHECK(wcscmp(defaults.hotkey, L"Ctrl+Shift+Space") == 0, "默认快捷键不正确");
     CHECK(defaults.language == LANGUAGE_SYSTEM && isnan(defaults.window_left) && defaults.window_width == 860, "默认语言或窗口位置不正确");
+    CHECK(defaults.watched_folders.count == 0 && defaults.watch_peek_seconds == 10 && !defaults.has_asked_folder_watch, "默认不应观察文件夹");
 
     defaults.shake_sensitivity = 20;
     defaults.auto_open_trigger = TRIGGER_EDGE;
@@ -289,6 +292,10 @@ static void test_settings_round_trip(void)
     defaults.window_top = 160.5;
     strlist_add(&defaults.blocked_apps, L"Photoshop.exe");
     strlist_add(&defaults.blocked_apps, L"game.exe");
+    strlist_add(&defaults.watched_folders, L"C:\\Users\\me\\Downloads");
+    strlist_add(&defaults.watched_folders, L"D:\\收件");
+    defaults.watch_peek_seconds = 25;
+    defaults.has_asked_folder_watch = true;
     settings_save(&defaults);
 
     AppSettings loaded;
@@ -305,6 +312,8 @@ static void test_settings_round_trip(void)
     CHECK(!loaded.close_when_empty && !loaded.show_getting_started && loaded.performance_mode == PERFORMANCE_NORMAL, "开关未恢复");
     CHECK(wcs_equal(loaded.accent_color, L"#8764B8") && wcscmp(loaded.hotkey, L"Ctrl+Alt+D") == 0 && loaded.has_completed_first_run, "强调色、快捷键或首次运行状态未恢复");
     CHECK(loaded.window_left == 624 && loaded.window_top == 160.5, "窗口位置未恢复");
+    CHECK(list_is(&loaded.watched_folders, 2, L"C:\\Users\\me\\Downloads", L"D:\\收件") && loaded.watch_peek_seconds == 25 &&
+          loaded.has_asked_folder_watch, "观察的文件夹或停留时间未恢复");
 
     wchar_t *path = settings_path();
     wchar_t *text = file_read_text(path, 1 << 20);
@@ -448,6 +457,11 @@ static void test_settings_normalization(void)
     strlist_add(&invalid.blocked_apps, L"C:\\Tools\\paint.exe");
     invalid.window_width = 10;
     invalid.window_height = NAN;
+    strlist_add(&invalid.watched_folders, L"  C:\\Downloads\\ ");
+    strlist_add(&invalid.watched_folders, L"c:\\downloads");
+    strlist_add(&invalid.watched_folders, L"   ");
+    strlist_add(&invalid.watched_folders, L"D:\\");
+    invalid.watch_peek_seconds = 0;
 
     AppSettings normalized;
     settings_clone(&normalized, &invalid);
@@ -465,6 +479,14 @@ static void test_settings_normalization(void)
         "自定义操作没有规范化");
     CHECK(wcscmp(normalized.hotkey, L"Ctrl+Shift+Space") == 0, "无效快捷键没有恢复默认值");
     CHECK(normalized.window_width >= 640 && normalized.window_height >= 520, "异常窗口尺寸没有恢复默认值");
+    CHECK(list_is(&normalized.watched_folders, 2, L"C:\\Downloads", L"D:\\"), "观察的文件夹没有去掉空白、重复和末尾的分隔符");
+    CHECK(normalized.watch_peek_seconds == WATCH_PEEK_DEFAULT_SECONDS, "异常的停留时间没有恢复默认值");
+    normalized.watch_peek_seconds = 100;
+    settings_normalize(&normalized);
+    CHECK(normalized.watch_peek_seconds == WATCH_PEEK_DEFAULT_SECONDS, "超过 99 秒的停留时间没有恢复默认值");
+    normalized.watch_peek_seconds = 99;
+    settings_normalize(&normalized);
+    CHECK(normalized.watch_peek_seconds == 99, "99 秒应该允许");
     CHECK(invalid.theme == 999, "规范化时修改了原设置对象");
     settings_free(&normalized);
     settings_free(&invalid);
@@ -1580,6 +1602,7 @@ static void test_drop_classify(void)
 #include "action_tests.inc"
 #include "merge_tests.inc"
 #include "main_tests.inc"
+#include "watch_tests.inc"
 
 /// 命令行给了名字时只跑名字里含有其中之一的测试，方便单独排查。
 static char **only_tests;
@@ -1667,6 +1690,9 @@ int main(int argc, char **argv)
     run("quick actions", test_quick_actions);
     run("shelf actions", test_shelf_actions);
     run("follow renamed", test_follow_renamed);
+    run("folder watch names", test_folder_watch_names);
+    run("folder watch", test_folder_watch);
+    run("shelf peek", test_shelf_peek);
     run("adopt between shelves", test_adopt_between_shelves);
     run("merge and split", test_merge_and_split);
     run("shelf history", test_shelf_history);

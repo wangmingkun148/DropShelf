@@ -81,6 +81,7 @@ typedef enum MainPage
 #define GLYPH_EDIT L"\xE70F"
 #define GLYPH_TIMER L"\xE823"
 #define GLYPH_SWAP L"\xE8AB"
+#define GLYPH_VIEW L"\xE890"
 
 /// 一个设置页：一张圆角的牌，内容在牌里滚动。
 typedef struct PageView
@@ -248,6 +249,9 @@ typedef enum PagesControl
     PAGES_SHELF_SIZE,
     PAGES_DRAG_OUT_MODE,
     PAGES_CLOSE_WHEN_EMPTY,
+    PAGES_WATCH_LIST,
+    PAGES_PEEK_SECONDS,
+    PAGES_PEEK_SECONDS_CARD,
     PAGES_LAYOUT,
     PAGES_THEME_SYSTEM,
     PAGES_THEME_LIGHT,

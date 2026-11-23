@@ -301,6 +301,7 @@ void settings_init(AppSettings *settings)
     settings->drag_out_mode = TRANSFER_MOVE;
     settings->quick_action_layout = LAYOUT_FOUR;
     settings->close_when_empty = true;
+    settings->watch_peek_seconds = WATCH_PEEK_DEFAULT_SECONDS;
     settings->performance_mode = PERFORMANCE_AUTO;
     settings->hotkey = hotkey_to_text(HOTKEY_DEFAULT);
     settings->show_getting_started = true;
@@ -311,6 +312,7 @@ void settings_free(AppSettings *settings)
 {
     strlist_clear(&settings->blocked_apps);
     strlist_clear(&settings->quick_action_slots);
+    strlist_clear(&settings->watched_folders);
     for (int index = 0; index < settings->custom_action_count; index++) custom_action_free(&settings->custom_actions[index]);
     free(settings->custom_actions);
     free(settings->accent_color);
@@ -325,6 +327,7 @@ void settings_clone(AppSettings *target, const AppSettings *source)
     *target = *source;
     strlist_clone(&target->blocked_apps, &source->blocked_apps);
     strlist_clone(&target->quick_action_slots, &source->quick_action_slots);
+    strlist_clone(&target->watched_folders, &source->watched_folders);
     target->custom_actions = xcalloc((size_t)source->custom_action_count, sizeof(CustomAction));
     for (int index = 0; index < source->custom_action_count; index++)
         custom_action_clone(&target->custom_actions[index], &source->custom_actions[index]);
@@ -461,6 +464,21 @@ void settings_normalize(AppSettings *settings)
     }
     strlist_clear(&settings->blocked_apps);
     settings->blocked_apps = apps;
+
+    // 观察的文件夹去掉空的、重复的和末尾的分隔符（盘符根目录保留，如 D:\）。
+    StrList folders = {0};
+    for (int index = 0; index < settings->watched_folders.count && folders.count < WATCH_FOLDERS_MAXIMUM; index++)
+    {
+        wchar_t *folder = wcs_trim_dup(settings->watched_folders.items[index]);
+        size_t length = wcslen(folder);
+        while (length > 3 && (folder[length - 1] == L'\\' || folder[length - 1] == L'/')) folder[--length] = 0;
+        if (*folder && strlist_index_of(&folders, folder, true) < 0) strlist_add(&folders, folder);
+        free(folder);
+    }
+    strlist_clear(&settings->watched_folders);
+    settings->watched_folders = folders;
+    if (settings->watch_peek_seconds < WATCH_PEEK_MINIMUM_SECONDS || settings->watch_peek_seconds > WATCH_PEEK_MAXIMUM_SECONDS)
+        settings->watch_peek_seconds = WATCH_PEEK_DEFAULT_SECONDS;
 
     normalize_custom_actions(settings);
     if (!settings->has_quick_action_slots) migrate_quick_actions(settings);
@@ -655,6 +673,8 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"QuickActions") == 0) ok = read_legacy_actions(value, settings);
         else if (wcscmp(key, L"QuickAction") == 0) ok = read_enum(value, &action_type_table, &settings->legacy_action);
         else if (wcscmp(key, L"CloseWhenEmpty") == 0) ok = read_bool(value, &settings->close_when_empty);
+        else if (wcscmp(key, L"WatchedFolders") == 0) ok = read_string_list(value, &settings->watched_folders, NULL);
+        else if (wcscmp(key, L"WatchPeekSeconds") == 0) ok = read_int(value, &settings->watch_peek_seconds);
         else if (wcscmp(key, L"PerformanceMode") == 0) ok = read_enum(value, &performance_table, &settings->performance_mode);
         else if (wcscmp(key, L"LowPerformanceMode") == 0)
         {
@@ -664,6 +684,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"Hotkey") == 0) ok = read_string(value, &settings->hotkey);
         else if (wcscmp(key, L"HasCompletedFirstRun") == 0) ok = read_bool(value, &settings->has_completed_first_run);
         else if (wcscmp(key, L"ShowGettingStarted") == 0) ok = read_bool(value, &settings->show_getting_started);
+        else if (wcscmp(key, L"HasAskedFolderWatch") == 0) ok = read_bool(value, &settings->has_asked_folder_watch);
     }
     json_free(root);
     return ok;
@@ -728,10 +749,13 @@ wchar_t *settings_serialize(const AppSettings *settings)
     json_write_end_array(&writer);
 
     json_write_bool(&writer, L"CloseWhenEmpty", settings->close_when_empty);
+    write_string_list(&writer, L"WatchedFolders", &settings->watched_folders);
+    json_write_int(&writer, L"WatchPeekSeconds", settings->watch_peek_seconds);
     write_enum(&writer, L"PerformanceMode", &performance_table, settings->performance_mode);
     json_write_string(&writer, L"Hotkey", settings->hotkey);
     json_write_bool(&writer, L"HasCompletedFirstRun", settings->has_completed_first_run);
     json_write_bool(&writer, L"ShowGettingStarted", settings->show_getting_started);
+    json_write_bool(&writer, L"HasAskedFolderWatch", settings->has_asked_folder_watch);
     json_write_end_object(&writer);
     return json_write_finish(&writer);
 }

@@ -3,6 +3,7 @@
 #include "shelf_window_internal.h"
 #include "attachment_cache.h"
 #include "clipboard.h"
+#include "folder_watch.h"
 #include "history_menu.h"
 #include "log.h"
 #include "task.h"
@@ -953,7 +954,15 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     ShelfDragSession session = { shelf, NULL, 0, 0, false };
     shelf_drag_session_begin(&session);
     DragOutRequest request = { shelf->handle, dragged, dragged_count, carried ? &extra : NULL, model->id, shelf->move_mode, shelf_scale(shelf) };
+    // 拖进观察的文件夹的不算新文件。
+    StrList names = {0};
+    for (int index = 0; index < dragged_count; index++)
+        if (shelf_item_is_file_system(dragged[index])) strlist_add(&names, dragged[index]->value);
+    for (int index = 0; index < extra.count; index++) strlist_add(&names, extra.items[index]);
+    folder_watch_drag_begin(&names);
+    strlist_clear(&names);
     DragOutOutcome outcome = dragged_count > 0 ? drag_out(&request) : (DragOutOutcome){ DRAG_OUT_CANCELLED, false };
+    folder_watch_drag_end();
     shelf_drag_session_end();
     SplitPlace place;
     bool has_place = split_pad_dismiss(&place);

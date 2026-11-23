@@ -73,6 +73,7 @@ wchar_t *str_images_failed(int count);                          // ，1 张无�
 wchar_t *str_opened_with(int count, const wchar_t *name);       // 已用 画图 打开 2 项
 wchar_t *str_opened_properties_for(int count);
 wchar_t *str_saved_to_downloads(int count);
+wchar_t *str_watch_peek_tooltip(int count);                    // 3 个新文件 · 点击打开，右键收起
 
 // 最近关闭的置物架、合并
 wchar_t *str_history_entry_title(const wchar_t *first, int count);   // 报告.pdf 等 3 项
@@ -89,7 +90,7 @@ wchar_t *str_update_available(const wchar_t *version);
 wchar_t *str_status_running_detail(int trigger, const wchar_t *hotkey);
 /// 概览页卡片上的当前设置，如“中文 · 开机启动 · Ctrl+Shift+Space”。hotkey 为 NULL 时是“未设置”。
 wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_t *hotkey);
-wchar_t *str_shelf_summary(int trigger, int drag_out_mode);
+wchar_t *str_shelf_summary(int trigger, int drag_out_mode, int watched_folders);
 wchar_t *str_actions_summary(const StrList *labels);
 wchar_t *str_appearance_summary(int theme, bool custom_accent);
 wchar_t *str_history_count(int count);                              // 已保留 3 个最近关闭的置物架

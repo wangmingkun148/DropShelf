@@ -2,6 +2,7 @@
 #include "main_window_internal.h"
 #include "ui_internal.h"
 #include "file_dialog.h"
+#include "file_ops.h"
 #include "foreground.h"
 #include "gesture.h"
 #include "lang.h"
@@ -35,6 +36,7 @@ static struct
     UiElement *performance, *performance_description;
     UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
     UiElement *blocked_list;
+    UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
     UiElement *shelf_size, *drag_out_mode, *close_when_empty;
     UiElement *history_description, *clear_history;
     UiElement *layout, *layout_description;
@@ -384,6 +386,99 @@ static void rebuild_blocked_list(void)
         card->minimum_height = 44;
         ui_add(P.blocked_list, card);
     }
+}
+
+// ───────────── 观察文件夹 ─────────────
+
+static void on_add_watch_folder(void *context)
+{
+    (void)context;
+    app_choose_watch_folder(ui_window_handle(M->window));
+}
+
+/// 列表上显示的文件夹；删除按钮记着自己在第几个。
+static StrList watch_names;
+
+static void on_remove_watch_folder(void *context)
+{
+    int index = (int)(intptr_t)context;
+    if (index < 0 || index >= watch_names.count) return;
+    wchar_t *folder = wcs_dup(watch_names.items[index]);
+    app_unwatch_folder(folder);
+    free(folder);
+}
+
+static void rebuild_watch_list(void)
+{
+    const AppSettings *settings = app_settings();
+    if (P.watch_list->child_count == watch_names.count && strlist_equal(&watch_names, &settings->watched_folders, false)) return;
+    ui_clear_children(P.watch_list);
+    strlist_clear(&watch_names);
+    strlist_clone(&watch_names, &settings->watched_folders);
+    for (int index = 0; index < watch_names.count; index++)
+    {
+        UiElement *remove = ui_button(UI_BUTTON_ICON, UI_LIT(GLYPH_DELETE), on_remove_watch_folder, (void *)(intptr_t)index);
+        ui_button_set_font_size(remove, 14);
+        ui_set_tooltip(remove, UI_STR(STR_StopWatchingFolder));
+        // 名字在上，完整的位置在下：同名的文件夹也分得清。
+        wchar_t *name = path_folder_name(watch_names.items[index]);
+        UiElement *card = ui_settings_card(NULL, UI_LIT(name), UI_LIT(watch_names.items[index]), remove, NULL);
+        free(name);
+        ui_stack_set_padding(card, 60, 6, 10, 6);
+        card->minimum_height = 52;
+        ui_add(P.watch_list, card);
+    }
+}
+
+/// 输入框里是 1–99 的整数时才保存；正在输入的空白或别的字不改设置，下次刷新时换回保存的值。
+static bool parse_peek_seconds(const wchar_t *text, int *seconds)
+{
+    wchar_t *trimmed = wcs_trim_dup(text);
+    int value = 0;
+    bool ok = *trimmed != 0;
+    for (const wchar_t *at = trimmed; ok && *at; at++)
+    {
+        ok = *at >= L'0' && *at <= L'9';
+        if (ok) value = value * 10 + (*at - L'0');
+        if (value > WATCH_PEEK_MAXIMUM_SECONDS) ok = false;
+    }
+    free(trimmed);
+    ok = ok && value >= WATCH_PEEK_MINIMUM_SECONDS;
+    if (ok) *seconds = value;
+    return ok;
+}
+
+static void on_peek_seconds(const wchar_t *text, void *context)
+{
+    (void)context;
+    int seconds = 0;
+    if (parse_peek_seconds(text, &seconds) && seconds != app_settings()->watch_peek_seconds) SET_INT(watch_peek_seconds, seconds);
+}
+
+static UiElement *build_peek_seconds_control(void)
+{
+    UiElement *row = ui_stack(true, 8);
+    wchar_t text[8];
+    swprintf(text, ARRAYSIZE(text), L"%d", app_settings()->watch_peek_seconds);
+    P.peek_seconds = ui_textbox(text, UI_NO_TEXT, 2, on_peek_seconds, NULL, NULL);
+    P.peek_seconds->width = 56;
+    ui_add(row, P.peek_seconds);
+    UiElement *unit = ui_label(UI_STR(STR_SecondsUnit), UI_TEXT_BODY);
+    unit->cross = UI_CROSS_CENTER;
+    ui_add(row, unit);
+    return row;
+}
+
+static void refresh_peek_seconds(const AppSettings *settings)
+{
+    int shown_value = 0;
+    bool valid = parse_peek_seconds(ui_textbox_text(P.peek_seconds), &shown_value);
+    // 正在输入时不打断（删空了准备重填也算）；其余时候显示保存的值。
+    if (P.peek_seconds->focused && (valid || wcs_is_blank(ui_textbox_text(P.peek_seconds)))) return;
+    if (valid && shown_value == settings->watch_peek_seconds) return;
+    wchar_t text[8];
+    swprintf(text, ARRAYSIZE(text), L"%d", settings->watch_peek_seconds);
+    ui_textbox_set_text(P.peek_seconds, text);
 }
 
 // ───────────── 概览页的卡片 ─────────────
@@ -799,6 +894,14 @@ static void build_shelf_page(void)
     add_card(content, GLYPH_CLEAR, UI_STR(STR_CloseWhenEmpty), UI_STR(STR_CloseWhenEmptyDescription), P.close_when_empty, NULL);
     P.clear_history = wide_button(STR_Clear, on_clear_history);
     add_card(content, GLYPH_HISTORY, UI_STR(STR_ClearShelfHistory), UI_STR(STR_HistoryEmpty), P.clear_history, &P.history_description);
+
+    section_header(content, STR_WatchFolders, 24, 8);
+    P.add_folder_button = wide_button(STR_AddFolder, on_add_watch_folder);
+    add_card(content, GLYPH_VIEW, UI_STR(STR_WatchedFoldersHeader), UI_STR(STR_WatchFoldersDescription), P.add_folder_button, NULL);
+    P.watch_list = ui_stack(false, 0);
+    ui_add(content, P.watch_list);
+    P.peek_seconds_card = add_card(content, GLYPH_TIMER, UI_STR(STR_WatchPeekSecondsHeader), UI_STR(STR_WatchPeekSecondsDescription),
+        build_peek_seconds_control(), NULL);
 }
 
 // ───────────── 快速操作 ─────────────
@@ -1130,7 +1233,7 @@ void pages_refresh(void)
     // 概览页四张卡片上的当前设置。
     bool has_hotkey = settings->hotkey && *settings->hotkey;
     tile_set_summary(M->tiles[PAGE_GENERAL], str_general_summary(settings->language, settings->start_with_windows, has_hotkey ? settings->hotkey : NULL));
-    tile_set_summary(M->tiles[PAGE_SHELF], str_shelf_summary(settings->auto_open_trigger, settings->drag_out_mode));
+    tile_set_summary(M->tiles[PAGE_SHELF], str_shelf_summary(settings->auto_open_trigger, settings->drag_out_mode, settings->watched_folders.count));
     QuickActionList visible = quick_actions_visible(settings);
     StrList labels = {0};
     for (int index = 0; index < visible.count; index++) strlist_add_owned(&labels, quick_action_label(&visible.items[index]));
@@ -1200,6 +1303,10 @@ void pages_refresh(void)
     }
     else ui_label_set_text(P.history_description, UI_STR(STR_HistoryEmpty));
     ui_set_disabled(P.clear_history, history_count == 0);
+    rebuild_watch_list();
+    // 没有观察的文件夹时停留时间用不上。
+    P.peek_seconds_card->hidden = settings->watched_folders.count == 0;
+    refresh_peek_seconds(settings);
 
     // 快速操作。
     int layout = settings->quick_action_layout;
@@ -1231,6 +1338,7 @@ void pages_close(void)
     unsigned generation = P.sensitivity_generation + 1;
     strlist_clear(&menu_apps);
     strlist_clear(&blocked_names);
+    strlist_clear(&watch_names);
     memset(&P, 0, sizeof(P));
     // 关掉之后还在等的保存计时不再起作用。
     P.sensitivity_generation = generation;
@@ -1256,6 +1364,9 @@ UiElement *pages_control(PagesControl control)
         case PAGES_SHELF_SIZE: return P.shelf_size;
         case PAGES_DRAG_OUT_MODE: return P.drag_out_mode;
         case PAGES_CLOSE_WHEN_EMPTY: return P.close_when_empty;
+        case PAGES_WATCH_LIST: return P.watch_list;
+        case PAGES_PEEK_SECONDS: return P.peek_seconds;
+        case PAGES_PEEK_SECONDS_CARD: return P.peek_seconds_card;
         case PAGES_LAYOUT: return P.layout;
         case PAGES_THEME_SYSTEM: return P.theme_tiles[THEME_SYSTEM];
         case PAGES_THEME_LIGHT: return P.theme_tiles[THEME_LIGHT];

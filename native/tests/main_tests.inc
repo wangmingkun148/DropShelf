@@ -90,8 +90,11 @@ static void test_main_strings(void)
     text = str_history_count(1);
     CHECK(wcscmp(text, L"1 recently closed shelf kept") == 0, "英文的单数不对");
     free(text);
-    text = str_shelf_summary(TRIGGER_EDGE, TRANSFER_COPY);
+    text = str_shelf_summary(TRIGGER_EDGE, TRANSFER_COPY, 0);
     CHECK(wcscmp(text, L"Pause at edge to open · Drag out to copy") == 0, "英文的置物架摘要不对");
+    free(text);
+    text = str_shelf_summary(TRIGGER_EDGE, TRANSFER_COPY, 1);
+    CHECK(wcscmp(text, L"Pause at edge to open · Drag out to copy · Watching 1 folder") == 0, "英文的置物架摘要没有写观察的文件夹");
     free(text);
     language_set_mode(LANGUAGE_CHINESE);
 }
@@ -837,6 +840,12 @@ static void test_main_window_settings(void)
     free(history_file);
 }
 
+static void forget_watch_asked(AppSettings *settings, void *context)
+{
+    (void)context;
+    settings->has_asked_folder_watch = false;
+}
+
 static void test_about_and_onboarding(void)
 {
     about_window_show(NULL);
@@ -852,19 +861,34 @@ static void test_about_and_onboarding(void)
     CHECK(next && wcscmp(next, L"下一步") == 0, "教程起始状态不正确");
     for (int step = 1; step < 4; step++) onboarding_window_go(step);
     next = onboarding_window_next_text();
-    CHECK(onboarding_window_step() == 3 && next && wcscmp(next, L"开始使用") == 0, "教程最后一步不正确");
+    CHECK(onboarding_window_step() == 3 && next && wcscmp(next, L"下一步") == 0, "快速操作这一步后面还有观察文件夹");
     const wchar_t *hotkey = app_settings()->hotkey;
     const wchar_t *body = onboarding_window_body_text();
     CHECK(hotkey && *hotkey && body && wcsstr(body, hotkey), "教程没有说明当前的快捷键");
     language_set_mode(LANGUAGE_ENGLISH);
     next = onboarding_window_next_text();
     const wchar_t *title = onboarding_window_title_text();
-    CHECK(next && wcscmp(next, L"Get started") == 0 && title && wcscmp(title, L"Quick actions and shortcut") == 0, "切换语言后教程文字没有更新");
+    CHECK(next && wcscmp(next, L"Next") == 0 && title && wcscmp(title, L"Quick actions and shortcut") == 0, "切换语言后教程文字没有更新");
     language_set_mode(LANGUAGE_CHINESE);
+    // 最后一步问要不要观察文件夹：没有“下一步”，换成“不用了”和“添加文件夹”。
     onboarding_window_go(9);
-    CHECK(onboarding_window_step() == 3, "超出时停在最后一步");
+    title = onboarding_window_title_text();
+    const wchar_t *add = onboarding_window_add_folder_text();
+    CHECK(onboarding_window_step() == 4 && !onboarding_window_next_text() && add && wcscmp(add, L"添加文件夹") == 0 &&
+          title && wcscmp(title, L"新文件，就在手边") == 0, "超出时应停在问观察文件夹的最后一步");
     onboarding_window_close();
-    CHECK(!onboarding_window_is_open() && app_settings()->has_completed_first_run, "关掉引导后应记下已完成第一次运行");
+    CHECK(!onboarding_window_is_open() && app_settings()->has_completed_first_run && app_settings()->has_asked_folder_watch,
+        "关掉引导后应记下已完成第一次运行，也算问过观察文件夹");
+
+    // 升级来的老用户只问观察文件夹这一步。
+    app_update_settings(forget_watch_asked, NULL);
+    onboarding_window_show_watch();
+    add = onboarding_window_add_folder_text();
+    CHECK(onboarding_window_is_open() && onboarding_window_is_watch_only() && onboarding_window_step() == 4 && add, "单独询问时应直接显示观察文件夹这一步");
+    onboarding_window_go(0);
+    CHECK(onboarding_window_step() == 4, "单独询问时不能翻到引导的其他步");
+    onboarding_window_close();
+    CHECK(app_settings()->has_asked_folder_watch, "单独询问后应记下已经问过");
 }
 
 /// 校准对话框：太轻的示范不算，三次示范后给出建议，采用后灵敏度随之改变；重来时从头开始。

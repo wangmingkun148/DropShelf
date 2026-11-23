@@ -23,6 +23,16 @@ void app_update_settings(void (*change)(AppSettings *settings, void *context), v
 /// 改所有置物架拖出时移动还是复制（TransferMode）。
 void app_update_drag_out_mode(int mode);
 
+/// 观察文件夹：加入（已经有了不重复加）、移除。
+void app_watch_folder(const wchar_t *folder);
+void app_unwatch_folder(const wchar_t *folder);
+
+/// 选一个文件夹加入观察（对话框从下载文件夹开始）。取消时返回 false。
+bool app_choose_watch_folder(HWND owner);
+
+/// 已经问过要不要观察文件夹（引导里点了“添加文件夹”或“不用了”，或者关掉了引导）。
+void app_mark_folder_watch_asked(void);
+
 /// 修改开机启动；写入注册表失败时保持原值并返回 false。
 bool app_set_start_with_windows(bool enabled);
 

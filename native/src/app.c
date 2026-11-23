@@ -1,6 +1,9 @@
 #include "app.h"
 #include "anim.h"
 #include "attachment_cache.h"
+#include "file_dialog.h"
+#include "file_ops.h"
+#include "folder_watch.h"
 #include "foreground.h"
 #include "gesture_service.h"
 #include "gfx.h"
@@ -13,6 +16,7 @@
 #include "log.h"
 #include "probe.h"
 #include "shelf_history.h"
+#include "shelf_peek.h"
 #include "shelf_window.h"
 #include "single_instance.h"
 #include "startup.h"
@@ -90,6 +94,12 @@ static bool quick_actions_settings_equal(const AppSettings *first, const AppSett
     return true;
 }
 
+/// 观察的文件夹里有新文件写完了：在屏幕边缘探出置物架的一角。
+static void on_watched_files(const StrList *paths)
+{
+    if (!exiting) shelf_peek_add(paths);
+}
+
 /// 设置变化后让各部分立即生效。
 static void apply_settings(const AppSettings *previous, const AppSettings *current)
 {
@@ -113,6 +123,8 @@ static void apply_settings(const AppSettings *previous, const AppSettings *curre
         hotkey_registered = hotkey_service_register(settings_hotkey(current));
     if (!strlist_equal(&previous->blocked_apps, &current->blocked_apps, true))
         foreground_watcher_set_blocked_apps(&current->blocked_apps);
+    if (!strlist_equal(&previous->watched_folders, &current->watched_folders, true))
+        folder_watch_set(&current->watched_folders, on_watched_files);
     // 尺寸、拖出方式、快速操作变化时，已打开的置物架需要立即更新。
     if (previous->quick_shelf_size != current->quick_shelf_size || previous->drag_out_mode != current->drag_out_mode ||
         !quick_actions_settings_equal(previous, current))
@@ -131,6 +143,53 @@ void app_update_settings(void (*change)(AppSettings *settings, void *context), v
     settings_save_in_background(&settings);
     settings_free(&previous);
     main_window_refresh();
+}
+
+static void change_watch_add(AppSettings *target, void *context)
+{
+    if (strlist_index_of(&target->watched_folders, context, true) < 0) strlist_add(&target->watched_folders, context);
+}
+
+static void change_watch_remove(AppSettings *target, void *context)
+{
+    int index = strlist_index_of(&target->watched_folders, context, true);
+    if (index < 0) return;
+    free(target->watched_folders.items[index]);
+    memmove(&target->watched_folders.items[index], &target->watched_folders.items[index + 1],
+        (size_t)(target->watched_folders.count - index - 1) * sizeof(wchar_t *));
+    target->watched_folders.count--;
+}
+
+static void change_watch_asked(AppSettings *target, void *context)
+{
+    (void)context;
+    target->has_asked_folder_watch = true;
+}
+
+void app_watch_folder(const wchar_t *folder)
+{
+    if (!wcs_is_blank(folder)) app_update_settings(change_watch_add, (void *)folder);
+}
+
+void app_unwatch_folder(const wchar_t *folder)
+{
+    app_update_settings(change_watch_remove, (void *)folder);
+}
+
+bool app_choose_watch_folder(HWND owner)
+{
+    wchar_t *downloads = persistent_output_directory();
+    wchar_t *folder = file_dialog_folder(owner, S(STR_ChooseWatchFolder), downloads);
+    free(downloads);
+    if (!folder) return false;
+    app_watch_folder(folder);
+    free(folder);
+    return true;
+}
+
+void app_mark_folder_watch_asked(void)
+{
+    if (!settings.has_asked_folder_watch) app_update_settings(change_watch_asked, NULL);
 }
 
 static void change_start_with_windows(AppSettings *target, void *context)
@@ -208,6 +267,8 @@ void app_prepare_for_shutdown(void)
     exiting = true;
     settings_save(&settings);
     ui_menu_dismiss();
+    folder_watch_stop();
+    shelf_peek_close();
     foreground_watcher_stop();
     gesture_service_stop();
     probe_destroy();
@@ -338,7 +399,11 @@ static LRESULT CALLBACK message_window_procedure(HWND window, UINT message, WPAR
             return 0;
         }
         case MESSAGE_SHOW_MAIN_WINDOW:
-            if (!exiting) main_window_show();
+            if (exiting) return 0;
+            main_window_show();
+            // 升级来的老用户没在引导里见过观察文件夹，打开主窗口时单独问一次。
+            if (settings.has_completed_first_run && !settings.has_asked_folder_watch && !onboarding_window_is_open())
+                onboarding_window_show_watch();
             return 0;
         case MESSAGE_SHOW_ONBOARDING:
             if (!exiting) onboarding_window_show();
@@ -443,6 +508,7 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     gesture_service_set_edge_dwell(settings.edge_dwell);
     foreground_watcher_set_listener(on_blocked_changed);
     foreground_watcher_set_blocked_apps(&settings.blocked_apps);
+    folder_watch_set(&settings.watched_folders, on_watched_files);
 
     shelves_prewarm();
     if (!start_in_background)

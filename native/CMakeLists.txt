@@ -37,6 +37,7 @@ add_library(dropshelf_core STATIC
     src/file_ops.c
     src/file_dialog.c
     src/file_identity.c
+    src/folder_watch.c
     src/foreground.c
     src/gesture.c
     src/gesture_service.c
@@ -67,6 +68,7 @@ add_library(dropshelf_core STATIC
     src/shelf_merge.c
     src/shelf_model.c
     src/shelf_motion.c
+    src/shelf_peek.c
     src/shelf_window.c
     src/shelves.c
     src/single_instance.c

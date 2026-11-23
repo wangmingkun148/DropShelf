@@ -58,6 +58,12 @@ typedef enum GestureSensitivity { SENSITIVITY_RESPONSIVE, SENSITIVITY_BALANCED, 
 #define SHAKE_BALANCED 50
 #define SHAKE_RESPONSIVE 100
 
+/// 观察的文件夹出现新文件时，探出的角没被点开，过这么多秒缩回。
+#define WATCH_PEEK_MINIMUM_SECONDS 1
+#define WATCH_PEEK_MAXIMUM_SECONDS 99
+#define WATCH_PEEK_DEFAULT_SECONDS 10
+#define WATCH_FOLDERS_MAXIMUM 32
+
 #define CUSTOM_ACTION_MINIMUM_IMAGE_KB 10
 #define CUSTOM_ACTION_MAXIMUM_IMAGE_KB (100 * 1024)
 #define CUSTOM_ACTION_DEFAULT_IMAGE_KB 500
@@ -119,10 +125,14 @@ typedef struct AppSettings
     int custom_action_count;
 
     bool close_when_empty;          // 全部拖出或移除后关闭置物架
+    /// 观察这些文件夹：出现新文件时屏幕边缘探出置物架的一角，点开后新文件就在里面。
+    StrList watched_folders;
+    int watch_peek_seconds;
     int performance_mode;
     wchar_t *hotkey;
     bool has_completed_first_run;
     bool show_getting_started;      // 概览页的“快速上手”被关闭后不再显示
+    bool has_asked_folder_watch;    // 问过要不要观察文件夹（第一次运行的引导里，或升级后单独问一次）
 
     // 以下只在读取旧版本的设置文件时用到，settings_normalize 之后都已迁移，不再写回文件。
     bool has_quick_action_slots;    // 文件里有没有写 QuickActionSlots；没有时按旧版本的设置迁移

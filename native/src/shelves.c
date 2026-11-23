@@ -127,9 +127,16 @@ ShelfWindow *shelves_open_at(POINT center, bool by_gesture, bool activate, Scree
         open_shelves = shelf;
     }
     shelf->model->opened_by_gesture = by_gesture;
-    ShelfEntranceKind entrance = !by_gesture ? ENTRANCE_PLAIN : edge == EDGE_NONE ? ENTRANCE_SHAKE : ENTRANCE_EDGE;
+    ShelfEntranceKind entrance = edge != EDGE_NONE ? ENTRANCE_EDGE : by_gesture ? ENTRANCE_SHAKE : ENTRANCE_PLAIN;
     shelf_window_show_at(shelf, center, activate, entrance, edge);
     shelves_prewarm();
+    return shelf;
+}
+
+ShelfWindow *shelves_open_with_paths(POINT center, ScreenEdge edge, const StrList *paths)
+{
+    ShelfWindow *shelf = shelves_open_at(center, false, false, edge);
+    if (shelf) shelf_window_add_paths(shelf, paths);
     return shelf;
 }
 
