@@ -279,17 +279,39 @@ public partial class ShelfWindow
         _dragInside = false;
         _dragSession = null;
         SetHoveredAction(null);
-        Body.Visibility = Visibility.Visible;
-        // 淡出期间放置区域不再挡住下面的内容。
-        DropOverlay.IsHitTestVisible = false;
-        Fade(Body, 1, OverlayFadeIn);
-        Fade(DropOverlay, 0, OverlayFadeOut, () =>
-        {
-            DropOverlay.Visibility = Visibility.Collapsed;
-            ResetMergeCharge();
-        });
         ResetTiles();
+        // 不依赖淡出动画的 Completed 回调改写可见性：OLE 拖放的模态循环里回调可能迟到或丢失，
+        // 文件已经入架却仍停在“松开以暂存”提示层，角标也停在落地动画中间值。
+        SettleDragVisuals();
+        RestoreSurfaceOpacity();
         WindowEffects.SetBorderColor(this, null);
+    }
+
+    /// <summary>把内容区、投放区和角标直接落到拖放结束后的确定终值。</summary>
+    private void SettleDragVisuals()
+    {
+        Body.BeginAnimation(OpacityProperty, null);
+        Body.Opacity = 1;
+        Body.Visibility = Visibility.Visible;
+
+        DropOverlay.BeginAnimation(OpacityProperty, null);
+        DropOverlay.Opacity = 0;
+        DropOverlay.Visibility = Visibility.Collapsed;
+        DropOverlay.IsHitTestVisible = false;
+
+        // 丢弃待执行的淡入淡出，迟到的 Completed 回调会被 Fade 的守卫忽略。
+        _fades.Remove(Body);
+        _fades.Remove(DropOverlay);
+
+        RestoreStackMark();
+        ResetMergeCharge();
+    }
+
+    /// <summary>取消可能残留的窗口内容淡入，保证置物架不是透明/空白的。</summary>
+    private void RestoreSurfaceOpacity()
+    {
+        Surface.BeginAnimation(OpacityProperty, null);
+        Surface.Opacity = 1;
     }
 
     private readonly Dictionary<UIElement, AnimationTimeline> _fades = [];

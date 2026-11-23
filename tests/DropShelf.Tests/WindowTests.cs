@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -521,6 +522,47 @@ internal static partial class Program
         }
         window.ShowStep(99);
         Assert(window.CurrentStep == 3, "越界步骤没有限制");
+        window.Close();
+    }
+
+    /// <summary>OLE 拖放的动画回调可能丢失，拖放结束和复用窗口都必须把可见性落到终值。</summary>
+    private static void TestShelfVisualStateSettles()
+    {
+        var controller = new AppController(Dispatcher.CurrentDispatcher);
+        var window = new ShelfWindow(new ShelfViewModel(), controller.Shelves) { Left = -20000, Top = -20000 };
+        window.Show();
+        Pump(150);
+
+        var body = (FrameworkElement)window.FindName("Body")!;
+        var overlay = (FrameworkElement)window.FindName("DropOverlay")!;
+        var surface = (FrameworkElement)window.FindName("Surface")!;
+
+        void MakeStale()
+        {
+            body.Visibility = Visibility.Hidden;
+            body.Opacity = 0;
+            overlay.Visibility = Visibility.Visible;
+            overlay.Opacity = 1;
+            overlay.IsHitTestVisible = true;
+            surface.Opacity = 0;
+        }
+
+        void AssertSettled(bool includeSurface)
+        {
+            Assert(body.Visibility == Visibility.Visible && body.Opacity == 1, "内容区没有恢复到可见终值");
+            Assert(overlay.Visibility == Visibility.Collapsed && overlay.Opacity == 0 && !overlay.IsHitTestVisible,
+                "投放区没有折叠到终值");
+            if (includeSurface) Assert(surface.Opacity == 1, "置物架内容仍然透明");
+        }
+
+        MakeStale();
+        typeof(ShelfWindow).GetMethod("EndDrag", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
+        AssertSettled(includeSurface: true);
+
+        MakeStale();
+        window.ShowAt(new POINT(-10000, -10000), false);
+        AssertSettled(includeSurface: false);
+
         window.Close();
     }
 

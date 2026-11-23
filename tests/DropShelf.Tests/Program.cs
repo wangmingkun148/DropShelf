@@ -133,6 +133,7 @@ internal static partial class Program
 
         // 界面
         Run("置物架窗口按设置生成快速操作", TestShelfWindowActions);
+        Run("拖放结束后可见性落到终值", TestShelfVisualStateSettles);
         Run("主窗口整合设置并自动保存", TestMainWindowSettings);
         Run("教程可以逐步切换", TestOnboardingSteps);
         Run("探针窗口可以显示和隐藏", TestProbeWindow);
