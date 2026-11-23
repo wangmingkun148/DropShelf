@@ -125,6 +125,18 @@ internal static partial class Program
         File.Delete(new SettingsService().SettingsPath);
     }
 
+    private static void TestCardHeightStableAtBoundary()
+    {
+        // 150% 缩放下测量值是 2/3 的倍数，算出的高度正好是整数时，浮点误差不能让结果在 174 和 175 之间跳。
+        foreach (var exact in new[] { 175.0, 156.0, 120.0 })
+        foreach (var noise in new[] { -1e-12, -1e-9, 0, 1e-12, 1e-9 })
+        {
+            var spare = (exact + 6) * 2 + 72 + noise;
+            Assert(MainWindow.CardHeightFor(spare, 72, 6) == exact, $"边界上的卡片高度应稳定为 {exact}：误差 {noise}");
+        }
+        Assert(MainWindow.CardHeightFor((175 + 6) * 2 + 72 - 0.5, 72, 6) == 174, "明显不足一个 DIP 时仍向下取整");
+    }
+
     private static void TestMainWindowSettings()
     {
         var service = new SettingsService();

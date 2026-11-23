@@ -220,6 +220,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 按剩余空间算卡片高度，向下取整到整数 DIP。缩放不是 100% 时测量值带小数，算出来的值常常正好落在整数边界上，
+    /// 浮点误差会让它在 174.9999999 和 175 之间来回跳：取整后目标一会儿 174 一会儿 175，每次都重启高度动画、
+    /// 触发新一轮排版，卡片就一直抖。先加一个远大于浮点误差的容差再取整，边界上的值就稳定了。
+    /// </summary>
+    public static double CardHeightFor(double spare, double headroom, double gap) =>
+        Math.Floor(Math.Clamp((spare - headroom) / 2 - gap, MinCardHeight, MaxCardHeight) + 1e-6);
+
+    /// <summary>
     /// 页面其余内容的高度不变，剩下的空间分给两行卡片；牌堆由布局固定在窗口底边，不受影响。
     /// 每次排版后检查一次：拖动窗口大小时直接跟随，只有页面内容变化（如收起入门提示）时才平滑过渡。
     /// </summary>
@@ -234,7 +242,7 @@ public partial class MainWindow : Window
         var spare = viewport - PageInset.Top - PageInset.Bottom - rest;
         var headroom = HistorySection.Visibility == Visibility.Visible ? FanHeadroom : 0;
         var gap = ((FrameworkElement)PageCards.Children[0]).Margin.Bottom;
-        var cards = Math.Floor(Math.Clamp((spare - headroom) / 2 - gap, MinCardHeight, MaxCardHeight));
+        var cards = CardHeightFor(spare, headroom, gap);
         if (Math.Abs(cards - _cardHeightTarget) < 1) return;
         _cardHeightTarget = cards;
         // 动画落后于窗口边缘时页面会时高时矮、滚动条反复出现，看起来整页都在抖。
