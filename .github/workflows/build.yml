@@ -4,6 +4,8 @@ name: Build
 
 on:
   push:
+    # tag 只走 Release 工作流，发布入口保持一条路径。
+    branches: ['**']
     paths:
       - 'native/**'
       - 'src/DropShelf/DropShelf.csproj'
