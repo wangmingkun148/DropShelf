@@ -49,6 +49,7 @@ struct UiWindow
     bool destroyed;
     bool moving;
     bool move_by_cursor;                // 层壳窗口拖动时用全局光标定位（Hyprland IPC / 已知指针位置）
+    guint move_source;                  // 拖动期间按固定间隔查光标；pointer 离开窗口后 GTK 不再送事件，靠它继续跟
     int move_offset_x, move_offset_y;   // 按下时全局光标相对窗口左上角的偏移
     // 上次设过的层壳位置：值没变就不再设，省掉每帧一次 configure 往返。
     bool layer_placed;
@@ -446,6 +447,64 @@ static void set_cursor_for(UiWindow *window, float x, float y)
 // 层壳窗口的位置由合成器按 margin 摆放，窗口跟着光标动之后，鼠标事件的本地坐标里就
 // 包含窗口自己移动的那一段：只按本地增量算，每隔一次事件才会挪一下，拖起来发飘。
 // 所以按下时记下全局光标和窗口左上角的差，之后每次事件都用全局光标反推窗口位置。
+
+/// 把“指针离开了窗口”送给界面。
+static void send_leave_event(UiWindow *window)
+{
+    UiMouseEvent event = { .kind = UI_MOUSE_LEAVE, .x = -1, .y = -1 };
+    if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
+    if (!window->captured) set_hovered(window, NULL, &event);
+}
+
+/// 结束拖动：停掉跟光标的定时器，清掉拖动状态。
+static void end_move(UiWindow *window, const wchar_t *reason)
+{
+    if (window->move_source)
+    {
+        g_source_remove(window->move_source);
+        window->move_source = 0;
+    }
+    window->caption_press = false;
+    if (!window->moving) return;
+    log_info(L"窗口拖动结束：%ls，停在 (%d,%d)", reason, window->x, window->y);
+    window->moving = false;
+    window->move_by_cursor = false;
+    // 拖动期间指针跑到窗口外面去了，收尾时补一次“离开”，界面上的悬停状态才不会停住。
+    if (!window->pointer_inside && !window->destroyed) send_leave_event(window);
+}
+
+/// 拖动期间固定间隔跟一次光标。GTK 的事件只在指针位于窗口内时才送来，窗口跟得慢一点
+/// 指针就跑到窗口外面，之后既收不到移动也收不到松手；这里直接问全局光标，
+/// 松手用 evdev 的全局左键状态判断，窗口就能一直贴着指针走。
+#define MOVE_FOLLOW_MILLISECONDS 8
+
+static gboolean move_follow_tick(gpointer data)
+{
+    UiWindow *window = data;
+    if (window->destroyed || !window->moving || !window->move_by_cursor)
+    {
+        window->move_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    int buttons = gesture_left_button_state();
+    if (buttons == 0)
+    {
+        window->move_source = 0;
+        end_move(window, L"全局左键已经松开");
+        return G_SOURCE_REMOVE;
+    }
+    if (buttons < 0)
+    {
+        // 没有 evdev 权限时看不到全局按键，只能退回 GTK 的 release/leave。
+        window->move_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    POINT cursor;
+    if (GetCursorPos(&cursor))
+        ui_window_place(window, cursor.x - window->move_offset_x, cursor.y - window->move_offset_y, 0, 0);
+    return G_SOURCE_CONTINUE;
+}
+
 static void move_window_to_pointer(UiWindow *window, float local_x, float local_y)
 {
     int old_x = window->x;
@@ -495,9 +554,7 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y, 
         // 只信点击手势的话窗口会一直粘着鼠标。evdev 能看到全局左键，松开了就收尾。
         if (gesture_left_button_state() == 0)
         {
-            log_info(L"窗口拖动结束：全局左键已经松开，停在 (%d,%d)", window->x, window->y);
-            window->moving = false;
-            window->move_by_cursor = false;
+            end_move(window, L"全局左键已经松开");
             return;
         }
         move_window_to_pointer(window, (float)x, (float)y);
@@ -528,13 +585,15 @@ static void on_leave(GtkEventControllerMotion *controller, gpointer data)
     UiWindow *window = data;
     if (window->destroyed) return;
     window->pointer_inside = false;
-    if (window->moving) log_info(L"窗口拖动结束：指针离开了窗口，停在 (%d,%d)", window->x, window->y);
-    window->moving = false;
-    window->move_by_cursor = false;
-    window->caption_press = false;
-    UiMouseEvent event = { .kind = UI_MOUSE_LEAVE, .x = -1, .y = -1 };
-    if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
-    if (!window->captured) set_hovered(window, NULL, &event);
+    if (window->moving && window->move_by_cursor)
+    {
+        // 窗口正跟着全局光标走，指针暂时跑到窗口外面是正常的，定时器会把它追回来。
+        // 这时不结束拖动，也不把“离开”送给界面，免得置物架自己收起来。
+        log_trace(L"窗口拖动：指针暂时离开窗口，继续跟着光标");
+        return;
+    }
+    end_move(window, L"指针离开了窗口");
+    send_leave_event(window);
 }
 
 static void on_pressed(GtkGestureClick *gesture, int press_count, double x, double y, gpointer data)
@@ -546,12 +605,7 @@ static void on_pressed(GtkGestureClick *gesture, int press_count, double x, doub
     window->pointer_inside = true;
     ui_pointer_seen_global(window->x + (int)lroundf((float)x), window->y + (int)lroundf((float)y));
     // 新的一次按下：上一次拖动不管因为什么没收到 release，都在这里结束掉。
-    if (window->moving)
-    {
-        log_info(L"窗口拖动结束：新的按下，停在 (%d,%d)", window->x, window->y);
-        window->moving = false;
-        window->move_by_cursor = false;
-    }
+    end_move(window, L"新的按下");
     // 点一下就把键盘焦点收到自绘区域：层壳窗口靠“点击后按需获得键盘”才收得到快捷键。
     gtk_widget_grab_focus(window->area);
     bool right = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3;
@@ -612,10 +666,7 @@ static void on_released(GtkGestureClick *gesture, int press_count, double x, dou
     }
     UiElement *captured = window->captured;
     window->captured = NULL;
-    if (window->moving) log_info(L"窗口拖动结束：层壳窗口停在 (%d,%d)", window->x, window->y);
-    window->moving = false;
-    window->move_by_cursor = false;
-    window->caption_press = false;
+    end_move(window, L"松开左键");
     if (!captured) return;
     captured->pressed = false;
     event.inside = under == captured;
@@ -809,6 +860,11 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
     if (window->destroyed) return;
     window->destroyed = true;
     stop_frames(window);
+    if (window->move_source)
+    {
+        g_source_remove(window->move_source);
+        window->move_source = 0;
+    }
     drop_timers((HWND)window);
     if (capture_window == (HWND)window) capture_window = NULL;
     for (UiWindow **link = &windows; *link; link = &(*link)->next)
@@ -1352,6 +1408,9 @@ void ui_window_begin_move(UiWindow *window)
         }
         log_info(L"窗口拖动开始：层壳窗口在 (%d,%d)，%ls", window->x, window->y,
             window->move_by_cursor ? L"按全局光标定位" : L"按本地增量移动");
+        // 能看到全局左键时才用定时器跟光标：它同时负责判断松手。
+        if (window->move_by_cursor && gesture_left_button_state() >= 0 && !window->move_source)
+            window->move_source = g_timeout_add(MOVE_FOLLOW_MILLISECONDS, move_follow_tick, window);
         return;
     }
     GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window->window));
