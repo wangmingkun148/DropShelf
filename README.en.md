@@ -1,10 +1,12 @@
-# DropShelf for Windows
+# DropShelf
 
 [简体中文](README.md) | English
 
 I only recently realised that there are a few other projects with the same name. I apologise for my almost non-existent naming skills (lol). That said, I haven't referenced the UI or logic of any other projects. My only source of inspiration was Dropover, which I mentioned below. I also hope to keep animations as one of the project's defining features and continue improving them.
 
 DropShelf is a temporary shelf for files on Windows. While dragging files, shake the mouse or pause at a screen edge, and a shelf appears. Drop your files on it, switch to the window you need, then drag them all to File Explorer, a chat app or a browser in one go.
+
+Both the Windows build and a native Wayland Linux build (C + GTK 4 + gtk4-layer-shell) are maintained. Build steps, dependencies and differences for Linux are in [linux/README-linux.md](linux/README-linux.md).
 
 **Highlights**
 
@@ -110,8 +112,16 @@ DropShelf installs to `%LOCALAPPDATA%\Programs\DropShelf` without admin rights; 
 
 ## System requirements
 
+Windows:
+
 - Windows 11, 64-bit
 - No separate .NET installation needed
+
+Linux:
+
+- A Wayland compositor with wlr-layer-shell support (Hyprland, Sway, …); Wayland sessions only
+- GTK 4, gtk4-layer-shell, gdk-pixbuf, libcurl
+- Gestures need the user to be in the `input` group; without it, use the global hotkey
 
 ## Building from source
 

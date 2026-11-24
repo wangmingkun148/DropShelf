@@ -1,10 +1,13 @@
 // 界面底座里的其余控件：等宽网格、滚动区、滑块、输入框和快捷键输入框。样式与 C# 版 Controls.xaml 里的相同。
 #include "ui.h"
 #include "ui_internal.h"
+#include "clipboard.h"
 #include "hotkey.h"
 #include "strings.h"
 
+#ifdef _WIN32
 #include <imm.h>
+#endif
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -522,6 +525,7 @@ static void textbox_keep_caret_visible(UiTextbox *box)
     if (box->scroll < 0) box->scroll = 0;
 }
 
+#ifdef _WIN32
 /// 输入法的候选窗跟着光标走。
 static void textbox_place_ime(UiTextbox *box)
 {
@@ -540,6 +544,13 @@ static void textbox_place_ime(UiTextbox *box)
     ImmSetCandidateWindow(ime, &candidate);
     ImmReleaseContext(handle, ime);
 }
+#else
+// Linux 上输入法由 GTK 处理；自绘文本框的输入法覆盖层在 M3 接上。
+static void textbox_place_ime(UiTextbox *box)
+{
+    (void)box;
+}
+#endif
 
 static void textbox_paint(UiElement *element, double time)
 {
@@ -641,28 +652,14 @@ static void textbox_copy(UiTextbox *box)
     if (box->anchor == box->caret) return;
     int start = box->anchor < box->caret ? box->anchor : box->caret;
     int end = box->anchor < box->caret ? box->caret : box->anchor;
-    HWND handle = ui_window_handle(box->base.window);
-    if (!OpenClipboard(handle)) return;
-    EmptyClipboard();
-    size_t bytes = (size_t)(end - start + 1) * sizeof(wchar_t);
-    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (memory)
-    {
-        wchar_t *target = GlobalLock(memory);
-        memcpy(target, box->text.data + start, bytes - sizeof(wchar_t));
-        target[end - start] = 0;
-        GlobalUnlock(memory);
-        if (!SetClipboardData(CF_UNICODETEXT, memory)) GlobalFree(memory);
-    }
-    CloseClipboard();
+    wchar_t *selected = wcs_dup_n(box->text.data + start, (size_t)(end - start));
+    clipboard_set_text(selected);
+    free(selected);
 }
 
 static void textbox_paste(UiTextbox *box)
 {
-    HWND handle = ui_window_handle(box->base.window);
-    if (!OpenClipboard(handle)) return;
-    HANDLE data = GetClipboardData(CF_UNICODETEXT);
-    const wchar_t *text = data ? GlobalLock(data) : NULL;
+    wchar_t *text = clipboard_get_text();
     if (text)
     {
         // 只取第一行，换行和制表符不进单行输入框。
@@ -671,11 +668,10 @@ static void textbox_paste(UiTextbox *box)
         wchar_t *line = wcs_dup_n(text, length);
         for (size_t index = 0; index < length; index++)
             if (line[index] == L'\t') line[index] = L' ';
-        GlobalUnlock(data);
         textbox_insert(box, line, length);
         free(line);
+        free(text);
     }
-    CloseClipboard();
 }
 
 static int word_left(const wchar_t *text, int index)
@@ -823,7 +819,8 @@ static void textbox_destroy(UiElement *element)
 }
 
 static const UiElementType textbox_type = {
-    textbox_measure, NULL, textbox_paint, textbox_mouse, textbox_destroy, true, textbox_key, textbox_character, textbox_focus, true, NULL, IDC_IBEAM
+    textbox_measure, NULL, textbox_paint, textbox_mouse, textbox_destroy, true, textbox_key, textbox_character, textbox_focus, true, NULL, IDC_IBEAM,
+    false, false, true
 };
 
 UiElement *ui_textbox(const wchar_t *text, UiText placeholder, int max_length, UiTextHandler changed, UiClickHandler submitted, void *context)

@@ -1,8 +1,20 @@
-// 基础工具：内存、字符串、路径和文件。程序内部一律用 UTF-16（wchar_t），只在读写文件时转成 UTF-8。
+// 基础工具：内存、字符串、路径和文件。程序内部一律用宽字符（Windows 上是 UTF-16，Linux 上是 UTF-32），
+// 只在读写文件和交给系统时转成 UTF-8。
 #pragma once
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform_linux.h"
+#endif
 #include <stdbool.h>
+
+// 路径里分隔目录的字符：共享代码里拼根目录和子项时用它，不直接写死反斜杠。
+#ifdef _WIN32
+#define PATH_SEPARATOR L'\\'
+#else
+#define PATH_SEPARATOR L'/'
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -126,7 +138,11 @@ void file_keep_unreadable(const wchar_t *path);
 bool file_write_atomic(const wchar_t *path, const void *data, size_t length);
 
 wchar_t *env_get(const wchar_t *name);                  // 没有设置或为空时返回 NULL
-wchar_t *local_app_data_directory(void);                // %LOCALAPPDATA%
+wchar_t *local_app_data_directory(void);                // %LOCALAPPDATA%；Linux 上是 XDG 数据目录
+wchar_t *config_directory(void);                        // 设置文件所在的文件夹（XDG_CONFIG_HOME/dropshelf）
+wchar_t *data_directory(void);                          // 记录、语言包等（XDG_DATA_HOME/dropshelf）
+wchar_t *cache_directory(void);                         // 缩略图等可再生的东西（XDG_CACHE_HOME/dropshelf）
+wchar_t *state_directory(void);                         // 日志、窗口状态等（XDG_STATE_HOME/dropshelf）
 wchar_t *executable_path(void);
 wchar_t *executable_directory(void);
 
@@ -137,6 +153,7 @@ wchar_t *new_guid_text(void);
 
 /// 在后台线程按顺序写文件，界面不用等（杀毒软件检查写入时可能要几十毫秒）。
 /// 连续保存时只写最新的内容：还没开始写的旧内容直接丢掉。
+#ifdef _WIN32
 typedef struct SaveQueue
 {
     INIT_ONCE once;
@@ -151,6 +168,22 @@ typedef struct SaveQueue
 } SaveQueue;
 
 #define SAVE_QUEUE_INIT(message) { INIT_ONCE_STATIC_INIT, {0}, {0}, NULL, NULL, NULL, 0, false, (message) }
+#else
+typedef struct SaveQueue
+{
+    pthread_mutex_t lock;
+    pthread_cond_t changed;
+    pthread_t thread;
+    bool thread_started;
+    wchar_t *path;
+    char *data;
+    size_t length;
+    bool busy;
+    const wchar_t *failure_message;
+} SaveQueue;
+
+#define SAVE_QUEUE_INIT(message) { .lock = PTHREAD_MUTEX_INITIALIZER, .changed = PTHREAD_COND_INITIALIZER, .failure_message = (message) }
+#endif
 
 void save_queue_post(SaveQueue *queue, const wchar_t *path, char *data, size_t length);   // 收下 data
 void save_queue_flush(SaveQueue *queue);                // 等还没写完的保存写完

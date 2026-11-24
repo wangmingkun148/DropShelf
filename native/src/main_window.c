@@ -9,7 +9,13 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
 #include <windowsx.h>
+#else
+// Wayland 上没有“鼠标第 4、5 键”，这个宏只用来编译通过；按键回调不会收到 WM_XBUTTONDOWN。
+#define GET_XBUTTON_WPARAM(wparam) ((WORD)((wparam) >> 16))
+#define XBUTTON1 0x0001
+#endif
 
 #ifndef DROPSHELF_VERSION
 #define DROPSHELF_VERSION L"0.0.0"

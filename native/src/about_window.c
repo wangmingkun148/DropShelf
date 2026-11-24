@@ -10,7 +10,9 @@
 #include "ui.h"
 #include "update_check.h"
 
+#ifdef _WIN32
 #include <shellapi.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,10 +48,14 @@ static void open_folder(const wchar_t *path)
 {
     if (wcs_is_blank(path)) return;
     directory_create(path);
+#ifdef _WIN32
     WStr arguments = {0};
     wstr_appendf(&arguments, L"\"%ls\"", path);
     if ((INT_PTR)ShellExecuteW(NULL, L"open", L"explorer.exe", arguments.data, NULL, SW_SHOWNORMAL) <= 32) log_error(L"打开文件夹失败\r\n%ls", path);
     wstr_free(&arguments);
+#else
+    if (!platform_open_external(path)) log_error(L"打开文件夹失败\r\n%ls", path);
+#endif
 }
 
 static wchar_t *language_folder(void)
@@ -176,7 +182,11 @@ static void on_check_update(void *context)
     (void)context;
     if (update_state == STATE_AVAILABLE && update_url)
     {
+        #ifdef _WIN32
         if ((INT_PTR)ShellExecuteW(NULL, L"open", update_url, NULL, NULL, SW_SHOWNORMAL) <= 32) log_error(L"打开下载页失败");
+#else
+        if (!platform_open_external(update_url)) log_error(L"打开下载页失败");
+#endif
         return;
     }
     update_state = STATE_CHECKING;
@@ -206,9 +216,15 @@ static void on_uninstall(void *context)
 {
     (void)context;
     wchar_t *path = uninstaller_path();
+#ifdef _WIN32
     wchar_t *directory = executable_directory();
     bool started = (INT_PTR)ShellExecuteW(NULL, L"open", path, NULL, directory, SW_SHOWNORMAL) > 32;
     free(directory);
+#else
+    // Linux 用发行版的包管理器卸载；按钮在没有卸载程序时本来就是灰的。
+    bool started = false;
+    (void)path;
+#endif
     free(path);
     if (started)
     {
@@ -386,10 +402,15 @@ void about_window_show(HWND owner)
     options.backdrop = UI_BACKDROP_MICA;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
+    #ifdef _WIN32
     options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));
+#else
+    options.icon = NULL;
+#endif
     options.closed = on_closed;
     window = ui_window_create(&options);
     if (!window) return;
+#ifdef _WIN32
     // 不在任务栏里另占一格，跟着主窗口。
     HWND handle = ui_window_handle(window);
     if (owner) SetWindowLongPtrW(handle, GWLP_HWNDPARENT, (LONG_PTR)owner);
@@ -399,6 +420,10 @@ void about_window_show(HWND owner)
         icon = gfx_image_from_icon(large);
         if (large) DestroyIcon(large);
     }
+#else
+    // Linux 的图标跟着 .desktop 的 app id 走，窗口里不另外画。
+    (void)owner;
+#endif
     UiElement *root = ui_element_new(&root_type, sizeof(UiElement));
     ui_add(root, build_content());
     close_button = ui_button(UI_BUTTON_CAPTION_CLOSE, UI_LIT(L"\xE711"), on_close, NULL);

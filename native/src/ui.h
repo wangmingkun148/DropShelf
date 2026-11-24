@@ -185,6 +185,8 @@ typedef struct UiElementType
     LPCWSTR cursor;     // 光标在上面时的样子；NULL 时能点的元素显示手形
     bool wheel;         // 接收滚轮；否则滚轮交给上一级
     bool paints_children;   // paint 自己按需要的顺序画子元素（ui_paint 不再挨个画）
+    /// 单行输入框：有焦点时，Wayland 后端在上面盖一个真正的 GtkEntry，让输入法（中文等）能用。
+    bool text_edit;
 } UiElementType;
 
 /// 所有元素开头的公共部分。具体的控件把它放在自己结构的第一个成员。

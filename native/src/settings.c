@@ -769,18 +769,27 @@ wchar_t *settings_path(void)
 {
     wchar_t *custom = env_get(L"DROPSHELF_SETTINGS_PATH");
     if (custom) return custom;
+#ifdef _WIN32
     wchar_t *base = local_app_data_directory();
     wchar_t *path = path_join(base, L"DropShelf\\settings.json");
+#else
+    wchar_t *base = config_directory();
+    wchar_t *path = path_join(base, L"settings.json");
+#endif
     free(base);
     return path;
 }
 
 wchar_t *settings_data_directory(void)
 {
+#ifndef _WIN32
+    return data_directory();
+#else
     wchar_t *path = settings_path();
     wchar_t *directory = path_directory(path);
     free(path);
     return directory ? directory : wcs_dup(L"");
+#endif
 }
 
 void settings_load(AppSettings *settings)

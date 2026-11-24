@@ -10,6 +10,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include "ui_linux.h"
+#endif
 
 #define CARD_WIDTH 150.0f
 #define CARD_HEIGHT 200.0f
@@ -620,8 +623,13 @@ static void ensure_ghost_window(void)
     options.message = ghost_window_message;
     options.closed = ghost_window_closed;
     ghost.window = ui_window_create(&options);
+#ifdef _WIN32
     if (ghost.window) SetWindowLongPtrW(ui_window_handle(ghost.window), GWL_EXSTYLE,
         GetWindowLongPtrW(ui_window_handle(ghost.window), GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+#else
+    // Wayland 上没有窗口样式：把输入区域设成空的，点到的还是下面的窗口。
+    if (ghost.window) ui_window_set_click_through(ghost.window, true);
+#endif
 }
 
 static void ghost_apply(void)

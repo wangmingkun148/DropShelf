@@ -8,8 +8,10 @@
 #include "ui.h"
 
 #include <math.h>
+#ifdef _WIN32
 #include <shellapi.h>
 #include <shellscalingapi.h>
+#endif
 #include <stdlib.h>
 
 // 尺寸都是 DIP。窗口比角大一圈，留出阴影和悬停时多伸出的地方。

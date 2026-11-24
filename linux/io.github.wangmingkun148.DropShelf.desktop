@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=DropShelf
+Name[zh_CN]=置物架
+Comment=Temporarily hold files, text and links
+Comment[zh_CN]=临时存放文件、文字和链接
+Exec=dropshelf %U
+Icon=io.github.wangmingkun148.DropShelf
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=file;temporary;shelf;drag;
+Keywords[zh_CN]=文件;临时;拖放;收纳;
+StartupNotify=false
+SingleMainWindow=true
+X-GNOME-UsesNotifications=true

@@ -422,6 +422,8 @@ void split_pad_show_for(ShelfWindow *source);
 bool split_pad_dismiss(SplitPlace *place);
 bool split_pad_is_shown(void);
 void split_pad_close_shared(void);
+/// Linux：拖出结束时问一下松手是不是落在“新置物架”上；问过就清掉。
+bool split_pad_take_request(void);
 
 /// 接收另一个置物架交来的项目，从 (x, y)（相对本窗口）飞进堆叠或列表。这边已经有的不重复放；一个也没放进来时提示。
 int shelf_receive(ShelfWindow *shelf, ShelfItem **items, int count, ShelfModel *from, float x, float y);

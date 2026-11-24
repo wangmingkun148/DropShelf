@@ -6,13 +6,17 @@
 #define SHARE_ALL (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
 #define MAXIMUM_PATH 32767
 
-/// 本地磁盘上的完整路径（C:\…）；网络路径和相对路径不取标识。
+/// 本地磁盘上的完整路径（C:\… 或 Linux 的 /…）；网络路径和相对路径不取标识。
 static bool is_local_path(const wchar_t *path)
 {
+#ifdef _WIN32
     if (!path || wcslen(path) < 3) return false;
     wchar_t letter = path[0];
     bool ascii_letter = (letter >= L'A' && letter <= L'Z') || (letter >= L'a' && letter <= L'z');
     return ascii_letter && path[1] == L':' && (path[2] == L'\\' || path[2] == L'/');
+#else
+    return path && path[0] == L'/';
+#endif
 }
 
 /// 只读属性（FILE_READ_ATTRIBUTES），不涉及文件内容，别的程序独占打开着的文件也能取到；打开文件夹需要 BACKUP_SEMANTICS。
@@ -23,9 +27,13 @@ static HANDLE open_attributes(const wchar_t *path)
 
 static bool read_identity(HANDLE handle, FileIdentity *identity)
 {
+#ifdef _WIN32
     wchar_t file_system[16] = {0};
     if (!GetVolumeInformationByHandleW(handle, NULL, 0, NULL, NULL, NULL, file_system, ARRAYSIZE(file_system))) return false;
     if (_wcsicmp(file_system, L"NTFS") != 0) return false;
+#else
+    // Linux 上用 (st_dev, st_ino)：同一个文件系统里改名、移动都不变。
+#endif
     BY_HANDLE_FILE_INFORMATION information;
     if (!GetFileInformationByHandle(handle, &information)) return false;
     ULONGLONG index = ((ULONGLONG)information.nFileIndexHigh << 32) | information.nFileIndexLow;
@@ -50,6 +58,7 @@ bool file_identity_get(const wchar_t *path, FileIdentity *identity)
 wchar_t *file_identity_resolve(const FileIdentity *identity, const wchar_t *original_path, bool is_folder)
 {
     if (!file_identity_valid(identity) || !is_local_path(original_path)) return NULL;
+#ifdef _WIN32
     wchar_t root[4] = { original_path[0], L':', L'\\', 0 };
     HANDLE volume = open_attributes(root);
     if (volume == INVALID_HANDLE_VALUE) return NULL;
@@ -81,4 +90,9 @@ wchar_t *file_identity_resolve(const FileIdentity *identity, const wchar_t *orig
     }
     CloseHandle(handle);
     return result;
+#else
+    // Linux 上还没实现按 inode 反查路径；改名/移动的跟随在 M4 用 GFileMonitor 补。
+    (void)is_folder;
+    return NULL;
+#endif
 }

@@ -52,6 +52,21 @@ bool clipboard_set_text(const wchar_t *text)
     return ok;
 }
 
+wchar_t *clipboard_get_text(void)
+{
+    if (!open_clipboard()) return NULL;
+    HANDLE data = GetClipboardData(CF_UNICODETEXT);
+    wchar_t *result = NULL;
+    if (data)
+    {
+        const wchar_t *text = GlobalLock(data);
+        if (text) result = wcs_dup(text);
+        GlobalUnlock(data);
+    }
+    CloseClipboard();
+    return result;
+}
+
 bool clipboard_set_files(const StrList *paths)
 {
     // DROPFILES：20 字节的头，后面是以两个 0 结尾的 UTF-16 路径列表。

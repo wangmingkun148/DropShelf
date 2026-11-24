@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wangmingkun148.DropShelf</id>
+  <name>DropShelf</name>
+  <name xml:lang="zh_CN">置物架</name>
+  <summary>Temporarily hold files, text and links</summary>
+  <summary xml:lang="zh_CN">临时存放文件、文字和链接</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>DropShelf is a temporary shelf for files, text and links. Drop something on it, switch windows, and pick it up again later.</p>
+    <p xml:lang="zh_CN">置物架临时存放文件、文字和链接：先把东西放上去，切换窗口，用的时候再拿回来。</p>
+  </description>
+  <launchable type="desktop-id">io.github.wangmingkun148.DropShelf.desktop</launchable>
+  <url type="homepage">https://github.com/wangmingkun148/DropShelf</url>
+  <url type="bugtracker">https://github.com/wangmingkun148/DropShelf/issues</url>
+  <developer id="io.github.wangmingkun148">
+    <name>Wang Mingkun</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="3.0.7" date="2026-11-24"/>
+  </releases>
+</component>

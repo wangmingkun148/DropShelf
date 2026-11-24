@@ -5,7 +5,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
 #include <winhttp.h>
+#else
+#include <curl/curl.h>
+#endif
 
 #ifndef DROPSHELF_VERSION
 #define DROPSHELF_VERSION L"0.0.0"
@@ -111,7 +115,9 @@ typedef struct Check
     void *context;
 } Check;
 
-static char *download(DWORD *status)
+#ifdef _WIN32
+
+static char *download(long *status)
 {
     *status = 0;
     WStr agent = {0};
@@ -128,8 +134,9 @@ static char *download(DWORD *status)
     if (request && WinHttpSendRequest(request, L"Accept: application/vnd.github+json\r\n", (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
         WinHttpReceiveResponse(request, NULL))
     {
-        DWORD size = sizeof(*status);
-        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, status, &size, WINHTTP_NO_HEADER_INDEX);
+        DWORD code = 0, size = sizeof(code);
+        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size, WINHTTP_NO_HEADER_INDEX);
+        *status = (long)code;
         for (;;)
         {
             DWORD available = 0;
@@ -149,10 +156,69 @@ static char *download(DWORD *status)
     return body;
 }
 
+#else
+
+typedef struct Downloaded
+{
+    char *body;
+    size_t length;
+} Downloaded;
+
+static size_t curl_received(char *part, size_t size, size_t count, void *data)
+{
+    Downloaded *downloaded = data;
+    size_t bytes = size * count;
+    // 发布列表不会很大；太大说明不对，不再读。
+    if (downloaded->length + bytes > 8 * 1024 * 1024) return 0;
+    downloaded->body = xrealloc(downloaded->body, downloaded->length + bytes + 1);
+    memcpy(downloaded->body + downloaded->length, part, bytes);
+    downloaded->length += bytes;
+    downloaded->body[downloaded->length] = 0;
+    return bytes;
+}
+
+static char *download(long *status)
+{
+    *status = 0;
+    CURL *curl = curl_easy_init();
+    if (!curl) return NULL;
+    Downloaded downloaded = {0};
+    WStr agent = {0};
+    wstr_appendf(&agent, L"DropShelf/%ls", DROPSHELF_VERSION);
+    char *narrow_agent = utf8_from_wide(agent.data, NULL);
+    wstr_free(&agent);
+    struct curl_slist *headers = curl_slist_append(NULL, "Accept: application/vnd.github+json");
+    curl_easy_setopt(curl, CURLOPT_URL, "https://api.github.com/repos/wangmingkun148/dropshelf/releases?per_page=30");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, narrow_agent ? narrow_agent : "DropShelf");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    // 只连本项目用的地址，不接受内容里给出的其他跳转。
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 0L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, TIMEOUT_MILLISECONDS / 1000);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_MILLISECONDS / 1000);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_received);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &downloaded);
+    CURLcode result = curl_easy_perform(curl);
+    long code = 0;
+    if (result == CURLE_OK) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+    *status = code;
+    curl_slist_free_all(headers);
+    if (narrow_agent) free(narrow_agent);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK)
+    {
+        free(downloaded.body);
+        return NULL;
+    }
+    return downloaded.body ? downloaded.body : xcalloc(1, 1);
+}
+
+#endif
+
 static void check_work(void *data)
 {
     Check *check = data;
-    DWORD status = 0;
+    long status = 0;
     char *body = download(&status);
     if (!body || status != 200)
     {

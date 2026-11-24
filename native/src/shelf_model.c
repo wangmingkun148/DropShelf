@@ -7,8 +7,10 @@
 #include "task.h"
 #include "thumbnail.h"
 
+#ifdef _WIN32
 #include <shellapi.h>
 #include <shlobj.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -937,11 +939,15 @@ bool shelf_model_copy_paths(ShelfModel *model, ShelfItem *const *items, int coun
 
 static bool shell_open(const wchar_t *target)
 {
+#ifdef _WIN32
     SHELLEXECUTEINFOW info = { .cbSize = sizeof(info) };
     info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
     info.lpFile = target;
     info.nShow = SW_SHOWNORMAL;
     return ShellExecuteExW(&info) != 0;
+#else
+    return platform_open_external(target);
+#endif
 }
 
 void shelf_model_open(ShelfModel *model, ShelfItem *item)

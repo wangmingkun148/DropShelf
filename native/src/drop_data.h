@@ -6,7 +6,9 @@
 #define COBJMACROS
 #include "base.h"
 
+#ifdef _WIN32
 #include <ole2.h>
+#endif
 
 typedef enum DropContentKind
 {

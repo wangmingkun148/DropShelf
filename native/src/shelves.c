@@ -6,7 +6,9 @@
 #include "task.h"
 
 #include <math.h>
+#ifdef _WIN32
 #include <shellscalingapi.h>
+#endif
 #include <stdlib.h>
 
 static ShelfWindow *open_shelves;   // 打开着的置物架

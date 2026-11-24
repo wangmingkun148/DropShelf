@@ -54,3 +54,9 @@ scoop install https://github.com/wangmingkun148/dropshelf/releases/latest/downlo
 想让用户用 `scoop install dropshelf` 这样的短名字安装，需要把清单放进一个 bucket：可以自己建一个 bucket 仓库放这份清单（清单里的 `checkver` 和 `autoupdate` 已经写好，bucket 的自动更新能跟上新版本），或者按 Scoop 官方 bucket 的收录要求提交到 `extras`。
 
 上架之后可以在 README 的“下载”一节补上对应的安装命令。
+
+## Linux 便携版
+
+发布标签时，`release.yml` 里的 `linux` 任务会在 Arch Linux 容器里编译，并运行 `linux/package.sh` 生成
+`DropShelf-<版本号>-linux-<架构>.tar.gz`，附加到同一个 Release。它只构建 x86_64；需要 aarch64 时在
+对应的机器上运行 `linux/package.sh`，或用 `linux/PKGBUILD` 在本机打包。

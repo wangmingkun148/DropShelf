@@ -2,7 +2,12 @@
 // ShelfWindow.DropIn.cs、ShelfWindow.DragOut.cs、ShelfWindow.Menu.cs 以及 ShelfWindow.xaml.cs 里的提示部分对应。
 #include "shelf_window_internal.h"
 #include "attachment_cache.h"
+#ifdef _WIN32
 #include "clipboard.h"
+#else
+#include "ui_linux.h"
+#include <gdk/gdk.h>
+#endif
 #include "folder_watch.h"
 #include "history_menu.h"
 #include "log.h"
@@ -193,6 +198,7 @@ static void offer_undo(ShelfWindow *shelf, ShelfRemoval *removal, bool expanded)
     shelf->close_after_toast = shelf->model->count == 0 && close_when_empty();
 }
 
+#ifdef _WIN32
 /// 文本或链接拖到了不接收文字的地方：提示可以转成文件，转好后再拖就和别的文件一样。
 static void offer_convert(ShelfWindow *shelf, ShelfItem **items, int count)
 {
@@ -202,6 +208,7 @@ static void offer_convert(ShelfWindow *shelf, ShelfItem **items, int count)
     for (int index = 0; index < count; index++) shelf->convert_items[index] = shelf_item_retain(items[index]);
     shelf->convert_count = count;
 }
+#endif
 
 static void convert_to_files(ShelfWindow *shelf, ShelfItem **items, int count)
 {
@@ -506,6 +513,7 @@ void shelf_restore_paths(ShelfWindow *shelf, const StrList *paths)
     }
 }
 
+#ifdef _WIN32
 static void paste(ShelfWindow *shelf)
 {
     IDataObject *data = clipboard_get_data();
@@ -521,9 +529,132 @@ static void paste(ShelfWindow *shelf)
     drop_read(data, false, true, &shelf->model->lifetime_over, received, receive);
     IDataObject_Release(data);
 }
+#else
+static void receive_paths_at(ShelfWindow *shelf, const StrList *paths, float x, float y);
+static void receive_text_at(ShelfWindow *shelf, const wchar_t *text, float x, float y);
+static void receive_texture_at(ShelfWindow *shelf, GdkTexture *texture, float x, float y);
+
+typedef struct PasteRead
+{
+    ShelfWindow *shelf;
+    float x, y;
+} PasteRead;
+
+static void paste_ready(GObject *source, GAsyncResult *result, gpointer data)
+{
+    PasteRead *read = data;
+    ShelfWindow *shelf = read->shelf;
+    GError *error = NULL;
+    const GValue *value = gdk_clipboard_read_value_finish(GDK_CLIPBOARD(source), result, &error);
+    if (error) g_error_free(error);
+    if (!shelf || shelf->closed)
+    {
+        if (value)
+        {
+            g_value_unset((GValue *)value);
+            g_free((GValue *)value);
+        }
+        shelf_window_release(shelf);
+        free(read);
+        return;
+    }
+    if (!value)
+    {
+        shelf_notify(shelf, S(STR_ClipboardEmpty), false);
+        shelf_window_release(shelf);
+        free(read);
+        return;
+    }
+    GType type = G_VALUE_TYPE(value);
+    if (type == GDK_TYPE_FILE_LIST)
+    {
+        StrList paths = {0};
+        GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
+        for (GSList *each = files; each; each = each->next)
+        {
+            char *path = g_file_get_path(G_FILE(each->data));
+            if (!path) continue;
+            wchar_t *wide = wide_from_utf8(path, strlen(path));
+            if (wide)
+            {
+                strlist_add(&paths, wide);
+                free(wide);
+            }
+            g_free(path);
+        }
+        g_slist_free(files);
+        receive_paths_at(shelf, &paths, read->x, read->y);
+        strlist_clear(&paths);
+    }
+    else if (type == G_TYPE_FILE)
+    {
+        StrList paths = {0};
+        char *path = g_file_get_path(g_value_get_object(value));
+        if (path)
+        {
+            wchar_t *wide = wide_from_utf8(path, strlen(path));
+            if (wide)
+            {
+                strlist_add(&paths, wide);
+                free(wide);
+            }
+            g_free(path);
+        }
+        receive_paths_at(shelf, &paths, read->x, read->y);
+        strlist_clear(&paths);
+    }
+    else if (type == G_TYPE_STRING)
+    {
+        const char *utf8 = g_value_get_string(value);
+        wchar_t *wide = utf8 ? wide_from_utf8(utf8, strlen(utf8)) : NULL;
+        if (wide)
+        {
+            receive_text_at(shelf, wide, read->x, read->y);
+            free(wide);
+        }
+    }
+    else if (type == GDK_TYPE_TEXTURE) receive_texture_at(shelf, g_value_get_object(value), read->x, read->y);
+    g_value_unset((GValue *)value);
+    g_free((GValue *)value);
+    shelf_window_release(shelf);
+    free(read);
+}
+
+static void paste(ShelfWindow *shelf)
+{
+    GdkDisplay *display = gdk_display_get_default();
+    GdkClipboard *clipboard = display ? gdk_display_get_clipboard(display) : NULL;
+    if (!clipboard)
+    {
+        shelf_notify(shelf, S(STR_ClipboardEmpty), false);
+        return;
+    }
+    GdkContentFormats *formats = gdk_clipboard_get_formats(clipboard);
+    GType type = G_TYPE_NONE;
+    if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_FILE_LIST)) type = GDK_TYPE_FILE_LIST;
+    else if (gdk_content_formats_contain_gtype(formats, G_TYPE_FILE)) type = G_TYPE_FILE;
+    else if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) type = GDK_TYPE_TEXTURE;
+    else if (gdk_content_formats_contain_gtype(formats, G_TYPE_STRING)) type = G_TYPE_STRING;
+    if (type == G_TYPE_NONE)
+    {
+        shelf_notify(shelf, S(STR_ClipboardEmpty), false);
+        return;
+    }
+    PasteRead *read = xcalloc(1, sizeof(PasteRead));
+    read->shelf = shelf_window_retain(shelf);
+    POINT cursor;
+    GetCursorPos(&cursor);
+    ScreenToClient(shelf->handle, &cursor);
+    float scale = shelf_scale(shelf);
+    read->x = cursor.x / scale;
+    read->y = cursor.y / scale;
+    gdk_clipboard_read_value_async(clipboard, type, G_PRIORITY_DEFAULT, NULL, paste_ready, read);
+}
+#endif
 
 // ───────────── 拖入 ─────────────
 
+#ifdef _WIN32
 static DWORD preferred_effect(DWORD allowed)
 {
     if (allowed & DROPEFFECT_COPY) return DROPEFFECT_COPY;
@@ -541,6 +672,7 @@ static void set_description(ShelfWindow *shelf, DropImageType type, const wchar_
     shelf->last_description = message;
     if (shelf->drag_data) drop_set_description(shelf->drag_data, type, message);
 }
+#endif
 
 static void ease_to(Anim *anim, double to, double duration, bool animate)
 {
@@ -569,12 +701,14 @@ void shelf_reset_tiles(ShelfWindow *shelf)
     apply_tiles(shelf, false, 0);
 }
 
+#ifdef _WIN32
 static void set_tiles_expanded(ShelfWindow *shelf, bool expanded)
 {
     if (expanded == shelf->tiles_expanded) return;
     shelf->tiles_expanded = expanded;
     apply_tiles(shelf, expanded, expanded ? TILES_EXPAND_DURATION : TILES_COLLAPSE_DURATION);
 }
+#endif
 
 void shelf_set_hovered_action(ShelfWindow *shelf, int action, bool force)
 {
@@ -587,6 +721,7 @@ void shelf_set_hovered_action(ShelfWindow *shelf, int action, bool force)
     shelf_repaint(shelf);
 }
 
+#ifdef _WIN32
 /// 拖到哪张卡片上（四周多留 3）；卡片没展开时是 -1。
 static int hit_test_tiles(ShelfWindow *shelf, float x, float y)
 {
@@ -599,6 +734,7 @@ static int hit_test_tiles(ShelfWindow *shelf, float x, float y)
     }
     return -1;
 }
+#endif
 
 void shelf_show_drop_overlay(ShelfWindow *shelf)
 {
@@ -644,6 +780,7 @@ void shelf_end_drag(ShelfWindow *shelf)
     request_frame(shelf);
 }
 
+#ifdef _WIN32
 static ShelfWindow *target_shelf(IDropTarget *self)
 {
     return ((struct ShelfDropTarget *)self)->shelf;
@@ -1009,6 +1146,425 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
     strlist_clear(&extra);
     shelf_window_release(shelf);
 }
+
+#else
+// Linux 的拖入拖出走 GdkDrop / GdkDrag，接在 ui_window 的 GTK 后端上；读取结果和移除逻辑和 Windows 共用。
+static GdkDrag *active_drag;    // 正在从这个进程拖出的数据，用来认出拖回自己身上的情况
+static bool self_drag;          // 拖动是从本进程的置物架开始的（GTK 的拖动源没有拿到 GdkDrag 之前）
+
+static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, double x, double y, GdkDragAction *actions, void **data);
+static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDragAction action);
+static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row);
+
+static DropContentKind classify_drop(GdkDrop *drop)
+{
+    GdkContentFormats *formats = gdk_drop_get_formats(drop);
+    if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_FILE_LIST) || gdk_content_formats_contain_gtype(formats, G_TYPE_FILE))
+        return DROP_FILES;
+    if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) return DROP_IMAGE;
+    if (gdk_content_formats_contain_gtype(formats, G_TYPE_STRING)) return DROP_TEXT;
+    return DROP_NONE;
+}
+
+static void add_file_paths(GdkFileList *list, StrList *paths)
+{
+    GSList *files = gdk_file_list_get_files(list);
+    for (GSList *each = files; each; each = each->next)
+    {
+        char *path = g_file_get_path(G_FILE(each->data));
+        if (!path) continue;
+        wchar_t *wide = wide_from_utf8(path, strlen(path));
+        if (wide)
+        {
+            strlist_add(paths, wide);
+            free(wide);
+        }
+        g_free(path);
+    }
+    g_slist_free(files);
+}
+
+static void receive_paths_at(ShelfWindow *shelf, const StrList *paths, float x, float y)
+{
+    if (paths->count == 0) return;
+    Receive *receive = xcalloc(1, sizeof(Receive));
+    receive->shelf = shelf_window_retain(shelf);
+    receive->x = x;
+    receive->y = y;
+    shelf->receiving++;
+    show_receiving(shelf, S(STR_ReadingDrop));
+    drop_read_paths(paths, received, receive);
+}
+
+static void receive_text_at(ShelfWindow *shelf, const wchar_t *text, float x, float y)
+{
+    wchar_t *trimmed = wcs_trim_dup(text ? text : L"");
+    if (!trimmed || !*trimmed)
+    {
+        free(trimmed);
+        return;
+    }
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc(1, sizeof(DroppedEntry));
+    result->entries[0].kind = text_is_single_url(trimmed) ? ITEM_LINK : ITEM_TEXT;
+    result->entries[0].value = trimmed;
+    result->count = 1;
+    Receive *receive = xcalloc(1, sizeof(Receive));
+    receive->shelf = shelf_window_retain(shelf);
+    receive->x = x;
+    receive->y = y;
+    shelf->receiving++;
+    received(result, receive);
+}
+
+static void receive_texture_at(ShelfWindow *shelf, GdkTexture *texture, float x, float y)
+{
+    wchar_t *directory = attachment_cache_create();
+    if (!directory) return;
+    wchar_t *path = path_join(directory, L"image.png");
+    size_t utf8_length = 0;
+    char *utf8 = utf8_from_wide(path, &utf8_length);
+    gboolean saved = utf8 ? gdk_texture_save_to_png(texture, utf8) : FALSE;
+    free(utf8);
+    if (!saved)
+    {
+        attachment_cache_release(directory);
+        free(path);
+        free(directory);
+        return;
+    }
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->with_facts = true;
+    result->entries = xcalloc(1, sizeof(DroppedEntry));
+    result->entries[0].kind = ITEM_FILE;
+    result->entries[0].value = path;
+    result->entries[0].has_facts = file_facts_read(path, &result->entries[0].facts);
+    result->entries[0].type_name = file_type_name(path);
+    result->count = 1;
+    // 缓存文件夹交给置物架持有：项目移除后由它清理掉图片文件。
+    strlist_add(&result->caches, directory);
+    free(directory);
+    Receive *receive = xcalloc(1, sizeof(Receive));
+    receive->shelf = shelf_window_retain(shelf);
+    receive->x = x;
+    receive->y = y;
+    shelf->receiving++;
+    received(result, receive);
+}
+
+struct LinuxDragOut
+{
+    ShelfWindow *shelf;
+    ShelfItem **items;
+    int count;
+    bool transferred;           // 已经交给别的置物架，结束时不要再按拖出的结果处理
+};
+typedef struct LinuxDragOut LinuxDragOut;
+static LinuxDragOut *current_drag_out;
+
+static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDrop *drop, const GValue *value, double x, double y,
+    GdkDragAction *action)
+{
+    (void)window;
+    ShelfWindow *shelf = context;
+    if (shelf->closing || shelf->closed) return false;
+    GdkDrag *source = drop ? gdk_drop_get_drag(drop) : NULL;
+    bool from_self = source && (source == active_drag || self_drag);
+    switch (phase)
+    {
+        case UI_DROP_ENTER:
+            shelf->drag_inside = true;
+            shelf->drag_from_self = from_self;
+            shelf->drag_from_shelf = false;
+            shelf->drag_kind = from_self ? DROP_NONE : classify_drop(drop);
+            if (!from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf);
+            return shelf->drag_kind != DROP_NONE && !shelf->model->busy;
+        case UI_DROP_MOTION:
+            return shelf->drag_kind != DROP_NONE && !shelf->model->busy;
+        case UI_DROP_LEAVE:
+            shelf_end_drag(shelf);
+            return true;
+        case UI_DROP_DROP:
+        {
+            DropContentKind kind = shelf->drag_kind;
+            bool self = shelf->drag_from_self;
+            shelf_end_drag(shelf);
+            if (self)
+            {
+                // 从一个置物架拖到另一个置物架上：项目交过去，来源那边按移走处理。
+                LinuxDragOut *out = current_drag_out;
+                if (out && out->shelf != shelf && !shelf->model->busy && !out->shelf->closed && !out->shelf->closing)
+                {
+                    out->transferred = true;
+                    shelf->model->has_interacted = true;
+                    shelf_receive(shelf, out->items, out->count, out->shelf->model, (float)x, (float)y);
+                    shelf_let_go(out->shelf, out->items, out->count);
+                    if (action) *action = GDK_ACTION_MOVE;
+                    return true;
+                }
+                return false;
+            }
+            if (kind == DROP_NONE || shelf->model->busy) return false;
+            shelf->model->has_interacted = true;
+            GType type = value ? G_VALUE_TYPE(value) : G_TYPE_INVALID;
+            if (type == GDK_TYPE_FILE_LIST)
+            {
+                StrList paths = {0};
+                add_file_paths((GdkFileList *)g_value_get_boxed(value), &paths);
+                receive_paths_at(shelf, &paths, (float)x, (float)y);
+                strlist_clear(&paths);
+            }
+            else if (type == G_TYPE_FILE)
+            {
+                StrList paths = {0};
+                char *path = g_file_get_path(g_value_get_object(value));
+                if (path)
+                {
+                    wchar_t *wide = wide_from_utf8(path, strlen(path));
+                    if (wide)
+                    {
+                        strlist_add(&paths, wide);
+                        free(wide);
+                    }
+                    g_free(path);
+                }
+                receive_paths_at(shelf, &paths, (float)x, (float)y);
+                strlist_clear(&paths);
+            }
+            else if (type == G_TYPE_STRING)
+            {
+                const char *utf8 = g_value_get_string(value);
+                wchar_t *wide = utf8 ? wide_from_utf8(utf8, strlen(utf8)) : NULL;
+                if (wide)
+                {
+                    receive_text_at(shelf, wide, (float)x, (float)y);
+                    free(wide);
+                }
+            }
+            else if (type == GDK_TYPE_TEXTURE) receive_texture_at(shelf, g_value_get_object(value), (float)x, (float)y);
+            return true;
+        }
+    }
+    return false;
+}
+
+void shelf_register_drop_target(ShelfWindow *shelf)
+{
+    if (!shelf || !shelf->ui) return;
+    ui_window_set_drop_handler(shelf->ui, linux_drop, shelf);
+    ui_window_set_drag_handler(shelf->ui, linux_drag_prepare, drag_out_finished, shelf);
+}
+
+void shelf_revoke_drop_target(ShelfWindow *shelf)
+{
+    if (!shelf || !shelf->ui) return;
+    ui_window_set_drop_handler(shelf->ui, NULL, NULL);
+    ui_window_set_drag_handler(shelf->ui, NULL, NULL, NULL);
+}
+
+static GdkDragAction gdk_action(DWORD effects)
+{
+    GdkDragAction action = 0;
+    if (effects & DROPEFFECT_COPY) action |= GDK_ACTION_COPY;
+    if (effects & DROPEFFECT_MOVE) action |= GDK_ACTION_MOVE;
+    if (effects & DROPEFFECT_LINK) action |= GDK_ACTION_LINK;
+    return action;
+}
+
+// 拖出从哪个位置开始；标题栏、滚动条、按钮上不拖出。
+static ShelfItem **drag_items_at(ShelfWindow *shelf, double x, double y, int *count)
+{
+    *count = 0;
+    ShelfModel *model = shelf->model;
+    int row = -1;
+    ShelfTarget target = hit_test(shelf, (float)x, (float)y, &row);
+    if (target == TARGET_STACK)
+    {
+        int total = model->count;
+        if (total == 0) return NULL;
+        ShelfItem **items = xalloc((size_t)total * sizeof(ShelfItem *));
+        for (int index = 0; index < total; index++) items[index] = shelf_item_retain(model->items[index]);
+        *count = total;
+        return items;
+    }
+    if (target != TARGET_ROW || row < 0 || row >= model->count) return NULL;
+    if (!model->items[row]->selected)
+    {
+        clear_selection(shelf);
+        model->items[row]->selected = true;
+    }
+    ShelfItem **items = selected_items(shelf, count);
+    for (int index = 0; index < *count; index++) shelf_item_retain(items[index]);
+    return items;
+}
+
+static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDragAction action)
+{
+    (void)window;
+    (void)context;
+    LinuxDragOut *out = data;
+    if (!out) return;
+    ShelfWindow *shelf = out->shelf;
+    SplitPlace place;
+    bool had_place = split_pad_dismiss(&place);
+    bool split = split_pad_take_request();
+    if (shelf && !shelf->closed)
+    {
+        shelf->dragging_out = false;
+        shelf->model->dragging_out = false;
+        shelf->model->has_interacted = true;
+        if (!out->transferred && split && had_place)
+        {
+            // 松手在“新置物架”上：拆成一个新的置物架。
+            POINT cursor;
+            GetCursorPos(&cursor);
+            shelf_split_off(shelf, out->items, out->count, &place, &cursor);
+        }
+        else if (!out->transferred && action != 0)
+        {
+            DragOutResult result = (action & GDK_ACTION_MOVE) ? DRAG_OUT_MOVED : (action & GDK_ACTION_LINK) ? DRAG_OUT_LINKED : DRAG_OUT_COPIED;
+            // 聊天软件和浏览器常在放下之后才读取文件，临时附件多保留一会儿。
+            for (int index = 0; index < out->count; index++)
+                if (out->items[index]->temporary || !shelf_item_is_file_system(out->items[index]))
+                    shelf_model_keep_temporary_files(shelf->model);
+            shelf_model_apply_drag_out(shelf->model, out->items, out->count, result, close_when_empty());
+        }
+        shelf_restore_dimmed(shelf);
+    }
+    active_drag = NULL;
+    self_drag = false;
+    current_drag_out = NULL;
+    for (int index = 0; index < out->count; index++) shelf_item_release(out->items[index]);
+    free(out->items);
+    shelf_window_release(out->shelf);
+    free(out);
+}
+
+static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, double x, double y, GdkDragAction *actions, void **data)
+{
+    (void)window;
+    ShelfWindow *shelf = context;
+    ShelfModel *model = shelf->model;
+    if (shelf->closing || shelf->closed || model->busy || shelf->dragging_out) return NULL;
+    int count = 0;
+    ShelfItem **items = drag_items_at(shelf, x, y, &count);
+    if (!items || count == 0)
+    {
+        free(items);
+        return NULL;
+    }
+    shelf_model_relink(model, items, count);
+    shelf->dragging_out = true;
+    model->dragging_out = true;
+    ui_window_set_tooltip(shelf->ui, NULL);
+
+    GdkContentProvider *provider = NULL;
+    ShelfItem **files = xalloc((size_t)count * sizeof(ShelfItem *));
+    ShelfItem **others = xalloc((size_t)count * sizeof(ShelfItem *));
+    int file_count = 0, other_count = 0;
+    bool has_temporary = false;
+    for (int index = 0; index < count; index++)
+    {
+        ShelfItem *item = items[index];
+        if (!shelf_item_is_file_system(item)) others[other_count++] = item;
+        else if (shelf_item_refresh_availability(item))
+        {
+            files[file_count++] = item;
+            has_temporary |= item->temporary;
+        }
+    }
+    // 有文件要拖出时，一起选中的文字和链接各写成一个文件跟着走，不再被落下。
+    StrList extra = {0};
+    if (file_count > 0 && other_count > 0) shelf_model_write_for_drag(model, others, other_count, &extra);
+    bool carried = file_count > 0 && extra.count == other_count && other_count > 0;
+    ShelfItem **dragged = xalloc((size_t)count * sizeof(ShelfItem *));
+    int dragged_count = 0;
+    if (file_count > 0)
+    {
+        memcpy(dragged, files, (size_t)file_count * sizeof(ShelfItem *));
+        dragged_count = file_count;
+        if (carried)
+        {
+            memcpy(dragged + dragged_count, others, (size_t)other_count * sizeof(ShelfItem *));
+            dragged_count += other_count;
+        }
+        for (int index = 0; index < dragged_count; index++) shelf_item_retain(dragged[index]);
+        StrList paths = {0};
+        for (int index = 0; index < file_count; index++) strlist_add(&paths, files[index]->value);
+        for (int index = 0; index < extra.count; index++) strlist_add(&paths, extra.items[index]);
+        GFile **objects = g_new0(GFile *, (gsize)paths.count);
+        int object_count = 0;
+        for (int index = 0; index < paths.count; index++)
+        {
+            size_t length = 0;
+            char *utf8 = utf8_from_wide(paths.items[index], &length);
+            if (!utf8) continue;
+            objects[object_count++] = g_file_new_for_path(utf8);
+            free(utf8);
+        }
+        strlist_clear(&paths);
+        GdkFileList *list = object_count > 0 ? gdk_file_list_new_from_array(objects, (gsize)object_count) : NULL;
+        for (int index = 0; index < object_count; index++) g_object_unref(objects[index]);
+        g_free(objects);
+        if (list)
+        {
+            provider = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
+            g_object_unref(list);
+            *actions = gdk_action(drag_allowed_effects(shelf->move_mode, has_temporary || extra.count > 0));
+            if (!*actions) *actions = GDK_ACTION_COPY;
+        }
+    }
+    else
+    {
+        // 没有文件：文字和链接连在一起当作文字拖出。
+        WStr text = {0};
+        for (int index = 0; index < other_count; index++)
+        {
+            if (others[index]->kind != ITEM_TEXT && others[index]->kind != ITEM_LINK) continue;
+            if (text.length > 0) wstr_append(&text, L"\n");
+            wstr_append(&text, others[index]->value);
+            dragged[dragged_count++] = shelf_item_retain(others[index]);
+        }
+        if (text.length > 0) provider = gdk_content_provider_new_typed(G_TYPE_STRING, text.data);
+        wstr_free(&text);
+        *actions = GDK_ACTION_COPY;
+    }
+    strlist_clear(&extra);
+    free(files);
+    free(others);
+    if (!provider || dragged_count == 0)
+    {
+        if (provider) g_object_unref(provider);
+        for (int index = 0; index < dragged_count; index++) shelf_item_release(dragged[index]);
+        free(dragged);
+        shelf->dragging_out = false;
+        model->dragging_out = false;
+        free(items);
+        return NULL;
+    }
+
+    *data = xcalloc(1, sizeof(LinuxDragOut));
+    LinuxDragOut *out = *data;
+    out->shelf = shelf_window_retain(shelf);
+    out->items = dragged;
+    out->count = dragged_count;
+    current_drag_out = out;
+    shelf_dim_dragged(shelf, items, count);
+    // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。
+    if (model->expanded && count < model->count) split_pad_show_for(shelf);
+    free(items);
+    self_drag = true;
+    return provider;
+}
+
+// Linux 的拖出由 GTK 的拖动源在拖动阈值到达时发起（见 linux_drag_prepare），共享代码里到阈值时的入口不用做别的。
+static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
+{
+    (void)shelf;
+    (void)items;
+    (void)count;
+}
+#endif
 
 // ───────────── 菜单 ─────────────
 

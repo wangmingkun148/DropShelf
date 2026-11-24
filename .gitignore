@@ -10,3 +10,4 @@ installer/*.exe
 
 # C 版的编译输出。
 native/build/
+linux/build/

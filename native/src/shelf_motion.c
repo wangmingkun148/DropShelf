@@ -6,7 +6,9 @@
 #include "task.h"
 
 #include <math.h>
+#ifdef _WIN32
 #include <shellscalingapi.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 

@@ -147,7 +147,7 @@ bool attachment_cache_is_owned(const wchar_t *path)
     trim_separators(candidate);
     const wchar_t *root = attachment_cache_root();
     size_t root_length = wcslen(root);
-    bool owned = wcslen(candidate) > root_length + 1 && candidate[root_length] == L'\\' &&
+    bool owned = wcslen(candidate) > root_length + 1 && candidate[root_length] == PATH_SEPARATOR &&
                  CompareStringOrdinal(candidate, (int)root_length, root, (int)root_length, TRUE) == CSTR_EQUAL;
     free(candidate);
     return owned;
@@ -256,17 +256,17 @@ wchar_t *attachment_cache_directory_of(const wchar_t *path)
     const wchar_t *root = attachment_cache_root();
     size_t root_length = wcslen(root);
     wchar_t *result = NULL;
-    if (wcslen(full) > root_length + 1 && full[root_length] == L'\\' &&
+    if (wcslen(full) > root_length + 1 && full[root_length] == PATH_SEPARATOR &&
         CompareStringOrdinal(full, (int)root_length, root, (int)root_length, TRUE) == CSTR_EQUAL)
     {
         const wchar_t *name = full + root_length + 1;
-        const wchar_t *end = wcschr(name, L'\\');
+        const wchar_t *end = wcschr(name, PATH_SEPARATOR);
         size_t name_length = end ? (size_t)(end - name) : wcslen(name);
         if (name_length > 0)
         {
             WStr directory = {0};
             wstr_append(&directory, root);
-            wstr_append_char(&directory, L'\\');
+            wstr_append_char(&directory, PATH_SEPARATOR);
             wstr_append_n(&directory, name, name_length);
             result = wstr_take(&directory);
         }
@@ -384,6 +384,8 @@ wchar_t *attachment_safe_name(const wchar_t *supplied, StrList *used)
 
 // ───────────── 下载来源标记 ─────────────
 
+#ifdef _WIN32
+
 char *zone_identifier_read(const wchar_t *path, size_t *length)
 {
     *length = 0;
@@ -430,3 +432,22 @@ void zone_identifier_write(const wchar_t *path, const char *zone, size_t length)
     WriteFile(file, zone, (DWORD)length, &written, NULL);
     CloseHandle(file);
 }
+
+#else
+
+// Linux 没有备用数据流；下载来源标记是 Windows 专有的提示，读不到也不影响别的功能。
+char *zone_identifier_read(const wchar_t *path, size_t *length)
+{
+    (void)path;
+    *length = 0;
+    return NULL;
+}
+
+void zone_identifier_write(const wchar_t *path, const char *zone, size_t length)
+{
+    (void)path;
+    (void)zone;
+    (void)length;
+}
+
+#endif

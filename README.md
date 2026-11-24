@@ -1,10 +1,12 @@
-# DropShelf for Windows
+# DropShelf
 
 简体中文 | [English](README.en.md)
 
 最近才发现有一些同名项目，我为我几乎为0的起名天赋道歉，不过我没有参考过其他项目的ui和逻辑，唯一的灵感来源只是下面提到的dropover，我也希望把动画作为一个特点继续维护
 
-DropShelf 是一个 Windows 临时文件置物架。拖着文件晃一晃鼠标，或拖到屏幕边缘停一下，置物架就会出现。先把文件放上去，切换到目标窗口后，再一次拖到资源管理器、聊天软件或浏览器里。
+DropShelf 是一个临时文件置物架。拖着文件晃一晃鼠标，或拖到屏幕边缘停一下，置物架就会出现。先把文件放上去，切换到目标窗口后，再一次拖到资源管理器、聊天软件或浏览器里。
+
+Windows 版和原生 Wayland 的 Linux 版（C + GTK 4 + gtk4-layer-shell）都在维护；Linux 的构建、依赖和差异见 [linux/README-linux.md](linux/README-linux.md)。
 
 **主要优点**
 
@@ -115,8 +117,16 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 
 ## 系统要求
 
+Windows：
+
 - Windows 11，64 位
 - 无需另外安装 .NET
+
+Linux：
+
+- 支持 wlr-layer-shell 的 Wayland 合成器（Hyprland、Sway 等），只支持 Wayland 会话
+- GTK 4、gtk4-layer-shell、gdk-pixbuf、libcurl
+- 手势需要当前用户在 `input` 组里；没有权限时用全局快捷键
 
 ## 从源码构建
 

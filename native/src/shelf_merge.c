@@ -5,9 +5,14 @@
 #include "drop_data.h"
 #include "log.h"
 #include "theme.h"
+#ifdef __linux__
+#include "ui_linux.h"
+#endif
 
 #include <math.h>
+#ifdef _WIN32
 #include <shellscalingapi.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -73,11 +78,17 @@ void shelf_drag_session_end(void)
 
 ShelfDragSession *shelf_drag_session_from(IDataObject *data)
 {
+#ifdef _WIN32
     if (!current_session || !data) return NULL;
     wchar_t *source = drop_source_shelf_id(data);
     bool same = source && wcs_equal(source, current_session->source->model->id);
     free(source);
     return same ? current_session : NULL;
+#else
+    // Linux 上置物架之间的拖动由 shelf_input.c 的 LinuxDragOut 直接认出来源，不需要从数据对象里读编号。
+    (void)data;
+    return current_session;
+#endif
 }
 
 void shelf_drag_session_drop_on(ShelfDragSession *session, ShelfWindow *target, float x, float y)
@@ -247,6 +258,7 @@ static void set_hot(bool hot, bool animate)
     if (pad.ui) ui_window_request_frame(pad.ui);
 }
 
+#ifdef _WIN32
 static HRESULT STDMETHODCALLTYPE pad_query_interface(IDropTarget *self, REFIID id, void **object)
 {
     if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_IDropTarget))
@@ -314,6 +326,50 @@ static HRESULT STDMETHODCALLTYPE pad_drop(IDropTarget *self, IDataObject *data, 
 }
 
 static IDropTargetVtbl pad_functions = { pad_query_interface, pad_add_ref, pad_release, pad_drag_enter, pad_drag_over, pad_drag_leave, pad_drop };
+#else
+// Linux 的拖放走 GdkDrop：落到这块“新置物架”上的只要是从本程序拖出来的就接受，
+// 松手后记下来，由拖出结束的代码把项目拆到新置物架里。
+static bool pad_split_requested;
+
+static bool pad_linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDrop *drop, const GValue *value, double x,
+    double y, GdkDragAction *action)
+{
+    (void)window;
+    (void)context;
+    (void)value;
+    (void)x;
+    (void)y;
+    if (!pad.shown) return false;
+    GdkDrag *drag = drop ? gdk_drop_get_drag(drop) : NULL;
+    bool local = drag ? ui_drag_is_local(drag) : false;
+    switch (phase)
+    {
+        case UI_DROP_ENTER:
+        case UI_DROP_MOTION:
+            set_hot(local, true);
+            if (local && action) *action = GDK_ACTION_COPY;
+            return local;
+        case UI_DROP_LEAVE:
+            set_hot(false, true);
+            return true;
+        case UI_DROP_DROP:
+            set_hot(false, false);
+            if (!local) return false;
+            pad_split_requested = true;
+            if (action) *action = GDK_ACTION_COPY;
+            return true;
+    }
+    return false;
+}
+
+/// 拖出结束时问一下：刚才松手是不是落在“新置物架”上（问过就清掉）。
+bool split_pad_take_request(void)
+{
+    bool requested = pad_split_requested;
+    pad_split_requested = false;
+    return requested;
+}
+#endif
 
 static void pad_closed(UiWindow *window, void *context)
 {
@@ -345,9 +401,13 @@ static bool ensure_pad(void)
     }
     pad.handle = ui_window_handle(pad.ui);
     ui_window_set_topmost(pad.ui, true);
+#ifdef _WIN32
     if (!pad.drop_helper) pad.drop_helper = drop_helper_create();
     pad.drop_target.base.lpVtbl = &pad_functions;
     pad.registered = SUCCEEDED(RegisterDragDrop(pad.handle, &pad.drop_target.base));
+#else
+    ui_window_set_drop_handler(pad.ui, pad_linux_drop, NULL);
+#endif
     return true;
 }
 
@@ -405,10 +465,14 @@ bool split_pad_is_shown(void)
 
 void split_pad_close_shared(void)
 {
+#ifdef _WIN32
     if (pad_data) IDataObject_Release(pad_data);
     pad_data = NULL;
     if (pad.registered && pad.handle) RevokeDragDrop(pad.handle);
     pad.registered = false;
+#else
+    pad_split_requested = false;
+#endif
     if (pad.ui) ui_window_close(pad.ui);
     pad.ui = NULL;
     pad.handle = NULL;

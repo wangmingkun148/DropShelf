@@ -623,6 +623,33 @@ wchar_t *local_app_data_directory(void)
     return result ? result : wcs_dup(L".");
 }
 
+// Windows 上没有 XDG 的对应物，仍都放在 %LOCALAPPDATA%\DropShelf 下。
+wchar_t *config_directory(void)
+{
+    wchar_t *base = local_app_data_directory();
+    wchar_t *path = path_join(base, L"DropShelf");
+    free(base);
+    return path;
+}
+
+wchar_t *data_directory(void)
+{
+    return config_directory();
+}
+
+wchar_t *cache_directory(void)
+{
+    wchar_t *base = local_app_data_directory();
+    wchar_t *path = path_join(base, L"DropShelf\\Cache");
+    free(base);
+    return path;
+}
+
+wchar_t *state_directory(void)
+{
+    return config_directory();
+}
+
 wchar_t *executable_path(void)
 {
     DWORD capacity = MAX_PATH;

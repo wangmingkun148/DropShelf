@@ -3,9 +3,14 @@
 
 #include "base.h"
 
+#ifdef _WIN32
 #include <ole2.h>
+#endif
 
 bool clipboard_set_text(const wchar_t *text);
+
+/// 剪贴板上的第一段文字；没有时返回 NULL。调用方负责 free。
+wchar_t *clipboard_get_text(void);
 
 /// 以“复制文件”的方式写入，可直接在资源管理器或聊天软件中粘贴；同时附上路径文字。
 bool clipboard_set_files(const StrList *paths);

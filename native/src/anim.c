@@ -1,7 +1,9 @@
 #include "anim.h"
 #include "settings.h"
 
+#ifdef _WIN32
 #include <dwmapi.h>
+#endif
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,9 +79,14 @@ double frame_clock_step(double passed, double *lag)
 
 bool anim_enabled(void)
 {
+#ifdef _WIN32
     BOOL enabled = TRUE;
     if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0)) return true;
     return enabled != FALSE;
+#else
+    // M3 接上 GTK 的 gtk-enable-animations 和系统的“减少动态效果”；在此之前照常播放动画。
+    return true;
+#endif
 }
 
 void anim_set(Anim *anim, double value)
@@ -135,6 +142,10 @@ bool anim_update(Anim *anim, double time)
 }
 
 // ───────────── 逐帧回调 ─────────────
+// Windows：一个后台线程用 DwmFlush 等屏幕的下一次刷新，然后给界面线程发一条消息；界面线程在这条消息里调用各个订阅者。
+// Linux：实现在 native/platform/linux/anim_linux.c，用 GLib 的定时器。
+
+#ifdef _WIN32
 // 一个后台线程用 DwmFlush 等屏幕的下一次刷新，然后给界面线程发一条消息；界面线程在这条消息里调用各个订阅者。
 // 交给订阅者的时刻是这一帧将要显示的时刻（DWM 报告的上一次刷新加一个刷新周期），不是消息处理时的“现在”：
 // 消息有时排在鼠标输入后面晚到几毫秒，按“现在”算的话相邻两帧走的距离忽大忽小，看起来发抖；按显示的时刻算，每帧正好走一个周期。
@@ -321,6 +332,8 @@ void frames_shutdown(void)
     subscriber_count = 0;
 }
 
+#endif // _WIN32
+
 // ───────────── 低性能模式 ─────────────
 
 /// 刷新率不低于这个值时动画隔一帧更新，例如 165Hz 降到 82 帧；更低的刷新率照常每帧更新。
@@ -342,6 +355,7 @@ int low_performance_mode(void)
 /// 使用电池或系统开启了节能模式。逐帧回调里也会问到，电源状态几秒内不会来回变，两秒内不重复查。
 static bool saving_power(void)
 {
+#ifdef _WIN32
     static ULONGLONG checked;
     static bool has_checked, saving;
     ULONGLONG now = GetTickCount64();
@@ -351,6 +365,10 @@ static bool saving_power(void)
     SYSTEM_POWER_STATUS status;
     saving = GetSystemPowerStatus(&status) && (status.ACLineStatus == 0 || status.SystemStatusFlag == 1);
     return saving;
+#else
+    // M2 接上 /sys/class/power_supply 和 power-profiles-daemon；在此之前不自动进入低性能模式。
+    return false;
+#endif
 }
 
 bool low_performance_enabled(void)
@@ -362,11 +380,16 @@ bool low_performance_enabled(void)
 
 int display_refresh_rate(void)
 {
+#ifdef _WIN32
     HDC screen = GetDC(NULL);
     if (!screen) return 0;
     int refresh = GetDeviceCaps(screen, VREFRESH);
     ReleaseDC(NULL, screen);
     return refresh;
+#else
+    // GLib 的逐帧回调按显示器自己的节奏来，这里只用于低性能模式隔帧的判断；先按 60Hz。
+    return 60;
+#endif
 }
 
 bool low_performance_skip(double time)

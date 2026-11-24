@@ -207,6 +207,10 @@ bool hotkey_parse(const wchar_t *text, HotkeyGesture *gesture)
 }
 
 // ───────────── 注册 ─────────────
+// Windows 用 RegisterHotKey；Linux 走 xdg-desktop-portal GlobalShortcuts 或 Hyprland bind，
+// 实现放在 native/platform/linux/hotkey_linux.c。
+
+#ifdef _WIN32
 
 #define HOTKEY_ID 0x4453
 
@@ -267,3 +271,5 @@ void hotkey_service_stop(void)
     service_window = NULL;
     service_pressed = NULL;
 }
+
+#endif // _WIN32

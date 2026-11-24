@@ -226,6 +226,7 @@ const wchar_t *theme_accent_preset(int index)
     return accent_presets[index];
 }
 
+#ifdef _WIN32
 static bool read_system_dark_mode(void)
 {
     DWORD value = 1, size = sizeof(value);
@@ -243,6 +244,21 @@ static AccentPalette read_system_accent(void)
         return palette;
     return accent_palette_default();
 }
+#else
+// Linux 侧从 GTK 设置和 xdg-desktop-portal 的 color-scheme / accent-color 读取。
+bool theme_linux_system_is_dark(void);
+AccentPalette theme_linux_system_accent(void);
+
+static bool read_system_dark_mode(void)
+{
+    return theme_linux_system_is_dark();
+}
+
+static AccentPalette read_system_accent(void)
+{
+    return theme_linux_system_accent();
+}
+#endif
 
 bool theme_resolve_is_dark(int mode, bool system_is_dark)
 {
