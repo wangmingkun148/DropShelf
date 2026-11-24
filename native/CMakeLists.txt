@@ -71,6 +71,7 @@ add_library(dropshelf_core STATIC
     src/shelf_model.c
     src/shelf_peek.c
     src/shelves.c
+    src/shortcut_icons.c
     src/single_instance.c
     src/startup.c
     src/strings.c

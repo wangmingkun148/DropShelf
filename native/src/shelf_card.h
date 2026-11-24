@@ -51,6 +51,13 @@ void shelf_card_prewarm(void);
 /// 牌先隐身画好第一帧再现身，同时调用 shown，然后才开始计时；播完调用 finished，之后还停留两帧盖住置物架现身前的那一帧，再隐藏放回去。
 void shelf_card_play(ShelfCard *card, RECT target, RECT area, double dpi_scale, GfxImage *face, const CardMotion *motion,
     ShelfCardHandler shown, ShelfCardHandler finished, void *context);
+/// 换风格的翻牌（多米诺里的一张）：停 delay_ms 毫秒后，用 duration_ms 毫秒绕竖轴翻过来，翻到侧面时略微抬起。
+CardMotion card_motion_look_flip(double delay_ms, double duration_ms);
+/// 换风格时盖住一个窗口的那张牌：正面 front 是窗口原来的样子，摆在 from（屏幕像素）；停 delay_ms 毫秒后翻过来。
+/// 背面（新风格的样子）和翻过来后的位置由 shelf_card_set_back 给出，翻到一半还没给时背面画成牌背。shown、finished 同 shelf_card_play。
+void shelf_card_flip(ShelfCard *card, RECT from, double dpi_scale, GfxImage *front, double delay_ms, double duration_ms, ShelfCardHandler shown,
+    ShelfCardHandler finished, void *context);
+void shelf_card_set_back(ShelfCard *card, GfxImage *back, RECT to, double dpi_scale);
 /// 立即停下并隐藏，不再调用 shown 和 finished。
 void shelf_card_cancel(ShelfCard *card);
 

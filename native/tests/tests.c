@@ -20,6 +20,7 @@
 #include "shelf_window.h"
 #include "shelf_card.h"
 #include "look_dispatch.h"
+#include "look_switch.h"
 #include "task.h"
 #include "foreground.h"
 #include "gesture.h"
@@ -42,6 +43,7 @@
 #include "onboarding_window.h"
 #include "update_check.h"
 
+#include <dwmapi.h>
 #include <limits.h>
 #include <math.h>
 #include <shlobj.h>
@@ -1752,6 +1754,7 @@ int main(int argc, char **argv)
     run("gfx layers", test_gfx_layers);
     run("main window", test_main_window);
     run("main window settings", test_main_window_settings);
+    run("look switch", test_look_switch);
     run("calibration dialog", test_calibration_dialog);
     run("about and onboarding", test_about_and_onboarding);
 

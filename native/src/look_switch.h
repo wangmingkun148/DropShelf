@@ -5,3 +5,6 @@
 
 /// 设置里的风格变了之后调用（app_update_settings 里）。和现在的一样时什么也不做。
 void look_switch_to(Look look);
+
+/// 正在翻牌换风格（测试用：等翻完再检查）。
+bool look_switch_busy(void);

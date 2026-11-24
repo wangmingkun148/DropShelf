@@ -362,6 +362,10 @@ struct ShelfCard
     RECT target, bounds;
     float width, height, radius;
     GfxImage *face;
+    // 换风格的翻牌（shelf_card_flip）：牌从 from 的位置和大小翻到 target，背面是新风格的样子（还没截好时是牌背）。
+    bool morph;
+    RECT from;
+    GfxImage *back;
     ShelfCardHandler shown, finished;
     void *context;
     double elapsed, lag, last_time;
@@ -391,8 +395,20 @@ static void card_paint(UiWindow *window, void *context, double time)
     float opacity = (float)(pose.opacity < 0 ? 0 : pose.opacity > 1 ? 1 : pose.opacity);
     if (opacity <= 0.001f) return;
     float scale = ui_window_scale(window);
-    float x = (float)((card->target.left - card->bounds.left + (card->target.right - card->target.left) / 2.0) / scale + pose.x);
-    float y = (float)((card->target.top - card->bounds.top + (card->target.bottom - card->target.top) / 2.0) / scale + pose.y);
+    RECT place = card->target;
+    if (card->morph)
+    {
+        // 翻过去的同时从原来的大小变成新的大小（两种风格的置物架大小不同）。
+        double t = fmin(fmax(pose.turn / 180, 0), 1);
+        place.left = (LONG)lround(card->from.left + (card->target.left - card->from.left) * t);
+        place.top = (LONG)lround(card->from.top + (card->target.top - card->from.top) * t);
+        place.right = (LONG)lround(card->from.right + (card->target.right - card->from.right) * t);
+        place.bottom = (LONG)lround(card->from.bottom + (card->target.bottom - card->from.bottom) * t);
+        card->width = (float)((place.right - place.left) / scale);
+        card->height = (float)((place.bottom - place.top) / scale);
+    }
+    float x = (float)((place.left - card->bounds.left + (place.right - place.left) / 2.0) / scale + pose.x);
+    float y = (float)((place.top - card->bounds.top + (place.bottom - place.top) / 2.0) / scale + pose.y);
     double turn = pose.turn * PI / 180;
     float squash = (float)(fmax(fabs(cos(turn)), 0.01) * pose.scale);
     float lift = (float)((1 + (CARD_LIFT - 1) * fabs(sin(turn))) * pose.scale);
@@ -410,6 +426,13 @@ static void card_paint(UiWindow *window, void *context, double time)
     {
         gfx_push_layer(rect, radius, 1);
         gfx_draw_image(card->face, rect, 1);
+        gfx_pop_layer();
+        gfx_stroke_rounded(inset(rect, 0.5f), fmaxf(0, radius - 0.5f), theme_color(THEME_SHELF_BORDER), 1);
+    }
+    else if (card->morph && card->back)
+    {
+        gfx_push_layer(rect, radius, 1);
+        gfx_draw_image(card->back, rect, 1);
         gfx_pop_layer();
         gfx_stroke_rounded(inset(rect, 0.5f), fmaxf(0, radius - 0.5f), theme_color(THEME_SHELF_BORDER), 1);
     }
@@ -441,6 +464,9 @@ static void release_card(ShelfCard *card)
     // 不再引用置物架的截图。
     gfx_image_release(card->face);
     card->face = NULL;
+    gfx_image_release(card->back);
+    card->back = NULL;
+    card->morph = false;
     card->context = NULL;
     if (!card->window) return;
     card->next = idle_cards;
@@ -503,6 +529,8 @@ static void card_closed(UiWindow *window, void *context)
     card->shown = card->finished = NULL;
     gfx_image_release(card->face);
     card->face = NULL;
+    gfx_image_release(card->back);
+    card->back = NULL;
     if (idle) free(card);
 }
 
@@ -602,6 +630,62 @@ void shelf_card_play(ShelfCard *card, RECT target, RECT area, double dpi_scale, 
     card->pose = card_motion_at(motion, 0);
     card->stage = STAGE_SHOWING;
     card->frames = 0;
+    ui_window_request_frame(card->window);
+}
+
+CardMotion card_motion_look_flip(double delay_ms, double duration_ms)
+{
+    // 先停着等前一张翻到一半（多米诺），再绕竖轴翻过来；翻到侧面时略微抬起。
+    CardKey keys[] = {
+        key(0, 0, 0, 1, 0, 0),
+        eased(key(delay_ms, 0, 0, 1, 0, 0), EASE_IN_OUT),
+        eased(key(delay_ms + duration_ms * 0.5, 0, 0, 1.04, 0, 90), EASE_IN_OUT),
+        key(delay_ms + duration_ms, 0, 0, 1, 0, 180),
+    };
+    return motion_of(keys, ARRAYSIZE(keys), false, 0);
+}
+
+void shelf_card_flip(ShelfCard *card, RECT from, double dpi_scale, GfxImage *front, double delay_ms, double duration_ms, ShelfCardHandler shown,
+    ShelfCardHandler finished, void *context)
+{
+    if (!card->window) return;
+    card->motion = card_motion_look_flip(delay_ms, duration_ms);
+    card->morph = true;
+    card->from = card->target = from;
+    card->shown = shown;
+    card->finished = finished;
+    card->context = context;
+    card->width = (float)((from.right - from.left) / dpi_scale);
+    card->height = (float)((from.bottom - from.top) / dpi_scale);
+    card->radius = ui_is_windows_11() ? 8.0f : 0.0f;
+    gfx_image_release(card->face);
+    card->face = gfx_image_retain(front);
+    gfx_image_release(card->back);
+    card->back = NULL;
+    // 窗口先按原来的范围放，背面截好以后再按新旧两个范围放大（shelf_card_set_back）。
+    double room = SHADOW_ROOM * dpi_scale + fmax(from.right - from.left, from.bottom - from.top) * (CARD_LIFT - 1);
+    card->bounds = (RECT){ (LONG)(from.left - room), (LONG)(from.top - room), (LONG)(from.right + room), (LONG)(from.bottom + room) };
+    place(card);
+    window_set_cloaked(card->handle, true);
+    if (!IsWindowVisible(card->handle)) ShowWindow(card->handle, SW_SHOWNOACTIVATE);
+    place(card);
+    card->pose = card_motion_at(&card->motion, 0);
+    card->stage = STAGE_SHOWING;
+    card->frames = 0;
+    ui_window_request_frame(card->window);
+}
+
+void shelf_card_set_back(ShelfCard *card, GfxImage *back, RECT to, double dpi_scale)
+{
+    if (!card || card->stage == STAGE_IDLE || !card->morph) return;
+    gfx_image_release(card->back);
+    card->back = gfx_image_retain(back);
+    card->target = to;
+    double room = SHADOW_ROOM * dpi_scale + fmax(fmax(to.right - to.left, to.bottom - to.top), fmax(card->from.right - card->from.left, card->from.bottom - card->from.top)) *
+                                              (CARD_LIFT - 1);
+    card->bounds = (RECT){ (LONG)(fmin(card->from.left, to.left) - room), (LONG)(fmin(card->from.top, to.top) - room),
+        (LONG)(fmax(card->from.right, to.right) + room), (LONG)(fmax(card->from.bottom, to.bottom) + room) };
+    place(card);
     ui_window_request_frame(card->window);
 }
 

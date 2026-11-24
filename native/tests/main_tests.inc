@@ -846,6 +846,94 @@ static void forget_watch_asked(AppSettings *settings, void *context)
     settings->has_asked_folder_watch = false;
 }
 
+static void forget_look_asked(AppSettings *settings, void *context)
+{
+    (void)context;
+    settings->has_asked_look = false;
+}
+
+static void change_look_setting(AppSettings *settings, void *context)
+{
+    settings->look = *(int *)context;
+}
+
+static bool window_cloaked(HWND handle)
+{
+    BOOL cloaked = FALSE;
+    return SUCCEEDED(DwmGetWindowAttribute(handle, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked;
+}
+
+static bool look_switch_done(void)
+{
+    return !look_switch_busy();
+}
+
+/// 换风格：主窗口原地重建（不关窗口、回到原来那一页），开着的置物架换成那种风格的样子，项目不丢；翻牌结束后窗口都现身。
+static void test_look_switch(void)
+{
+    language_set_mode(LANGUAGE_CHINESE);
+    task_initialize();
+    app_update_settings(reset_main_window_settings, NULL);
+    main_window_show();
+    CHECK(main_window_is_open() && M->window, "主窗口没有打开");
+    if (!M->window) return;
+    pump_until_main_idle(300);
+    flip_show_page(PAGE_APPEARANCE);
+    HWND main_handle = ui_window_handle(M->window);
+    wchar_t *folder = test_folder(L"look-switch");
+    wchar_t *first = test_file(folder, L"a.txt", "a"), *second = test_file(folder, L"b.png", "b");
+    StrList paths = {0};
+    strlist_add(&paths, first);
+    strlist_add(&paths, second);
+    ShelfWindow *shelf = shelves_open_with_paths((POINT){ 500, 400 }, EDGE_NONE, &paths);
+    strlist_clear(&paths);
+    pump_for(800);
+    CHECK(shelf && shelf->model->count == 2, "置物架没有放进两个文件");
+    RECT simple_rect = { 0 };
+    if (shelf) GetWindowRect(shelf->handle, &simple_rect);
+
+    // 在外观页选“纸牌”。
+    UiElement *look = pages_control(PAGES_LOOK);
+    CHECK(look && ui_segmented_selected(look) == LOOK_SIMPLE, "外观页没有风格的选项，或默认不是简洁");
+    if (look) ui_segmented_choose(look, LOOK_CARDS);
+    pump_for(100);
+    pump_until_done(look_switch_done, 8000);
+    pump_for(200);
+    CHECK(theme_is_cards() && app_settings()->look == LOOK_CARDS, "选了纸牌以后风格没有换");
+    CHECK(main_window_is_open() && ui_window_handle(M->window) == main_handle && M->page == PAGE_APPEARANCE, "换风格时主窗口应原地重建，停在外观页");
+    CHECK(!window_cloaked(main_handle), "翻牌结束后主窗口应现身");
+    UiElement *cards_look = pages_control(PAGES_LOOK);
+    CHECK(cards_look && ui_segmented_selected(cards_look) == LOOK_CARDS, "重建后的外观页没有选中纸牌");
+    if (shelf)
+    {
+        RECT cards_rect;
+        GetWindowRect(shelf->handle, &cards_rect);
+        CHECK(!shelf->closed && shelf->model->count == 2 && IsWindowVisible(shelf->handle) && !window_cloaked(shelf->handle), "换风格后置物架应还在、项目不丢、窗口现身");
+        CHECK(cards_rect.right - cards_rect.left != simple_rect.right - simple_rect.left || cards_rect.bottom - cards_rect.top != simple_rect.bottom - simple_rect.top,
+            "换成纸牌后置物架应换成牌堆的大小");
+    }
+
+    // 换回简洁。
+    int simple = LOOK_SIMPLE;
+    app_update_settings(change_look_setting, &simple);
+    pump_for(100);
+    pump_until_done(look_switch_done, 8000);
+    pump_for(200);
+    CHECK(!theme_is_cards() && main_window_is_open() && ui_window_handle(M->window) == main_handle && !window_cloaked(main_handle), "换回简洁后主窗口不对");
+    if (shelf)
+    {
+        RECT back_rect;
+        GetWindowRect(shelf->handle, &back_rect);
+        CHECK(shelf->model->count == 2 && abs((back_rect.right - back_rect.left) - (simple_rect.right - simple_rect.left)) <= 1, "换回简洁后置物架应回到原来的大小");
+        shelf_window_close_now(shelf);
+    }
+    main_window_close();
+    pump_for(300);
+    free(first);
+    free(second);
+    free(folder);
+}
+
 static void test_about_and_onboarding(void)
 {
     about_window_show(NULL);
@@ -859,9 +947,13 @@ static void test_about_and_onboarding(void)
     CHECK(onboarding_window_is_open() && onboarding_window_step() == 0, "引导应从第 1 步开始");
     const wchar_t *next = onboarding_window_next_text();
     CHECK(next && wcscmp(next, L"下一步") == 0, "教程起始状态不正确");
-    for (int step = 1; step < 4; step++) onboarding_window_go(step);
+    // 第 2 步挑风格。
+    onboarding_window_go(1);
+    const wchar_t *look_title = onboarding_window_title_text();
+    CHECK(onboarding_window_step() == 1 && look_title && wcscmp(look_title, L"挑一种风格") == 0, "第 2 步应是挑风格");
+    for (int step = 2; step < 5; step++) onboarding_window_go(step);
     next = onboarding_window_next_text();
-    CHECK(onboarding_window_step() == 3 && next && wcscmp(next, L"下一步") == 0, "快速操作这一步后面还有观察文件夹");
+    CHECK(onboarding_window_step() == 4 && next && wcscmp(next, L"下一步") == 0, "快速操作这一步后面还有观察文件夹");
     const wchar_t *hotkey = app_settings()->hotkey;
     const wchar_t *body = onboarding_window_body_text();
     CHECK(hotkey && *hotkey && body && wcsstr(body, hotkey), "教程没有说明当前的快捷键");
@@ -874,21 +966,33 @@ static void test_about_and_onboarding(void)
     onboarding_window_go(9);
     title = onboarding_window_title_text();
     const wchar_t *add = onboarding_window_add_folder_text();
-    CHECK(onboarding_window_step() == 4 && !onboarding_window_next_text() && add && wcscmp(add, L"添加文件夹") == 0 &&
+    CHECK(onboarding_window_step() == 5 && !onboarding_window_next_text() && add && wcscmp(add, L"添加文件夹") == 0 &&
           title && wcscmp(title, L"新文件，就在手边") == 0, "超出时应停在问观察文件夹的最后一步");
     onboarding_window_close();
-    CHECK(!onboarding_window_is_open() && app_settings()->has_completed_first_run && app_settings()->has_asked_folder_watch,
-        "关掉引导后应记下已完成第一次运行，也算问过观察文件夹");
+    CHECK(!onboarding_window_is_open() && app_settings()->has_completed_first_run && app_settings()->has_asked_folder_watch &&
+              app_settings()->has_asked_look,
+        "关掉引导后应记下已完成第一次运行，也算问过观察文件夹和风格");
 
     // 升级来的老用户只问观察文件夹这一步。
     app_update_settings(forget_watch_asked, NULL);
     onboarding_window_show_watch();
     add = onboarding_window_add_folder_text();
-    CHECK(onboarding_window_is_open() && onboarding_window_is_watch_only() && onboarding_window_step() == 4 && add, "单独询问时应直接显示观察文件夹这一步");
+    CHECK(onboarding_window_is_open() && onboarding_window_is_watch_only() && onboarding_window_step() == 5 && add, "单独询问时应直接显示观察文件夹这一步");
     onboarding_window_go(0);
-    CHECK(onboarding_window_step() == 4, "单独询问时不能翻到引导的其他步");
+    CHECK(onboarding_window_step() == 5, "单独询问时不能翻到引导的其他步");
     onboarding_window_close();
     CHECK(app_settings()->has_asked_folder_watch, "单独询问后应记下已经问过");
+
+    // 升级来的老用户也单独问一次风格：只有挑风格这一步，按钮是“就用这个”。
+    app_update_settings(forget_look_asked, NULL);
+    onboarding_window_show_look();
+    next = onboarding_window_next_text();
+    CHECK(onboarding_window_is_open() && onboarding_window_is_look_only() && onboarding_window_step() == 1 && next && wcscmp(next, L"就用这个") == 0,
+        "单独问风格时应直接显示挑风格这一步");
+    onboarding_window_go(3);
+    CHECK(onboarding_window_step() == 1, "单独问风格时不能翻到引导的其他步");
+    onboarding_window_close();
+    CHECK(app_settings()->has_asked_look, "单独问过风格后应记下");
 }
 
 /// 校准对话框：太轻的示范不算，三次示范后给出建议，采用后灵敏度随之改变；重来时从头开始。

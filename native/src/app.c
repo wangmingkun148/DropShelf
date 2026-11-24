@@ -16,6 +16,7 @@
 #include "log.h"
 #include "look_switch.h"
 #include "probe.h"
+#include "shortcut_icons.h"
 #include "shelf_history.h"
 #include "shelf_peek.h"
 #include "shelf_window.h"
@@ -187,6 +188,17 @@ bool app_choose_watch_folder(HWND owner)
     app_watch_folder(folder);
     free(folder);
     return true;
+}
+
+static void change_look_asked(AppSettings *target, void *context)
+{
+    (void)context;
+    target->has_asked_look = true;
+}
+
+void app_mark_look_asked(void)
+{
+    if (!settings.has_asked_look) app_update_settings(change_look_asked, NULL);
 }
 
 void app_mark_folder_watch_asked(void)
@@ -403,9 +415,12 @@ static LRESULT CALLBACK message_window_procedure(HWND window, UINT message, WPAR
         case MESSAGE_SHOW_MAIN_WINDOW:
             if (exiting) return 0;
             main_window_show();
-            // 升级来的老用户没在引导里见过观察文件夹，打开主窗口时单独问一次。
-            if (settings.has_completed_first_run && !settings.has_asked_folder_watch && !onboarding_window_is_open())
-                onboarding_window_show_watch();
+            // 升级来的老用户没在引导里见过选风格和观察文件夹，打开主窗口时单独问一次；两样都没问过时先问风格，下次再问文件夹。
+            if (settings.has_completed_first_run && !onboarding_window_is_open())
+            {
+                if (!settings.has_asked_look) onboarding_window_show_look();
+                else if (!settings.has_asked_folder_watch) onboarding_window_show_watch();
+            }
             return 0;
         case MESSAGE_SHOW_ONBOARDING:
             if (!exiting) onboarding_window_show();
@@ -480,6 +495,8 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     free(packs);
     language_set_pack(language_packs_find(settings.language_pack));
     theme_initialize(settings.theme, settings.accent_color, (Look)settings.look);
+    // 重装或升级后安装程序把快捷方式的图标恢复成了第一个：按现在的风格再对一遍。
+    shortcut_icons_sync((Look)settings.look);
     low_performance_set_mode(settings.performance_mode);
     log_cleanup_old();
     attachment_cache_cleanup_stale();
