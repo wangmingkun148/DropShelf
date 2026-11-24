@@ -447,3 +447,188 @@ static void test_probe_window(void)
     CHECK(!IsWindow(window), "探针窗口没有销毁");
     if (SUCCEEDED(ole)) OleUninitialize();
 }
+
+// ───────────── 纸牌风格的置物架 ─────────────
+
+static void test_shelf_sizes_cards(void)
+{
+    // 纸牌风格下再跑一遍（和 style 分支原来的测试相同），跑完换回简洁。
+    theme_set_look(LOOK_CARDS);
+    float widths[3];
+    for (int size = 0; size < 3; size++) widths[size] = shelf_width_for(size);
+    CHECK(widths[SHELF_SIZE_SMALL] < widths[SHELF_SIZE_MEDIUM] && widths[SHELF_SIZE_MEDIUM] < widths[SHELF_SIZE_LARGE], "三档尺寸没有依次增大");
+
+    // 窗口大小只取决于尺寸、项目数和按钮数：用一个空的置物架结构量各档的大小，不用真的建窗口。
+    for (int buttons = 0; buttons <= 4; buttons += 4)
+    {
+        ShelfModel model = {0};
+        ShelfWindow shelf = {0};
+        shelf.model = &model;
+        shelf.actions.count = buttons;
+        bool ratio = true, wide = true;
+        float expanded[3];
+        for (int size = 0; size < 3; size++)
+        {
+            shelf.size = size;
+            float width, height, list_width, list_height;
+            shelf_target_size(&shelf, false, &width, &height);
+            shelf_target_size(&shelf, true, &list_width, &list_height);
+            expanded[size] = list_width;
+            // 堆叠区域的高度是宽度的 0.66：总高减去标题栏、堆叠下的两行文字和按钮栏。
+            float stack = height - SHELF_HEADER_HEIGHT - SHELF_CAPTION_HEIGHT - (buttons > 0 ? SHELF_ACTION_BAR_HEIGHT : 10);
+            if (fabsf(stack / width - 0.66f) > 0.01f) ratio = false;
+            if (list_width < width + 60) wide = false;
+        }
+        CHECK(ratio, "堆叠区域比例不一致");
+        CHECK(wide, "平铺开后过窄");
+        // 平铺开时一行放 4、5、6 张牌：中档 5 × 70 + 22。
+        CHECK(expanded[0] < expanded[1] && expanded[1] < expanded[2] && expanded[1] == 372, "展开后的宽度没有随三档尺寸变化");
+    }
+
+    // 小窗以鼠标为中心并保持在屏幕内（和探针窗口用同一个算法）。
+    POINT placed = probe_place((POINT){ 500, 400 }, (RECT){ 0, 0, 1000, 800 }, 300, 300);
+    CHECK(placed.x == 350 && placed.y == 250, "小窗没有以鼠标位置为中心");
+    placed = probe_place((POINT){ 10, 10 }, (RECT){ 0, 0, 1000, 800 }, 300, 300);
+    CHECK(placed.x == 0 && placed.y == 0, "左上角位置超出屏幕");
+    placed = probe_place((POINT){ 990, 790 }, (RECT){ 0, 0, 1000, 800 }, 300, 300);
+    CHECK(placed.x == 700 && placed.y == 500, "右下角位置超出屏幕");
+    placed = probe_place((POINT){ -500, 300 }, (RECT){ -1920, 0, 0, 1080 }, 300, 300);
+    CHECK(placed.x == -650 && placed.y == 150, "左侧副屏位置不正确");
+    theme_set_look(LOOK_SIMPLE);
+}
+
+/// C# 版 TestShelfWindowActions：按钮数量、标题、拖出方式、切换语言、按钮布局、置顶、展开收起、关闭后记入最近关闭并能恢复。
+static void test_shelf_window_actions_cards(void)
+{
+    // 纸牌风格下再跑一遍（和 style 分支原来的测试相同），跑完换回简洁。
+    theme_set_look(LOOK_CARDS);
+    language_set_mode(LANGUAGE_CHINESE);
+    HRESULT ole = OleInitialize(NULL);
+    task_initialize();
+    wchar_t *history_file = path_join(temporary_directory, L"history-window.json");
+    DeleteFileW(history_file);
+    shelf_history_load(history_file);
+    set_shelf_window_settings(LAYOUT_FOUR, TRANSFER_MOVE);
+    ShelfWindow *shelf = shelves_open_at((POINT){ 600, 400 }, false, false, EDGE_NONE);
+    CHECK(shelf != NULL, "没有打开置物架");
+    if (!shelf)
+    {
+        free(history_file);
+        if (SUCCEEDED(ole)) OleUninitialize();
+        theme_set_look(LOOK_SIMPLE);
+        return;
+    }
+    pump_for(600);
+    HWND handle = shelf->handle;
+    CHECK(shelf->actions.count == LAYOUT_FOUR, "快速操作按钮数量不正确");
+    CHECK(shelf_window_is_reusable(shelf), "空置物架应可复用");
+    CHECK(window_title_is(handle, L"DropShelf 置物架 - 置物架"), "置物架窗口标题不正确");
+    CHECK(shelf->move_mode && wcscmp(S(STR_TransferMove), L"移动") == 0, "默认拖出方式应显示为移动");
+
+    language_set_mode(LANGUAGE_ENGLISH);
+    pump_for(50);
+    CHECK(shelf->action_tooltips[0] && wcsncmp(shelf->action_tooltips[0], L"Compress: ", 10) == 0, "切换语言后快速操作提示没有更新");
+    CHECK(window_title_is(handle, L"DropShelf shelf - Shelf") && wcscmp(S(STR_TransferMove), L"Move") == 0, "切换语言后置物架文字没有更新");
+    language_set_mode(LANGUAGE_CHINESE);
+    pump_for(50);
+
+    set_shelf_window_settings(LAYOUT_TWO, TRANSFER_COPY);
+    CHECK(!shelf->move_mode, "拖出方式没有更新");
+    CHECK(shelf->actions.count == 2, "两个按钮时应显示两个操作");
+    int two_height = window_height(handle);
+    set_shelf_window_settings(LAYOUT_FOUR, TRANSFER_COPY);
+    CHECK(abs(window_height(handle) - two_height) <= 1, "两个和四个按钮的置物架高度应相同");
+    shelf_layout(shelf);
+    bool one_row = shelf->actions.count == 4;
+    for (int index = 1; index < shelf->actions.count; index++)
+        if (shelf->layout.action_buttons[index].top != shelf->layout.action_buttons[0].top) one_row = false;
+    CHECK(one_row, "四个操作时按钮应排成一行");
+    set_shelf_window_settings(LAYOUT_OFF, TRANSFER_COPY);
+    CHECK(shelf->actions.count == 0, "关闭快速操作后仍显示按钮");
+    set_shelf_window_settings(LAYOUT_FOUR, TRANSFER_MOVE);
+
+    wchar_t *folder = test_folder(L"shelf-window-actions");
+    wchar_t *file = test_file(folder, L"a.txt", "x");
+    shelf_layout(shelf);
+    CHECK(rect_is_empty(shelf->layout.view), "空置物架不应显示文件堆/列表切换按钮");
+    StrList paths = {0};
+    strlist_add(&paths, file);
+    shelf_window_add_paths(shelf, &paths);
+    strlist_clear(&paths);
+    pump_for(500);
+    shelf_layout(shelf);
+    CHECK(shelf->model->count == 1 && !rect_is_empty(shelf->layout.view), "只有一项时也应显示文件堆/列表切换按钮");
+    strlist_add(&paths, folder);
+    shelf_window_add_paths(shelf, &paths);
+    strlist_clear(&paths);
+    pump_for(500);
+    CHECK(shelf->model->count == 2 && !shelf_window_is_reusable(shelf), "有内容的置物架不应被复用");
+    CHECK(shelf->model->pinned && (GetWindowLongW(handle, GWL_EXSTYLE) & WS_EX_TOPMOST), "置物架默认应置顶");
+    shelf_layout(shelf);
+    click_rect(shelf->ui, shelf->layout.pin);
+    CHECK(!shelf->model->pinned && !(GetWindowLongW(handle, GWL_EXSTYLE) & WS_EX_TOPMOST), "取消钉子后置物架不应再置顶");
+    click_rect(shelf->ui, shelf->layout.pin);
+    CHECK(shelf->model->pinned && (GetWindowLongW(handle, GWL_EXSTYLE) & WS_EX_TOPMOST), "再点钉子后置物架应恢复置顶");
+
+    // 切换时窗口先平滑变大、牌再一张张发到格子，等动画播完再检查。
+    float scale = shelf_scale(shelf);
+    int collapsed_width = window_width(handle);
+    click_rect(shelf->ui, shelf->layout.view);
+    pump_for(900);
+    CHECK(shelf->model->expanded, "点击切换按钮没有平铺开");
+    CHECK(window_width(handle) >= (int)lroundf(shelf_width_for(SHELF_SIZE_MEDIUM) * scale) + (int)(60 * scale), "展开后宽度没有变化");
+
+    // 平铺时继续放入项目：一行放满之后再放一张时窗口变高。
+    int columns = cards_shelf_grid_columns(shelf->size);
+    shelf_layout(shelf);
+    CHECK(shelf->layout.columns == columns, "平铺一行放的牌数不对");
+    int one_row_height = window_height(handle);
+    wchar_t *extras[8] = {0};
+    for (int index = 0; index < columns - 1 && index < 8; index++)
+    {
+        wchar_t name[32];
+        swprintf(name, ARRAYSIZE(name), L"extra%d.txt", index);
+        extras[index] = test_file(folder, name, "y");
+        strlist_add(&paths, extras[index]);
+    }
+    shelf_window_add_paths(shelf, &paths);
+    strlist_clear(&paths);
+    pump_for(800);
+    CHECK(shelf->model->count == columns + 1 && window_height(handle) > one_row_height, "平铺时放入项目后牌或高度没有更新");
+    int later_count = shelf->model->count > 2 ? shelf->model->count - 2 : 0;
+    ShelfItem *later[8];
+    for (int index = 0; index < later_count && index < 8; index++) later[index] = shelf->model->items[2 + index];
+    shelf_remove_items(shelf, later, later_count < 8 ? later_count : 8);
+    pump_for(600);
+    shelf_layout(shelf);
+    click_rect(shelf->ui, shelf->layout.view);
+    pump_for(900);
+    CHECK(!shelf->model->expanded && abs(window_width(handle) - collapsed_width) <= 1 && !shelf->switching && !shelf->card_posed[0],
+        "叠起来的动画结束后应回到堆叠，窗口恢复收起时的宽度");
+
+    // 关掉以后记入最近关闭，恢复时项目原样回来。
+    shelf_window_close_animated(shelf);
+    CHECK(pump_until_done(no_shelves_open, 3000), "置物架没有关掉");
+    ShelfHistoryEntry *latest = shelf_history_latest();
+    CHECK(latest && latest->count == 2 && wcs_equal(latest->items[0].path, file) &&
+              wcs_equal(latest->items[1].path, folder), "关闭的置物架没有记入最近关闭");
+    if (latest)
+    {
+        shelves_restore(latest, NULL);
+        pump_for(800);
+        int count = 0;
+        shelf_history_entries(&count);
+        CHECK(shelves_open_count() == 1 && count == 0, "最近关闭的置物架没有恢复");
+    }
+    shelves_close_all();
+    pump_for(300);
+    shelf_history_clear();
+    shelf_history_flush();
+    DeleteFileW(history_file);
+    free(history_file);
+    for (int index = 0; index < 8; index++) free(extras[index]);
+    free(file);
+    free(folder);
+    if (SUCCEEDED(ole)) OleUninitialize();
+    theme_set_look(LOOK_SIMPLE);
+}

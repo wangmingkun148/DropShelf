@@ -1,5 +1,6 @@
 // 置物架的鼠标、键盘、右键菜单、拖入拖出、提示和处理中的遮罩，和 C# 版的
 // ShelfWindow.DropIn.cs、ShelfWindow.DragOut.cs、ShelfWindow.Menu.cs 以及 ShelfWindow.xaml.cs 里的提示部分对应。
+#include "look_variant.h"
 #include "shelf_window_internal.h"
 #include "attachment_cache.h"
 #include "clipboard.h"
@@ -10,6 +11,9 @@
 #include "theme.h"
 
 #include <math.h>
+#ifdef LOOK_VARIANT_CARDS
+#include <shellapi.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -463,6 +467,10 @@ static void received(DropReadResult *result, void *context)
             shelf->landing_y = receive->y;
             shelf->landing_added = summary.added;
         }
+#ifdef LOOK_VARIANT_CARDS
+        // 都已在置物架里或读取失败：摊开的牌直接合拢。
+        else shelf_close_fan(shelf);
+#endif
         if (summary.added == 0) shelf_notify(shelf, error_copy ? error_copy : message, false);
         else if (summary.duplicates > 0 || summary.unavailable > 0 || failed > 0)
         {
@@ -600,11 +608,37 @@ static int hit_test_tiles(ShelfWindow *shelf, float x, float y)
     return -1;
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 拖进来的文件数；读不到文件列表（文字、链接、虚拟文件）时为 0，不显示数字。
+static int incoming_count(IDataObject *data)
+{
+    FORMATETC request = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM medium = {0};
+    if (IDataObject_GetData(data, &request, &medium) != S_OK) return 0;
+    int count = 0;
+    HDROP drop = (HDROP)GlobalLock(medium.hGlobal);
+    if (drop)
+    {
+        count = (int)DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+        GlobalUnlock(medium.hGlobal);
+    }
+    ReleaseStgMedium(&medium);
+    return count;
+}
+
+void shelf_show_drop_overlay(ShelfWindow *shelf, IDataObject *data, int incoming)
+#else
 void shelf_show_drop_overlay(ShelfWindow *shelf)
+#endif
 {
     shelf_finish_motion(shelf);
     if (shelf->ui) ui_window_set_tooltip(shelf->ui, NULL);
     shelf->drop_zone_text = shelf->drag_from_shelf ? STR_ReleaseToMoveHere : shelf->model->count > 0 ? STR_ReleaseToAdd : STR_ReleaseToHold;
+#ifdef LOOK_VARIANT_CARDS
+    shelf->incoming = data ? incoming_count(data) : incoming;
+    // 原来那一摞最上面两张从叠着的样子向左右各转开一点，中间的虚线空位浮起来，等松手。
+    shelf_fan_out(shelf);
+#endif
     // 平常拖入时不带合并的蓄力底色；合并的提示自己接着设置。
     if (shelf->merge_hint == MERGE_HINT_NONE) shelf_reset_merge_charge(shelf);
     shelf_reset_tiles(shelf);
@@ -628,7 +662,13 @@ void shelf_show_drop_overlay(ShelfWindow *shelf)
     request_frame(shelf);
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 拖动离开或松手：放置区域淡出、内容区淡入。instant 时直接换回：松手后堆叠要从摊开的样子接着落牌（见 shelf_hold_fan），
+/// 两边的牌正好重合，交叉淡化反而会让牌变淡一下。
+static void end_drag(ShelfWindow *shelf, bool instant)
+#else
 void shelf_end_drag(ShelfWindow *shelf)
+#endif
 {
     if (shelf->handle) KillTimer(shelf->handle, SHELF_TIMER_LEAVE);
     shelf->drag_inside = false;
@@ -637,13 +677,33 @@ void shelf_end_drag(ShelfWindow *shelf)
     shelf->drag_data = NULL;
     shelf->overlay_hit = false;
     shelf_set_hovered_action(shelf, -1, false);
+#ifdef LOOK_VARIANT_CARDS
+    if (instant)
+    {
+        anim_set(&shelf->body_opacity, 1);
+        anim_set(&shelf->overlay_opacity, 0);
+    }
+    else
+    {
+        fade(&shelf->body_opacity, 1, OVERLAY_FADE_IN);
+        fade(&shelf->overlay_opacity, 0, OVERLAY_FADE_OUT);
+    }
+#else
     fade(&shelf->body_opacity, 1, OVERLAY_FADE_IN);
     fade(&shelf->overlay_opacity, 0, OVERLAY_FADE_OUT);
+#endif
     shelf_reset_tiles(shelf);
     if (shelf->ui) ui_window_set_border_color(shelf->ui, NULL);
     request_frame(shelf);
 }
 
+#ifdef LOOK_VARIANT_CARDS
+void shelf_end_drag(ShelfWindow *shelf)
+{
+    end_drag(shelf, false);
+}
+
+#endif
 static ShelfWindow *target_shelf(IDropTarget *self)
 {
     return ((struct ShelfDropTarget *)self)->shelf;
@@ -760,7 +820,11 @@ static HRESULT STDMETHODCALLTYPE target_drag_enter(IDropTarget *self, IDataObjec
         // 另一个置物架上的项目：松手后由那个置物架交过来。
         shelf->drag_from_shelf = !shelf->drag_from_self && shelf_drag_session_from(data) != NULL;
         shelf->drag_kind = shelf->drag_from_self ? DROP_NONE : drop_classify(data);
+#ifdef LOOK_VARIANT_CARDS
+        if (!shelf->drag_from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf, data, 0);
+#else
         if (!shelf->drag_from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf);
+#endif
     }
     // 出场期间拖出窗口又回来时，拖入的状态还留着，只需要重新接上拖动图像和说明。
     if (fresh || shelf->image_left)
@@ -828,7 +892,13 @@ static HRESULT STDMETHODCALLTYPE target_drop(IDropTarget *self, IDataObject *dat
     bool from_self = shelf->drag_from_self;
     DropContentKind kind = shelf->drag_kind;
     ShelfDragSession *session = from_self ? NULL : shelf_drag_session_from(data);
+#ifdef LOOK_VARIANT_CARDS
+    // 松手时摊开的牌留在堆叠上，等新牌落进中间再合拢。来自另一个置物架的项目稍后才交过来，那时摊开的牌已经收好，这里照常淡回去。
+    bool fan = action < 0 && !session && !from_self && !shelf->model->expanded && shelf_take_fan(shelf);
+    end_drag(shelf, fan);
+#else
     shelf_end_drag(shelf);
+#endif
 
     if (from_self || kind == DROP_NONE || shelf->model->busy || shelf->closing || (action >= 0 && !drop_can_provide_files(kind)))
     {
@@ -860,6 +930,9 @@ static HRESULT STDMETHODCALLTYPE target_drop(IDropTarget *self, IDataObject *dat
         return S_OK;
     }
 
+#ifdef LOOK_VARIANT_CARDS
+    if (fan) shelf_hold_fan(shelf);
+#endif
     // 文件很多、在网络盘上，或磁盘很久没用时，读取可能要好几秒：这期间显示正在读取。
     Receive *receive = xcalloc(1, sizeof(Receive));
     receive->shelf = shelf_window_retain(shelf);
@@ -1115,7 +1188,11 @@ static void open_shelf_menu(ShelfWindow *shelf)
     UiMenuItem items[16];
     int n = 0;
     if (model->expanded) items[n++] = menu_item(MENU_COLLAPSE, STR_MenuCollapse, L"\xE81E", L"Esc", true);
+#ifdef LOOK_VARIANT_CARDS
+    else if (has_items) items[n++] = menu_item(MENU_EXPAND, STR_MenuExpand, L"\xF0E2", NULL, true);
+#else
     else if (has_items) items[n++] = menu_item(MENU_EXPAND, STR_MenuExpand, L"\xE8FD", NULL, true);
+#endif
     items[n++] = menu_item(MENU_SELECT_ALL, STR_MenuSelectAll, L"\xE8B3", L"Ctrl+A", model->count > 1);
     items[n++] = menu_item(MENU_COPY, STR_MenuCopy, L"\xE8C8", L"Ctrl+C", has_items);
     items[n++] = menu_item(MENU_PASTE, STR_MenuPaste, L"\xE77F", L"Ctrl+V", true);
@@ -1198,6 +1275,31 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row)
     if (!shelf->shown_expanded) return in_rect(layout->stack, x, y) ? TARGET_STACK : TARGET_NONE;
     if (!in_rect(layout->list, x, y)) return TARGET_NONE;
     if (layout->scrollable && x >= layout->scroll_track.left) return TARGET_SCROLLBAR;
+#ifdef LOOK_VARIANT_CARDS
+    // 悬停的牌抬起来，右上角的移除按钮伸出牌角，先看它。
+    int hovered = shelf->hovered == TARGET_ROW || shelf->hovered == TARGET_ROW_REMOVE ? shelf->hovered_row : -1;
+    if (hovered >= 0 && hovered < shelf->model->count)
+    {
+        GfxRect card = shelf_tile_card_rect(shelf, hovered);
+        float lift = 4 * (float)shelf->model->items[hovered]->lift.value;
+        GfxRect face = { card.left, card.top - lift, card.right, card.bottom - lift };
+        if (in_rect(shelf_tile_remove_rect(face), x, y))
+        {
+            *row = hovered;
+            return TARGET_ROW_REMOVE;
+        }
+    }
+    int first, last;
+    shelf_visible_tiles(shelf, &first, &last);
+    for (int index = first; index <= last; index++)
+    {
+        if (!in_rect(shelf_tile_rect(shelf, index), x, y)) continue;
+        *row = index;
+        return TARGET_ROW;
+    }
+    // 牌之间的空白：双击收回堆叠。
+    return TARGET_GRID;
+#else
     int index = shelf->scroll_first + (int)floorf((y - layout->list.top - 1) / SHELF_ROW_PITCH);
     if (index < 0 || index >= shelf->model->count) return TARGET_NONE;
     GfxRect rect = shelf_row_rect(shelf, index);
@@ -1205,6 +1307,7 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row)
     *row = index;
     GfxRect remove = { rect.right - 6 - 26, rect.top + 8, rect.right - 6, rect.top + 34 };
     return in_rect(remove, x, y) ? TARGET_ROW_REMOVE : TARGET_ROW;
+#endif
 }
 
 /// 光标下的按钮的提示，和 C# 版各个按钮的 ToolTip 相同。
@@ -1228,9 +1331,33 @@ static void update_tooltip(ShelfWindow *shelf)
     if (shelf->ui) ui_window_set_tooltip(shelf->ui, shelf->dragging_out ? NULL : tooltip_for(shelf, shelf->hovered, shelf->hovered_row));
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 光标下的那张牌（悬停时抬起），没有时为 -1。
+static int hovered_tile(ShelfTarget target, int row)
+{
+    return target == TARGET_ROW || target == TARGET_ROW_REMOVE ? row : -1;
+}
+
+static void lift_tile(ShelfWindow *shelf, int index, bool up)
+{
+    if (index < 0 || index >= shelf->model->count) return;
+    anim_start(&shelf->model->items[index]->lift, up ? 1 : 0, up ? 0.120 : 0.150, EASE_OF(EASE_CUBIC_OUT));
+    if (shelf->ui) ui_window_request_frame(shelf->ui);
+}
+
+#endif
 static void set_hovered(ShelfWindow *shelf, ShelfTarget target, int row, bool scroll)
 {
     if (shelf->hovered == target && shelf->hovered_row == row && shelf->scroll_hovered == scroll) return;
+#ifdef LOOK_VARIANT_CARDS
+    // 悬停的牌抬起 4，移开时放下。
+    int was_tile = hovered_tile(shelf->hovered, shelf->hovered_row), is_tile = hovered_tile(target, row);
+    if (was_tile != is_tile)
+    {
+        lift_tile(shelf, was_tile, false);
+        lift_tile(shelf, is_tile, true);
+    }
+#endif
     bool was_toast = shelf->hovered == TARGET_TOAST || shelf->hovered == TARGET_TOAST_ACTION;
     bool is_toast = target == TARGET_TOAST || target == TARGET_TOAST_ACTION;
     shelf->hovered = target;
@@ -1251,15 +1378,31 @@ static bool passed_drag_threshold(ShelfWindow *shelf, float x, float y)
     return fabsf(x - shelf->press_x) >= GetSystemMetrics(SM_CXDRAG) || fabsf(y - shelf->press_y) >= GetSystemMetrics(SM_CYDRAG);
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 平铺的可见高度（DIP）。
+static float grid_viewport(ShelfWindow *shelf)
+{
+    return shelf->layout.list.bottom - shelf->layout.list.top - 2;
+}
+
+#endif
 static void scroll_to_thumb(ShelfWindow *shelf, float y)
 {
     const ShelfLayout *layout = &shelf->layout;
     float track = layout->scroll_track.bottom - layout->scroll_track.top;
     float length = layout->scroll_thumb.bottom - layout->scroll_thumb.top;
+#ifdef LOOK_VARIANT_CARDS
+    float maximum = layout->extent - grid_viewport(shelf);
+#else
     int maximum = shelf->model->count - shelf_visible_rows(shelf);
+#endif
     if (maximum <= 0 || track - length <= 0) return;
     float position = (y - shelf->scroll_drag_offset - layout->scroll_track.top) / (track - length);
+#ifdef LOOK_VARIANT_CARDS
+    shelf_set_scroll_offset(shelf, position * maximum);
+#else
     shelf_set_scroll(shelf, (int)lroundf(position * maximum));
+#endif
 }
 
 static void press_row(ShelfWindow *shelf, int index, float x, float y)
@@ -1437,8 +1580,15 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
                 shelf_move_by_hand(shelf);
                 break;
             }
+#ifdef LOOK_VARIANT_CARDS
+            // 平铺里按下：单击时“刚由单击牌堆摊开”就过去了；双击的第二下落在刚摊开的牌桌上时不算数，不打开牌也不收回去。
+            bool in_grid = target == TARGET_ROW || target == TARGET_ROW_REMOVE || target == TARGET_GRID || target == TARGET_SCROLLBAR;
+            if (in_grid && !double_click) shelf->expanded_by_click = false;
+            bool grid_double_click = double_click && !shelf->expanded_by_click;
+#endif
             if (target == TARGET_STACK)
             {
+#ifndef LOOK_VARIANT_CARDS
                 if (double_click && model->count == 1)
                 {
                     shelf->stack_pressed = false;
@@ -1446,21 +1596,43 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
                     shelf_model_open(model, model->items[0]);
                     break;
                 }
+#endif
                 shelf->stack_pressed = true;
                 shelf->press_x = event->x;
                 shelf->press_y = event->y;
             }
             else if (target == TARGET_ROW)
             {
+#ifdef LOOK_VARIANT_CARDS
+                if (double_click)
+#else
                 if (double_click && row >= 0)
+#endif
                 {
                     shelf->list_pressed = false;
                     shelf->pressed = TARGET_NONE;
+#ifdef LOOK_VARIANT_CARDS
+                    if (grid_double_click && row >= 0) shelf_model_open(model, model->items[row]);
+#else
                     shelf_model_open(model, model->items[row]);
+#endif
                     break;
                 }
                 press_row(shelf, row, event->x, event->y);
             }
+#ifdef LOOK_VARIANT_CARDS
+            else if (target == TARGET_GRID)
+            {
+                // 双击牌之间的空白处收回堆叠。
+                shelf->pressed = TARGET_NONE;
+                if (grid_double_click)
+                {
+                    model->has_interacted = true;
+                    shelf_model_set_expanded(model, false);
+                    break;
+                }
+            }
+#endif
             else if (target == TARGET_SCROLLBAR)
             {
                 const ShelfLayout *layout = &shelf->layout;
@@ -1471,8 +1643,13 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
                 }
                 else
                 {
+#ifdef LOOK_VARIANT_CARDS
+                    float page = grid_viewport(shelf);
+                    shelf_set_scroll_offset(shelf, shelf->scroll_offset + (event->y < layout->scroll_thumb.top ? -page : page));
+#else
                     int page = shelf_visible_rows(shelf);
                     shelf_set_scroll(shelf, shelf->scroll_first + (event->y < layout->scroll_thumb.top ? -page : page));
+#endif
                 }
             }
             SetCapture(shelf->handle);
@@ -1491,6 +1668,14 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
             {
                 shelf->stack_pressed = false;
                 model->has_interacted = true;
+#ifdef LOOK_VARIANT_CARDS
+                // 点一下牌堆（没有拖动）就摊开成平铺。这一下若是双击的第一下，第二下会落在刚摊开的牌桌上，不能再把它收回去。
+                if (target == TARGET_STACK)
+                {
+                    shelf->expanded_by_click = true;
+                    expand(shelf);
+                }
+#endif
             }
             if (shelf->list_pressed && shelf->defer_selection && shelf->pressed_item && shelf_model_contains(model, shelf->pressed_item))
             {
@@ -1506,12 +1691,16 @@ bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event)
         }
         case UI_MOUSE_WHEEL:
             if (shelf->shown_expanded && !shelf->switching && model->count > 0)
+#ifdef LOOK_VARIANT_CARDS
+                shelf_set_scroll_offset(shelf, shelf->scroll_offset - event->wheel * SHELF_ROW_PITCH);
+#else
             {
                 UINT lines = 3;
                 SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
                 if (lines == WHEEL_PAGESCROLL) lines = (UINT)shelf_visible_rows(shelf);
                 shelf_set_scroll(shelf, shelf->scroll_first - (int)lroundf(event->wheel * (float)lines));
             }
+#endif
             break;
     }
     return true;

@@ -1,6 +1,7 @@
 // 主窗口里的三个对话框（Windows 11 对话框样式，盖在半透明的遮罩上）：添加或编辑自定义操作、确认删除、晃动示范校准。
 // 和 C# 版的 CustomActionEditorViewModel、ShakeCalibrationViewModel、MainWindow.Calibration.cs 以及 MainWindow.xaml 里的对话框对应。
 #include "main_window_internal.h"
+#include "card_face.h"
 #include "file_dialog.h"
 #include "gesture.h"
 #include "quick_action.h"
@@ -717,10 +718,40 @@ static GfxSize pad_measure(UiElement *element, float available)
     return (GfxSize){ available, 170 };
 }
 
+/// 纸牌：练习区是一小块牌桌，那张“文件”是一张竖版牌：按下后跟着光标走，松手弹回。提示写在牌桌底边。
+static void pad_paint_cards(GfxRect bounds)
+{
+    ThemePattern table = theme_pattern(THEME_PATTERN_TABLE);
+    gfx_push_layer(bounds, 8, 1);
+    gfx_fill_rounded_pattern(bounds, 0, &table);
+    GfxTextStyle hint = { GFX_FONT_TEXT, 11, 400, false, true, GFX_ALIGN_CENTER, GFX_ALIGN_END };
+    Color hint_color = theme_color(THEME_TABLE_TEXT);
+    hint_color.a = (uint8_t)(hint_color.a * 0.8f);
+    gfx_text_draw(S(STR_CalibrationPadHint), (GfxRect){ bounds.left + 8, bounds.top, bounds.right - 8, bounds.bottom - 10 }, &hint, hint_color);
+    float dx = C.stroking ? C.follow_x : (float)C.chip_x.value, dy = C.stroking ? C.follow_y : (float)C.chip_y.value;
+    // 牌下面留出 14 给提示，所以中心比牌桌的中心高 7。
+    float cx = (bounds.left + bounds.right) / 2 + dx, cy = (bounds.top + bounds.bottom) / 2 - 7 + dy;
+    GfxRect chip = { cx - 36, cy - 50, cx + 36, cy + 50 };
+    gfx_fill_rounded(chip, 5, theme_color(THEME_SHELF_TILE));
+    gfx_stroke_rounded(chip, 5, theme_color(THEME_SHELF_TILE_BORDER), 1.2f);
+    static const CardCorner corner = { 18, 18, 6, 2 };
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    card_paint_corner(L"1", SUIT_DOCUMENT, &corner, chip.left + 6, chip.top + 5, ink, 1);
+    card_paint_corner_inverted(L"1", SUIT_DOCUMENT, &corner, chip, 6, 5, ink, 1);
+    GfxTextStyle glyph = { GFX_FONT_ICON, 24, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    gfx_text_draw(GLYPH_DOCUMENT, chip, &glyph, theme_color(THEME_TEXT_SECONDARY));
+    gfx_pop_layer();
+}
+
 static void pad_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
+    if (theme_is_cards())
+    {
+        pad_paint_cards(bounds);
+        return;
+    }
     gfx_fill_rounded(bounds, 8, theme_color(THEME_CONTROL_ALT));
     gfx_stroke_rounded(bounds, 8, theme_color(THEME_DIVIDER), 1);
     gfx_push_layer(bounds, 8, 1);
@@ -775,17 +806,28 @@ static void pad_mouse(UiElement *element, const UiMouseEvent *event)
 
 static const UiElementType pad_type = { pad_measure, NULL, pad_paint, pad_mouse, NULL, true };
 
+/// 进度：简洁是三个圆点，记下一次亮一个；纸牌是三张小牌，没记下时是虚线空位，记下后是强调色的牌。
 static GfxSize dot_measure(UiElement *element, float available)
 {
     (void)element;
     (void)available;
-    return (GfxSize){ 8, 8 };
+    return theme_is_cards() ? (GfxSize){ 10, 14 } : (GfxSize){ 8, 8 };
 }
 
 static void dot_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
+    if (theme_is_cards())
+    {
+        if (element->disabled) gfx_stroke_rounded_dashed(bounds, 2, theme_color(THEME_TEXT_SECONDARY), 1, 2, 2);
+        else
+        {
+            gfx_fill_rounded(bounds, 2, theme_color(THEME_ACCENT));
+            gfx_stroke_rounded(bounds, 2, theme_color(THEME_TEXT_PRIMARY), 1);
+        }
+        return;
+    }
     bool lit = !element->disabled;
     Color color = theme_color(lit ? THEME_ACCENT : THEME_CONTROL_STRONG_BORDER);
     if (!lit) color.a = (uint8_t)(color.a * 0.4f);
@@ -842,9 +884,16 @@ static void build_calibration(void)
     // 结果：滑块上标出建议的位置，下面是这个位置需要晃多远、掉头几次。
     C.result = ui_stack(false, 0);
     ui_set_margin(C.result, 0, 20, 0, 0);
+    // 纸牌：和设置里的切牌滑块一样宽，只用来标出位置。
+    UiElement *ruler = ui_stack(false, 0);
+    if (theme_is_cards())
+    {
+        ruler->width = 240;
+        ruler->cross = UI_CROSS_START;
+    }
     C.slider = ui_slider(0, 100, SHAKE_BALANCED, 1, NULL, NULL);
     ui_slider_set_read_only(C.slider, true);
-    ui_add(C.result, C.slider);
+    ui_add(ruler, C.slider);
     UiElement *ends = ui_stack(true, 0);
     ui_set_margin(ends, 0, -3, 0, 0);
     UiElement *steady = ui_label(UI_STR(STR_SensitivitySteady), UI_TEXT_CAPTION);
@@ -854,7 +903,8 @@ static void build_calibration(void)
     UiElement *responsive = ui_label(UI_STR(STR_SensitivityResponsive), UI_TEXT_CAPTION);
     ui_label_style(responsive)->wrap = false;
     ui_add(ends, responsive);
-    ui_add(C.result, ends);
+    ui_add(ruler, ends);
+    ui_add(C.result, ruler);
     C.result_text = ui_label(UI_NO_TEXT, UI_TEXT_BODY);
     ui_label_set_size(C.result_text, 13);
     ui_set_margin(C.result_text, 0, 12, 0, 0);
@@ -868,7 +918,7 @@ static void build_calibration(void)
     {
         C.dots[index] = ui_element_new(&dot_type, sizeof(UiElement));
         C.dots[index]->cross = UI_CROSS_CENTER;
-        ui_set_margin(C.dots[index], 0, 0, 6, 0);
+        ui_set_margin(C.dots[index], 0, 0, theme_is_cards() ? 5 : 6, 0);
         ui_add(progress, C.dots[index]);
     }
     C.status = ui_label(UI_NO_TEXT, UI_TEXT_BODY);

@@ -173,8 +173,9 @@ static void card_paint(UiElement *element, double time)
     GfxRect bounds = element->bounds;
     bool source = dragging && card == pressed_card;
     if (source) gfx_push_opacity(0.4f);
-    gfx_fill_rounded(bounds, 6, theme_color(card->drop_target ? THEME_ACCENT_FAINT : THEME_CARD));
-    gfx_stroke_rounded(bounds, 6, theme_color(card->drop_target ? THEME_ACCENT : THEME_CARD_BORDER), 1);
+    bool cards = theme_is_cards();
+    gfx_fill_rounded(bounds, 6, theme_color(card->drop_target ? THEME_ACCENT_FAINT : cards ? THEME_SETTING_ROW : THEME_CARD));
+    gfx_stroke_rounded(bounds, 6, theme_color(card->drop_target ? THEME_ACCENT : cards ? THEME_SETTING_ROW_BORDER : THEME_CARD_BORDER), 1);
     Color primary = theme_color(THEME_TEXT_PRIMARY), secondary = theme_color(THEME_TEXT_SECONDARY);
     if (card->slot >= 0)
     {

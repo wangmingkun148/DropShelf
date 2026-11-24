@@ -1,5 +1,6 @@
 // 管理同时打开的多个置物架，并预先准备一个隐藏的窗口，让晃动后能立即弹出。和 C# 版的 ShelfManager 对应。
 #include "shelf_window_internal.h"
+#include "shelf_card.h"
 #include "lang.h"
 #include "shelf_history.h"
 #include "log.h"
@@ -98,6 +99,8 @@ static void prewarm_tick(void *data)
     spare = shelf_window_create();
     // 在屏幕外画一帧：字体、文字排版和绘制效果都在这时准备好，晃动弹出时显示窗口只剩少量工作。
     if (spare) ui_window_warm(spare->ui);
+    // 纸牌：替置物架出场的那张牌也先备好。
+    if (theme_is_cards()) shelf_card_prewarm();
 }
 
 void shelves_prewarm(void)
@@ -221,6 +224,22 @@ static void close_unused(void *data)
 void shelves_drag_released(void)
 {
     task_delay(350, close_unused, NULL);
+}
+
+void shelves_leave_look(void)
+{
+    for (ShelfWindow *shelf = open_shelves; shelf; shelf = shelf->next)
+        if (!shelf->closing) shelf_window_leave_look(shelf);
+    if (spare) shelf_window_leave_look(spare);
+    // 拆分用的小窗口按风格定了系统材质，下次用到时按新风格重建。
+    split_pad_close_shared();
+}
+
+void shelves_adopt_look(void)
+{
+    for (ShelfWindow *shelf = open_shelves; shelf; shelf = shelf->next)
+        if (!shelf->closing) shelf_window_adopt_look(shelf);
+    if (spare) shelf_window_adopt_look(spare);
 }
 
 void shelves_apply_settings(void)

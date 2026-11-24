@@ -18,3 +18,6 @@ const wchar_t *onboarding_window_title_text(void);
 const wchar_t *onboarding_window_body_text(void);
 const wchar_t *onboarding_window_next_text(void);
 const wchar_t *onboarding_window_add_folder_text(void);
+
+/// 换风格后换上那种风格的系统材质和图标（演示画面按新风格重画）。
+void onboarding_window_apply_look(void);

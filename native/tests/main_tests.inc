@@ -686,7 +686,7 @@ static void test_main_window_settings(void)
     // 概览页卡片上的摘要、快速操作页的位置和更多操作。
     actions_assign_slot(1, L"Reveal");
     CHECK(summary_is(PAGE_SHELF, L"屏幕边缘呼出 · 拖出时复制") && summary_is(PAGE_ACTIONS, L"压缩、显示位置") &&
-              summary_is(PAGE_APPEARANCE, L"深色 · 自选强调色"),
+              summary_is(PAGE_APPEARANCE, L"简洁 · 深色 · 自选强调色"),
         "设置卡片上的摘要不正确");
     CHECK(actions_slot_count() == 2 && actions_slot_position(0) == STR_SlotLeft && actions_slot_position(1) == STR_SlotRight, "两个操作时位置应为左、右");
     QuickActionList available = quick_actions_available(app_settings());

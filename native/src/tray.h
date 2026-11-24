@@ -20,6 +20,8 @@ bool tray_handle_message(UINT message, WPARAM wparam, LPARAM lparam);
 
 /// 切换界面语言后更新托盘提示文字。
 void tray_refresh_text(void);
+/// 换风格后换上那种风格的图标。
+void tray_refresh_icon(void);
 
 /// 关闭主窗口后提示一次：DropShelf 仍在运行。
 void tray_show_still_running_hint(void);

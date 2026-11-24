@@ -22,12 +22,14 @@ ShelfItem *shelf_item_new(ShelfItemKind kind, const wchar_t *value, const wchar_
     item->type_name = wcs_dup(L"");
     shelf_item_motion_reset(item);
     anim_set(&item->dim, 1);
+    anim_set(&item->lift, 0);
     return item;
 }
 
 void shelf_item_motion_reset(ShelfItem *item)
 {
-    item->motion = (ShelfItemMotion){ 1, 0, 0, 0, 0, 0, 1, 1, 1, 0 };
+    item->motion = (ShelfItemMotion){ .row_opacity = 1, .thumb_scale = 1, .thumb_opacity = 1, .text_opacity = 1, .scale = 1, .opacity = 1,
+        .name_opacity = 1 };
 }
 
 ShelfItem *shelf_item_retain(ShelfItem *item)
@@ -576,4 +578,26 @@ bool folder_measure(const wchar_t *path, int *children, bool *has_size, long lon
     *has_size = !walk.exceeded;
     *size = walk.exceeded ? 0 : walk.size;
     return true;
+}
+
+FileSuit shelf_item_suit(const ShelfItem *item)
+{
+    switch (item->kind)
+    {
+        case ITEM_FOLDER: return SUIT_FOLDER;
+        case ITEM_TEXT: return SUIT_DOCUMENT;
+        case ITEM_LINK: return SUIT_OTHER;
+        default: return file_suit_of_path(item->value);
+    }
+}
+
+wchar_t *shelf_item_card_mark(const ShelfItem *item)
+{
+    switch (item->kind)
+    {
+        case ITEM_FILE: return file_card_mark(item->value);
+        case ITEM_LINK: return wcs_dup(L"URL");
+        case ITEM_TEXT: return wcs_dup(L"TXT");
+        default: return wcs_dup(L"");
+    }
 }

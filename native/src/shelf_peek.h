@@ -28,3 +28,6 @@ void shelf_peek_ignore_busy(bool ignore);
 
 /// 角的窗口放在哪里（屏幕像素）：光标靠左半边就贴左边，否则贴右边；和光标一样高，不超出工作区。
 POINT shelf_peek_place(POINT cursor, RECT work, int width, int height, ScreenEdge *edge);
+
+/// 换风格后：探出着的角换成那种风格的大小，贴着同一条边、中心高度不变。
+void shelf_peek_apply_look(void);

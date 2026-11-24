@@ -172,6 +172,9 @@ wchar_t *shelf_model_title(const ShelfModel *model);
 wchar_t *shelf_model_stack_caption(ShelfModel *model);
 wchar_t *shelf_model_stack_detail(ShelfModel *model);
 
+/// 堆叠牌角上的花色（纸牌）：数量最多的文件类型；一样多时取最后放入的那一种。
+FileSuit shelf_model_suit(const ShelfModel *model);
+
 /// 只有堆叠顶部三张和列表里显示出来的行持有缩略图：其余的取消并释放，内存不随项目数量增长。
 void shelf_model_update_thumbnails(ShelfModel *model);
 

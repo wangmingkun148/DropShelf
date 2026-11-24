@@ -1,5 +1,6 @@
 #include "shelf_peek.h"
 #include "app.h"
+#include "card_face.h"
 #include "shelf_window.h"
 #include "strings.h"
 #include "task.h"
@@ -12,15 +13,24 @@
 #include <shellscalingapi.h>
 #include <stdlib.h>
 
-// 尺寸都是 DIP。窗口比角大一圈，留出阴影和悬停时多伸出的地方。
+// 尺寸都是 DIP。简洁：窗口比角大一圈，留出阴影和悬停时多伸出的地方。
 #define TAB_WIDTH 44.0f
 #define TAB_HEIGHT 72.0f
 #define HOVER_EXTRA 8.0f
 #define MARGIN 14.0f
 #define RADIUS 10.0f
-#define WINDOW_WIDTH (TAB_WIDTH + HOVER_EXTRA + MARGIN)
-#define WINDOW_HEIGHT (TAB_HEIGHT + 2 * MARGIN)
 #define ICON_SIZE 28.0f
+// 纸牌：探出来的是一张竖版的牌，斜着露出靠里的那一截；窗口比露出的部分大一圈，留出阴影、倾斜和悬停时多探出的地方。
+#define CARD_WIDTH 60.0f
+#define CARD_HEIGHT 84.0f
+#define CARD_RADIUS 5.0f
+#define PEEK_WIDTH 38.0f            // 探出时露出多宽
+#define CARD_HOVER_EXTRA 10.0f
+#define TILT 6.0f                   // 牌斜着探出，靠里的上角更突出；悬停时再斜一点
+#define HOVER_TILT 3.0f
+#define CARD_MARGIN 18.0f
+#define WINDOW_WIDTH (theme_is_cards() ? PEEK_WIDTH + CARD_HOVER_EXTRA + CARD_MARGIN : TAB_WIDTH + HOVER_EXTRA + MARGIN)
+#define WINDOW_HEIGHT (theme_is_cards() ? CARD_HEIGHT + 2 * CARD_MARGIN : TAB_HEIGHT + 2 * MARGIN)
 #define HIDE_TIMER 1
 #define BUSY_RETRY 2000             // 全屏或演示时每隔这么久看一次
 #define RESUME_MINIMUM 1500         // 光标移开后至少再留这么久，不会一移开就没了
@@ -39,6 +49,7 @@ static Anim slide, hover, badge;
 static GfxImage *icon;
 static unsigned icon_generation;
 static bool ignore_busy;
+static FileSuit suit = SUIT_OTHER;  // 纸牌：角里的文件数量最多的类型，印在牌角上
 
 void shelf_peek_ignore_busy(bool ignore)
 {
@@ -74,6 +85,7 @@ POINT shelf_peek_place(POINT cursor, RECT work, int width, int height, ScreenEdg
 
 static float visible_width(void)
 {
+    if (theme_is_cards()) return (float)slide.value * PEEK_WIDTH + (float)hover.value * CARD_HOVER_EXTRA;
     return (float)slide.value * TAB_WIDTH + (float)hover.value * HOVER_EXTRA;
 }
 
@@ -123,12 +135,68 @@ static void paint_badge(GfxRect tab)
     gfx_pop_transform();
 }
 
+/// 牌面：中间是最新那个文件的缩略图（露出来多少算多少），没有缩略图时是文档图标。
+static void paint_card_picture(GfxRect card)
+{
+    GfxRect area = { card.left + 7, card.top + 20, card.right - 7, card.bottom - 16 };
+    if (icon)
+    {
+        float width = (float)gfx_image_width(icon), height = (float)gfx_image_height(icon);
+        float fit = width > 0 && height > 0 ? fminf((area.right - area.left) / width, (area.bottom - area.top) / height) : 1;
+        width *= fit;
+        height *= fit;
+        float x = (area.left + area.right - width) / 2, y = (area.top + area.bottom - height) / 2;
+        gfx_draw_image(icon, (GfxRect){ x, y, x + width, y + height }, 1);
+        return;
+    }
+    GfxTextStyle style = { GFX_FONT_ICON, 26, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER, 0 };
+    gfx_text_draw(L"\xE8A5", area, &style, theme_color(THEME_TEXT_SECONDARY));
+}
+
+/// 牌角印在露出来的那一侧：张数在上、花色在下。来了新文件时数字从下面滚上来。
+static void paint_card_corner(GfxRect card)
+{
+    wchar_t rank[8];
+    if (paths.count > 99) wcscpy(rank, L"99+");
+    else swprintf(rank, ARRAYSIZE(rank), L"%d", paths.count);
+    static const CardCorner corner = { 15, 15, 6, 2 };
+    float left = edge == EDGE_LEFT ? card.right - 5 - card_corner_size(rank, &corner).width : card.left + 5;
+    float roll = (float)badge.value;
+    card_paint_corner_rolling(rank, suit, &corner, left, card.top + 4, theme_color(THEME_TEXT_PRIMARY), 1, (1 - roll) * 10, roll);
+}
+
+/// 纸牌：斜着探出的一张牌。
+static void peek_paint_card(GfxSize size)
+{
+    // 牌的中心放在屏幕边缘外面，露出靠里的 visible 那么宽。
+    float visible = visible_width();
+    float center_x = edge == EDGE_LEFT ? visible - CARD_WIDTH / 2 : size.width - visible + CARD_WIDTH / 2;
+    float tilt = (TILT + (float)hover.value * HOVER_TILT) * (edge == EDGE_LEFT ? 1 : -1);
+    gfx_push_opacity((float)fmin(1.0, slide.value * 2));
+    gfx_push_transform(gfx_matrix_multiply(gfx_matrix_rotate(tilt, 0, 0), gfx_matrix_translate(center_x, size.height / 2)));
+    GfxRect card = { -CARD_WIDTH / 2, -CARD_HEIGHT / 2, CARD_WIDTH / 2, CARD_HEIGHT / 2 };
+    gfx_shadow(card, CARD_RADIUS, 12, 0, 3, COLOR_ARGB(70, 0, 0, 0));
+    gfx_fill_rounded(card, CARD_RADIUS, theme_color(THEME_SHELF_TILE));
+    gfx_stroke_rounded(card, CARD_RADIUS, theme_color(THEME_SHELF_TILE_BORDER), 1.2f);
+    gfx_push_clip(card);
+    paint_card_picture(card);
+    paint_card_corner(card);
+    gfx_pop_clip();
+    gfx_pop_transform();
+    gfx_pop_layer();
+}
+
 static void peek_paint(UiWindow *target, void *context, double time)
 {
     (void)context;
     (void)time;
     if (slide.value <= 0.001) return;
     GfxSize size = ui_window_size(target);
+    if (theme_is_cards())
+    {
+        peek_paint_card(size);
+        return;
+    }
     GfxRect tab = tab_rect(size);
     float opacity = (float)fmin(1.0, slide.value * 2);
     gfx_push_opacity(opacity);
@@ -352,8 +420,13 @@ static void show(void)
     }
     leaving = false;
     anim_start(&slide, 1, 0.34, EASE_BACK_OF(0.35));
-    // 新来的文件让数字跳一下。
-    if (was_shown)
+    // 新来的文件让数字跳一下；纸牌是牌角的数字从下面滚上来。
+    if (was_shown && theme_is_cards())
+    {
+        anim_set(&badge, 0);
+        anim_start(&badge, 1, 0.3, EASE_OF(EASE_CUBIC_OUT));
+    }
+    else if (was_shown)
     {
         anim_set(&badge, 1.3);
         anim_start(&badge, 1, 0.3, EASE_BACK_OF(0.4));
@@ -371,7 +444,12 @@ static void add_to_corner(const StrList *added)
 {
     for (int index = 0; index < added->count; index++)
         if (strlist_index_of(&paths, added->items[index], true) < 0) strlist_add(&paths, added->items[index]);
-    if (paths.count > 0) show();
+    if (paths.count == 0) return;
+    FileSuit *suits = xalloc((size_t)paths.count * sizeof(FileSuit));
+    for (int index = 0; index < paths.count; index++) suits[index] = file_suit_of_path(paths.items[index]);
+    suit = file_suit_dominant(suits, paths.count);
+    free(suits);
+    show();
 }
 
 static void retry_waiting(void *data)
@@ -434,4 +512,20 @@ void shelf_peek_close(void)
     shown = leaving = false;
     strlist_clear(&paths);
     forget_icon();
+}
+
+void shelf_peek_apply_look(void)
+{
+    if (!window) return;
+    if (shown)
+    {
+        RECT rect;
+        GetWindowRect(ui_window_handle(window), &rect);
+        float scale = ui_window_scale(window);
+        int width = (int)lround(WINDOW_WIDTH * scale), height = (int)lround(WINDOW_HEIGHT * scale);
+        int x = edge == EDGE_LEFT ? rect.left : rect.right - width;
+        int y = (rect.top + rect.bottom) / 2 - height / 2;
+        ui_window_place(window, x, y, WINDOW_WIDTH, WINDOW_HEIGHT);
+    }
+    ui_window_repaint(window);
 }

@@ -7,3 +7,6 @@
 void about_window_show(HWND owner);
 void about_window_close(void);
 bool about_window_is_open(void);
+
+/// 换风格后换上那种风格的系统材质和图标（内容按新颜色重画）。
+void about_window_apply_look(void);

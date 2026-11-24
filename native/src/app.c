@@ -14,6 +14,7 @@
 #include "ui.h"
 #include "lang.h"
 #include "log.h"
+#include "look_switch.h"
 #include "probe.h"
 #include "shelf_history.h"
 #include "shelf_peek.h"
@@ -105,6 +106,7 @@ static void apply_settings(const AppSettings *previous, const AppSettings *curre
 {
     if (previous->theme != current->theme || !wcs_equal(previous->accent_color, current->accent_color))
         theme_set_mode(current->theme, current->accent_color);
+    if (previous->look != current->look) look_switch_to((Look)current->look);
     if (previous->performance_mode != current->performance_mode)
     {
         low_performance_set_mode(current->performance_mode);
@@ -477,7 +479,7 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     language_packs_reload(packs);
     free(packs);
     language_set_pack(language_packs_find(settings.language_pack));
-    theme_initialize(settings.theme, settings.accent_color);
+    theme_initialize(settings.theme, settings.accent_color, (Look)settings.look);
     low_performance_set_mode(settings.performance_mode);
     log_cleanup_old();
     attachment_cache_cleanup_stale();

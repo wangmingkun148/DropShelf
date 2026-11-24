@@ -442,6 +442,27 @@ wchar_t *shelf_history_entry_time(const ShelfHistoryEntry *entry)
     return str_history_date(closed.wMonth, closed.wDay);
 }
 
+wchar_t *shelf_history_entry_clock(const ShelfHistoryEntry *entry)
+{
+    SYSTEMTIME closed;
+    ULONGLONG ticks;
+    if (!to_local(entry->closed_at, &closed, &ticks)) return wcs_dup(L"");
+    wchar_t time[16];
+    swprintf(time, ARRAYSIZE(time), L"%02u:%02u", closed.wHour, closed.wMinute);
+    return wcs_dup(time);
+}
+
+wchar_t *shelf_history_entry_day(const ShelfHistoryEntry *entry)
+{
+    SYSTEMTIME closed, today;
+    ULONGLONG closed_ticks, today_ticks;
+    if (!to_local(entry->closed_at, &closed, &closed_ticks) || !to_local(now_utc(), &today, &today_ticks)) return wcs_dup(L"");
+    const ULONGLONG day = 24ull * 60 * TICKS_PER_MINUTE;
+    ULONGLONG closed_day = closed_ticks / day, today_day = today_ticks / day;
+    int days_ago = closed_day == today_day ? 0 : closed_day + 1 == today_day ? 1 : 2;
+    return str_history_day(days_ago, closed.wMonth, closed.wDay);
+}
+
 wchar_t *shelf_history_entry_preview(const ShelfHistoryEntry *entry)
 {
     WStr text = {0};

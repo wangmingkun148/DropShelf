@@ -15,7 +15,6 @@
 #define DROPSHELF_VERSION L"0.0.0"
 #endif
 
-#define APP_ICON_RESOURCE 1
 
 // 内容区宽到放得下状态栏和完整页面时显示；两个阈值之间不切换，拖动窗口边缘时不会反复出现、消失。
 #define SIDE_PANEL_SHOW_WIDTH 1260.0f
@@ -30,6 +29,7 @@ MainShell main_shell;
 static UiElement *minimize_button, *maximize_button, *close_button;
 static UiElement *status_element;
 static GfxImage *app_icon;
+static int rebuild_page = PAGE_OVERVIEW;   // 换风格重建时回到这一页
 static bool side_panel_wanted;
 static bool side_panel_pending;     // 排版时发现要切换状态栏，下一帧再切
 static float last_viewport;
@@ -352,7 +352,30 @@ typedef struct PanelIcon
     UiElement base;
 } PanelIcon;
 
-/// 线框版的应用图标（256 × 256 的画布缩进 52 × 52），跟随文字颜色。
+/// 纸牌风格的应用图标（256 × 256 的画布）：一张牌背上叠一张牌，牌背跟随强调色，牌上是向下的箭头和托盘。
+static void paint_cards_icon(void)
+{
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    ThemePattern back = theme_pattern(THEME_PATTERN_SHEET_BORDER);
+    gfx_push_transform(gfx_matrix_rotate(10, 92 + 70, 22 + 95));
+    gfx_fill_rounded_pattern((GfxRect){ 92, 22, 232, 212 }, 18, &back);
+    gfx_pop_transform();
+    gfx_push_transform(gfx_matrix_rotate(-6, 30 + 70, 46 + 95));
+    gfx_fill_rounded((GfxRect){ 30, 46, 170, 236 }, 18, theme_color(THEME_CARD));
+    gfx_stroke_rounded((GfxRect){ 30, 46, 170, 236 }, 18, ink, 8);
+    gfx_pop_transform();
+    gfx_push_transform(gfx_matrix_rotate(-6, 100, 141));
+    float stem[] = { 100, 90, 100, 160 };
+    float arrow[] = { 72, 134, 100, 162, 128, 134 };
+    float tray[] = { 66, 194, 134, 194 };
+    Color accent = theme_color(THEME_ACCENT);
+    gfx_polyline(stem, 2, accent, 16);
+    gfx_polyline(arrow, 3, accent, 16);
+    gfx_polyline(tray, 2, ink, 14);
+    gfx_pop_transform();
+}
+
+/// 应用图标（256 × 256 的画布缩进 52 × 52）：简洁是线框版，跟随文字颜色；纸牌见 paint_cards_icon。
 static void panel_icon_paint(UiElement *element, double time)
 {
     (void)time;
@@ -364,6 +387,15 @@ static void panel_icon_paint(UiElement *element, double time)
     if (opacity <= 0.001f) return;
     gfx_push_transform(gfx_matrix_scale(zoom, zoom, center_x, center_y));
     gfx_push_opacity(opacity);
+    if (theme_is_cards())
+    {
+        gfx_push_transform(gfx_matrix_multiply(gfx_matrix_scale(scale, scale, 0, 0), gfx_matrix_translate(bounds.left, bounds.top)));
+        paint_cards_icon();
+        gfx_pop_transform();
+        gfx_pop_layer();
+        gfx_pop_transform();
+        return;
+    }
     Color color = theme_color(THEME_TEXT_PRIMARY);
     gfx_stroke_rounded((GfxRect){ bounds.left + 16 * scale, bounds.top + 16 * scale, bounds.left + 240 * scale, bounds.top + 240 * scale }, 50 * scale,
         color, 12 * scale);
@@ -380,7 +412,7 @@ static void panel_icon_paint(UiElement *element, double time)
 
 static const UiElementType panel_icon_type = { NULL, NULL, panel_icon_paint, NULL, NULL, false };
 
-/// 状态栏里的“＋ 打开置物架”：强调色底，向右渐隐。
+/// 状态栏里的“＋ 打开置物架”：强调色底，简洁向右渐隐，纸牌是圆角按钮。
 typedef struct SoftButton
 {
     UiElement base;
@@ -398,10 +430,14 @@ static void soft_button_paint(UiElement *element, double time)
     GfxRect bounds = element->bounds;
     bool pressed = element->pressed && element->hovered;
     Color fill = theme_color(pressed ? THEME_ACCENT_PRESSED : element->hovered ? THEME_ACCENT_HOVER : THEME_ACCENT);
-    GfxStop stops[3] = { { 0, fill }, { 0.62f, fill }, { 1, color_with_alpha(fill, 0) } };
-    gfx_push_layer(bounds, 6, 1);
-    gfx_fill_rect_linear(bounds, bounds.left, bounds.top, bounds.right, bounds.top, stops, 3);
-    gfx_pop_layer();
+    if (theme_is_cards()) gfx_fill_rounded(bounds, 6, fill);
+    else
+    {
+        GfxStop stops[3] = { { 0, fill }, { 0.62f, fill }, { 1, color_with_alpha(fill, 0) } };
+        gfx_push_layer(bounds, 6, 1);
+        gfx_fill_rect_linear(bounds, bounds.left, bounds.top, bounds.right, bounds.top, stops, 3);
+        gfx_pop_layer();
+    }
     Color text = theme_color(THEME_TEXT_ON_ACCENT);
     GfxTextStyle glyph = { GFX_FONT_ICON, 13, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
     GfxTextStyle label = { GFX_FONT_TEXT, 13, 400, false, true, GFX_ALIGN_START, GFX_ALIGN_CENTER };
@@ -454,11 +490,20 @@ static void back_pill_mouse(UiElement *element, const UiMouseEvent *event)
 
 static const UiElementType back_pill_type = { back_pill_measure, NULL, back_pill_paint, back_pill_mouse, NULL, true };
 
-/// 状态栏背景：卡片色的椭圆渐隐，左上角一点强调色的光晕。
+/// 状态栏背景。简洁：卡片色的椭圆渐隐，左上角一点强调色的光晕。
+/// 纸牌：一张竖放的牌，牌面底色，右边描一条边，再露出 3 像素宽的一道牌背，和概览页的卡片一样。
 static void side_panel_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
+    if (theme_is_cards())
+    {
+        ThemePattern edge = theme_pattern(THEME_PATTERN_STACK_EDGE);
+        gfx_fill_rounded_pattern((GfxRect){ bounds.right, bounds.top, bounds.right + 3, bounds.bottom }, 0, &edge);
+        gfx_fill_rect(bounds, theme_color(THEME_CARD));
+        gfx_fill_rect((GfxRect){ bounds.right - 1, bounds.top, bounds.right, bounds.bottom }, theme_color(THEME_CARD_BORDER));
+        return;
+    }
     float width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
     Color card = theme_color(THEME_CARD);
     GfxStop fade[3] = { { 0, card }, { 0.6f, color_with_alpha(card, (uint8_t)(card.a * 0xB0 / 255)) }, { 1, color_with_alpha(card, 0) } };
@@ -509,7 +554,7 @@ static UiElement *way_row(const wchar_t *glyph, UiElement *content)
     ui_set_margin(row, 2, 0, 0, 12);
     UiElement *icon = ui_label(UI_LIT(glyph), UI_TEXT_GLYPH);
     ui_label_set_size(icon, 15);
-    ui_label_set_color(icon, THEME_ACCENT_TEXT);
+    ui_label_set_color(icon, theme_is_cards() ? THEME_TEXT_PRIMARY : THEME_ACCENT_TEXT);
     icon->width = 26;
     ui_add(row, icon);
     content->cross = UI_CROSS_CENTER;
@@ -525,11 +570,11 @@ static UiElement *way_text(StringId text)
     return label;
 }
 
-/// 快捷键的一个按键：小方块，下边框略粗。
+/// 快捷键的一个按键：小方块，下边框略粗。纸牌风格是墨色描边，数字用 Bahnschrift。
 static GfxSize key_cap_measure(UiElement *element, float available)
 {
     (void)available;
-    GfxTextStyle style = { GFX_FONT_TEXT, 11, 400 };
+    GfxTextStyle style = { theme_is_cards() ? GFX_FONT_NUMBER : GFX_FONT_TEXT, 11, 400 };
     GfxSize text = gfx_text_measure(element->tag, &style, 0);
     return (GfxSize){ text.width + 12, text.height + 3 + 3 };
 }
@@ -538,6 +583,15 @@ static void key_cap_paint(UiElement *element, double time)
 {
     (void)time;
     GfxRect bounds = element->bounds;
+    if (theme_is_cards())
+    {
+        Color ink = theme_color(THEME_TEXT_PRIMARY);
+        gfx_stroke_rounded(bounds, 3, ink, 1);
+        gfx_fill_rect((GfxRect){ bounds.left + 2, bounds.bottom - 2, bounds.right - 2, bounds.bottom - 1 }, ink);
+        GfxTextStyle number = { GFX_FONT_NUMBER, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        gfx_text_draw(element->tag, (GfxRect){ bounds.left, bounds.top, bounds.right, bounds.bottom - 1 }, &number, ink);
+        return;
+    }
     gfx_fill_rounded(bounds, 4, theme_color(THEME_CONTROL_BORDER));
     gfx_fill_rounded((GfxRect){ bounds.left + 1, bounds.top + 1, bounds.right - 1, bounds.bottom - 2 }, 3, theme_color(THEME_CONTROL));
     GfxTextStyle style = { GFX_FONT_TEXT, 11, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
@@ -683,7 +737,7 @@ static void status_paint(UiElement *element, double time)
     GfxRect bounds = element->bounds;
     bool healthy = app_is_gesture_running();
     float middle = (bounds.top + bounds.bottom) / 2;
-    gfx_fill_ellipse(bounds.left + 3.5f, middle + 0.5f, 3.5f, 3.5f, theme_color(healthy ? THEME_SUCCESS : THEME_CAUTION));
+    gfx_fill_ellipse(bounds.left + 3.5f, middle + 0.5f, 3.5f, 3.5f, theme_color(healthy ? (theme_is_cards() ? THEME_ACCENT : THEME_SUCCESS) : THEME_CAUTION));
     gfx_text_draw(S(healthy ? STR_StatusRunning : STR_StatusGestureFailed), (GfxRect){ bounds.left + 13, bounds.top, bounds.right + 20, bounds.bottom - 1 },
         &caption_style, theme_color(THEME_TEXT_SECONDARY));
 }
@@ -709,7 +763,7 @@ static void refresh_status(void)
 static GfxSize link_measure(UiElement *element, float available)
 {
     (void)available;
-    GfxTextStyle style = { GFX_FONT_TEXT, 12, 400 };
+    GfxTextStyle style = { theme_is_cards() ? GFX_FONT_NUMBER : GFX_FONT_TEXT, 12, 400 };
     wchar_t *text = str_version(DROPSHELF_VERSION);
     GfxSize size = gfx_text_measure(text, &style, 0);
     free(text);
@@ -720,9 +774,12 @@ static GfxSize link_measure(UiElement *element, float available)
 static void link_paint(UiElement *element, double time)
 {
     (void)time;
-    GfxTextStyle style = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+    bool cards = theme_is_cards();
+    GfxTextStyle style = { cards ? GFX_FONT_NUMBER : GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
     wchar_t *text = str_version(DROPSHELF_VERSION);
-    gfx_text_draw(text, element->bounds, &style, theme_color(element->hovered ? THEME_ACCENT_TEXT : THEME_TEXT_SECONDARY));
+    // 纸牌：概览页有历史牌时版本号压在牌桌上，跟牌桌上的文字同色。
+    bool on_table = cards && M->page == PAGE_OVERVIEW && M->history_section && !M->history_section->hidden;
+    gfx_text_draw(text, element->bounds, &style, theme_color(on_table ? THEME_TABLE_TEXT : element->hovered ? THEME_ACCENT_TEXT : THEME_TEXT_SECONDARY));
     free(text);
 }
 
@@ -976,6 +1033,24 @@ static void on_animate(UiWindow *target, void *context, double time)
     if (running) main_request_frame();
 }
 
+/// 内容的元素已经销毁：各部分只清掉自己记着的东西，回到没有打开过的状态（M->window 除外）。
+static void forget_content(void)
+{
+    pages_close();
+    fan_close();
+    actions_close();
+    dialogs_close();
+    flip_close();
+    UiWindow *window = M->window;
+    memset(M, 0, sizeof(*M));
+    M->window = window;
+    M->page = PAGE_OVERVIEW;
+    minimize_button = maximize_button = close_button = status_element = NULL;
+    side_panel_wanted = side_panel_pending = false;
+    last_viewport = 0;
+    memset(&panel, 0, sizeof(panel));
+}
+
 static void on_closed(UiWindow *closed, void *context)
 {
     (void)closed;
@@ -983,19 +1058,9 @@ static void on_closed(UiWindow *closed, void *context)
     // 窗口显示期间保持正常性能，关掉后交还系统决定。元素已经销毁，各部分只清掉自己记着的东西。
     power_hold(&M->window, false);
     M->window = NULL;
-    pages_close();
-    fan_close();
-    actions_close();
-    dialogs_close();
-    flip_close();
+    forget_content();
     // 排好的几百段文字只有主窗口用，留着要占几兆内存；下次打开时第一帧重新排。
     gfx_release_text_cache();
-    memset(M, 0, sizeof(*M));
-    M->page = PAGE_OVERVIEW;
-    minimize_button = maximize_button = close_button = status_element = NULL;
-    side_panel_wanted = side_panel_pending = false;
-    last_viewport = 0;
-    memset(&panel, 0, sizeof(panel));
     app_main_window_closed();
 }
 
@@ -1064,6 +1129,71 @@ static UiElement *build_root(void)
     return root;
 }
 
+static void reset_panel(void)
+{
+    M->page = PAGE_OVERVIEW;
+    M->page_left = PAGE_MARGIN;
+    panel.header_page = PAGE_OVERVIEW;
+    anim_set(&panel.opacity, 0);
+    anim_set(&panel.shift, -24);
+    anim_set(&panel.title_scale, 1);
+    anim_set(&panel.title_opacity, 1);
+    anim_set(&panel.open_opacity, 1);
+    anim_set(&panel.icon_opacity, 1);
+    anim_set(&panel.icon_scale, 1);
+}
+
+/// 按现在的风格建好窗口里的内容，显示 page 那一页。
+static void populate(int page)
+{
+    if (!app_icon)
+    {
+        HICON icon = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource()), IMAGE_ICON, 32, 32, 0);
+        app_icon = gfx_image_from_icon(icon);
+        if (icon) DestroyIcon(icon);
+    }
+    ui_window_set_root(M->window, build_root());
+    ui_window_set_maximize_button(M->window, maximize_button);
+    main_window_refresh();
+    fan_refresh(false);
+    flip_show_page(page);
+}
+
+/// 第一次排版前就按窗口的宽度定好状态栏显示与否，不播放动画。
+static void place_side_panel(void)
+{
+    GfxSize size = ui_window_size(M->window);
+    side_panel_wanted = size.width >= SIDE_PANEL_SHOW_WIDTH;
+    if (side_panel_wanted)
+    {
+        M->root->bounds.right = size.width;
+        set_side_panel(false);
+    }
+}
+
+void main_window_prepare_look(void)
+{
+    if (!M->window) return;
+    rebuild_page = M->page;
+    flip_cancel();
+    // 先按原来的风格拆掉内容：两种风格的页面各有一份代码，各自清掉自己记着的东西。
+    ui_window_set_root(M->window, NULL);
+    forget_content();
+    gfx_image_release(app_icon);
+    app_icon = NULL;
+}
+
+void main_window_apply_look(void)
+{
+    if (!M->window) return;
+    // 窗口不关，位置、大小不变；系统材质、图标和内容换成新风格的，回到原来那一页。
+    ui_window_set_backdrop(M->window, theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA);
+    ui_window_set_icon(M->window, LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource())));
+    reset_panel();
+    populate(rebuild_page);
+    place_side_panel();
+}
+
 void main_window_show(void)
 {
     if (M->window)
@@ -1086,40 +1216,21 @@ void main_window_show(void)
     options.minimum_width = 640;
     options.minimum_height = 520;
     options.resizable = true;
-    options.backdrop = UI_BACKDROP_MICA;
+    // 纸牌的窗口是不透明的牌桌底色，不用系统材质。
+    options.backdrop = theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
-    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));
+    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource()));
     options.key = on_key;
     options.mouse = on_mouse;
     options.message = on_message;
     options.moved = on_moved;
     options.closed = on_closed;
     options.animate = on_animate;
-    M->page = PAGE_OVERVIEW;
-    M->page_left = PAGE_MARGIN;
-    panel.header_page = PAGE_OVERVIEW;
-    anim_set(&panel.opacity, 0);
-    anim_set(&panel.shift, -24);
-    anim_set(&panel.title_scale, 1);
-    anim_set(&panel.title_opacity, 1);
-    anim_set(&panel.open_opacity, 1);
-    anim_set(&panel.icon_opacity, 1);
-    anim_set(&panel.icon_scale, 1);
+    reset_panel();
     M->window = ui_window_create(&options);
     if (!M->window) return;
-    if (!app_icon)
-    {
-        HICON icon = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE), IMAGE_ICON, 32, 32, 0);
-        app_icon = gfx_image_from_icon(icon);
-        if (icon) DestroyIcon(icon);
-    }
-
-    ui_window_set_root(M->window, build_root());
-    ui_window_set_maximize_button(M->window, maximize_button);
-    main_window_refresh();
-    fan_refresh(false);
-    flip_show_page(PAGE_OVERVIEW);
+    populate(PAGE_OVERVIEW);
 
     // 回到上次的位置；没有记录、或那个位置已经不在任何显示器上（换了显示器）时放在屏幕中央。
     bool placed = false;
@@ -1134,14 +1245,7 @@ void main_window_show(void)
         }
     }
     if (!placed) ui_window_center(M->window);
-    // 第一次排版前就按窗口的宽度定好状态栏显示与否，不播放动画。
-    GfxSize size = ui_window_size(M->window);
-    side_panel_wanted = size.width >= SIDE_PANEL_SHOW_WIDTH;
-    if (side_panel_wanted)
-    {
-        M->root->bounds.right = size.width;
-        set_side_panel(false);
-    }
+    place_side_panel();
     power_hold(&M->window, true);
     ui_window_show(M->window);
 }
