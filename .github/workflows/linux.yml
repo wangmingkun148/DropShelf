@@ -33,7 +33,8 @@ jobs:
       - name: 安装依赖
         run: |
           pacman -Syu --noconfirm --needed base-devel cmake ninja pkgconf \
-            gtk4 gtk4-layer-shell gdk-pixbuf2 libcurl glib2 libarchive fontconfig
+            gtk4 gtk4-layer-shell gdk-pixbuf2 curl glib2 libarchive fontconfig \
+            file desktop-file-utils librsvg patchelf zsync
 
       - uses: actions/checkout@v5
 
@@ -43,7 +44,15 @@ jobs:
           cmake --build linux/build
           ctest --test-dir linux/build --output-on-failure
 
-      - name: 打包便携版
+      - name: 打包便携版和安装包
         run: |
           ./linux/package.sh "$GITHUB_WORKSPACE/dist"
+          ./linux/package-formats.sh linux/build "$GITHUB_WORKSPACE/dist"
           ls -lh dist
+
+      - name: 上传构建结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/*
+          if-no-files-found: error

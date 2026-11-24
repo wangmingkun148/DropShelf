@@ -117,6 +117,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.wangmingkun148.DropShelf.me
     DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/icons/hicolor" DESTINATION "${CMAKE_INSTALL_DATADIR}/icons")
 install(FILES "${DROPSHELF_LINUX_DIR}/fonts/DropShelfIcons.ttf" DESTINATION "${CMAKE_INSTALL_DATADIR}/dropshelf/fonts")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/dropshelf")
 install(FILES "${DROPSHELF_LINUX_DIR}/fonts/DropShelfIcons-LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/dropshelf")
 
 enable_testing()

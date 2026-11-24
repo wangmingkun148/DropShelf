@@ -18,7 +18,7 @@
 Arch：
 
 ```bash
-sudo pacman -S --needed gtk4 gtk4-layer-shell gdk-pixbuf2 libcurl libarchive fontconfig
+sudo pacman -S --needed gtk4 gtk4-layer-shell gdk-pixbuf2 curl libarchive fontconfig
 ```
 
 ## 构建和运行
@@ -42,6 +42,16 @@ sudo cmake --install linux/build
 ```bash
 linux/package.sh        # 生成 dist/DropShelf-<版本>-linux-<架构>.tar.gz
 ```
+
+安装包（AppImage、deb、rpm、pacman）：
+
+```bash
+linux/package-formats.sh   # 生成到 dist/，工具自动下载到 linux/build/packaging-tools
+```
+
+每次发布都会附上这四种安装包和便携版；也可以从 Releases 页面直接下载。
+其中 AppImage 自带 GTK 等依赖，解压即用；deb/rpm/pacman 包依赖系统里的
+GTK 4、gtk4-layer-shell、gdk-pixbuf、libarchive、curl 和 fontconfig。
 
 Arch 包（本地源码目录，版本标签发布后也可以用 makepkg）：
 

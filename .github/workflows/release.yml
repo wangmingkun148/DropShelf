@@ -141,17 +141,21 @@ jobs:
       - name: 安装依赖
         run: |
           pacman -Syu --noconfirm --needed base-devel cmake ninja pkgconf \
-            gtk4 gtk4-layer-shell gdk-pixbuf2 libcurl glib2 libarchive fontconfig github-cli
+            gtk4 gtk4-layer-shell gdk-pixbuf2 curl glib2 libarchive fontconfig github-cli \
+            file desktop-file-utils librsvg patchelf zsync
 
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: 编译并打包
-        run: ./linux/package.sh "$GITHUB_WORKSPACE/dist"
+        run: |
+          ./linux/package.sh "$GITHUB_WORKSPACE/dist"
+          ./linux/package-formats.sh linux/build "$GITHUB_WORKSPACE/dist"
+          ls -lh dist
 
       - name: 发布到 Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" dist/*.tar.gz --clobber
+        run: gh release upload "$TAG" dist/* --clobber
