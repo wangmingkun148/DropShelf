@@ -889,8 +889,16 @@ static void test_look_switch(void)
     strlist_clear(&paths);
     pump_for(800);
     CHECK(shelf && shelf->model->count == 2, "置物架没有放进两个文件");
+    // 叠着的时候两种风格一样大，展开后不同（列表和平铺），所以先展开。
     RECT simple_rect = { 0 };
-    if (shelf) GetWindowRect(shelf->handle, &simple_rect);
+    if (shelf)
+    {
+        shelf_layout(shelf);
+        click_rect(shelf->ui, shelf->layout.view);
+        pump_for(900);
+        CHECK(shelf->model->expanded, "点击切换按钮没有展开");
+        GetWindowRect(shelf->handle, &simple_rect);
+    }
 
     // 在外观页选“纸牌”。
     UiElement *look = pages_control(PAGES_LOOK);
@@ -909,8 +917,8 @@ static void test_look_switch(void)
         RECT cards_rect;
         GetWindowRect(shelf->handle, &cards_rect);
         CHECK(!shelf->closed && shelf->model->count == 2 && IsWindowVisible(shelf->handle) && !window_cloaked(shelf->handle), "换风格后置物架应还在、项目不丢、窗口现身");
-        CHECK(cards_rect.right - cards_rect.left != simple_rect.right - simple_rect.left || cards_rect.bottom - cards_rect.top != simple_rect.bottom - simple_rect.top,
-            "换成纸牌后置物架应换成牌堆的大小");
+        CHECK(shelf->model->expanded && cards_rect.right - cards_rect.left != simple_rect.right - simple_rect.left,
+            "换成纸牌后展开的置物架应换成平铺的宽度");
     }
 
     // 换回简洁。
