@@ -248,12 +248,12 @@ static bool gestures_blocked_at(POINT point)
 {
     if (foreground_watcher_is_blocked_at(point))
     {
-        log_trace(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
+        log_info(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
         return true;
     }
     if (foreground_is_fullscreen())
     {
-        log_trace(L"识别到手势 (%ld, %ld)，但前台全屏，不弹出置物架", point.x, point.y);
+        log_info(L"识别到手势 (%ld, %ld)，但前台全屏，不弹出置物架", point.x, point.y);
         return true;
     }
     return false;
@@ -278,13 +278,13 @@ static void on_gesture(GestureEvent event, ScreenEdge edge, POINT point)
     {
         case GESTURE_SHAKE:
             if (gestures_blocked_at(point)) return;
-            log_trace(L"识别到晃动 (%ld, %ld)，显示探针窗口", point.x, point.y);
+            log_info(L"识别到晃动 (%ld, %ld)，显示探针窗口", point.x, point.y);
             pending_edge = EDGE_NONE;
             probe_show_at(point);
             break;
         case GESTURE_EDGE_DWELL:
             if (gestures_blocked_at(point)) return;
-            log_trace(L"在屏幕边缘停留 (%ld, %ld)，显示探针窗口", point.x, point.y);
+            log_info(L"在屏幕边缘停留 (%ld, %ld)，显示探针窗口", point.x, point.y);
             pending_edge = edge;
             probe_show_at(point);
             break;
@@ -305,12 +305,17 @@ static bool on_message(UiWindow *window, void *context, UINT message, WPARAM wpa
     return true;
 }
 
+static bool gestures_paused;
+
 static void pause_if_blocked(void)
 {
     // 全屏或屏蔽的应用在前台时，手势和快捷键都让给前台。
     bool blocked = foreground_watcher_is_blocked() || foreground_is_fullscreen();
     gesture_service_set_paused(blocked);
     hotkey_service_set_paused(blocked);
+    if (blocked == gestures_paused) return;
+    gestures_paused = blocked;
+    log_info(blocked ? L"前台是全屏或屏蔽的应用，手势暂停" : L"手势恢复");
 }
 
 static void on_blocked_changed(bool blocked)

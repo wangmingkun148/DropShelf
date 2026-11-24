@@ -289,8 +289,9 @@ static void end_press(void)
 {
     power_hold(&detector, false);
     power_background_thread();
-    if (log_trace_enabled() && moves_this_press > 20)
-        log_trace(L"按住期间取到 %d 次光标位置，%ls", moves_this_press, triggered ? L"已识别手势" : L"未识别手势");
+    // 按住期间光标位置是靠 Hyprland IPC 取的，这里记一笔能让“晃动没反应”有据可查。
+    if (moves_this_press >= 8)
+        log_info(L"按住期间取到 %d 次光标位置，%ls", moves_this_press, triggered ? L"已识别手势" : L"未识别手势");
     bool released = triggered;
     triggered = false;
     shake_detector_reset(&detector);

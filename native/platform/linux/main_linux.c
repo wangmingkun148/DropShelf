@@ -194,6 +194,7 @@ static void on_startup(GApplication *app, gpointer data)
     (void)app;
     (void)data;
     g_set_prgname("dropshelf");
+    log_info(L"DropShelf %hs 启动", DROPSHELF_VERSION_UTF8);
     task_initialize();
     theme_initialize(THEME_SYSTEM, NULL);
     language_set_mode(LANGUAGE_SYSTEM);

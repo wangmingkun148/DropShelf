@@ -1166,20 +1166,37 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row);
 static DropContentKind classify_drop(GdkDrop *drop)
 {
     GdkContentFormats *formats = gdk_drop_get_formats(drop);
+    // 和 ui_window 里 drop target 的类型顺序保持一致：有图片就按图片接。
+    if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) return DROP_IMAGE;
     if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_FILE_LIST) || gdk_content_formats_contain_gtype(formats, G_TYPE_FILE))
         return DROP_FILES;
-    if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) return DROP_IMAGE;
     if (gdk_content_formats_contain_gtype(formats, G_TYPE_STRING)) return DROP_TEXT;
     return DROP_NONE;
 }
 
-static void add_file_paths(GdkFileList *list, StrList *paths)
+/// 文件列表里的本地路径放进 paths；网页一类的地址没有本地路径，放进 uris 当链接。
+static void add_file_paths(GdkFileList *list, StrList *paths, StrList *uris)
 {
     GSList *files = gdk_file_list_get_files(list);
     for (GSList *each = files; each; each = each->next)
     {
         char *path = g_file_get_path(G_FILE(each->data));
-        if (!path) continue;
+        if (!path)
+        {
+            // 浏览器拖链接、拖网页图片时给的是 http(s) 地址：没有本地文件，按链接收。
+            char *uri = g_file_get_uri(G_FILE(each->data));
+            if (uri && (g_str_has_prefix(uri, "http://") || g_str_has_prefix(uri, "https://")))
+            {
+                wchar_t *wide = wide_from_utf8(uri, strlen(uri));
+                if (wide)
+                {
+                    strlist_add(uris, wide);
+                    free(wide);
+                }
+            }
+            if (uri) g_free(uri);
+            continue;
+        }
         wchar_t *wide = wide_from_utf8(path, strlen(path));
         if (wide)
         {
@@ -1216,6 +1233,26 @@ static void receive_text_at(ShelfWindow *shelf, const wchar_t *text, float x, fl
     result->entries[0].kind = text_is_single_url(trimmed) ? ITEM_LINK : ITEM_TEXT;
     result->entries[0].value = trimmed;
     result->count = 1;
+    Receive *receive = xcalloc(1, sizeof(Receive));
+    receive->shelf = shelf_window_retain(shelf);
+    receive->x = x;
+    receive->y = y;
+    shelf->receiving++;
+    received(result, receive);
+}
+
+/// 浏览器拖来的网页地址（链接、网页图片的地址）：没有本地文件，当成链接放进去。
+static void receive_links_at(ShelfWindow *shelf, const StrList *uris, float x, float y)
+{
+    if (uris->count == 0) return;
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc((size_t)uris->count, sizeof(DroppedEntry));
+    for (int index = 0; index < uris->count; index++)
+    {
+        result->entries[index].kind = ITEM_LINK;
+        result->entries[index].value = wcs_dup(uris->items[index]);
+    }
+    result->count = uris->count;
     Receive *receive = xcalloc(1, sizeof(Receive));
     receive->shelf = shelf_window_retain(shelf);
     receive->x = x;
@@ -1353,15 +1390,18 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             GType type = value ? G_VALUE_TYPE(value) : G_TYPE_INVALID;
             if (type == GDK_TYPE_FILE_LIST)
             {
-                StrList paths = {0};
-                add_file_paths((GdkFileList *)g_value_get_boxed(value), &paths);
+                StrList paths = {0}, uris = {0};
+                add_file_paths((GdkFileList *)g_value_get_boxed(value), &paths, &uris);
                 receive_paths_at(shelf, &paths, (float)x, (float)y);
+                receive_links_at(shelf, &uris, (float)x, (float)y);
                 strlist_clear(&paths);
+                strlist_clear(&uris);
             }
             else if (type == G_TYPE_FILE)
             {
-                StrList paths = {0};
-                char *path = g_file_get_path(g_value_get_object(value));
+                GFile *file = g_value_get_object(value);
+                StrList paths = {0}, uris = {0};
+                char *path = g_file_get_path(file);
                 if (path)
                 {
                     wchar_t *wide = wide_from_utf8(path, strlen(path));
@@ -1372,8 +1412,24 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
                     }
                     g_free(path);
                 }
+                else
+                {
+                    char *uri = g_file_get_uri(file);
+                    if (uri && (g_str_has_prefix(uri, "http://") || g_str_has_prefix(uri, "https://")))
+                    {
+                        wchar_t *wide = wide_from_utf8(uri, strlen(uri));
+                        if (wide)
+                        {
+                            strlist_add(&uris, wide);
+                            free(wide);
+                        }
+                    }
+                    if (uri) g_free(uri);
+                }
                 receive_paths_at(shelf, &paths, (float)x, (float)y);
+                receive_links_at(shelf, &uris, (float)x, (float)y);
                 strlist_clear(&paths);
+                strlist_clear(&uris);
             }
             else if (type == G_TYPE_STRING)
             {

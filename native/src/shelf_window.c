@@ -317,8 +317,14 @@ void shelf_layout(ShelfWindow *shelf)
     layout->height = height;
 
     // 标题栏：外边距 4，左边是置顶和移动/复制，右边是切换视图、更多和关闭，标题在中间。
+#ifdef _WIN32
     layout->pin = rect_of(4, 7, 28, 30);
     layout->mode = rect_of(4 + 28 + 2, 10, mode_width(shelf), 24);
+#else
+    // Wayland 上没有“取消置顶”：层壳窗口本来就在所有普通窗口之上，置顶开关没得可关，索性不画。
+    layout->pin = (GfxRect){ 0, 0, 0, 0 };
+    layout->mode = rect_of(4, 10, mode_width(shelf), 24);
+#endif
     layout->close = rect_of(width - 4 - 28, 7, 28, 30);
     layout->more = rect_of(layout->close.left - 28, 7, 28, 30);
     bool has_items = shelf->model->count > 0;
@@ -447,9 +453,10 @@ static void paint_icon_button(ShelfWindow *shelf, GfxRect rect, ShelfTarget targ
 static void paint_header(ShelfWindow *shelf)
 {
     const ShelfLayout *layout = &shelf->layout;
-    // 置顶：开着时图标是强调色。
-    paint_icon_button(shelf, layout->pin, TARGET_PIN, shelf->model->pinned ? GLYPH_PINNED : GLYPH_PIN, 14,
-        theme_color(shelf->model->pinned ? THEME_ACCENT_TEXT : THEME_TEXT_PRIMARY));
+    // 置顶：开着时图标是强调色。（Wayland 版没有这个按钮，矩形是空的。）
+    if (layout->pin.right > layout->pin.left)
+        paint_icon_button(shelf, layout->pin, TARGET_PIN, shelf->model->pinned ? GLYPH_PINNED : GLYPH_PIN, 14,
+            theme_color(shelf->model->pinned ? THEME_ACCENT_TEXT : THEME_TEXT_PRIMARY));
 
     // 移动/复制：和普通按钮一样有底色和边框，一眼看出能点。
     bool hovered = shelf->hovered == TARGET_MODE, pressed = hovered && shelf->pressed == TARGET_MODE;

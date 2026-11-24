@@ -168,7 +168,9 @@ static char *icon_path(void)
     if (exe)
     {
         char *folder = g_path_get_dirname(exe);
-        // 开发时在仓库的 linux/icons 下；装好后在 ../share/icons 下。
+        // 开发时在仓库的 linux/icons 下；装好（包括 AppImage）后在 ../share/icons 下。
+        // 装好的程序不经过图标主题缓存，托盘只能靠 IconPixmap 显示，所以这里一定要找到文件。
+        g_ptr_array_add(directories, g_build_filename(folder, "..", "share", "icons", "hicolor", NULL));
         g_ptr_array_add(directories, g_build_filename(folder, "..", "icons", "hicolor", NULL));
         g_ptr_array_add(directories, g_build_filename(folder, "..", "..", "linux", "icons", "hicolor", NULL));
         g_free(folder);

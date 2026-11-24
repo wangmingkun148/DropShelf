@@ -557,7 +557,9 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y, 
             end_move(window, L"全局左键已经松开");
             return;
         }
-        move_window_to_pointer(window, (float)x, (float)y);
+        // 有定时器在按全局光标摆窗口时，这里不要再摆一次：两个来源的时机不同，
+        // 一帧里挪两下反而会看出抖动。
+        if (!(window->move_by_cursor && window->move_source)) move_window_to_pointer(window, (float)x, (float)y);
         return;
     }
     UiMouseEvent event = { .kind = UI_MOUSE_MOVE, .x = (float)x, .y = (float)y };
@@ -1149,7 +1151,9 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
 
     // 从别的程序拖进来：文件、文字、图片。数据在松开时由 GTK 读好，交给窗口的拖放回调。
     GtkDropTarget *drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
-    GType drop_types[] = { GDK_TYPE_FILE_LIST, G_TYPE_FILE, G_TYPE_STRING, GDK_TYPE_TEXTURE };
+    // 顺序就是偏好：浏览器拖图片时同时给 GdkFileList（里面是网页地址，没有本地路径）
+// 和 image/png，优先要图片本身，落下来才是一张能看的图。
+    GType drop_types[] = { GDK_TYPE_TEXTURE, GDK_TYPE_FILE_LIST, G_TYPE_FILE, G_TYPE_STRING };
     gtk_drop_target_set_gtypes(drop, drop_types, G_N_ELEMENTS(drop_types));
     // 捕获阶段先拿到拖动：别的控制器（编辑框、拖动源）在冒泡阶段可能先把它吃掉。
     gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(drop), GTK_PHASE_CAPTURE);
@@ -1376,7 +1380,12 @@ void ui_window_center(UiWindow *window)
 void ui_window_set_topmost(UiWindow *window, bool topmost)
 {
     if (!window || !window->layer || !gtk_layer_is_supported()) return;
-    gtk_layer_set_layer(GTK_WINDOW(window->window), topmost ? GTK_LAYER_SHELL_LAYER_OVERLAY : GTK_LAYER_SHELL_LAYER_TOP);
+    // Wayland 上没有真正的“取消置顶”：普通窗口永远在 overlay/top 层下面。共享代码里的
+    // 置顶开关在 Linux 版去掉了，这里一律留在 overlay 层（值是判断一下再设，避免多余的重映射）。
+    (void)topmost;
+    GtkWindow *gtk = GTK_WINDOW(window->window);
+    if (gtk_layer_get_layer(gtk) != GTK_LAYER_SHELL_LAYER_OVERLAY)
+        gtk_layer_set_layer(gtk, GTK_LAYER_SHELL_LAYER_OVERLAY);
 }
 
 void ui_window_set_border_color(UiWindow *window, const Color *color)

@@ -100,7 +100,11 @@ void probe_show_at(POINT center)
     MONITORINFO info;
     memset(&info, 0, sizeof info);
     info.cbSize = sizeof info;
-    if (!GetMonitorInfoW(monitor, &info)) return;
+    if (!GetMonitorInfoW(monitor, &info))
+    {
+        log_info(L"探针窗口：取不到 (%ld, %ld) 所在显示器的工作区，不显示", center.x, center.y);
+        return;
+    }
     int size = (int)lround(PROBE_SIZE);
     POINT position = probe_place(center, info.rcWork, size, size);
     UiWindowOptions options = {0};
