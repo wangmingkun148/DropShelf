@@ -79,7 +79,8 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Created ZIP files and extracted folders go to a new shelf; existing files with the same name are never overwritten.
 
 ### Settings and appearance
-- Light (ivory background), Dark or System theme; the accent color follows Windows or can be one of eight colors.
+- Two styles you can switch any time under Appearance: Simple (cards, Mica and Acrylic like Windows 11 Settings, with a list when the shelf is expanded) and Cards (card faces, backs and a card table; the expanded shelf lays its cards out, and the shelf flips open or is flung back as a card). When you switch, the main window and open shelves flip over one after another like dominoes, and the window, tray and shortcut icons change too. New users start with Simple and can pick a style in the first-run tutorial; users upgrading are asked once.
+- Light (ivory background), Dark or System theme; the accent color follows Windows or can be one of eight colors (Cards defaults to cobalt).
 - English and Simplified Chinese interface, following the system language by default. Other languages can be added as language packs (a JSON file each) without changing the program; see [docs/translating.md](docs/translating.md).
 - Settings apply immediately and are saved automatically.
 - A tutorial is shown on first run and can be viewed again from General.
