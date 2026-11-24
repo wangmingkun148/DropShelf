@@ -2,6 +2,8 @@
 
 [简体中文](README.md) | English
 
+This repository is based on the upstream project [wangmingkun148/DropShelf](https://github.com/wangmingkun148/DropShelf). The code was pushed here directly, so it is an independent repository rather than a GitHub fork, and it has no "forked from" label.
+
 I only recently realised that there are a few other projects with the same name. I apologise for my almost non-existent naming skills (lol). That said, I haven't referenced the UI or logic of any other projects. My only source of inspiration was Dropover, which I mentioned below. I also hope to keep animations as one of the project's defining features and continue improving them.
 
 DropShelf is a temporary shelf for files on Windows. While dragging files, shake the mouse or pause at a screen edge, and a shelf appears. Drop your files on it, switch to the window you need, then drag them all to File Explorer, a chat app or a browser in one go.

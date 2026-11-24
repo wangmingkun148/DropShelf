@@ -2,6 +2,8 @@
 
 简体中文 | [English](README.en.md)
 
+本仓库基于上游项目 [wangmingkun148/DropShelf](https://github.com/wangmingkun148/DropShelf)。它是直接把代码 push 上来的独立仓库，不是 GitHub 上的 fork，所以没有 “forked from” 标识。
+
 最近才发现有一些同名项目，我为我几乎为0的起名天赋道歉，不过我没有参考过其他项目的ui和逻辑，唯一的灵感来源只是下面提到的dropover，我也希望把动画作为一个特点继续维护
 
 DropShelf 是一个临时文件置物架。拖着文件晃一晃鼠标，或拖到屏幕边缘停一下，置物架就会出现。先把文件放上去，切换到目标窗口后，再一次拖到资源管理器、聊天软件或浏览器里。
