@@ -51,7 +51,7 @@ jobs:
           ls -lh dist
 
       - name: 上传构建结果
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: linux-packages
           path: dist/*
