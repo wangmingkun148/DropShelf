@@ -460,6 +460,55 @@ int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, She
     return added;
 }
 
+// ───────────── 重新排序 ─────────────
+
+void shelf_model_move(ShelfModel *model, ShelfItem *const *items, int count, int index)
+{
+    if (model->released || count <= 0 || count > model->count) return;
+    // 这些项目得都在这个置物架上，并且记下 index 前面有几个会被挪走。
+    int moved_before = 0;
+    for (int each = 0; each < count; each++)
+    {
+        int at = -1;
+        for (int position = 0; position < model->count; position++)
+            if (model->items[position] == items[each])
+            {
+                at = position;
+                break;
+            }
+        if (at < 0) return;
+        if (at < index) moved_before++;
+    }
+    if (index < 0 || index > model->count) index = model->count;
+    int target = index - moved_before;
+    // 挪走的按原来的先后排好，剩下的按原来的顺序留下。
+    ShelfItem **moving = xalloc((size_t)count * sizeof(ShelfItem *));
+    ShelfItem **rest = xalloc((size_t)model->count * sizeof(ShelfItem *));
+    int moving_count = 0, rest_count = 0;
+    for (int position = 0; position < model->count; position++)
+    {
+        bool found = false;
+        for (int each = 0; each < count; each++)
+            if (model->items[position] == items[each])
+            {
+                found = true;
+                break;
+            }
+        if (found) moving[moving_count++] = model->items[position];
+        else rest[rest_count++] = model->items[position];
+    }
+    if (target < 0) target = 0;
+    if (target > rest_count) target = rest_count;
+    memcpy(model->items, rest, (size_t)target * sizeof(ShelfItem *));
+    memcpy(&model->items[target], moving, (size_t)moving_count * sizeof(ShelfItem *));
+    memcpy(&model->items[target + moving_count], &rest[target], (size_t)(rest_count - target) * sizeof(ShelfItem *));
+    model->count = rest_count + moving_count;
+    free(moving);
+    free(rest);
+    model->has_interacted = true;
+    items_changed(model);
+}
+
 // ───────────── 移除和撤销 ─────────────
 
 ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int count)

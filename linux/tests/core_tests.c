@@ -446,6 +446,66 @@ static void test_shelf_model(void)
 }
 
 
+/// 把项目拖回置物架、在某一行松手：按松手位置重排，项目之间的先后不变。
+static void test_shelf_model_move(void)
+{
+    ShelfModel *model = shelf_model_new(NULL);
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc(4, sizeof(DroppedEntry));
+    const wchar_t *values[4] = { L"一", L"二", L"三", L"四" };
+    for (int index = 0; index < 4; index++)
+    {
+        result->entries[index].kind = ITEM_TEXT;
+        result->entries[index].value = wcs_dup(values[index]);
+    }
+    result->count = 4;
+    CHECK(shelf_model_add(model, result).added == 4);
+    drop_result_free(result);
+    if (model->count != 4)
+    {
+        shelf_model_release(model);
+        return;
+    }
+    ShelfItem *first = model->items[0];
+    ShelfItem *second = model->items[1];
+    ShelfItem *third = model->items[2];
+    ShelfItem *fourth = model->items[3];
+
+    // 拖到第四项上松手：它占住第四项原来那一行。
+    ShelfItem *one[1] = { first };
+    shelf_model_move(model, one, 1, 3);
+    CHECK(model->count == 4 && model->items[0] == second && model->items[1] == third && model->items[2] == first &&
+        model->items[3] == fourth);
+
+    // 一次拖两项：它们之间的先后不变。
+    ShelfItem *pair[2] = { second, third };
+    shelf_model_move(model, pair, 2, 4);
+    CHECK(model->items[0] == first && model->items[1] == fourth && model->items[2] == second && model->items[3] == third);
+
+    // 拖到列表末尾以外就是放到最上面（堆叠里松手）。
+    ShelfItem *last[1] = { first };
+    shelf_model_move(model, last, 1, 99);
+    CHECK(model->count == 4 && model->items[3] == first);
+
+    // 不在这个置物架上的项目：什么也不做。
+    ShelfModel *other = shelf_model_new(NULL);
+    DropReadResult *foreign_result = xcalloc(1, sizeof(DropReadResult));
+    foreign_result->entries = xcalloc(1, sizeof(DroppedEntry));
+    foreign_result->entries[0].kind = ITEM_TEXT;
+    foreign_result->entries[0].value = wcs_dup(L"别人的");
+    foreign_result->count = 1;
+    CHECK(shelf_model_add(other, foreign_result).added == 1);
+    drop_result_free(foreign_result);
+    if (other->count == 1)
+    {
+        ShelfItem *foreign[1] = { other->items[0] };
+        shelf_model_move(model, foreign, 1, 0);
+        CHECK(model->count == 4 && model->items[3] == first && model->items[0] != other->items[0]);
+    }
+    shelf_model_release(other);
+    shelf_model_release(model);
+}
+
 static void test_write_for_drag(void)
 {
     ShelfModel *model = shelf_model_new(NULL);
@@ -578,6 +638,7 @@ int main(void)
     test_attachment_cache();
     test_drop_read_paths();
     test_shelf_model();
+    test_shelf_model_move();
     test_write_for_drag();
     test_hyprland_monitors();
     test_gesture_edges();

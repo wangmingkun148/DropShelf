@@ -1298,15 +1298,16 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             shelf->drag_kind = from_self ? DROP_NONE : classify_drop(drop);
             if (!from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf);
         {
-            bool accepted = shelf->drag_kind != DROP_NONE && !shelf->model->busy;
-            log_info(L"拖入：识别为 %ls，置物架%ls，%ls", shelf->drag_kind == DROP_FILES ? L"文件" :
+            // 本程序自己的拖动也接：拖回原来的置物架按松手位置重排，拖到另一个置物架就交过去。
+            bool accepted = !shelf->model->busy && (from_self || shelf->drag_kind != DROP_NONE);
+            log_info(L"拖入：识别为 %ls，置物架%ls，%ls", from_self ? L"本程序自己的拖动" : shelf->drag_kind == DROP_FILES ? L"文件" :
                 shelf->drag_kind == DROP_IMAGE ? L"图片" : shelf->drag_kind == DROP_TEXT ? L"文字" : L"不支持的内容",
                 shelf->model->busy ? L"正忙" : L"空闲", accepted ? L"接受" : L"不接受");
             return accepted;
         }
         case UI_DROP_MOTION:
             log_trace(L"拖入：移动到（%g, %g）", x, y);
-            return shelf->drag_kind != DROP_NONE && !shelf->model->busy;
+            return !shelf->model->busy && (from_self || shelf->drag_kind != DROP_NONE);
         case UI_DROP_LEAVE:
             log_info(L"拖入：离开置物架");
             shelf_end_drag(shelf);
@@ -1322,8 +1323,20 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             shelf_end_drag(shelf);
             if (self)
             {
-                // 从一个置物架拖到另一个置物架上：项目交过去，来源那边按移走处理。
                 LinuxDragOut *out = current_drag_out;
+                if (out && out->shelf == shelf && !shelf->model->busy)
+                {
+                    // 拖回原来的置物架：按松手的位置重新排序，堆叠里松手就放到最上面。
+                    int row = -1;
+                    ShelfTarget target = hit_test(shelf, (float)x, (float)y, &row);
+                    int index = target == TARGET_ROW || target == TARGET_ROW_REMOVE ? row : shelf->model->count;
+                    out->transferred = true;
+                    shelf_model_move(shelf->model, out->items, out->count, index);
+                    log_info(L"拖入：在原来的置物架上重排，放到第 %d 项", index);
+                    if (action) *action = GDK_ACTION_MOVE;
+                    return true;
+                }
+                // 从一个置物架拖到另一个置物架上：项目交过去，来源那边按移走处理。
                 if (out && out->shelf != shelf && !shelf->model->busy && !out->shelf->closed && !out->shelf->closing)
                 {
                     out->transferred = true;

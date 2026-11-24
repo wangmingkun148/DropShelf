@@ -183,6 +183,48 @@ static void test_adopt_between_shelves(void)
     free(folder);
 }
 
+/// 从一个置物架把项目拖回来、在列表的某一行松手：按松手位置重排，项目之间的先后不变。
+static void test_reorder_by_drop(void)
+{
+    task_initialize();
+    ShelfModel *model = shelf_model_new(NULL);
+    add_entry(model, ITEM_TEXT, L"一", NULL);
+    add_entry(model, ITEM_TEXT, L"二", NULL);
+    add_entry(model, ITEM_TEXT, L"三", NULL);
+    add_entry(model, ITEM_TEXT, L"四", NULL);
+    ShelfItem *first = model->items[0];
+    ShelfItem *second = model->items[1];
+    ShelfItem *third = model->items[2];
+    ShelfItem *fourth = model->items[3];
+
+    // 拖到第四项上松手：它占住第四项原来那一行。
+    ShelfItem *one[1] = { first };
+    shelf_model_move(model, one, 1, 3);
+    CHECK(model->count == 4 && model->items[0] == second && model->items[1] == third && model->items[2] == first &&
+          model->items[3] == fourth, "拖回置物架之后没有按松手位置重排");
+
+    // 一次拖两项：它们之间的先后不变。
+    ShelfItem *pair[2] = { second, third };
+    shelf_model_move(model, pair, 2, 4);
+    CHECK(model->items[0] == first && model->items[1] == fourth && model->items[2] == second && model->items[3] == third,
+        "一次拖回来的多个项目顺序不对");
+
+    // 放到最上面：堆叠里松手就是这一种。
+    ShelfItem *last[1] = { first };
+    shelf_model_move(model, last, 1, 99);
+    CHECK(model->count == 4 && model->items[3] == first, "拖到列表末尾以外时没有放到最上面");
+
+    // 不在这个置物架上的项目：什么也不做。
+    ShelfModel *other = shelf_model_new(NULL);
+    add_entry(other, ITEM_TEXT, L"别人的", NULL);
+    ShelfItem *foreign[1] = { other->items[0] };
+    shelf_model_move(model, foreign, 1, 0);
+    CHECK(model->count == 4 && model->items[3] == first && model->items[0] != other->items[0],
+        "把别的置物架上的项目塞了进来");
+    shelf_model_release(other);
+    shelf_model_release(model);
+}
+
 static int history_count(void)
 {
     int count;

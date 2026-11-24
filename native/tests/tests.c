@@ -1694,6 +1694,7 @@ int main(int argc, char **argv)
     run("folder watch", test_folder_watch);
     run("shelf peek", test_shelf_peek);
     run("adopt between shelves", test_adopt_between_shelves);
+    run("reorder by drop", test_reorder_by_drop);
     run("merge and split", test_merge_and_split);
     run("shelf history", test_shelf_history);
     run("update check", test_update_check);

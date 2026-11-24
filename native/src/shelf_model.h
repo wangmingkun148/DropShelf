@@ -111,6 +111,11 @@ void shelf_model_run_action_on_dropped(ShelfModel *model, const QuickAction *act
 /// 对方随后自己把原来的项目移除。返回放进来的数量（放在最后）。
 int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, ShelfModel *from);
 
+/// 把已经在置物架上的这些项目挪到 index 之前（index 等于项目数表示放到最上面）：
+/// 从一个置物架把它们拖回来、在列表里松手时按松手的位置重新排序。
+/// 这些项目必须都在这边，否则什么也不做。多个项目之间的先后顺序不变。
+void shelf_model_move(ShelfModel *model, ShelfItem *const *items, int count, int index);
+
 // ───────────── 跟着改名和移动 ─────────────
 
 /// 当场找回的项目最多这么多，多了交给后台的检查。
