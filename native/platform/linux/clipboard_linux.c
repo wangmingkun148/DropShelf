@@ -86,6 +86,8 @@ bool clipboard_set_files(const StrList *paths)
     GdkContentProvider *providers[2];
     int count = 0;
     providers[count++] = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
+    // GdkFileList 不是 GObject，用 g_boxed_free 释放（GValue 里已经复制了一份）。
+    g_boxed_free(GDK_TYPE_FILE_LIST, list);
     GdkContentProvider *text_provider = NULL;
     if (text && text_length > 0) text_provider = gdk_content_provider_new_typed(G_TYPE_STRING, text);
     if (text_provider) providers[count++] = text_provider;

@@ -1553,7 +1553,9 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         if (list)
         {
             provider = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
-            g_object_unref(list);
+            // GdkFileList 是 boxed 类型，不是 GObject：用 g_boxed_free 释放，g_object_unref 会报
+            // “g_object_unref: assertion 'G_IS_OBJECT (object)' failed”，而且是漏掉的。
+            g_boxed_free(GDK_TYPE_FILE_LIST, list);
             *actions = gdk_action(drag_allowed_effects(shelf->move_mode, has_temporary || extra.count > 0));
             if (!*actions) *actions = GDK_ACTION_COPY;
         }
@@ -1569,7 +1571,16 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             wstr_append(&text, others[index]->value);
             dragged[dragged_count++] = shelf_item_retain(others[index]);
         }
-        if (text.length > 0) provider = gdk_content_provider_new_typed(G_TYPE_STRING, text.data);
+        if (text.length > 0)
+        {
+            // GTK 要的是 UTF-8：直接给 wchar_t 那边收到的是乱码，拖出去的文字也会坏掉。
+            char *utf8_text = utf8_from_wide(text.data, NULL);
+            if (utf8_text)
+            {
+                provider = gdk_content_provider_new_typed(G_TYPE_STRING, utf8_text);
+                free(utf8_text);
+            }
+        }
         wstr_free(&text);
         *actions = GDK_ACTION_COPY;
     }
