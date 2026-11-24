@@ -146,6 +146,12 @@ PATH="$tools:$PATH" APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 DEPLOY_GTK_VERSION=4 \
     --custom-apprun "$tmp/AppRun" \
     --plugin gtk
 
+# appimagetool 还按老的 .appdata.xml 名字找 AppStream 元数据，只给 AppImage 补一个副本。
+metainfo="$appdir/usr/share/metainfo/${desktop%.desktop}.metainfo.xml"
+if [ -f "$metainfo" ]; then
+    cp "$metainfo" "${metainfo%.metainfo.xml}.appdata.xml"
+fi
+
 ARCH="$arch" APPIMAGE_EXTRACT_AND_RUN=1 \
     "$tools/appimagetool" "$appdir" "$out/DropShelf-$version-$arch.AppImage"
 
