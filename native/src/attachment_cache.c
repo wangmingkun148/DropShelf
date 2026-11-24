@@ -229,7 +229,8 @@ void attachment_cache_release(const wchar_t *directory)
     if (!last || !attachment_cache_is_owned(directory)) return;
     Deletion *deletion = xcalloc(1, sizeof(Deletion));
     deletion->directory = wcs_dup(directory);
-    start_deletion(deletion);
+    // 等这一轮消息处理完再删：同一轮里又被持有（比如一个置物架放手、另一个接手）时，删之前那次检查就能看到。
+    task_post(start_deletion, deletion);
 }
 
 static void release_now(void *data)
