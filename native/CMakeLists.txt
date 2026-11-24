@@ -1,13 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-# 版本号只写在 C# 工程里（见仓库根目录的 CLAUDE.md），这里读出来用，不用多维护一处。
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../src/DropShelf/DropShelf.csproj" DROPSHELF_VERSION_LINE REGEX "<Version>")
-string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" DROPSHELF_VERSION "${DROPSHELF_VERSION_LINE}")
-if(NOT DROPSHELF_VERSION)
-    message(FATAL_ERROR "没有在 DropShelf.csproj 里找到版本号")
-endif()
-
-project(DropShelf VERSION ${DROPSHELF_VERSION} LANGUAGES C CXX RC)
+# 版本号改动时同步 res/app.manifest 和 installer 下的两个 .iss 文件（见仓库根目录的 CLAUDE.md）。
+project(DropShelf VERSION 3.0.7 LANGUAGES C CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "DropShelf 只支持用 MSVC 编译")
@@ -90,7 +84,7 @@ add_library(dropshelf_flags INTERFACE)
 target_include_directories(dropshelf_flags INTERFACE src)
 target_compile_definitions(dropshelf_flags INTERFACE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS
-    DROPSHELF_VERSION=L"${DROPSHELF_VERSION}"
+    DROPSHELF_VERSION=L"${PROJECT_VERSION}"
 )
 # 源文件是 UTF-8，里面直接写中文。gfx.cpp 是唯一的 C++ 文件，不用异常和运行时类型信息。
 target_compile_options(dropshelf_flags INTERFACE /utf-8 /W4 /wd4100)
@@ -112,17 +106,16 @@ target_link_libraries(dropshelf_core PUBLIC miniz user32 gdi32 comctl32 version 
 
 configure_file(res/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
 
-# 清单与 C# 版共用一份，版本号不用多改一处。
 add_executable(DropShelf WIN32
     src/main.c
     res/DropShelf.rc
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src/DropShelf/app.manifest"
+    res/app.manifest
 )
 target_include_directories(DropShelf PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(DropShelf PRIVATE dropshelf_core)
 # 清单里已经写了权限级别，不让链接器再生成一份。
 target_link_options(DropShelf PRIVATE /MANIFESTUAC:NO)
-# 提示框等系统控件用新版的样式（C# 版不需要这一项，所以没有写在共用的清单里）。
+# 提示框等系统控件用新版的样式。
 target_link_options(DropShelf PRIVATE "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'")
 
 enable_testing()

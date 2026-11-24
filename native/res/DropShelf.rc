@@ -1,11 +1,11 @@
-// 程序图标和版本信息。图标与 C# 版共用一份；第二个是纸牌风格的图标（窗口、托盘和快捷方式跟着风格换）。
+// 程序图标和版本信息。第一个是简洁风格的图标，第二个是纸牌风格的图标（窗口、托盘和快捷方式跟着风格换）。
 #pragma code_page(65001)
 
 #include <winver.h>
 #include "version.h"
 
-1 ICON "../../src/DropShelf/Assets/DropShelf.ico"
-2 ICON "../../src/DropShelf/Assets/DropShelf-cards.ico"
+1 ICON "DropShelf.ico"
+2 ICON "DropShelf-cards.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION DROPSHELF_VERSION_COMMA

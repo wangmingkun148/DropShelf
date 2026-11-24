@@ -1,4 +1,4 @@
-﻿#define AppName "DropShelf"
+﻿﻿#define AppName "DropShelf"
 #define AppVersion "3.0.7"
 #define AppPublisher "DropShelf"
 #define AppExeName "DropShelf.exe"
@@ -26,7 +26,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\installer
 OutputBaseFilename=DropShelf-Setup-{#AppVersion}
-SetupIconFile=..\src\DropShelf\Assets\DropShelf.ico
+SetupIconFile=..\native\res\DropShelf.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
 UninstallFilesDir={app}

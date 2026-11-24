@@ -1,4 +1,4 @@
-﻿#define AppName "DropShelf"
+﻿﻿#define AppName "DropShelf"
 #define AppVersion "3.0.7"
 
 [Setup]
@@ -13,7 +13,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 OutputDir=..\artifacts\win-x64
 OutputBaseFilename=卸载 DropShelf
-SetupIconFile=..\src\DropShelf\Assets\DropShelf.ico
+SetupIconFile=..\native\res\DropShelf.ico
 Compression=lzma2/fast
 SolidCompression=no
 WizardStyle=modern

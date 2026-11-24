@@ -99,17 +99,17 @@ static void test_program_resources(void)
     if (module) FreeLibrary(module);
     free(exe);
 
-    // 版本号写在四处（见仓库根目录的 CLAUDE.md），csproj 之外的三处要一致。
+    // 版本号写在四处（见仓库根目录的 CLAUDE.md），CMakeLists.txt 之外的三处要一致。
     wchar_t version_text[64], define[96], info[96];
     swprintf(version_text, 64, L"version=\"%d.%d.%d.0\"", major, minor, patch);
     swprintf(define, 96, L"#define AppVersion \"%ls\"", DROPSHELF_VERSION);
     swprintf(info, 96, L"VersionInfoVersion=%ls.0", DROPSHELF_VERSION);
-    wchar_t *app_manifest = repository_text(L"src/DropShelf/app.manifest");
+    wchar_t *app_manifest = repository_text(L"native/res/app.manifest");
     wchar_t *installer = repository_text(L"installer/DropShelf.iss");
     wchar_t *uninstaller = repository_text(L"installer/UninstallLauncher.iss");
-    CHECK(app_manifest && wcsstr(app_manifest, version_text), "app.manifest 的版本号与 DropShelf.csproj 不一致");
-    CHECK(installer && wcsstr(installer, define) && wcsstr(installer, info), "DropShelf.iss 的版本号与 DropShelf.csproj 不一致");
-    CHECK(uninstaller && wcsstr(uninstaller, define) && wcsstr(uninstaller, info), "UninstallLauncher.iss 的版本号与 DropShelf.csproj 不一致");
+    CHECK(app_manifest && wcsstr(app_manifest, version_text), "app.manifest 的版本号与 CMakeLists.txt 不一致");
+    CHECK(installer && wcsstr(installer, define) && wcsstr(installer, info), "DropShelf.iss 的版本号与 CMakeLists.txt 不一致");
+    CHECK(uninstaller && wcsstr(uninstaller, define) && wcsstr(uninstaller, info), "UninstallLauncher.iss 的版本号与 CMakeLists.txt 不一致");
     free(app_manifest);
     free(installer);
     free(uninstaller);

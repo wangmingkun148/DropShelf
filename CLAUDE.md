@@ -1,11 +1,15 @@
 # 版本号规则
 
-版本号格式为 `主.次.修订`，版本号写在 `src/DropShelf/DropShelf.csproj`、`src/DropShelf/app.manifest`、`installer/DropShelf.iss`、`installer/UninstallLauncher.iss` 四处，需同步修改。
+版本号格式为 `主.次.修订`，版本号写在 `native/CMakeLists.txt`（`project(DropShelf VERSION …)`）、`native/res/app.manifest`、`installer/DropShelf.iss`、`installer/UninstallLauncher.iss` 四处，需同步修改。
 
 - 每次修改应用代码，修订号加一（如 2.2.0 → 2.2.1）。
 - 某一位加到 10 时归零并向前一位进一（如 2.2.9 → 2.3.0，2.9.9 → 3.0.0）。
 - 只改文档或测试不升版本。
 - 简洁和纸牌两种风格都在 main 里，只发一种安装包和一个 `v` 开头的标签；style 分支（claude/deck-style）不再单独发布。
+
+# C# 版
+
+- `legacy/csharp` 是原来的 C# 版（2.x），已不再使用、不再发布，只留作参考。不要改它，也不要再同步它的版本号；新功能和修复只做在 `native` 里。
 
 # 两种风格
 

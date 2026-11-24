@@ -2,7 +2,7 @@
 
 这三件事都需要项目维护者自己的账号或证书，仓库里只准备好了接入的位置：没有配置时，发布流程和原来完全一样。
 
-安装包、便携版、Scoop 清单和提交到 winget 的都是 C 版（`native` 文件夹）：`installer/Build-Installer.ps1` 先用 `native/build.ps1` 编译出一个不依赖其他文件的 `DropShelf.exe`（运行库静态链接，不需要 .NET 或另外安装 VC++ 运行库），放到 `artifacts\win-x64`，再交给 Inno Setup。构建机要有 Visual Studio 2022 或 Build Tools 的 C++ 工具（GitHub 的 `windows-latest` 自带）。要临时改回发布 C# 版，给构建脚本加上 `-DotNet`，并在 `release.yml` 里加回安装 .NET 10 SDK 的一步（`actions/setup-dotnet`）。
+安装包、便携版、Scoop 清单和提交到 winget 的都是 C 版（`native` 文件夹）：`installer/Build-Installer.ps1` 先用 `native/build.ps1` 编译出一个不依赖其他文件的 `DropShelf.exe`（运行库静态链接，不需要 .NET 或另外安装 VC++ 运行库），放到 `artifacts\win-x64`，再交给 Inno Setup。构建机要有 Visual Studio 2022 或 Build Tools 的 C++ 工具（GitHub 的 `windows-latest` 自带）。原来的 C# 版已停用，放在 `legacy/csharp`，不再发布。
 
 ## 代码签名
 

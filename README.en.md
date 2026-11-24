@@ -128,36 +128,19 @@ Build the portable version and installer (requires Inno Setup 6 or 7) into the `
 .\installer\Build-Installer.ps1
 ```
 
-The original C# version is still in `src` and needs the .NET 10 SDK:
-
-```powershell
-dotnet build .\DropShelf.sln -c Release
-dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
-.\installer\Build-Installer.ps1 -DotNet
-```
+The original C# version (2.x) is no longer used; it is kept for reference in [`legacy/csharp`](legacy/csharp).
 
 For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHELF_SETTINGS_PATH` and `DROPSHELF_LOG_DIRECTORY` to choose where settings and logs go.
 
 ## Project structure
 
-- `native`: the C version (the one that is released). `native/src` is the program and `native/tests` the tests; most files say at the top which part of the C# version they correspond to.
-
-The C# version:
-
-- `src/DropShelf/AppController.cs`: app controller.
-- `src/DropShelf/Services/Gestures`: shake detection and screen edge dwell.
-- `src/DropShelf/Views/ProbeWindow.cs`: probe window that confirms what is being dragged.
-- `src/DropShelf/Shelves/ShelfManager.cs`: creating, reusing and closing shelves.
-- `src/DropShelf/Views`: shelf, settings, tutorial and other windows. The main window and shelf code is split by feature into `MainWindow.*.cs` and `ShelfWindow.*.cs`, such as flipping, the side panel, dropping in and dragging out.
-- `src/DropShelf/Services`: drag in and out, quick actions, archives, history, clipboard, theme, tray, hotkeys and more.
-- `src/DropShelf/Localization`: English and Chinese UI text.
-- `src/DropShelf/Themes`: colors, icons and control styles.
-- `src/DropShelf/Interop`: Win32, DWM and Shell interfaces.
-- `tests/DropShelf.Tests`: automated tests.
+- `native`: the C version (the one that is released). `native/src` is the program, `native/tests` the tests, and `native/res` the icons, manifest and version info.
+- `installer`: Inno Setup scripts for the installer and uninstaller.
+- `legacy/csharp`: the original C# version, no longer used.
 
 ## Releasing a new version
 
-1. Update the version in `DropShelf.csproj`, `app.manifest` and both `.iss` files under `installer`, then merge into `main`.
+1. Update the version in `native/CMakeLists.txt`, `native/res/app.manifest` and both `.iss` files under `installer`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish. Alternatively, write the release notes in `docs/releases/v<version>.md` and just push the tag: Actions then creates the release with those notes, or generates notes from the commits if the file is missing.
 3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
 

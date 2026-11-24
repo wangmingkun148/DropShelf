@@ -133,36 +133,19 @@ DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows �
 .\installer\Build-Installer.ps1
 ```
 
-原来的 C# 版还在 `src` 里，需要 .NET 10 SDK：
-
-```powershell
-dotnet build .\DropShelf.sln -c Release
-dotnet run --project .\tests\DropShelf.Tests\DropShelf.Tests.csproj
-.\installer\Build-Installer.ps1 -DotNet
-```
+原来的 C# 版（2.x）已不再使用，留作参考放在 [`legacy/csharp`](legacy/csharp)。
 
 调试时可设置环境变量 `DROPSHELF_INSTANCE` 运行独立实例，`DROPSHELF_SETTINGS_PATH` 和 `DROPSHELF_LOG_DIRECTORY` 指定设置和日志位置。
 
 ## 项目结构
 
-- `native`：C 版（发布的就是它）。`native/src` 是程序，`native/tests` 是测试；大多数文件开头写着对应 C# 版的哪一部分。
-
-以下是 C# 版：
-
-- `src/DropShelf/AppController.cs`：应用总控。
-- `src/DropShelf/Services/Gestures`：晃动识别与屏幕边缘停留。
-- `src/DropShelf/Views/ProbeWindow.cs`：确认拖动内容的探针窗口。
-- `src/DropShelf/Shelves/ShelfManager.cs`：置物架的创建、复用与关闭。
-- `src/DropShelf/Views`：置物架、设置、教程等窗口。主窗口和置物架的代码按功能分在 `MainWindow.*.cs`、`ShelfWindow.*.cs` 里，如翻牌、状态栏、拖入、拖出。
-- `src/DropShelf/Services`：拖入拖出、快速操作、压缩解压、历史记录、剪贴板、主题、托盘、快捷键等。
-- `src/DropShelf/Localization`：中英文界面文字，以及读取语言包、导出翻译模板。
-- `src/DropShelf/Themes`：颜色、图标与控件样式。
-- `src/DropShelf/Interop`：Win32、DWM 与 Shell 接口。
-- `tests/DropShelf.Tests`：自动化测试。
+- `native`：C 版（发布的就是它）。`native/src` 是程序，`native/tests` 是测试，`native/res` 是图标、清单和版本信息。
+- `installer`：安装包和卸载程序的 Inno Setup 脚本。
+- `legacy/csharp`：原来的 C# 版，不再使用。
 
 ## 发布新版本
 
-1. 修改 `DropShelf.csproj`、`app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
+1. 修改 `native/CMakeLists.txt`、`native/res/app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
 2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.9`，须与版本号一致）并发布。也可以把发布说明写在 `docs/releases/v版本号.md`，再直接推送这个标签：Actions 新建 Release 时用这份说明，没有这个文件时按提交记录自动生成。
 3. GitHub Actions 会自动编译 C 版的安装包和便携版，几分钟后附加到这个 Release 上；`v` 开头的标签还会附带一份 Scoop 清单 `dropshelf.json`。改动 `native` 里的代码时，Actions 还会编译并运行 C 版的测试（`.github/workflows/build.yml`）。
 
