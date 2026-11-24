@@ -126,10 +126,15 @@ exec "$this_dir/usr/bin/dropshelf" "$@"
 EOF
 chmod +x "$tmp/AppRun"
 
-# GTK 4 本身不带 /usr/lib/gtk-4.0 模块目录（桌面上通常由 fcitx 等输入法包提供），
-# 干净环境里 GTK 插件复制这个目录会失败，缺的时候先建一个空的。
+# GTK 4 本身不带 /usr/lib/gtk-4.0 模块目录（桌面上通常由 fcitx 等输入法包提供）；
+# gdk-pixbuf 的模块目录在只装了内置加载器的系统上也可能不存在。干净环境里 GTK 插件
+# 复制这两个目录会失败，缺的时候先建空目录。PNG/JPEG 等常用加载器已经编进库里。
 gtk4_libdir="$(pkg-config --variable=libdir gtk4)"
 mkdir -p "$gtk4_libdir/gtk-4.0" 2>/dev/null || true
+pixbuf_dir="$(pkg-config --variable=gdk_pixbuf_binarydir gdk-pixbuf-2.0)"
+if [ -n "$pixbuf_dir" ]; then
+    mkdir -p "$pixbuf_dir/loaders" 2>/dev/null || true
+fi
 
 # linuxdeploy 自带的 strip 是旧版 binutils，遇到 .relr.dyn 会报 “unknown type [0x13] section”，
 # 所以让它别剥离（NO_STRIP）；continuous 的 patchelf 能正确处理这种库。
