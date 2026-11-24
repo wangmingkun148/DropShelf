@@ -49,6 +49,9 @@ public partial class ShelfWindow
     /// <summary>以屏幕像素坐标为中心显示置物架。</summary>
     public void ShowAt(POINT center, bool activate, ShelfEntrance entrance = default)
     {
+        // 长时间空闲或复用已有窗口时，上一次拖放可能把可见性留在动画中间态；
+        // 在入口处归位，后续拖入事件会按需要重新显示投放区。
+        SettleDragVisuals();
         ShowActivated = activate;
         var wasVisible = IsVisible;
         var trace = wasVisible ? null : FrameTrace.Start($"Shelf open {entrance.Kind}");
