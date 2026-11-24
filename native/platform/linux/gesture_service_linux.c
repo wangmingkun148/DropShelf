@@ -231,6 +231,22 @@ static bool any_button_down(void)
     return false;
 }
 
+/// 左键的全局状态，界面线程也会读：1 按住、0 松开、-1 不知道（没有设备）。
+static volatile int left_button_state = -1;
+
+int gesture_left_button_state(void)
+{
+    return left_button_state;
+}
+
+static void update_left_button_state(void)
+{
+    bool down = false;
+    for (int index = 0; index < device_count; index++)
+        if (devices[index].fd >= 0 && devices[index].left_down) down = true;
+    left_button_state = device_count > 0 ? (down ? 1 : 0) : -1;
+}
+
 static void apply_sensitivity_if_changed(void)
 {
     int requested = requested_sensitivity;
@@ -383,6 +399,7 @@ static void *run(void *parameter)
             if (!(waited[index].revents & (POLLIN | POLLERR | POLLHUP))) continue;
             read_device(owners[index]);
         }
+        update_left_button_state();
 
         // 按键状态变了：开始或结束一次按住。
         bool down = any_button_down();
@@ -401,6 +418,7 @@ static void *run(void *parameter)
     }
     reset_button_state();
     close_all_devices();
+    left_button_state = -1;
     running = false;
     return NULL;
 }

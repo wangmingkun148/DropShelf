@@ -11,6 +11,7 @@
 #include "ui_internal.h"
 #include "ui_linux.h"
 #include "gfx_gtk.h"
+#include "gesture_linux.h"
 #include "lang.h"
 #include "log.h"
 
@@ -450,7 +451,11 @@ static void move_window_to_pointer(UiWindow *window, float local_x, float local_
     int old_x = window->x;
     int old_y = window->y;
     POINT cursor;
-    if (window->layer && window->move_by_cursor && GetCursorPos(&cursor))
+    gint64 query_started = g_get_monotonic_time();
+    bool have_cursor = window->layer && window->move_by_cursor && GetCursorPos(&cursor);
+    if (log_trace_enabled() && g_get_monotonic_time() - query_started > 2000)
+        log_trace(L"窗口拖动：向 Hyprland 询问光标用了 %.1f 毫秒", (g_get_monotonic_time() - query_started) / 1000.0);
+    if (have_cursor)
         ui_window_place(window, cursor.x - window->move_offset_x, cursor.y - window->move_offset_y, 0, 0);
     else
     {
@@ -486,6 +491,15 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y, 
     }
     if (window->moving)
     {
+        // GTK 偶尔会在窗口跟手移动的途中漏掉 release（指针刚好离开 surface 的时候），
+        // 只信点击手势的话窗口会一直粘着鼠标。evdev 能看到全局左键，松开了就收尾。
+        if (gesture_left_button_state() == 0)
+        {
+            log_info(L"窗口拖动结束：全局左键已经松开，停在 (%d,%d)", window->x, window->y);
+            window->moving = false;
+            window->move_by_cursor = false;
+            return;
+        }
         move_window_to_pointer(window, (float)x, (float)y);
         return;
     }
@@ -531,6 +545,13 @@ static void on_pressed(GtkGestureClick *gesture, int press_count, double x, doub
     window->pointer_y = (float)y;
     window->pointer_inside = true;
     ui_pointer_seen_global(window->x + (int)lroundf((float)x), window->y + (int)lroundf((float)y));
+    // 新的一次按下：上一次拖动不管因为什么没收到 release，都在这里结束掉。
+    if (window->moving)
+    {
+        log_info(L"窗口拖动结束：新的按下，停在 (%d,%d)", window->x, window->y);
+        window->moving = false;
+        window->move_by_cursor = false;
+    }
     // 点一下就把键盘焦点收到自绘区域：层壳窗口靠“点击后按需获得键盘”才收得到快捷键。
     gtk_widget_grab_focus(window->area);
     bool right = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3;
@@ -1074,6 +1095,8 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
     GtkDropTarget *drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
     GType drop_types[] = { GDK_TYPE_FILE_LIST, G_TYPE_FILE, G_TYPE_STRING, GDK_TYPE_TEXTURE };
     gtk_drop_target_set_gtypes(drop, drop_types, G_N_ELEMENTS(drop_types));
+    // 捕获阶段先拿到拖动：别的控制器（编辑框、拖动源）在冒泡阶段可能先把它吃掉。
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(drop), GTK_PHASE_CAPTURE);
     g_signal_connect(drop, "enter", G_CALLBACK(on_drop_enter), window);
     g_signal_connect(drop, "motion", G_CALLBACK(on_drop_motion), window);
     g_signal_connect(drop, "leave", G_CALLBACK(on_drop_leave), window);
