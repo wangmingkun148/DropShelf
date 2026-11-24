@@ -1,4 +1,4 @@
-﻿﻿#define AppName "DropShelf"
+﻿#define AppName "DropShelf"
 #define AppVersion "3.0.7"
 #define AppPublisher "DropShelf"
 #define AppExeName "DropShelf.exe"
