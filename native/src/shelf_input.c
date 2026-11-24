@@ -546,26 +546,30 @@ static void paste_ready(GObject *source, GAsyncResult *result, gpointer data)
     ShelfWindow *shelf = read->shelf;
     GError *error = NULL;
     const GValue *value = gdk_clipboard_read_value_finish(GDK_CLIPBOARD(source), result, &error);
-    if (error) g_error_free(error);
+    if (error)
+    {
+        log_info(L"粘贴：读取剪贴板失败：%hs", error->message);
+        g_error_free(error);
+    }
+    // 这个 GValue 归 GdkClipboard 所有（transfer none），不能 unset/free；以前在这里释放会让
+    // 类型系统在之后某次 g_value_unset 时读到坏掉的类型指针，按 Ctrl+V 后程序会崩。
     if (!shelf || shelf->closed)
     {
-        if (value)
-        {
-            g_value_unset((GValue *)value);
-            g_free((GValue *)value);
-        }
+        log_trace(L"粘贴：置物架已经关闭，忽略剪贴板内容");
         shelf_window_release(shelf);
         free(read);
         return;
     }
     if (!value)
     {
+        log_info(L"粘贴：剪贴板里没有可用的内容");
         shelf_notify(shelf, S(STR_ClipboardEmpty), false);
         shelf_window_release(shelf);
         free(read);
         return;
     }
     GType type = G_VALUE_TYPE(value);
+    log_info(L"粘贴：剪贴板内容是 %hs", g_type_name(type) ? g_type_name(type) : "未知类型");
     if (type == GDK_TYPE_FILE_LIST)
     {
         StrList paths = {0};
@@ -614,8 +618,7 @@ static void paste_ready(GObject *source, GAsyncResult *result, gpointer data)
         }
     }
     else if (type == GDK_TYPE_TEXTURE) receive_texture_at(shelf, g_value_get_object(value), read->x, read->y);
-    g_value_unset((GValue *)value);
-    g_free((GValue *)value);
+    else log_info(L"粘贴：剪贴板里的 %hs 不是能放上置物架的内容", g_type_name(type) ? g_type_name(type) : "未知类型");
     shelf_window_release(shelf);
     free(read);
 }
@@ -635,6 +638,10 @@ static void paste(ShelfWindow *shelf)
     else if (gdk_content_formats_contain_gtype(formats, G_TYPE_FILE)) type = G_TYPE_FILE;
     else if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) type = GDK_TYPE_TEXTURE;
     else if (gdk_content_formats_contain_gtype(formats, G_TYPE_STRING)) type = G_TYPE_STRING;
+    char *format_text = formats ? gdk_content_formats_to_string(formats) : NULL;
+    log_info(L"粘贴：开始读取剪贴板%s%hs", type == G_TYPE_NONE ? L"（没有支持的格式）" : L"",
+        format_text ? format_text : "");
+    g_free(format_text);
     if (type == G_TYPE_NONE)
     {
         shelf_notify(shelf, S(STR_ClipboardEmpty), false);
@@ -1267,9 +1274,21 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
 {
     (void)window;
     ShelfWindow *shelf = context;
-    if (shelf->closing || shelf->closed) return false;
+    if (shelf->closing || shelf->closed)
+    {
+        log_info(L"拖入：置物架已经关闭，忽略（阶段 %d）", (int)phase);
+        return false;
+    }
     GdkDrag *source = drop ? gdk_drop_get_drag(drop) : NULL;
     bool from_self = source && (source == active_drag || self_drag);
+    if (phase == UI_DROP_ENTER)
+    {
+        GdkContentFormats *formats = drop ? gdk_drop_get_formats(drop) : NULL;
+        char *format_text = formats ? gdk_content_formats_to_string(formats) : NULL;
+        log_info(L"拖入：进入置物架（%g, %g），格式 %hs，允许动作 0x%x，来自本程序 %ls", x, y,
+            format_text ? format_text : "", (unsigned)(drop ? gdk_drop_get_actions(drop) : 0), from_self ? L"是" : L"否");
+        g_free(format_text);
+    }
     switch (phase)
     {
         case UI_DROP_ENTER:
@@ -1278,16 +1297,28 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             shelf->drag_from_shelf = false;
             shelf->drag_kind = from_self ? DROP_NONE : classify_drop(drop);
             if (!from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy) shelf_show_drop_overlay(shelf);
-            return shelf->drag_kind != DROP_NONE && !shelf->model->busy;
+        {
+            bool accepted = shelf->drag_kind != DROP_NONE && !shelf->model->busy;
+            log_info(L"拖入：识别为 %ls，置物架%ls，%ls", shelf->drag_kind == DROP_FILES ? L"文件" :
+                shelf->drag_kind == DROP_IMAGE ? L"图片" : shelf->drag_kind == DROP_TEXT ? L"文字" : L"不支持的内容",
+                shelf->model->busy ? L"正忙" : L"空闲", accepted ? L"接受" : L"不接受");
+            return accepted;
+        }
         case UI_DROP_MOTION:
+            log_trace(L"拖入：移动到（%g, %g）", x, y);
             return shelf->drag_kind != DROP_NONE && !shelf->model->busy;
         case UI_DROP_LEAVE:
+            log_info(L"拖入：离开置物架");
             shelf_end_drag(shelf);
             return true;
         case UI_DROP_DROP:
         {
             DropContentKind kind = shelf->drag_kind;
             bool self = shelf->drag_from_self;
+            GType value_type = value ? G_VALUE_TYPE(value) : G_TYPE_INVALID;
+            log_info(L"拖入：在（%g, %g）放下，识别为 %d，数据是 %hs，%ls", x, y, (int)kind,
+                value_type != G_TYPE_INVALID && g_type_name(value_type) ? g_type_name(value_type) : "无",
+                self ? L"本程序拖出的" : L"外部拖入");
             shelf_end_drag(shelf);
             if (self)
             {
@@ -2103,6 +2134,8 @@ bool shelf_on_key(UiWindow *window, void *context, unsigned key)
     ShelfWindow *shelf = context;
     ShelfModel *model = shelf->model;
     bool control = GetKeyState(VK_CONTROL) < 0;
+    log_trace(L"置物架按键：键码 %u，Ctrl %ls，展开 %ls，项目 %d", key, control ? L"按住" : L"松开",
+        model->expanded ? L"是" : L"否", model->count);
     switch (key)
     {
         case VK_ESCAPE:

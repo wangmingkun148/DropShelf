@@ -47,6 +47,12 @@ struct UiWindow
     bool rendering;
     bool destroyed;
     bool moving;
+    bool move_by_cursor;                // 层壳窗口拖动时用全局光标定位（Hyprland IPC / 已知指针位置）
+    int move_offset_x, move_offset_y;   // 按下时全局光标相对窗口左上角的偏移
+    // 上次设过的层壳位置：值没变就不再设，省掉每帧一次 configure 往返。
+    bool layer_placed;
+    GdkMonitor *layer_monitor;          // GdkDisplay 持有，这里只借来比较
+    int layer_margin_x, layer_margin_y;
     bool caption_press;                 // 在自绘标题栏上按下了，还没拖动：等移动超过阈值再开始拖窗口
     float caption_press_x, caption_press_y;
     float move_last_x, move_last_y;
@@ -434,6 +440,29 @@ static void set_cursor_for(UiWindow *window, float x, float y)
     gtk_widget_set_cursor_from_name(window->area, name);
 }
 
+// 拖动窗口：层壳窗口按全局光标定位，普通窗口按本地增量。
+//
+// 层壳窗口的位置由合成器按 margin 摆放，窗口跟着光标动之后，鼠标事件的本地坐标里就
+// 包含窗口自己移动的那一段：只按本地增量算，每隔一次事件才会挪一下，拖起来发飘。
+// 所以按下时记下全局光标和窗口左上角的差，之后每次事件都用全局光标反推窗口位置。
+static void move_window_to_pointer(UiWindow *window, float local_x, float local_y)
+{
+    int old_x = window->x;
+    int old_y = window->y;
+    POINT cursor;
+    if (window->layer && window->move_by_cursor && GetCursorPos(&cursor))
+        ui_window_place(window, cursor.x - window->move_offset_x, cursor.y - window->move_offset_y, 0, 0);
+    else
+    {
+        float delta_x = local_x - window->move_last_x;
+        float delta_y = local_y - window->move_last_y;
+        ui_window_place(window, old_x + (int)lroundf(delta_x), old_y + (int)lroundf(delta_y), 0, 0);
+    }
+    // 本地坐标扣掉窗口这次移动的量，下一帧的增量才是光标真正走的路程。
+    window->move_last_x = local_x - (float)(window->x - old_x);
+    window->move_last_y = local_y - (float)(window->y - old_y);
+}
+
 static void on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer data)
 {
     (void)controller;
@@ -457,11 +486,7 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y, 
     }
     if (window->moving)
     {
-        float delta_x = (float)x - window->move_last_x;
-        float delta_y = (float)y - window->move_last_y;
-        window->move_last_x = (float)x;
-        window->move_last_y = (float)y;
-        ui_window_place(window, window->x + (int)lroundf(delta_x), window->y + (int)lroundf(delta_y), 0, 0);
+        move_window_to_pointer(window, (float)x, (float)y);
         return;
     }
     UiMouseEvent event = { .kind = UI_MOUSE_MOVE, .x = (float)x, .y = (float)y };
@@ -489,7 +514,9 @@ static void on_leave(GtkEventControllerMotion *controller, gpointer data)
     UiWindow *window = data;
     if (window->destroyed) return;
     window->pointer_inside = false;
+    if (window->moving) log_info(L"窗口拖动结束：指针离开了窗口，停在 (%d,%d)", window->x, window->y);
     window->moving = false;
+    window->move_by_cursor = false;
     window->caption_press = false;
     UiMouseEvent event = { .kind = UI_MOUSE_LEAVE, .x = -1, .y = -1 };
     if (window->options.mouse && window->options.mouse(window, window->options.context, &event)) return;
@@ -504,6 +531,8 @@ static void on_pressed(GtkGestureClick *gesture, int press_count, double x, doub
     window->pointer_y = (float)y;
     window->pointer_inside = true;
     ui_pointer_seen_global(window->x + (int)lroundf((float)x), window->y + (int)lroundf((float)y));
+    // 点一下就把键盘焦点收到自绘区域：层壳窗口靠“点击后按需获得键盘”才收得到快捷键。
+    gtk_widget_grab_focus(window->area);
     bool right = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3;
     if (right) right_button_down = true;
     else left_button_down = true;
@@ -562,7 +591,9 @@ static void on_released(GtkGestureClick *gesture, int press_count, double x, dou
     }
     UiElement *captured = window->captured;
     window->captured = NULL;
+    if (window->moving) log_info(L"窗口拖动结束：层壳窗口停在 (%d,%d)", window->x, window->y);
     window->moving = false;
+    window->move_by_cursor = false;
     window->caption_press = false;
     if (!captured) return;
     captured->pressed = false;
@@ -693,6 +724,7 @@ static gboolean on_key(GtkEventControllerKey *controller, guint keyval, guint ke
     unsigned key = key_to_vk(keyval);
     if (!key) return FALSE;
     if (state & GDK_ALT_MASK) key |= UI_KEY_ALT;
+    log_trace(L"窗口按键：键码 %u（%hs），修饰键 0x%x", key, gdk_keyval_name(keyval) ? gdk_keyval_name(keyval) : "?", (unsigned)state);
 
     UiElement *focused = window->focused;
     if (focused && !focused->hidden && focused->type->key && focused->type->key(focused, key)) return TRUE;
@@ -825,6 +857,16 @@ static void update_layer_position(UiWindow *window)
     // 记回合成器实际会给的位置，拖动时按增量算的下一次位置才和光标对得上。
     window->x = geometry.x + margin_x;
     window->y = geometry.y + margin_y;
+    if (window->layer_placed && window->layer_monitor == monitor
+        && window->layer_margin_x == margin_x && window->layer_margin_y == margin_y)
+    {
+        g_object_unref(monitor);
+        return;
+    }
+    window->layer_placed = true;
+    window->layer_monitor = monitor;
+    window->layer_margin_x = margin_x;
+    window->layer_margin_y = margin_y;
     gtk_layer_set_monitor(gtk, monitor);
     gtk_layer_set_margin(gtk, GTK_LAYER_SHELL_EDGE_LEFT, margin_x);
     gtk_layer_set_margin(gtk, GTK_LAYER_SHELL_EDGE_TOP, margin_y);
@@ -844,8 +886,15 @@ static GdkDragAction drop_enter_motion(UiWindow *window, GdkDrop *drop, double x
 
 static GdkDragAction on_drop_enter(GtkDropTarget *target, double x, double y, gpointer data)
 {
-    (void)target;
-    return drop_enter_motion(data, gtk_drop_target_get_current_drop(target), x, y, true);
+    GdkDrop *drop = gtk_drop_target_get_current_drop(target);
+    GdkContentFormats *formats = drop ? gdk_drop_get_formats(drop) : NULL;
+    char *text = formats ? gdk_content_formats_to_string(formats) : NULL;
+    log_info(L"GTK 拖放：进入窗口（%g, %g），格式 %hs，允许动作 0x%x", x, y, text ? text : "",
+        (unsigned)(drop ? gdk_drop_get_actions(drop) : 0));
+    g_free(text);
+    GdkDragAction action = drop_enter_motion(data, drop, x, y, true);
+    log_info(L"GTK 拖放：进入结果 0x%x（0 表示不接收）", (unsigned)action);
+    return action;
 }
 
 static GdkDragAction on_drop_motion(GtkDropTarget *target, double x, double y, gpointer data)
@@ -855,8 +904,8 @@ static GdkDragAction on_drop_motion(GtkDropTarget *target, double x, double y, g
 
 static void on_drop_leave(GtkDropTarget *target, gpointer data)
 {
-    (void)target;
     UiWindow *window = data;
+    log_info(L"GTK 拖放：离开窗口");
     if (!window->drop_handler || window->destroyed) return;
     GdkDragAction action = 0;
     window->drop_handler(window, window->drop_context, UI_DROP_LEAVE, gtk_drop_target_get_current_drop(target), NULL, 0, 0, &action);
@@ -865,9 +914,14 @@ static void on_drop_leave(GtkDropTarget *target, gpointer data)
 static gboolean on_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer data)
 {
     UiWindow *window = data;
+    GType type = value ? G_VALUE_TYPE(value) : G_TYPE_INVALID;
+    log_info(L"GTK 拖放：在（%g, %g）松开，数据是 %hs", x, y,
+        type != G_TYPE_INVALID && g_type_name(type) ? g_type_name(type) : "无");
     if (!window->drop_handler || window->destroyed) return FALSE;
     GdkDragAction action = gdk_drop_get_actions(gtk_drop_target_get_current_drop(target));
-    return window->drop_handler(window, window->drop_context, UI_DROP_DROP, gtk_drop_target_get_current_drop(target), value, x, y, &action);
+    bool accepted = window->drop_handler(window, window->drop_context, UI_DROP_DROP, gtk_drop_target_get_current_drop(target), value, x, y, &action);
+    log_info(L"GTK 拖放：松开结果 %ls", accepted ? L"已接收" : L"未接收");
+    return accepted;
 }
 
 bool ui_drag_is_local(GdkDrag *drag)
@@ -888,6 +942,7 @@ void ui_window_set_drop_handler(UiWindow *window, UiDropHandler handler, void *c
     if (!window) return;
     window->drop_handler = handler;
     window->drop_context = context;
+    log_info(L"拖放：窗口%ls接收文件拖入（层壳 %ls）", handler ? L"开始" : L"不再", window->layer ? L"是" : L"否");
 }
 
 void ui_window_set_drag_handler(UiWindow *window, UiDragPrepare prepare, UiDragEnd end, void *context)
@@ -1186,6 +1241,8 @@ void ui_window_show_with(UiWindow *window, bool activate)
     update_layer_position(window);
     window->visible = true;
     gtk_widget_set_visible(window->window, TRUE);
+    if (window->layer && window->drop_handler)
+        log_info(L"窗口显示：接收拖入的层壳窗口在 (%d,%d)，%.0fx%.0f", window->x, window->y, window->width, window->height);
     if (activate && !window->options.no_activate)
     {
         gtk_window_present(GTK_WINDOW(window->window));
@@ -1259,10 +1316,19 @@ void ui_window_begin_move(UiWindow *window)
     if (!window || window->destroyed) return;
     if (window->layer)
     {
-        // layer-shell 没有系统拖动；记录起点，由鼠标移动改 margin。
+        // layer-shell 没有系统拖动；记下起点，移动时改 margin。
         window->moving = true;
         window->move_last_x = window->pointer_x;
         window->move_last_y = window->pointer_y;
+        POINT cursor;
+        window->move_by_cursor = GetCursorPos(&cursor);
+        if (window->move_by_cursor)
+        {
+            window->move_offset_x = cursor.x - window->x;
+            window->move_offset_y = cursor.y - window->y;
+        }
+        log_info(L"窗口拖动开始：层壳窗口在 (%d,%d)，%ls", window->x, window->y,
+            window->move_by_cursor ? L"按全局光标定位" : L"按本地增量移动");
         return;
     }
     GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window->window));
