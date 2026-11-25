@@ -232,6 +232,11 @@ static gboolean on_terminate(gpointer data)
 
 int main(int argc, char **argv)
 {
+    // GTK 默认用显卡渲染（Vulkan 或 OpenGL）。有的显卡/合成器组合会丢设备：之前先后见过
+    // Vulkan 丢设备后 GTK 在 gdk_vulkan_context_surface_detach 里 abort，以及 OpenGL 渲染时
+    // 拿不到当前上下文、直接段错误。置物架和设置窗口都很小，用 Cairo 在 CPU 上画完全够用，
+    // 也不会因为显卡驱动出问题把整个桌面带走。用户自己指定了渲染器的话照用户的来。
+    if (!g_getenv("GSK_RENDERER")) g_setenv("GSK_RENDERER", "cairo", FALSE);
     application = gtk_application_new(APPLICATION_ID, G_APPLICATION_HANDLES_COMMAND_LINE);
     g_signal_connect(application, "startup", G_CALLBACK(on_startup), NULL);
     g_signal_connect(application, "activate", G_CALLBACK(on_activate), NULL);

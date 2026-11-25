@@ -11,3 +11,6 @@ installer/*.exe
 # C 版的编译输出。
 native/build/
 linux/build/
+
+# 打包输出，发布在 GitHub Releases。
+dist/

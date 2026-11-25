@@ -93,6 +93,18 @@ bool foreground_active_fullscreen(const wchar_t *text)
     return fullscreen;
 }
 
+wchar_t *foreground_active_name(void)
+{
+    char *reply = hyprland_request("j/activewindow");
+    if (!reply) return NULL;
+    wchar_t *text = wide_from_utf8(reply, strlen(reply));
+    free(reply);
+    if (!text) return NULL;
+    wchar_t *name = foreground_active_class(text);
+    free(text);
+    return name;
+}
+
 bool foreground_is_fullscreen(void)
 {
     char *reply = hyprland_request("j/activewindow");

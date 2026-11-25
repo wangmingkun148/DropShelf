@@ -220,6 +220,10 @@ static void pad_paint(UiWindow *window, void *context, double time)
     gfx_push_transform(gfx_matrix_translate(0, (float)pad.offset.value));
     gfx_push_opacity(opacity);
     GfxRect frame = { 6, 6, size.width - 6, size.height - 6 };
+#ifdef __linux__
+    // Linux 的这块窗口是透明的，自己铺一层半透明的烟色当材质；不然只看得见桌面，提示框太淡。
+    gfx_fill_rounded(frame, 8, theme_color(THEME_SMOKE));
+#endif
     // 虚线框带着淡淡的底色，拖到上面时再铺一层强调色。
     gfx_fill_rounded(frame, 8, theme_color(THEME_ACCENT_FAINT));
     gfx_stroke_rounded_dashed(frame, 8, theme_color(THEME_ACCENT), 1.4f, 4, 3);
@@ -392,6 +396,10 @@ static bool ensure_pad(void)
     // 纸牌的置物架是不透明的牌桌底色，不用系统材质。
     options.backdrop = theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_ACRYLIC;
     options.background = THEME_SHELF_SOLID;
+#ifdef __linux__
+    // Linux 给不了系统材质，不透明的窗口底色会让这块提示变成一块黑板；改成透明窗口，只画底下的虚线框。
+    options.popup = true;
+#endif
     options.paint = pad_paint;
     options.animate = pad_animate;
     options.closed = pad_closed;

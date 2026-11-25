@@ -12,6 +12,9 @@ bool foreground_active_fullscreen(const wchar_t *json);
 /// 现在前台有没有全屏的窗口。全屏时晃动和边缘停留要暂停。
 bool foreground_is_fullscreen(void);
 
+/// 现在前台窗口的应用标识（调试和日志用），调用方 free；没有时返回 NULL。
+wchar_t *foreground_active_name(void);
+
 /// 从 hyprctl -j clients 的回复里取有窗口的程序，去重、排序（不含本程序）。
 void foreground_clients_apps(const wchar_t *json, StrList *names);
 

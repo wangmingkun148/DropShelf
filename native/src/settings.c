@@ -33,6 +33,7 @@ static const EnumName look_names[] = { { L"Simple", LOOK_SIMPLE }, { L"Cards", L
 static const EnumName language_names[] = { { L"System", LANGUAGE_SYSTEM }, { L"Chinese", LANGUAGE_CHINESE }, { L"English", LANGUAGE_ENGLISH } };
 static const EnumName size_names[] = { { L"Small", SHELF_SIZE_SMALL }, { L"Medium", SHELF_SIZE_MEDIUM }, { L"Large", SHELF_SIZE_LARGE } };
 static const EnumName transfer_names[] = { { L"Move", TRANSFER_MOVE }, { L"Copy", TRANSFER_COPY } };
+static const EnumName mixed_drag_names[] = { { L"Smart", MIXED_DRAG_SMART }, { L"Batch", MIXED_DRAG_BATCH }, { L"Files", MIXED_DRAG_FILES }, { L"Text", MIXED_DRAG_TEXT } };
 static const EnumName layout_names[] = { { L"Off", LAYOUT_OFF }, { L"Two", LAYOUT_TWO }, { L"Four", LAYOUT_FOUR } };
 static const EnumName performance_names[] = { { L"Auto", PERFORMANCE_AUTO }, { L"Normal", PERFORMANCE_NORMAL }, { L"Low", PERFORMANCE_LOW } };
 static const EnumName sensitivity_names[] = {
@@ -56,6 +57,7 @@ static const EnumTable look_table = ENUM_TABLE(look_names);
 static const EnumTable language_table = ENUM_TABLE(language_names);
 static const EnumTable size_table = ENUM_TABLE(size_names);
 static const EnumTable transfer_table = ENUM_TABLE(transfer_names);
+static const EnumTable mixed_drag_table = ENUM_TABLE(mixed_drag_names);
 static const EnumTable layout_table = ENUM_TABLE(layout_names);
 static const EnumTable performance_table = ENUM_TABLE(performance_names);
 static const EnumTable sensitivity_table = ENUM_TABLE(sensitivity_names);
@@ -302,6 +304,7 @@ void settings_init(AppSettings *settings)
     settings->language = LANGUAGE_SYSTEM;
     settings->quick_shelf_size = SHELF_SIZE_MEDIUM;
     settings->drag_out_mode = TRANSFER_MOVE;
+    settings->mixed_drag = MIXED_DRAG_BATCH;
     settings->quick_action_layout = LAYOUT_FOUR;
     settings->close_when_empty = true;
     settings->pause_in_fullscreen = true;
@@ -454,6 +457,7 @@ void settings_normalize(AppSettings *settings)
     if (!enum_is_defined(&language_table, settings->language)) settings->language = LANGUAGE_SYSTEM;
     if (!enum_is_defined(&size_table, settings->quick_shelf_size)) settings->quick_shelf_size = SHELF_SIZE_MEDIUM;
     if (!enum_is_defined(&transfer_table, settings->drag_out_mode)) settings->drag_out_mode = TRANSFER_MOVE;
+    if (!enum_is_defined(&mixed_drag_table, settings->mixed_drag)) settings->mixed_drag = MIXED_DRAG_BATCH;
     if (!enum_is_defined(&layout_table, settings->quick_action_layout)) settings->quick_action_layout = LAYOUT_FOUR;
     if (settings->legacy_low_performance) settings->performance_mode = PERFORMANCE_LOW;
     settings->legacy_low_performance = false;
@@ -675,6 +679,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"StartWithWindows") == 0) ok = read_bool(value, &settings->start_with_windows);
         else if (wcscmp(key, L"QuickShelfSize") == 0) ok = read_enum(value, &size_table, &settings->quick_shelf_size);
         else if (wcscmp(key, L"DragOutMode") == 0) ok = read_enum(value, &transfer_table, &settings->drag_out_mode);
+        else if (wcscmp(key, L"MixedDragMode") == 0) ok = read_enum(value, &mixed_drag_table, &settings->mixed_drag);
         else if (wcscmp(key, L"QuickActionLayout") == 0) ok = read_enum(value, &layout_table, &settings->quick_action_layout);
         else if (wcscmp(key, L"QuickActionSlots") == 0) ok = read_string_list(value, &settings->quick_action_slots, &settings->has_quick_action_slots);
         else if (wcscmp(key, L"CustomActions") == 0) ok = read_custom_actions(value, settings);
@@ -738,6 +743,7 @@ wchar_t *settings_serialize(const AppSettings *settings)
     json_write_bool(&writer, L"StartWithWindows", settings->start_with_windows);
     write_enum(&writer, L"QuickShelfSize", &size_table, settings->quick_shelf_size);
     write_enum(&writer, L"DragOutMode", &transfer_table, settings->drag_out_mode);
+    write_enum(&writer, L"MixedDragMode", &mixed_drag_table, settings->mixed_drag);
     write_enum(&writer, L"QuickActionLayout", &layout_table, settings->quick_action_layout);
     write_string_list(&writer, L"QuickActionSlots", &settings->quick_action_slots);
 

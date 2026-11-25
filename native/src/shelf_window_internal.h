@@ -293,6 +293,10 @@ struct ShelfWindow
     } drop_target;
     DropTargetHelper *drop_helper;
     bool drop_registered;
+#ifdef __linux__
+    // X11（XWayland）应用的拖动落不到原生 Wayland 窗口上，这个接放窗口盖在置物架上接住它（见 xdnd_linux.h）。
+    void *xdnd_sink;
+#endif
     bool drag_inside, drag_from_self, image_left;
     DropContentKind drag_kind;
     DropImageType last_description_type;

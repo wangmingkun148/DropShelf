@@ -211,8 +211,10 @@ static void test_gesture_and_settings(void)
     CHECK(settings.shake_sensitivity == SHAKE_BALANCED);
     CHECK(settings.hotkey != NULL);
     CHECK(settings.pause_in_fullscreen);
+    CHECK(settings.mixed_drag == MIXED_DRAG_BATCH);
     settings.shake_sensitivity = 80;
     settings.pause_in_fullscreen = false;
+    settings.mixed_drag = MIXED_DRAG_TEXT;
     strlist_add(&settings.watched_folders, L"/tmp/watched");
     wchar_t *json = settings_serialize(&settings);
     CHECK(json != NULL);
@@ -222,6 +224,7 @@ static void test_gesture_and_settings(void)
     CHECK(settings_parse(json, &parsed));
     CHECK(parsed.shake_sensitivity == 80);
     CHECK(!parsed.pause_in_fullscreen);
+    CHECK(parsed.mixed_drag == MIXED_DRAG_TEXT);
     CHECK(parsed.watched_folders.count == 1);
     CHECK(wcs_is(parsed.watched_folders.items[0], L"/tmp/watched"));
     settings_free(&parsed);

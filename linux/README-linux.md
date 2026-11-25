@@ -10,6 +10,7 @@
 - gdk-pixbuf
 - fontconfig（运行时注册随程序附带的图标字体）
 - libcurl（检查更新）
+- libxcb（接住 XWayland 程序的拖放，比如 WPS；没有 X 服务器时这部分不启用）
 - `bsdtar`（解压 7z；ZIP 用内置的 miniz，不需要这个）：Arch 在 libarchive 里，
   Debian/Ubuntu 是 libarchive-tools，Fedora 是 bsdtar
 - gdk-pixbuf 的图片加载器：JPEG、PNG、WebP 一般在 gdk-pixbuf2 里，
@@ -19,7 +20,7 @@
 Arch：
 
 ```bash
-sudo pacman -S --needed gtk4 gtk4-layer-shell gdk-pixbuf2 curl libarchive fontconfig
+sudo pacman -S --needed gtk4 gtk4-layer-shell gdk-pixbuf2 curl libarchive fontconfig libxcb
 ```
 
 ## 构建和运行
@@ -52,7 +53,7 @@ linux/package-formats.sh   # 生成到 dist/，工具自动下载到 linux/build
 
 每次发布都会附上这四种安装包和便携版；也可以从 Releases 页面直接下载。
 其中 AppImage 自带 GTK 等依赖，解压即用；deb/rpm/pacman 包依赖系统里的
-GTK 4、gtk4-layer-shell、gdk-pixbuf、libarchive、curl 和 fontconfig。
+GTK 4、gtk4-layer-shell、gdk-pixbuf、libarchive、curl、fontconfig 和 libxcb。
 
 Arch 包（本地源码目录，版本标签发布后也可以用 makepkg）：
 
@@ -71,6 +72,8 @@ cd linux && makepkg -si
 - 观察文件夹：设置 → 手势与置物架 → 观察文件夹。文件夹里出现新文件时，
   光标所在的屏幕边缘会探出置物架的一角；点一下展开，右键收起。
 - 拖放：从文件管理器拖入；拖出用 GTK 的拖动协议，移动/复制由协商的动作决定。
+  Hyprland 不会把 XWayland 程序（WPS 等）发起的拖动交给 Wayland 窗口，程序会在置物架上
+  放一个看不见的 X11 窗口接住；往 XWayland 程序里拖时也自己发 Xdnd。拖进置物架一律按复制。
 - 主窗口、引导和“关于”是固定布局的普通窗口（不是层壳），标题栏由程序自己画：
   按住标题栏空白处可以拖动，双击切换最大化，最小化/最大化/关闭按钮在标题栏右侧。
 - Hyprland 默认把普通窗口平铺；程序启动时会用 `hyprctl` 给 `<app_id>` 加一条运行时

@@ -31,6 +31,18 @@ void hyprland_monitors_free(HyprMonitor *monitors, int count);
 /// 纯解析，不访问 IPC，测试用。格式是 hyprctl -j monitors 的输出。
 int hyprland_parse_monitors(const wchar_t *json, HyprMonitor *out, int max);
 
+typedef struct HyprClientAt
+{
+    bool found;                 // 光标底下有没有窗口
+    bool xwayland;              // 这个窗口是不是 XWayland 的程序
+    int pid;                    // 窗口所属进程；为 0 表示 Hyprland 没报
+    RECT rect;                  // 窗口在逻辑坐标里的位置
+} HyprClientAt;
+
+/// 光标（逻辑坐标）底下最上面的窗口：只算当前工作区里可见的窗口。
+/// 光标下面是 Wayland 原生窗口时 xwayland 为 false——这种时候拖动归合成器和 GTK 管。
+bool hyprland_client_at(int x, int y, HyprClientAt *out);
+
 // ───────────── 快捷键 ─────────────
 // Hyprland 的全局快捷键协议只让程序“登记”快捷键，按键仍要用户在配置里绑；
 // 为了让设置里的快捷键直接可用，这里在运行时用 keyword bind 把组合键绑到一条命令，不改配置文件。
