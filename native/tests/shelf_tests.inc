@@ -921,7 +921,9 @@ static void test_shelf_motion(void)
 
 static void test_stack_labels(ShelfWindow *shelf)
 {
-    CHECK(wcs_equal(shelf->stack_caption, L"2 个文件") && wcs_equal(shelf->stack_detail, L"3 B"), "堆叠汇总不正确");
+    // 多个项目时不再写一整句汇总，改成每一类一个彩色标签；大小汇总照旧。
+    CHECK(!shelf->stack_caption && wcs_equal(shelf->stack_detail, L"3 B"), "堆叠汇总不正确");
+    CHECK(shelf->tag_count == 1 && wcs_equal(shelf->tag_labels[0], L"2 个文件"), "堆叠下没有显示文件标签");
     bool moving = shelf->move_mode;
     LanguagePack *pack = language_pack_parse(L"test", L"{\"from\":\"zh\",\"strings\":{"
         L"\"{0} 个文件\":\"Files: {0}\",\"复制\":\"Copy\",\"移动\":\"Move to another folder\"}}");
@@ -929,20 +931,22 @@ static void test_stack_labels(ShelfWindow *shelf)
     shelf->move_mode = false;
     ui_window_warm(shelf->ui);
     float copy_width = shelf->layout.mode.right - shelf->layout.mode.left;
-    CHECK(wcs_equal(shelf->stack_caption, L"Files: 2"), "换语言包后堆叠汇总没有更新");
+    CHECK(shelf->tag_count == 1 && wcs_equal(shelf->tag_labels[0], L"Files: 2"), "换语言包后堆叠标签没有更新");
     shelf->move_mode = true;
     shelf_layout(shelf);
     CHECK(shelf->layout.mode.right - shelf->layout.mode.left > copy_width, "切换移动模式后按钮没有随文字变宽");
 
     add_entry(shelf->model, ITEM_TEXT, L"note", NULL);
     ui_window_warm(shelf->ui);
-    CHECK(wcs_equal(shelf->stack_caption, L"Files: 2 · 1 段文本"), "放入文本后仍显示旧的堆叠汇总");
+    CHECK(shelf->tag_count == 2 && wcs_equal(shelf->tag_labels[0], L"Files: 2") &&
+        wcs_equal(shelf->tag_labels[1], L"1 段文本"), "放入文本后仍显示旧的堆叠标签");
 
     shelf->move_mode = moving;
     language_set_pack(NULL);
     language_pack_free(pack);
     ui_window_warm(shelf->ui);
-    CHECK(wcs_equal(shelf->stack_caption, L"2 个文件 · 1 段文本"), "移除语言包后仍显示旧译文");
+    CHECK(shelf->tag_count == 2 && wcs_equal(shelf->tag_labels[0], L"2 个文件") &&
+        wcs_equal(shelf->tag_labels[1], L"1 段文本"), "移除语言包后仍显示旧译文");
 }
 
 static void test_shelf_window(void)
