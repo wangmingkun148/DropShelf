@@ -304,6 +304,13 @@ bool hyprland_client_at(int x, int y, HyprClientAt *out)
             out->xwayland = xwayland && xwayland->type == JSON_BOOL && xwayland->boolean;
             out->pid = pid && pid->type == JSON_NUMBER ? (int)lround(pid->number) : 0;
             out->rect = rect;
+            const JsonValue *title = json_get(client, L"title");
+            out->title[0] = 0;
+            if (title && title->type == JSON_STRING && title->string)
+            {
+                wcsncpy(out->title, title->string, sizeof out->title / sizeof out->title[0] - 1);
+                out->title[sizeof out->title / sizeof out->title[0] - 1] = 0;
+            }
             best_focus = focus_value;
             result = true;
         }

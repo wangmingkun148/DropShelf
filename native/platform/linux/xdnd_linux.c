@@ -59,7 +59,7 @@ typedef struct Atoms
     xcb_atom_t action_copy, action_move;
     xcb_atom_t uri_list, image_png, image_jpeg, text_utf8, text_plain, utf8_string, text_html;
     xcb_atom_t data_property;
-    xcb_atom_t targets, net_wm_pid;
+    xcb_atom_t targets, net_wm_pid, net_wm_name;
 } Atoms;
 
 static struct
@@ -145,6 +145,7 @@ static void intern_atoms(void)
     atoms->data_property = intern(DATA_PROPERTY);
     atoms->targets = intern("TARGETS");
     atoms->net_wm_pid = intern("_NET_WM_PID");
+    atoms->net_wm_name = intern("_NET_WM_NAME");
 }
 
 static void send_message(xcb_window_t destination, xcb_atom_t type, const uint32_t data[5])
@@ -898,8 +899,25 @@ static bool window_aware(xcb_window_t window)
     return aware;
 }
 
-/// 在 X 的顶层窗口里找 pid 那个程序的主窗口：同进程的窗口可能有好几个，取大小最接近的。
-static bool source_find_target(int pid, const RECT *rect)
+/// 窗口标题（_NET_WM_NAME，没有就用 WM_NAME），调用方 free。Hyprland 报的标题就是从这里读的。
+static wchar_t *window_title(xcb_window_t window)
+{
+    xcb_atom_t names[2] = { bridge.atoms.net_wm_name, XCB_ATOM_WM_NAME };
+    for (int index = 0; index < 2; index++)
+    {
+        if (!names[index]) continue;
+        xcb_get_property_reply_t *reply = xcb_get_property_reply(bridge.connection,
+            xcb_get_property(bridge.connection, 0, window, names[index], XCB_GET_PROPERTY_TYPE_ANY, 0, 1024), NULL);
+        int length = reply ? xcb_get_property_value_length(reply) : 0;
+        wchar_t *title = length > 0 ? wide_from_utf8(xcb_get_property_value(reply), (size_t)length) : NULL;
+        free(reply);
+        if (title) return title;
+    }
+    return NULL;
+}
+
+/// 在 X 的顶层窗口里找光标下那个窗口：同一个程序可能开着好几个大小一样的窗口，先按标题认，再看大小。
+static bool source_find_target(int pid, const RECT *rect, const wchar_t *title)
 {
     if (!bridge.connection || !bridge.screen || pid <= 0 || !rect) return false;
     int width = rect->right - rect->left;
@@ -926,6 +944,13 @@ static bool source_find_target(int pid, const RECT *rect)
         xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(bridge.connection, xcb_get_geometry(bridge.connection, window), NULL);
         if (!geometry) continue;
         int score = abs((int)geometry->width - width) + abs((int)geometry->height - height);
+        if (title && *title)
+        {
+            wchar_t *own = window_title(window);
+            // Hyprland 那边的标题最多存 255 个字，只比这么长。
+            if (!own || wcsncmp(own, title, 255) != 0) score += 1 << 20;
+            free(own);
+        }
         if (!best || score < best_score)
         {
             best = window;
@@ -1436,8 +1461,10 @@ static void source_tick(gint64 now)
     if (source.starting)
     {
         if (now < source.start_at) return;
-        source.starting = false;
-        if (!source_start()) source_finish(false);
+        // 启动失败也要经过 source_finish（它只认 starting 和 active）：GTK 的拖动已经取消了，
+        // 不收尾的话置物架一直停在“正在拖出”，以后再也拖不出东西。
+        if (source_start()) source.starting = false;
+        else source_finish(false);
         return;
     }
     if (!source.active || !bridge.connection) return;
@@ -1448,7 +1475,9 @@ static void source_tick(gint64 now)
         {
             if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
             {
-                log_info(L"X11 拖动源：这一批等 XdndFinished 等太久，按已放下收尾");
+                // 迟到的 XdndFinished 会被记到下一批头上：不再往下送，只算之前确认过的几批。
+                log_info(L"X11 拖动源：这一批等 XdndFinished 等太久，剩下 %u 批不送了", g_queue_get_length(&batches));
+                source_batches_clear();
                 source_finish(true);
             }
             return;
@@ -1469,7 +1498,8 @@ static void source_tick(gint64 now)
     {
         if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
         {
-            log_info(L"X11 拖动源：等 XdndFinished 等太久，按已放下收尾");
+            log_info(L"X11 拖动源：等 XdndFinished 等太久，不算送到，排着的批次也不送了");
+            source_batches_clear();
             source_finish(true);
         }
         return;
@@ -1506,17 +1536,23 @@ static void source_tick(gint64 now)
             source_finish(false);
             return;
         }
-        if (client.pid != source.target_pid)
+        // 同一个程序的另一个窗口 pid 一样，所以还要看窗口的位置和大小变没变。
+        if (client.pid != source.target_pid || memcmp(&client.rect, &source.target_rect, sizeof client.rect) != 0)
         {
-            if (!source_find_target(client.pid, &client.rect))
+            xcb_window_t previous = source.target;
+            if (!source_find_target(client.pid, &client.rect, client.title))
             {
                 log_info(L"X11 拖动源：找不到新的接收窗口，取消");
                 source_finish(false);
                 return;
             }
-            xcb_window_t window = source.target;
-            source_send_leave();
-            source_send_enter(window);
+            if (source.target != previous)
+            {
+                log_info(L"X11 拖动源：换到窗口 0x%x（pid %d）", (unsigned)source.target, source.target_pid);
+                xcb_window_t window = source.target;
+                source_send_leave();
+                source_send_enter(window);
+            }
         }
     }
     source_send_position();
@@ -1557,7 +1593,7 @@ bool xdnd_source_should_take_over(void)
     }
     if (!copy_only && now - source.dwell_since < TAKEOVER_DWELL_MICROSECONDS) return false;
     // 真找到那个 X 窗口才动手：找不到就别把 GTK 的拖动打断。
-    if (!source_find_target(client.pid, &client.rect))
+    if (!source_find_target(client.pid, &client.rect, client.title))
     {
         log_trace(L"接管检查：pid %d 没有 XdndAware 的可见窗口", client.pid);
         source.dwell_pid = 0;

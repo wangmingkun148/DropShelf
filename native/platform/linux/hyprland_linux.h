@@ -37,6 +37,7 @@ typedef struct HyprClientAt
     bool xwayland;              // 这个窗口是不是 XWayland 的程序
     int pid;                    // 窗口所属进程；为 0 表示 Hyprland 没报
     RECT rect;                  // 窗口在逻辑坐标里的位置
+    wchar_t title[256];         // 窗口标题：同一个程序开着几个窗口时，靠它认出是哪一个
 } HyprClientAt;
 
 /// 光标（逻辑坐标）底下最上面的窗口：只算当前工作区里可见的窗口。
