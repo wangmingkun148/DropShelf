@@ -36,6 +36,8 @@ typedef enum MainPage
 #define STACK_ROOM 64.0f            // 牌底下留给其余几张牌的边
 #define SHEET_MAX_WIDTH 908.0f
 #define SHEET_RADIUS 12.0f
+/// 纸牌：设置页四周牌背纹样的宽度：翻牌、抽牌途中由背面的轮廓画出这一圈。
+#define SHEET_BAND 10.0f
 #define TILE_RADIUS 8.0f
 #define MOTION_SECONDS 0.34
 #define MOTION_EASE EASE_OF(EASE_CUBIC_OUT)
@@ -52,6 +54,7 @@ typedef enum MainPage
 #define GLYPH_TEXT L"\xE8D2"
 #define GLYPH_SETTINGS L"\xE713"
 #define GLYPH_COLOR L"\xE790"
+#define GLYPH_STYLE L"\xE771"
 #define GLYPH_LIGHTNING L"\xE945"
 #define GLYPH_KEYBOARD L"\xE765"
 #define GLYPH_POWER L"\xE7E8"
@@ -253,6 +256,7 @@ typedef enum PagesControl
     PAGES_PEEK_SECONDS,
     PAGES_PEEK_SECONDS_CARD,
     PAGES_LAYOUT,
+    PAGES_LOOK,
     PAGES_THEME_SYSTEM,
     PAGES_THEME_LIGHT,
     PAGES_THEME_DARK,

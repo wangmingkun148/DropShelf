@@ -20,7 +20,6 @@
 #define DROPSHELF_VERSION L"0.0.0"
 #endif
 
-#define APP_ICON_RESOURCE 1
 #define WINDOW_WIDTH 580.0f
 #define CAPTION_HEIGHT 40.0f
 
@@ -399,11 +398,11 @@ void about_window_show(HWND owner)
     options.width = WINDOW_WIDTH;
     options.height = 400;
     options.resizable = false;
-    options.backdrop = UI_BACKDROP_MICA;
+    options.backdrop = theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
-    #ifdef _WIN32
-    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));
+#ifdef _WIN32
+    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource()));
 #else
     options.icon = NULL;
 #endif
@@ -416,7 +415,7 @@ void about_window_show(HWND owner)
     if (owner) SetWindowLongPtrW(handle, GWLP_HWNDPARENT, (LONG_PTR)owner);
     if (!icon)
     {
-        HICON large = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE), IMAGE_ICON, 96, 96, 0);
+        HICON large = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource()), IMAGE_ICON, 96, 96, 0);
         icon = gfx_image_from_icon(large);
         if (large) DestroyIcon(large);
     }
@@ -458,4 +457,12 @@ void about_window_show(HWND owner)
 void about_window_close(void)
 {
     if (window) ui_window_close(window);
+}
+
+void about_window_apply_look(void)
+{
+    if (!window) return;
+    ui_window_set_backdrop(window, theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA);
+    ui_window_set_icon(window, LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource())));
+    ui_window_invalidate(window);
 }

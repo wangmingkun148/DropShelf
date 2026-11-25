@@ -10,7 +10,7 @@ out="${1:-$root/dist}"
 cmake -S "$root/linux" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build "$build"
 
-version="$(sed -n 's:.*<Version>\([0-9.]*\)</Version>.*:\1:p' "$root/src/DropShelf/DropShelf.csproj" | head -1)"
+version="$(sed -n 's:.*project(DropShelf VERSION \([0-9.]*\) LANGUAGES.*:\1:p' "$root/native/CMakeLists.txt" | head -1)"
 if [[ -z "$version" ]]; then
     echo "读不到版本号" >&2
     exit 1

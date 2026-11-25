@@ -119,6 +119,10 @@ void ui_window_place(UiWindow *window, int x, int y, float width, float height);
 /// 把窗口放到光标所在显示器的工作区中央。
 void ui_window_center(UiWindow *window);
 
+/// 隐身：窗口照常显示和绘制，只是不画到屏幕上；取消隐身后立即以画好的样子出现。
+/// Windows 用 DWM 的 cloak（见 shelf_card.c），Wayland 没有对应物，Linux 后端用 0 透明度顶替。
+void ui_window_set_cloaked(HWND window, bool cloaked);
+
 /// 显示窗口；activate 为 false 时不抢当前程序的焦点。
 void ui_window_show_with(UiWindow *window, bool activate);
 
@@ -127,6 +131,13 @@ void ui_window_set_topmost(UiWindow *window, bool topmost);
 
 /// Windows 11 上窗口边框的颜色；color 为 NULL 时恢复系统默认。
 void ui_window_set_border_color(UiWindow *window, const Color *color);
+/// 换成 handlers 里的回调（paint、mouse、key、activated、moved、closed、animate、cursor、message），其余选项不变。
+/// 换风格时置物架改用另一种风格的那一份代码。
+void ui_window_set_handlers(UiWindow *window, const UiWindowOptions *handlers);
+/// 换风格后改用另一种系统材质（简洁用云母或亚克力，纸牌不用）。
+void ui_window_set_backdrop(UiWindow *window, UiBackdrop backdrop);
+/// 换窗口的图标（标题栏、任务栏和 Alt+Tab 里的）。窗口不负责释放这个图标。
+void ui_window_set_icon(UiWindow *window, HICON icon);
 
 /// 按住鼠标后调用：由系统接着拖动窗口，直到松开鼠标才返回（和 WPF 的 DragMove 相同）。
 void ui_window_begin_move(UiWindow *window);
@@ -139,6 +150,12 @@ void ui_close_all_windows(void);
 
 /// 诊断和测试用：把窗口现在的样子画进一张 PNG 图片（没有系统材质，背景是纯色）。
 bool ui_window_snapshot(UiWindow *window, const wchar_t *path);
+
+/// 把窗口现在的样子按设备像素画进一张图片（置物架出场和离场那张牌的正面）。正在画这个窗口或失败时返回 NULL。
+GfxImage *ui_window_capture(UiWindow *window);
+
+/// Windows 11 及以上：窗口有系统画的圆角。
+bool ui_is_windows_11(void);
 
 /// 在屏幕外把窗口画一遍再扔掉（窗口可以是隐藏的）：字体、文字排版和绘制效果提前准备好，第一次显示时更快。
 void ui_window_warm(UiWindow *window);
@@ -426,6 +443,8 @@ typedef void (*UiSliderHandler)(int value, bool dragging, void *context);
 UiElement *ui_slider(int minimum, int maximum, int value, int step, UiSliderHandler changed, void *context);
 void ui_slider_set_value(UiElement *slider, int value);
 int ui_slider_value(UiElement *slider);
+/// 切牌滑块上已经翻成牌背的张数。
+int ui_slider_face_down_count(UiElement *slider);
 
 /// 只显示，不能拖动（校准的结果）。
 void ui_slider_set_read_only(UiElement *slider, bool read_only);

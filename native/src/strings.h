@@ -78,6 +78,8 @@ wchar_t *str_watch_peek_tooltip(int count);                    // 3 个新文件
 // 最近关闭的置物架、合并
 wchar_t *str_history_entry_title(const wchar_t *first, int count);   // 报告.pdf 等 3 项
 wchar_t *str_history_yesterday(const wchar_t *time);                // 昨天 14:05
+/// 历史牌右上角时间下面的一行：今天、昨天或日期。days_ago 是关闭那天离今天几天。
+wchar_t *str_history_day(int days_ago, int month, int day);
 wchar_t *str_history_date(int month, int day);                      // 11月5日、Nov 5
 wchar_t *str_restored(int added, int unavailable);                  // 已恢复 3 项，1 项已删除或移动
 wchar_t *str_merged_shelves(int count);                             // 已合并 3 项
@@ -92,7 +94,8 @@ wchar_t *str_status_running_detail(int trigger, const wchar_t *hotkey);
 wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_t *hotkey);
 wchar_t *str_shelf_summary(int trigger, int drag_out_mode, int watched_folders);
 wchar_t *str_actions_summary(const StrList *labels);
-wchar_t *str_appearance_summary(int theme, bool custom_accent);
+/// look 是 Look（1 是纸牌）；accent 为 NULL 时简洁跟随 Windows、纸牌是钴蓝，"system" 时跟随 Windows，其余是自选的颜色。
+wchar_t *str_appearance_summary(int look, int theme, const wchar_t *accent);
 wchar_t *str_history_count(int count);                              // 已保留 3 个最近关闭的置物架
 wchar_t *str_history_card_detail(int count, const wchar_t *time);  // 3 个项目 · 14:05
 wchar_t *str_sensitivity_detail(int reversals, int distance);

@@ -90,7 +90,7 @@ static DWORD windows_build(void)
     return build;
 }
 
-static bool is_windows_11(void)
+bool ui_is_windows_11(void)
 {
     return windows_build() >= 22000;
 }
@@ -114,7 +114,7 @@ static void apply_appearance(UiWindow *window, bool force)
         // 显示和隐藏时不播放系统的淡入淡出；Windows 11 上不画圆角和边框，透明窗口里只看得到内容。
         BOOL disabled = TRUE;
         DwmSetWindowAttribute(handle, ATTRIBUTE_TRANSITIONS_FORCEDISABLED, &disabled, sizeof(disabled));
-        if (is_windows_11())
+        if (ui_is_windows_11())
         {
             int corner = CORNER_DO_NOT_ROUND;
             DwmSetWindowAttribute(handle, ATTRIBUTE_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
@@ -626,7 +626,7 @@ static LRESULT hit_test(UiWindow *window, LPARAM lparam)
     float scale = ui_window_scale(window);
     float x = point.x / scale, y = point.y / scale;
     UiElement *under = element_at(window, x, y);
-    if (under && under == window->maximize_button && !under->disabled && is_windows_11()) return HTMAXBUTTON;
+    if (under && under == window->maximize_button && !under->disabled && ui_is_windows_11()) return HTMAXBUTTON;
     if (y < window->options.caption_height && !under) return HTCAPTION;
     return HTCLIENT;
 }
@@ -946,6 +946,37 @@ bool ui_window_snapshot(UiWindow *window, const wchar_t *path)
     return gfx_end_image(path);
 }
 
+/// 按窗口现在的大小排版，画进一张图片（gfx_begin_image）；画不了时返回 false。
+static bool begin_window_image(UiWindow *window, double *time)
+{
+    RECT client;
+    GetClientRect(window->handle, &client);
+    int width = client.right - client.left, height = client.bottom - client.top;
+    if (width <= 0 || height <= 0 || window->rendering) return false;
+    float dpi = (float)GetDpiForWindow(window->handle);
+    float scale = dpi / 96.0f;
+    if (window->root)
+    {
+        ui_measure(window->root, width / scale);
+        ui_arrange(window->root, (GfxRect){ 0, 0, width / scale, height / scale });
+    }
+    if (!gfx_begin_image(width, height, dpi)) return false;
+    *time = frames_time();
+    return true;
+}
+
+GfxImage *ui_window_capture(UiWindow *window)
+{
+    double time;
+    if (!window || !window->handle || !begin_window_image(window, &time)) return NULL;
+    window->rendering = true;
+    gfx_clear(window->options.popup ? COLOR_TRANSPARENT : theme_color(window->options.background));
+    if (window->options.paint) window->options.paint(window, window->options.context, time);
+    if (window->root) ui_paint(window->root, time);
+    window->rendering = false;
+    return gfx_end_image_capture();
+}
+
 void ui_window_warm(UiWindow *window)
 {
     if (!window || !window->handle || window->rendering) return;
@@ -1136,9 +1167,40 @@ void ui_window_set_topmost(UiWindow *window, bool topmost)
     }
 }
 
+void ui_window_set_handlers(UiWindow *window, const UiWindowOptions *handlers)
+{
+    if (!window) return;
+    window->options.paint = handlers->paint;
+    window->options.mouse = handlers->mouse;
+    window->options.key = handlers->key;
+    window->options.activated = handlers->activated;
+    window->options.moved = handlers->moved;
+    window->options.closed = handlers->closed;
+    window->options.animate = handlers->animate;
+    window->options.cursor = handlers->cursor;
+    window->options.message = handlers->message;
+    ui_window_repaint(window);
+}
+
+void ui_window_set_backdrop(UiWindow *window, UiBackdrop backdrop)
+{
+    if (!window || !window->handle || window->options.backdrop == backdrop) return;
+    window->options.backdrop = backdrop;
+    apply_appearance(window, true);
+    ui_window_repaint(window);
+}
+
+void ui_window_set_icon(UiWindow *window, HICON icon)
+{
+    if (!window || !window->handle || !icon) return;
+    window->options.icon = icon;
+    SendMessageW(window->handle, WM_SETICON, ICON_BIG, (LPARAM)icon);
+    SendMessageW(window->handle, WM_SETICON, ICON_SMALL, (LPARAM)icon);
+}
+
 void ui_window_set_border_color(UiWindow *window, const Color *color)
 {
-    if (!window || !window->handle || !is_windows_11()) return;
+    if (!window || !window->handle || !ui_is_windows_11()) return;
     COLORREF value = color ? RGB(color->r, color->g, color->b) : 0xFFFFFFFF;    // DWMWA_COLOR_DEFAULT
     DwmSetWindowAttribute(window->handle, ATTRIBUTE_BORDER_COLOR, &value, sizeof(value));
 }

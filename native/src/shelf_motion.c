@@ -1,6 +1,7 @@
 // 置物架的动画，和 C# 版的 ShelfWindow.Motion.cs、ShelfWindow.Entrance.cs、ShelfMotion.cs 对应。
 // 拖进来的文件从松手处飞进堆叠或列表；堆叠和列表之间切换时，每张牌飞到列表里自己那一行（或飞回来）。
 // 窗口大小平滑过渡，但不和牌同时动：展开时窗口先变大再飞牌，收起时牌飞回去之后窗口再变小。动画途中再有变化时直接跳到终点。
+#include "look_variant.h"
 #include "shelf_window_internal.h"
 #include "log.h"
 #include "task.h"

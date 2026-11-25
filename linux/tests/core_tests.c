@@ -16,7 +16,9 @@
 #include "log.h"
 #include "settings.h"
 #include "shelf_model.h"
+#include "task.h"
 
+#include <glib.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -317,6 +319,19 @@ static void test_attachment_names(void)
     strlist_clear(&used);
 }
 
+/// 转一会儿主循环：临时附件的删除排在这一轮消息处理之后（见 attachment_cache_release），要等它做完。
+static void pump_until_gone(const wchar_t *path)
+{
+    char *bytes = utf8_from_wide(path, NULL);
+    if (!bytes) return;
+    for (int waited = 0; waited < 8000 && g_file_test(bytes, G_FILE_TEST_EXISTS); waited += 5)
+    {
+        while (g_main_context_iteration(NULL, FALSE)) {}
+        g_usleep(5000);
+    }
+    free(bytes);
+}
+
 static void test_attachment_cache(void)
 {
     const wchar_t *root = attachment_cache_root();
@@ -332,7 +347,8 @@ static void test_attachment_cache(void)
     free(found);
     free(file);
     attachment_cache_release(directory);
-    // 任务池没有初始化时删除在调用线程上直接做完。
+    // 删除排在后面（消息处理完、线程池删完），转一会儿主循环等它做完。
+    pump_until_gone(directory);
     CHECK(!path_exists(directory));
     free(directory);
 }

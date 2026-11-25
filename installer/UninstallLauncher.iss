@@ -1,10 +1,10 @@
 ﻿#define AppName "DropShelf"
-#define AppVersion "3.1.4"
+#define AppVersion "3.1.5"
 
 [Setup]
 AppName={#AppName} 卸载程序
 AppVersion={#AppVersion}
-VersionInfoVersion=3.1.4.0
+VersionInfoVersion=3.1.5.0
 VersionInfoDescription=卸载 {#AppName}
 DefaultDirName={tmp}
 CreateAppDir=no
@@ -13,7 +13,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 OutputDir=..\artifacts\win-x64
 OutputBaseFilename=卸载 DropShelf
-SetupIconFile=..\src\DropShelf\Assets\DropShelf.ico
+SetupIconFile=..\native\res\DropShelf.ico
 Compression=lzma2/fast
 SolidCompression=no
 WizardStyle=modern

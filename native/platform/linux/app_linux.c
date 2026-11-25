@@ -160,6 +160,19 @@ void app_mark_folder_watch_asked(void)
     settings_save_in_background(&current_settings);
 }
 
+void app_mark_look_asked(void)
+{
+    app_settings();
+    if (current_settings.has_asked_look) return;
+    AppSettings copy;
+    settings_init(&copy);
+    settings_clone(&copy, &current_settings);
+    copy.has_asked_look = true;
+    settings_free(&current_settings);
+    current_settings = copy;
+    settings_save_in_background(&current_settings);
+}
+
 static void set_start_with_windows(AppSettings *settings, void *context)
 {
     settings->start_with_windows = *(bool *)context;

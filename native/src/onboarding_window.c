@@ -2,6 +2,8 @@
 // 最后一步问要不要观察文件夹；升级来的老用户只看这一步（onboarding_window_show_watch）。
 #include "onboarding_window.h"
 #include "app.h"
+#include "task.h"
+#include "card_face.h"
 #include "main_window.h"
 #include "power.h"
 #include "strings.h"
@@ -11,11 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define APP_ICON_RESOURCE 1
 #define WINDOW_WIDTH 600.0f
 #define WINDOW_HEIGHT 560.0f
 #define CAPTION_HEIGHT 40.0f
-#define STEP_COUNT 5
+#define STEP_COUNT 6
+#define LOOK_STEP 1
 #define WATCH_STEP (STEP_COUNT - 1)
 #define ART_WIDTH 552.0f
 #define ART_HEIGHT 262.0f
@@ -26,12 +28,14 @@ static UiWindow *window;
 static int step;
 static bool step_shown;
 static bool watch_only;             // 只问观察文件夹的那一步
+static bool look_only;              // 只问用哪种风格的那一步（升级来的老用户）
 static double story_start[STEP_COUNT];
 static Anim art_opacity[STEP_COUNT];
 static Anim text_opacity, text_shift;
 static Anim dot_width[STEP_COUNT], dot_opacity[STEP_COUNT];
 static UiElement *title_label, *body_label, *skip_button, *back_button, *next_button, *close_button, *text_stack, *nav;
 static UiElement *no_thanks_button, *add_folder_button;
+static UiElement *look_choice;      // 选风格那一步的“简洁 | 纸牌”
 
 bool onboarding_window_is_open(void)
 {
@@ -61,6 +65,11 @@ const wchar_t *onboarding_window_next_text(void)
 const wchar_t *onboarding_window_add_folder_text(void)
 {
     return window && !add_folder_button->hidden ? ui_button_text(add_folder_button) : NULL;
+}
+
+bool onboarding_window_is_look_only(void)
+{
+    return window && look_only;
 }
 
 bool onboarding_window_is_watch_only(void)
@@ -120,12 +129,14 @@ static Color with_opacity(Color color, double opacity)
     return color;
 }
 
-/// 小置物架：预制的阴影，圆角 14。
+/// 小置物架：预制的阴影，圆角 14（纸牌圆角 8，描置物架的边框色）。
 static void mini_shelf(GfxRect rect)
 {
-    gfx_shadow(rect, 14, 24, 0, 6, COLOR_ARGB(46, 0, 0, 0));
-    gfx_fill_rounded(rect, 14, theme_color(THEME_SHELF_SOLID));
-    gfx_stroke_rounded(rect, 14, theme_color(THEME_CARD_BORDER), 1);
+    bool cards = theme_is_cards();
+    float radius = cards ? 8.0f : 14.0f;
+    gfx_shadow(rect, radius, 24, 0, 6, COLOR_ARGB(46, 0, 0, 0));
+    gfx_fill_rounded(rect, radius, theme_color(THEME_SHELF_SOLID));
+    gfx_stroke_rounded(rect, radius, theme_color(cards ? THEME_SHELF_BORDER : THEME_CARD_BORDER), 1);
 }
 
 static void glyph(const wchar_t *text, GfxRect rect, float size, Color color)
@@ -140,13 +151,14 @@ static void text(const wchar_t *value, GfxRect rect, float size, int weight, Col
     gfx_text_draw(value, rect, &style, color);
 }
 
-/// 一张小卡片（58 × 58），中间一个图标；绕中心转 angle 度。
+/// 一张小卡片（58 × 58，纸牌是圆角 4 的小牌），中间一个图标；绕中心转 angle 度。
 static void mini_card(float center_x, float center_y, float size, const wchar_t *icon, float icon_size, float angle)
 {
     GfxRect rect = { center_x - size / 2, center_y - size / 2, center_x + size / 2, center_y + size / 2 };
     if (angle != 0) gfx_push_transform(gfx_matrix_rotate(angle, center_x, center_y));
-    gfx_fill_rounded(rect, 8, theme_color(THEME_SHELF_TILE));
-    gfx_stroke_rounded(rect, 8, theme_color(THEME_SHELF_TILE_BORDER), 1);
+    bool cards = theme_is_cards();
+    gfx_fill_rounded(rect, cards ? 4.0f : 8.0f, theme_color(THEME_SHELF_TILE));
+    gfx_stroke_rounded(rect, cards ? 4.0f : 8.0f, theme_color(THEME_SHELF_TILE_BORDER), cards ? 1.2f : 1.0f);
     glyph(icon, rect, icon_size, theme_color(THEME_ACCENT_TEXT));
     if (angle != 0) gfx_pop_transform();
 }
@@ -164,15 +176,104 @@ static void cursor(float x, float y)
     gfx_polygon(points, 7, COLOR_WHITE, COLOR_BLACK, 1.2f);
 }
 
-static void dashed(GfxRect rect, float radius, ThemeColor stroke, ThemeColor fill, float width, double opacity)
+/// 虚线框，圆角 10、4 3 的虚线。纸牌的放置区域（drop 为 true）是圆角 6、3 2 的短虚线，和置物架里拖入时的虚线牌一样。
+static void dashed(GfxRect rect, float radius, ThemeColor stroke, ThemeColor fill, float width, double opacity, bool drop)
 {
+    bool short_dashes = drop && theme_is_cards();
+    if (short_dashes) radius = 6;
     gfx_fill_rounded(rect, radius, with_opacity(theme_color(fill), opacity));
-    gfx_stroke_rounded_dashed(rect, radius, with_opacity(theme_color(stroke), opacity), width, 4, 3);
+    gfx_stroke_rounded_dashed(rect, radius, with_opacity(theme_color(stroke), opacity), width, short_dashes ? 3.0f : 4.0f, short_dashes ? 2.0f : 3.0f);
 }
 
 // ───────────── 四步的演示 ─────────────
 
 /// 第 1 步：欢迎。和真实的置物架一样：左上角钉子和移动/复制切换，右上角菜单和关闭，堆叠下方是名称和数量。
+/// 选风格那一步：左边是简洁的置物架（列表），右边是纸牌的（一摞牌），选中的那一边描强调色的框。两边各按自己风格的颜色画。
+static GfxRect look_panel(float x, float y, int look)
+{
+    return look == LOOK_CARDS ? (GfxRect){ x + 296, y + 28, x + 296 + 220, y + 28 + 190 } : (GfxRect){ x + 36, y + 28, x + 36 + 220, y + 28 + 190 };
+}
+
+static void paint_look_simple(GfxRect panel, const Color *palette)
+{
+    GfxRect shelf = { panel.left + 30, panel.top + 18, panel.right - 30, panel.bottom - 18 };
+    gfx_shadow(shelf, 14, 18, 0, 4, COLOR_ARGB(40, 0, 0, 0));
+    gfx_fill_rounded(shelf, 14, palette[THEME_SHELF_SOLID]);
+    gfx_stroke_rounded(shelf, 14, palette[THEME_CARD_BORDER], 1);
+    for (int row = 0; row < 3; row++)
+    {
+        float top = shelf.top + 30 + row * 36;
+        GfxRect line = { shelf.left + 10, top, shelf.right - 10, top + 30 };
+        if (row == 0) gfx_fill_rounded(line, 5, palette[THEME_SUBTLE_HOVER]);
+        GfxRect icon = { line.left + 6, line.top + 4, line.left + 28, line.top + 26 };
+        gfx_fill_rounded(icon, 5, palette[THEME_SHELF_TILE]);
+        gfx_stroke_rounded(icon, 5, palette[THEME_SHELF_TILE_BORDER], 1);
+        gfx_fill_rounded((GfxRect){ icon.right + 8, line.top + 7, line.right - 30 - row * 10, line.top + 13 }, 3, palette[THEME_TEXT_SECONDARY]);
+        gfx_fill_rounded((GfxRect){ icon.right + 8, line.top + 18, line.right - 60, line.top + 23 }, 2.5f, palette[THEME_TEXT_TERTIARY]);
+    }
+    gfx_fill_rounded((GfxRect){ shelf.left + 12, shelf.top + 10, shelf.left + 46, shelf.top + 20 }, 4, palette[THEME_SUBTLE_SELECTED]);
+}
+
+static void paint_look_cards(GfxRect panel, bool dark, const Color *palette)
+{
+    ThemePattern patterns[THEME_PATTERN_COUNT];
+    theme_build_patterns(dark, palette, patterns);
+    gfx_push_layer(panel, 10, 1);
+    gfx_fill_rounded_pattern(panel, 0, &patterns[THEME_PATTERN_TABLE]);
+    gfx_pop_layer();
+    float cx = (panel.left + panel.right) / 2, cy = (panel.top + panel.bottom) / 2 - 4;
+    // 一张牌背、两张牌面斜着叠成一摞。
+    const float angles[3] = { -12, 8, -2 };
+    const float shifts[3] = { -26, 24, 0 };
+    for (int index = 0; index < 3; index++)
+    {
+        gfx_push_transform(gfx_matrix_rotate(angles[index], cx + shifts[index], cy));
+        GfxRect card = { cx + shifts[index] - 34, cy - 48, cx + shifts[index] + 34, cy + 48 };
+        gfx_shadow(card, 5, 10, 0, 3, COLOR_ARGB(50, 0, 0, 0));
+        if (index == 0)
+        {
+            gfx_fill_rounded_pattern(card, 5, &patterns[THEME_PATTERN_SHEET_BORDER]);
+            gfx_stroke_rounded(card, 5, palette[THEME_CARD_BACK_LINE], 1);
+        }
+        else
+        {
+            gfx_fill_rounded(card, 5, palette[THEME_SHELF_TILE]);
+            gfx_stroke_rounded(card, 5, palette[THEME_SHELF_TILE_BORDER], 1.2f);
+            static const CardCorner corner = { 15, 15, 6, 2 };
+            card_paint_corner(index == 2 ? L"3" : L"1", index == 2 ? SUIT_IMAGE : SUIT_DOCUMENT, &corner, card.left + 5, card.top + 4,
+                palette[THEME_TEXT_PRIMARY], 1);
+            GfxRect art = { card.left + 9, card.top + 28, card.right - 9, card.bottom - 12 };
+            gfx_fill_rounded(art, 3, palette[THEME_ACCENT_SUBTLE]);
+        }
+        gfx_pop_transform();
+    }
+}
+
+static void paint_look_step(float x, float y)
+{
+    bool dark = theme_is_dark();
+    Look current = theme_look();
+    for (int look = LOOK_SIMPLE; look <= LOOK_CARDS; look++)
+    {
+        Color palette[THEME_COLOR_COUNT];
+        AccentPalette accent = look == LOOK_CARDS && !app_settings()->accent_color ? accent_palette_from_color(THEME_COBALT) : theme_accent();
+        theme_build_palette((Look)look, dark, accent, palette);
+        GfxRect panel = look_panel(x, y, look);
+        if (look == LOOK_CARDS) paint_look_cards(panel, dark, palette);
+        else
+        {
+            gfx_fill_rounded(panel, 10, palette[THEME_WINDOW_BACKGROUND]);
+            gfx_fill_rounded(panel, 10, palette[THEME_LAYER]);
+            paint_look_simple(panel, palette);
+        }
+        bool chosen = look == (int)current;
+        gfx_stroke_rounded(panel, 10, theme_color(chosen ? THEME_ACCENT : THEME_CARD_BORDER), chosen ? 2.5f : 1);
+        GfxTextStyle name = { GFX_FONT_TEXT, 13, chosen ? 600 : 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_START };
+        gfx_text_draw(S(look == LOOK_CARDS ? STR_LookCards : STR_LookSimple), (GfxRect){ panel.left, panel.bottom + 8, panel.right, panel.bottom + 28 },
+            &name, theme_color(chosen ? THEME_TEXT_PRIMARY : THEME_TEXT_SECONDARY));
+    }
+}
+
 static void paint_step1(float x, float y, double time)
 {
     // 上下浮动：1.6 秒到顶，再回来。
@@ -231,7 +332,7 @@ static void paint_step2(float x, float y, double time)
         gfx_push_opacity((float)shelf_opacity);
         mini_shelf(shelf);
         GfxRect zone = { shelf.left + 14, shelf.top + 14 + 22, shelf.right - 14, shelf.bottom - 14 };
-        dashed(zone, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, 1);
+        dashed(zone, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, 1, true);
         Color accent = theme_color(THEME_ACCENT_TEXT);
         GfxTextStyle hint = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_END };
         float hint_height = gfx_text_measure(S(STR_ReleaseToHold), &hint, 0).height;
@@ -259,7 +360,8 @@ static void paint_step3(float x, float y, double time)
 
     GfxRect shelf = { x + 70, y + 34, x + 70 + 170, y + 34 + 194 };
     mini_shelf(shelf);
-    dashed((GfxRect){ shelf.left + 14, shelf.top + 34, shelf.right - 14, shelf.bottom - 40 }, 10, THEME_CONTROL_STRONG_BORDER, THEME_TRANSPARENT, 1.2f, 0.4);
+    dashed((GfxRect){ shelf.left + 14, shelf.top + 34, shelf.right - 14, shelf.bottom - 40 }, 10, THEME_CONTROL_STRONG_BORDER, THEME_TRANSPARENT, 1.2f, 0.4,
+        false);
     if (FRAMES(stack_opacity, time) > 0.5)
         mini_card((shelf.left + shelf.right) / 2, (shelf.top + shelf.bottom) / 2 - 3, 58, L"\xE8B9", 26, 0);
 
@@ -319,7 +421,7 @@ static void paint_step4(float x, float y, double time)
     if (zone > 0.001)
     {
         gfx_push_opacity((float)zone);
-        dashed(upper, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, FRAMES(frame_opacity, time));
+        dashed(upper, 10, THEME_ACCENT, THEME_ACCENT_FAINT, 1.4f, FRAMES(frame_opacity, time), true);
         float middle = (upper.top + upper.bottom) / 2;
         glyph(L"\xE896", (GfxRect){ upper.left, middle - 26, upper.right, middle - 2 }, 18, accent);
         text(S(STR_ReleaseToHold), (GfxRect){ upper.left, middle + 2, upper.right, middle + 18 }, 11, 400, accent, GFX_ALIGN_CENTER);
@@ -353,9 +455,11 @@ static void paint_step4(float x, float y, double time)
         for (int index = 0; index < 4; index++)
         {
             GfxRect tile = { inner.left + cell * index + 2, inner.bottom - 62, inner.left + cell * (index + 1) - 2, inner.bottom };
-            gfx_fill_rounded(tile, 8, theme_color(THEME_CARD));
-            gfx_stroke_rounded(tile, 8, theme_color(THEME_CARD_BORDER), 1);
-            if (index == 0) gfx_fill_rounded(tile, 8, with_opacity(theme_color(THEME_ACCENT), FRAMES(highlight, time)));
+            bool cards = theme_is_cards();
+            float radius = cards ? 6.0f : 8.0f;
+            gfx_fill_rounded(tile, radius, theme_color(THEME_CARD));
+            gfx_stroke_rounded(tile, radius, theme_color(cards ? THEME_SHELF_UNDER_CARD_BORDER : THEME_CARD_BORDER), 1);
+            if (index == 0) gfx_fill_rounded(tile, radius, with_opacity(theme_color(THEME_ACCENT), FRAMES(highlight, time)));
             float middle = (tile.top + tile.bottom) / 2;
             glyph(icons[index], (GfxRect){ tile.left, middle - 20, tile.right, middle + 1 }, 16, primary);
             text(S(labels[index]), (GfxRect){ tile.left + 2, middle + 4, tile.right - 2, middle + 18 }, 10, 400, primary, GFX_ALIGN_CENTER);
@@ -390,7 +494,8 @@ static void paint_step4(float x, float y, double time)
     }
 }
 
-/// 第 5 步：新文件落进下载文件夹 → 右边缘探出置物架的一角 → 光标移过去，角再伸出一点 → 点一下，置物架带着文件伸出来。
+/// 第 5 步：新文件落进下载文件夹 → 右边缘探出置物架的一角（纸牌：斜着探出一张牌，牌角印着 1 和文档的花色）
+/// → 光标移过去，角再伸出一点 → 点一下，置物架带着文件伸出来。
 static void paint_step5(float x, float y, double time)
 {
     KeyFrame drop_y[] = { DISCRETE(0, -70), EASED(0.55, 0, EASE_OF(EASE_CUBIC_IN)) };
@@ -429,9 +534,24 @@ static void paint_step5(float x, float y, double time)
         theme_color(THEME_TEXT_SECONDARY));
     gfx_pop_transform();
 
-    // 探出的角：贴边的一侧伸到画面外面，像是从屏幕边缘后面探出来。
+    // 探出的角：贴边的一侧伸到画面外面，像是从屏幕边缘后面探出来。纸牌：中心在画面外面，斜着露出靠里的一截。
     double out = FRAMES(peek, time);
-    if (out > 0.001)
+    if (out > 0.001 && theme_is_cards())
+    {
+        float hovered = (float)FRAMES(hover, time);
+        float visible = (float)out * 34 + hovered * 8;
+        gfx_push_transform(gfx_matrix_multiply(gfx_matrix_rotate(-6 - 3 * hovered, 0, 0), gfx_matrix_translate(right - visible + 26, y + 132)));
+        GfxRect card = { -26, -36, 26, 36 };
+        gfx_shadow(card, 4, 12, 0, 2, COLOR_ARGB(60, 0, 0, 0));
+        Color face = color_over(with_opacity(theme_color(THEME_SUBTLE_PRESSED), FRAMES(press, time)), theme_color(THEME_SHELF_TILE));
+        gfx_fill_rounded(card, 4, face);
+        gfx_stroke_rounded(card, 4, theme_color(THEME_SHELF_TILE_BORDER), 1.2f);
+        glyph(L"\xE8A5", (GfxRect){ card.left + 6, card.top + 16, card.right - 6, card.bottom - 12 }, 20, accent);
+        static const CardCorner corner = { 13, 13, 5, 2 };
+        card_paint_corner(L"1", SUIT_DOCUMENT, &corner, card.left + 4, card.top + 3, primary, 1);
+        gfx_pop_transform();
+    }
+    else if (out > 0.001)
     {
         float visible = (float)(out * 40 + FRAMES(hover, time) * 8);
         GfxRect tab = { right - visible, y + 100, right + 14, y + 100 + 64 };
@@ -470,7 +590,7 @@ static void paint_step5(float x, float y, double time)
 }
 
 /// 关闭了动画效果时各步演示停在这一刻：画面里该有的都在。第 5 步停在光标移到探出的角上。
-static const double still_frames[STEP_COUNT] = { 0, 2, 1.3, 1.1, 1.8 };
+static const double still_frames[STEP_COUNT] = { 0, 0, 2, 1.3, 1.1, 1.8 };
 
 static double story_time(int index, double time)
 {
@@ -491,13 +611,17 @@ static void update_step_text(void)
             ui_label_set_text(title_label, UI_STR(STR_OnboardingWelcomeTitle));
             ui_label_set_text(body_label, UI_STR(STR_OnboardingWelcomeBody));
             break;
-        case 1:
+        case LOOK_STEP:
+            ui_label_set_text(title_label, UI_STR(STR_OnboardingLookTitle));
+            ui_label_set_text(body_label, UI_STR(STR_OnboardingLookBody));
+            break;
+        case 2:
             ui_label_set_text(title_label, UI_STR(STR_OnboardingShakeTitle));
             ui_label_set_text(body_label, UI_STR(STR_OnboardingShakeBody));
             break;
-        case 2:
+        case 3:
             ui_label_set_text(title_label, UI_STR(STR_OnboardingStackTitle));
-            ui_label_set_text(body_label, UI_STR(STR_OnboardingStackBody));
+            ui_label_set_text(body_label, UI_STR(theme_is_cards() ? STR_OnboardingStackBodyCards : STR_OnboardingStackBody));
             break;
         case WATCH_STEP:
             ui_label_set_text(title_label, UI_STR(STR_OnboardingWatchTitle));
@@ -514,14 +638,16 @@ static void update_step_text(void)
             break;
         }
     }
-    ui_button_set_text(next_button, UI_STR(STR_Next));
+    ui_button_set_text(next_button, UI_STR(look_only ? STR_OnboardingLookDone : STR_Next));
+    look_choice->hidden = step != LOOK_STEP;
+    ui_segmented_set_selected(look_choice, theme_look());
 }
 
 /// 换到第 next 步：旧的演示淡出、新的淡入，说明文字从前进的方向滑入，指示点变宽变色。第一次显示和关闭了动画效果时直接到位。
 static void show_step(int next)
 {
     int previous = step;
-    step = watch_only ? WATCH_STEP : next < 0 ? 0 : next >= STEP_COUNT ? STEP_COUNT - 1 : next;
+    step = watch_only ? WATCH_STEP : look_only ? LOOK_STEP : next < 0 ? 0 : next >= STEP_COUNT ? STEP_COUNT - 1 : next;
     bool animate = step_shown && previous != step && anim_enabled();
     step_shown = true;
     double now = frames_time();
@@ -558,8 +684,8 @@ static void show_step(int next)
     }
     // 最后一步不再是“下一步”，而是问要不要观察文件夹。
     bool asking = step == WATCH_STEP;
-    back_button->hidden = step == 0 || watch_only;
-    skip_button->hidden = asking;
+    back_button->hidden = step == 0 || watch_only || look_only;
+    skip_button->hidden = asking || look_only;
     next_button->hidden = asking;
     no_thanks_button->hidden = !asking;
     add_folder_button->hidden = !asking;
@@ -575,7 +701,7 @@ void onboarding_window_go(int index)
 static void on_next(void *context)
 {
     (void)context;
-    if (step >= STEP_COUNT - 1) onboarding_window_close();
+    if (step >= STEP_COUNT - 1 || look_only) onboarding_window_close();
     else show_step(step + 1);
 }
 
@@ -611,10 +737,10 @@ static bool on_key(UiWindow *target, void *context, unsigned key)
     switch (key)
     {
         case VK_RIGHT:
-            if (step < STEP_COUNT - 1) show_step(step + 1);
+            if (step < STEP_COUNT - 1 && !look_only) show_step(step + 1);
             return true;
         case VK_LEFT:
-            if (step > 0 && !watch_only) show_step(step - 1);
+            if (step > 0 && !watch_only && !look_only) show_step(step - 1);
             return true;
         case VK_ESCAPE:
             onboarding_window_close();
@@ -649,11 +775,13 @@ static void root_paint(UiElement *element, double time)
 {
     GfxRect bounds = element->bounds;
     GfxTextStyle caption = { GFX_FONT_TEXT, 12, 400, false, false, GFX_ALIGN_START, GFX_ALIGN_CENTER };
-    gfx_text_draw(watch_only ? L"DropShelf" : S(STR_OnboardingWelcomeTitle), (GfxRect){ 18, 0, bounds.right - 60, CAPTION_HEIGHT }, &caption,
+    gfx_text_draw(watch_only || look_only ? L"DropShelf" : S(STR_OnboardingWelcomeTitle), (GfxRect){ 18, 0, bounds.right - 60, CAPTION_HEIGHT }, &caption,
         theme_color(THEME_TEXT_PRIMARY));
     GfxRect art = { 24, CAPTION_HEIGHT, bounds.right - 24, CAPTION_HEIGHT + ART_HEIGHT };
-    gfx_fill_rounded(art, 12, theme_color(THEME_LAYER));
-    gfx_push_layer((GfxRect){ art.left + 1, art.top + 1, art.right - 1, art.bottom - 1 }, 11, 1);
+    bool cards = theme_is_cards();
+    float art_radius = cards ? 8.0f : 12.0f;
+    gfx_fill_rounded(art, art_radius, theme_color(cards ? THEME_CARD : THEME_LAYER));
+    gfx_push_layer((GfxRect){ art.left + 1, art.top + 1, art.right - 1, art.bottom - 1 }, art_radius - 1, 1);
     // 画布 552 × 262 放在中间。
     float x = (art.left + art.right - ART_WIDTH) / 2, y = art.top;
     for (int index = 0; index < STEP_COUNT; index++)
@@ -665,19 +793,20 @@ static void root_paint(UiElement *element, double time)
         switch (index)
         {
             case 0: paint_step1(x, y, t); break;
-            case 1: paint_step2(x, y, t); break;
-            case 2: paint_step3(x, y, t); break;
-            case 3: paint_step4(x, y, t); break;
+            case LOOK_STEP: paint_look_step(x, y); break;
+            case 2: paint_step2(x, y, t); break;
+            case 3: paint_step3(x, y, t); break;
+            case 4: paint_step4(x, y, t); break;
             default: paint_step5(x, y, t); break;
         }
         gfx_pop_layer();
     }
     gfx_pop_layer();
-    gfx_stroke_rounded(art, 12, theme_color(THEME_CARD_BORDER), 1);
+    gfx_stroke_rounded(art, art_radius, theme_color(THEME_CARD_BORDER), 1);
 
-    // 底部的指示点；只问观察文件夹时没有。
+    // 底部的指示点；只问观察文件夹或风格时没有。
     float dot_x = 34, dot_y = nav->bounds.top + (nav->bounds.bottom - nav->bounds.top) / 2;
-    for (int index = 0; index < STEP_COUNT && !watch_only; index++)
+    for (int index = 0; index < STEP_COUNT && !watch_only && !look_only; index++)
     {
         float width = (float)dot_width[index].value;
         Color color = theme_color(index == step ? THEME_ACCENT : THEME_CONTROL_STRONG_BORDER);
@@ -703,7 +832,38 @@ static void root_arrange(UiElement *element)
     ui_arrange(nav, (GfxRect){ 34, bounds.bottom - 24 - nav->desired.height, bounds.right - 24, bounds.bottom - 24 });
 }
 
-static const UiElementType root_type = { root_measure, root_arrange, root_paint, NULL, NULL, false };
+static void change_look(AppSettings *settings, void *context)
+{
+    settings->look = (int)(intptr_t)context;
+}
+
+/// 换风格要等这一轮消息处理完再做（换的时候整串窗口翻牌）。
+static void apply_look_choice(void *data)
+{
+    if (window && (int)(intptr_t)data != app_settings()->look) app_update_settings(change_look, data);
+}
+
+static void on_look_choice(int index, void *context)
+{
+    (void)context;
+    task_post(apply_look_choice, (void *)(intptr_t)index);
+}
+
+/// 选风格那一步：点左右两边的预览也能选。
+static void root_mouse(UiElement *element, const UiMouseEvent *event)
+{
+    if (step != LOOK_STEP || event->kind != UI_MOUSE_UP || !event->inside || event->right_button) return;
+    GfxRect bounds = element->bounds;
+    float x = (bounds.right - 24 + 24 - ART_WIDTH) / 2, y = CAPTION_HEIGHT;
+    for (int look = LOOK_SIMPLE; look <= LOOK_CARDS; look++)
+    {
+        GfxRect panel = look_panel(x, y, look);
+        if (event->x >= panel.left && event->x < panel.right && event->y >= panel.top && event->y < panel.bottom + 28)
+            task_post(apply_look_choice, (void *)(intptr_t)look);
+    }
+}
+
+static const UiElementType root_type = { root_measure, root_arrange, root_paint, root_mouse, NULL, true };
 
 static void change_first_run(AppSettings *settings, void *context)
 {
@@ -715,12 +875,15 @@ static void on_closed(UiWindow *closed, void *context)
 {
     (void)closed;
     (void)context;
+    bool was_watch_only = watch_only;
     power_hold(&window, false);
     window = NULL;
-    watch_only = false;
+    watch_only = look_only = false;
     title_label = body_label = skip_button = back_button = next_button = close_button = text_stack = nav = NULL;
-    no_thanks_button = add_folder_button = NULL;
+    no_thanks_button = add_folder_button = look_choice = NULL;
     if (!app_settings()->has_completed_first_run) app_update_settings(change_first_run, NULL);
+    // 看过完整的引导，或者单独问过风格，以后都不再问风格；只问观察文件夹时不算。
+    if (!was_watch_only) app_mark_look_asked();
     // 不管是选了、点了“不用了”还是跳过了引导，都算问过，以后不再单独问。
     app_mark_folder_watch_asked();
 }
@@ -731,7 +894,7 @@ static void on_close(void *context)
     onboarding_window_close();
 }
 
-static void open_window(bool only_watch)
+static void open_window(bool only_watch, bool only_look)
 {
     if (window)
     {
@@ -739,14 +902,15 @@ static void open_window(bool only_watch)
         return;
     }
     watch_only = only_watch;
+    look_only = only_look;
     UiWindowOptions options = { 0 };
-    options.title = only_watch ? L"DropShelf" : S(STR_OnboardingWelcomeTitle);
+    options.title = only_watch || only_look ? L"DropShelf" : S(STR_OnboardingWelcomeTitle);
     options.width = WINDOW_WIDTH;
     options.height = WINDOW_HEIGHT;
-    options.backdrop = UI_BACKDROP_MICA;
+    options.backdrop = theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA;
     options.background = THEME_WINDOW_BACKGROUND;
     options.caption_height = CAPTION_HEIGHT;
-    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(APP_ICON_RESOURCE));
+    options.icon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource()));
     options.key = on_key;
     options.animate = on_animate;
     options.closed = on_closed;
@@ -766,6 +930,11 @@ static void open_window(bool only_watch)
     ui_label_set_color(body_label, THEME_TEXT_SECONDARY);
     ui_set_margin(body_label, 0, 10, 0, 0);
     ui_add(text_stack, body_label);
+    UiText looks[2] = { UI_STR(STR_LookSimple), UI_STR(STR_LookCards) };
+    look_choice = ui_segmented(looks, 2, theme_look(), on_look_choice, NULL);
+    look_choice->cross = UI_CROSS_START;
+    ui_set_margin(look_choice, 0, 12, 0, 0);
+    ui_add(text_stack, look_choice);
     ui_add(root, text_stack);
     nav = ui_stack(true, 8);
     ui_add(nav, ui_spacer());
@@ -787,7 +956,7 @@ static void open_window(bool only_watch)
     ui_add(root, nav);
     ui_window_set_root(window, root);
 
-    step = only_watch ? WATCH_STEP : 0;
+    step = only_watch ? WATCH_STEP : only_look ? LOOK_STEP : 0;
     step_shown = false;
     anim_set(&text_opacity, 1);
     anim_set(&text_shift, 0);
@@ -810,15 +979,33 @@ static void open_window(bool only_watch)
 
 void onboarding_window_show(void)
 {
-    open_window(false);
+    open_window(false, false);
 }
 
 void onboarding_window_show_watch(void)
 {
-    open_window(true);
+    open_window(true, false);
+}
+
+void onboarding_window_show_look(void)
+{
+    open_window(false, true);
 }
 
 void onboarding_window_close(void)
 {
     if (window) ui_window_close(window);
+}
+
+void onboarding_window_apply_look(void)
+{
+    if (!window) return;
+    ui_window_set_backdrop(window, theme_is_cards() ? UI_BACKDROP_NONE : UI_BACKDROP_MICA);
+    ui_window_set_icon(window, LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(theme_icon_resource())));
+    ui_window_invalidate(window);
+}
+
+UiWindow *onboarding_window_ui(void)
+{
+    return window;
 }

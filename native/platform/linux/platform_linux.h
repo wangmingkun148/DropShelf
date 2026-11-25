@@ -646,6 +646,10 @@ HRESULT GetDpiForMonitor(HMONITOR monitor, int dpi_type, UINT *dpi_x, UINT *dpi_
 
 /// 窗口在屏幕上的位置和大小（物理像素）；没有显示时为 false。
 BOOL GetWindowRect(HWND window, RECT *rect);
+/// 客户区大小和窗口左上角（物理像素）；我们的窗口没有标题栏，客户区就是整个窗口。
+BOOL GetClientRect(HWND window, RECT *rect);
+BOOL ClientToScreen(HWND window, POINT *point);
+UINT GetDpiForWindow(HWND window);
 BOOL SetWindowPos(HWND window, HWND insert_after, int x, int y, int width, int height, UINT flags);
 BOOL IsWindowVisible(HWND window);
 BOOL IsWindow(HWND window);

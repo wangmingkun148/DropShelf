@@ -1,6 +1,7 @@
 #include "settings.h"
 #include "json.h"
 #include "log.h"
+#include "theme.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -28,6 +29,7 @@ typedef struct EnumTable
 static const EnumName trigger_names[] = { { L"Shake", TRIGGER_SHAKE }, { L"Edge", TRIGGER_EDGE }, { L"Both", TRIGGER_BOTH } };
 static const EnumName dwell_names[] = { { L"Short", DWELL_SHORT }, { L"Medium", DWELL_MEDIUM }, { L"Long", DWELL_LONG } };
 static const EnumName theme_names[] = { { L"System", THEME_SYSTEM }, { L"Light", THEME_LIGHT }, { L"Dark", THEME_DARK } };
+static const EnumName look_names[] = { { L"Simple", LOOK_SIMPLE }, { L"Cards", LOOK_CARDS } };
 static const EnumName language_names[] = { { L"System", LANGUAGE_SYSTEM }, { L"Chinese", LANGUAGE_CHINESE }, { L"English", LANGUAGE_ENGLISH } };
 static const EnumName size_names[] = { { L"Small", SHELF_SIZE_SMALL }, { L"Medium", SHELF_SIZE_MEDIUM }, { L"Large", SHELF_SIZE_LARGE } };
 static const EnumName transfer_names[] = { { L"Move", TRANSFER_MOVE }, { L"Copy", TRANSFER_COPY } };
@@ -50,6 +52,7 @@ static const EnumName format_names[] = { { L"Jpeg", IMAGE_FORMAT_JPEG }, { L"Png
 static const EnumTable trigger_table = ENUM_TABLE(trigger_names);
 static const EnumTable dwell_table = ENUM_TABLE(dwell_names);
 static const EnumTable theme_table = ENUM_TABLE(theme_names);
+static const EnumTable look_table = ENUM_TABLE(look_names);
 static const EnumTable language_table = ENUM_TABLE(language_names);
 static const EnumTable size_table = ENUM_TABLE(size_names);
 static const EnumTable transfer_table = ENUM_TABLE(transfer_names);
@@ -440,7 +443,9 @@ void settings_normalize(AppSettings *settings)
     if (!enum_is_defined(&trigger_table, settings->auto_open_trigger)) settings->auto_open_trigger = TRIGGER_BOTH;
     if (!enum_is_defined(&dwell_table, settings->edge_dwell)) settings->edge_dwell = DWELL_MEDIUM;
     if (!enum_is_defined(&theme_table, settings->theme)) settings->theme = THEME_SYSTEM;
-    if (!accent_color_parse(settings->accent_color, NULL))
+    if (!enum_is_defined(&look_table, settings->look)) settings->look = LOOK_SIMPLE;
+    // 跟随 Windows 存为 "system"，和 C# 版的 ThemeService.SystemAccent 相同。
+    if (!wcs_equal(settings->accent_color, THEME_SYSTEM_ACCENT_VALUE) && !accent_color_parse(settings->accent_color, NULL))
     {
         free(settings->accent_color);
         settings->accent_color = NULL;
@@ -662,6 +667,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"BlockedApps") == 0) ok = read_string_list(value, &settings->blocked_apps, NULL);
         else if (wcscmp(key, L"Theme") == 0) ok = read_enum(value, &theme_table, &settings->theme);
         else if (wcscmp(key, L"AccentColor") == 0) ok = read_string(value, &settings->accent_color);
+        else if (wcscmp(key, L"Look") == 0) ok = read_enum(value, &look_table, &settings->look);
         else if (wcscmp(key, L"Language") == 0) ok = read_enum(value, &language_table, &settings->language);
         else if (wcscmp(key, L"LanguagePack") == 0) ok = read_string(value, &settings->language_pack);
         else if (wcscmp(key, L"StartWithWindows") == 0) ok = read_bool(value, &settings->start_with_windows);
@@ -685,6 +691,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"HasCompletedFirstRun") == 0) ok = read_bool(value, &settings->has_completed_first_run);
         else if (wcscmp(key, L"ShowGettingStarted") == 0) ok = read_bool(value, &settings->show_getting_started);
         else if (wcscmp(key, L"HasAskedFolderWatch") == 0) ok = read_bool(value, &settings->has_asked_folder_watch);
+        else if (wcscmp(key, L"HasAskedLook") == 0) ok = read_bool(value, &settings->has_asked_look);
     }
     json_free(root);
     return ok;
@@ -722,6 +729,7 @@ wchar_t *settings_serialize(const AppSettings *settings)
     write_string_list(&writer, L"BlockedApps", &settings->blocked_apps);
     write_enum(&writer, L"Theme", &theme_table, settings->theme);
     json_write_string(&writer, L"AccentColor", settings->accent_color);
+    write_enum(&writer, L"Look", &look_table, settings->look);
     write_enum(&writer, L"Language", &language_table, settings->language);
     json_write_string(&writer, L"LanguagePack", settings->language_pack);
     json_write_bool(&writer, L"StartWithWindows", settings->start_with_windows);
@@ -756,6 +764,7 @@ wchar_t *settings_serialize(const AppSettings *settings)
     json_write_bool(&writer, L"HasCompletedFirstRun", settings->has_completed_first_run);
     json_write_bool(&writer, L"ShowGettingStarted", settings->show_getting_started);
     json_write_bool(&writer, L"HasAskedFolderWatch", settings->has_asked_folder_watch);
+    json_write_bool(&writer, L"HasAskedLook", settings->has_asked_look);
     json_write_end_object(&writer);
     return json_write_finish(&writer);
 }

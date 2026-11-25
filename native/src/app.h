@@ -31,6 +31,8 @@ void app_unwatch_folder(const wchar_t *folder);
 bool app_choose_watch_folder(HWND owner);
 
 /// 已经问过要不要观察文件夹（引导里点了“添加文件夹”或“不用了”，或者关掉了引导）。
+/// 问过用哪种风格了（看过完整的引导，或升级后单独问过一次）。
+void app_mark_look_asked(void);
 void app_mark_folder_watch_asked(void);
 
 /// 修改开机启动；写入注册表失败时保持原值并返回 false。

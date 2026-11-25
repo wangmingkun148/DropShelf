@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-# 版本号以 src/DropShelf/DropShelf.csproj 为准（CLAUDE.md 的规则）。
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../src/DropShelf/DropShelf.csproj" DROPSHELF_CSPROJ)
-string(REGEX MATCH "<Version>([0-9]+\\.[0-9]+\\.[0-9]+)</Version>" DROPSHELF_VERSION_MATCH "${DROPSHELF_CSPROJ}")
+# 版本号以 native/CMakeLists.txt 为准（CLAUDE.md 的规则）。
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../native/CMakeLists.txt" DROPSHELF_NATIVE_CMAKE)
+string(REGEX MATCH "project\\(DropShelf VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)" DROPSHELF_VERSION_MATCH "${DROPSHELF_NATIVE_CMAKE}")
 set(DROPSHELF_VERSION "${CMAKE_MATCH_1}")
 if(NOT DROPSHELF_VERSION)
     set(DROPSHELF_VERSION "0.0.0")
@@ -43,10 +43,11 @@ add_library(dropshelf_core STATIC
     "${DROPSHELF_SOURCE_DIR}/shelf_item.c"
     "${DROPSHELF_SOURCE_DIR}/shelf_model.c"
     "${DROPSHELF_SOURCE_DIR}/shelf_history.c"
-    "${DROPSHELF_SOURCE_DIR}/shelf_motion.c"
-    "${DROPSHELF_SOURCE_DIR}/shelf_window.c"
     "${DROPSHELF_SOURCE_DIR}/shelves.c"
-    "${DROPSHELF_SOURCE_DIR}/shelf_input.c"
+    "${DROPSHELF_SOURCE_DIR}/shelf_card.c"
+    "${DROPSHELF_SOURCE_DIR}/card_face.c"
+    "${DROPSHELF_SOURCE_DIR}/look_dispatch.c"
+    "${DROPSHELF_SOURCE_DIR}/look_switch.c"
     "${DROPSHELF_SOURCE_DIR}/history_menu.c"
     "${DROPSHELF_SOURCE_DIR}/file_identity.c"
     "${DROPSHELF_SOURCE_DIR}/attachment_cache.c"
@@ -57,7 +58,6 @@ add_library(dropshelf_core STATIC
     "${DROPSHELF_SOURCE_DIR}/update_check.c"
     "${DROPSHELF_SOURCE_DIR}/../third_party/miniz/miniz.c"
     "${DROPSHELF_SOURCE_DIR}/main_window.c"
-    "${DROPSHELF_SOURCE_DIR}/main_pages.c"
     "${DROPSHELF_SOURCE_DIR}/main_flip.c"
     "${DROPSHELF_SOURCE_DIR}/main_fan.c"
     "${DROPSHELF_SOURCE_DIR}/main_dialogs.c"
@@ -88,18 +88,36 @@ add_library(dropshelf_core STATIC
     "${DROPSHELF_LINUX_DIR}/folder_watch_linux.c"
     "${DROPSHELF_LINUX_DIR}/anim_linux.c"
     "${DROPSHELF_LINUX_DIR}/theme_linux.c"
+    "${DROPSHELF_LINUX_DIR}/shortcut_icons_linux.c"
     "${DROPSHELF_LINUX_DIR}/gfx_gtk.c"
     "${DROPSHELF_LINUX_DIR}/ui_window_gtk.c"
 )
 
-target_include_directories(dropshelf_core PUBLIC
+# 编译选项单独放在一个接口库里：下面两种风格的源文件也用同样的选项。
+add_library(dropshelf_flags INTERFACE)
+target_include_directories(dropshelf_flags INTERFACE
     "${DROPSHELF_SOURCE_DIR}"
     "${DROPSHELF_LINUX_DIR}"
     "${DROPSHELF_SOURCE_DIR}/../third_party/miniz"
 )
-target_compile_definitions(dropshelf_core PUBLIC _GNU_SOURCE DROPSHELF_VERSION=L\"${DROPSHELF_VERSION}\")
-target_compile_options(dropshelf_core PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(dropshelf_core PUBLIC Threads::Threads m PkgConfig::GTK4 PkgConfig::LAYER_SHELL PkgConfig::GDK_PIXBUF PkgConfig::CURL PkgConfig::FONTCONFIG)
+target_compile_definitions(dropshelf_flags INTERFACE _GNU_SOURCE DROPSHELF_VERSION=L\"${DROPSHELF_VERSION}\")
+target_compile_options(dropshelf_flags INTERFACE -Wall -Wextra -Wno-unused-parameter)
+target_link_libraries(dropshelf_flags INTERFACE Threads::Threads m PkgConfig::GTK4 PkgConfig::LAYER_SHELL PkgConfig::GDK_PIXBUF PkgConfig::CURL PkgConfig::FONTCONFIG)
+target_link_libraries(dropshelf_core PUBLIC dropshelf_flags)
+
+# 置物架和设置页在两种风格（简洁、纸牌）下差别很大：这几个文件各编译两遍，纸牌那一遍定义 LOOK_VARIANT_CARDS，
+# 对外的函数分别加上 simple_、cards_ 前缀（见 look_variant.h），由 look_dispatch.c 按当前的风格调用其中一份。
+set(LOOK_SOURCES
+    "${DROPSHELF_SOURCE_DIR}/shelf_window.c"
+    "${DROPSHELF_SOURCE_DIR}/shelf_input.c"
+    "${DROPSHELF_SOURCE_DIR}/main_pages.c")
+add_library(look_simple OBJECT ${LOOK_SOURCES} "${DROPSHELF_SOURCE_DIR}/shelf_motion.c")
+add_library(look_cards OBJECT ${LOOK_SOURCES} "${DROPSHELF_SOURCE_DIR}/shelf_motion_cards.c")
+target_compile_definitions(look_cards PRIVATE LOOK_VARIANT_CARDS)
+foreach(look look_simple look_cards)
+    target_link_libraries(${look} PRIVATE dropshelf_flags)
+    target_sources(dropshelf_core PRIVATE $<TARGET_OBJECTS:${look}>)
+endforeach()
 
 # 图标字体放在可执行文件旁边，运行时由 gfx 交给 fontconfig；安装和便携版放在 share/dropshelf/fonts。
 configure_file("${DROPSHELF_LINUX_DIR}/fonts/DropShelfIcons.ttf" "${CMAKE_CURRENT_BINARY_DIR}/DropShelfIcons.ttf" COPYONLY)

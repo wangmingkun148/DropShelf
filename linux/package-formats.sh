@@ -15,7 +15,7 @@ case "$arch" in
     *) echo "不认识的架构：$arch" >&2; exit 1 ;;
 esac
 
-version="$(sed -n 's:.*<Version>\([0-9.]*\)</Version>.*:\1:p' "$root/src/DropShelf/DropShelf.csproj" | head -1)"
+version="$(sed -n 's:.*project(DropShelf VERSION \([0-9.]*\) LANGUAGES.*:\1:p' "$root/native/CMakeLists.txt" | head -1)"
 if [ -z "$version" ]; then
     echo "读不到版本号" >&2
     exit 1

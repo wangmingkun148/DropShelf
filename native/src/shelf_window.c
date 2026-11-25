@@ -1,4 +1,9 @@
+#include "look_variant.h"
 #include "shelf_window_internal.h"
+#ifdef LOOK_VARIANT_CARDS
+#include "shelf_card.h"
+#include "card_face.h"
+#endif
 #include "log.h"
 #include "shelf_history.h"
 #include "power.h"
@@ -20,7 +25,11 @@
 #define GLYPH_CLOSE L"\xE711"
 #define GLYPH_DOWNLOAD L"\xE896"
 #define GLYPH_COLLAPSE L"\xE81E"
+#ifdef LOOK_VARIANT_CARDS
+#define GLYPH_SPREAD L"\xF0E2"
+#else
 #define GLYPH_LIST L"\xE8FD"
+#endif
 #define GLYPH_COPY L"\xE8C8"
 #define GLYPH_MOVE L"\xE7C2"
 #define GLYPH_COMPLETED L"\xE930"
@@ -44,12 +53,47 @@ static float resolve_stack_height(int size)
     return (float)rint(resolve_width(size) * 0.66);
 }
 
+#ifdef LOOK_VARIANT_CARDS
+// ───────────── 平铺的格子，和 C# style 版的 CardGridPanel 相同 ─────────────
+
+int shelf_grid_columns_for(float width)
+{
+    int columns = (int)(width / SHELF_SLOT_WIDTH);
+    return columns < 1 ? 1 : columns;
+}
+
+int shelf_grid_columns(int size)
+{
+    return size == SHELF_SIZE_SMALL ? 4 : size == SHELF_SIZE_LARGE ? 6 : 5;
+}
+
+int shelf_grid_rows_for(int count, float width)
+{
+    int columns = shelf_grid_columns_for(width);
+    return (count + columns - 1) / columns;
+}
+
+float shelf_grid_height(int rows)
+{
+    return rows <= 0 ? 0 : 2 * SHELF_GRID_INSET + rows * SHELF_ROW_PITCH - SHELF_ROW_GAP;
+}
+
+#endif
 void shelf_target_size(ShelfWindow *shelf, bool expanded, float *width, float *height)
 {
+#ifdef LOOK_VARIANT_CARDS
+    // 平铺时窗口按一行的牌数定宽：内容区左右各留 10，平铺区域四周还有 1，少算这 2 就会少放一列。
+    *width = expanded ? shelf_grid_columns(shelf->size) * SHELF_SLOT_WIDTH + 22 : resolve_width(shelf->size);
+    // 平铺最多显示两行，再多就滚动。
+    int rows = shelf_grid_rows_for(shelf->model->count, *width - 22);
+    rows = rows < 1 ? 1 : rows > 2 ? 2 : rows;
+    float body = expanded ? shelf_grid_height(rows) : resolve_stack_height(shelf->size) + SHELF_CAPTION_HEIGHT;
+#else
     *width = expanded ? resolve_width(shelf->size) + 80 : resolve_width(shelf->size);
     int count = shelf->model->count;
     int rows = count < 2 ? 2 : count > 6 ? 6 : count;
     float body = expanded ? rows * SHELF_ROW_HEIGHT + 6 : resolve_stack_height(shelf->size) + SHELF_CAPTION_HEIGHT;
+#endif
     bool has_actions = shelf->actions.count > 0;
     float actions = has_actions ? SHELF_ACTION_BAR_HEIGHT : 10;
     // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
@@ -111,7 +155,11 @@ void shelf_update_window_size(ShelfWindow *shelf)
     if (rect.right - rect.left != pixel_width || rect.bottom - rect.top != pixel_height)
         SetWindowPos(shelf->handle, NULL, 0, 0, pixel_width, pixel_height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
+#ifdef LOOK_VARIANT_CARDS
+    if (IsWindowVisible(shelf->handle) && !shelf->sliding && !shelf->card) shelf_keep_in_work_area(shelf);
+#else
     if (IsWindowVisible(shelf->handle) && !shelf->sliding) shelf_keep_in_work_area(shelf);
+#endif
     ui_window_invalidate(shelf->ui);
 }
 
@@ -119,7 +167,11 @@ static void update_thumbnail_size(ShelfWindow *shelf)
 {
     // 卡片 84 减去内边距后显示区域约为 66；堆叠画布 160×116 随置物架大小缩放，两侧各留 10 的边距。
     float stack_scale = fminf((resolve_width(shelf->size) - 20) / SHELF_CANVAS_WIDTH, resolve_stack_height(shelf->size) / SHELF_CANVAS_HEIGHT);
+#ifdef LOOK_VARIANT_CARDS
+    shelf->model->thumbnail_size = (int)ceil(50 * fmaxf(stack_scale, 1) * shelf_scale(shelf));
+#else
     shelf->model->thumbnail_size = (int)ceil(66 * stack_scale * shelf_scale(shelf));
+#endif
 }
 
 void shelf_window_apply_settings(ShelfWindow *shelf)
@@ -223,9 +275,15 @@ CardPose shelf_card_home(int card)
 {
     // XAML 里三张牌的位置：最上面一张不转，第二张转 7° 往右挪，最下面一张转 -10° 往左挪；中心 = 左上角 + 42 + 平移。
     static const CardPose homes[3] = {
+#ifdef LOOK_VARIANT_CARDS
+        { 48 + 32, 12 + 43, 0, 1, 1 },
+        { 48 + 32 + 11, 14 + 43 + 1, 7, 1, 1 },
+        { 48 + 32 - 12, 16 + 43 + 2, -10, 1, 1 },
+#else
         { 38 + 42, 16 + 42, 0, 1, 1 },
         { 38 + 42 + 11, 18 + 42 + 1, 7, 1, 1 },
         { 38 + 42 - 12, 20 + 42 + 2, -10, 1, 1 },
+#endif
     };
     return homes[card];
 }
@@ -238,20 +296,41 @@ void shelf_to_canvas(ShelfWindow *shelf, float x, float y, float *cx, float *cy)
     *cy = (y - layout->canvas_y) / scale;
 }
 
+#ifdef LOOK_VARIANT_CARDS
+int shelf_grid_columns_now(ShelfWindow *shelf)
+#else
 int shelf_visible_rows(ShelfWindow *shelf)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    return shelf->layout.columns > 0 ? shelf->layout.columns : 1;
+#else
     float height = shelf->layout.list.bottom - shelf->layout.list.top - 2;
     int rows = (int)floorf(height / SHELF_ROW_PITCH);
     return rows < 1 ? 1 : rows;
+#endif
 }
 
+#ifdef LOOK_VARIANT_CARDS
+void shelf_set_scroll_offset(ShelfWindow *shelf, float offset)
+#else
 void shelf_set_scroll(ShelfWindow *shelf, int first)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    float viewport = shelf->layout.list.bottom - shelf->layout.list.top - 2;
+    float maximum = shelf->layout.extent - viewport;
+    if (offset > maximum) offset = maximum;
+    if (offset < 0) offset = 0;
+    if (offset == shelf->scroll_offset) return;
+    shelf->scroll_offset = offset;
+#else
     int maximum = shelf->model->count - shelf_visible_rows(shelf);
     if (first > maximum) first = maximum;
     if (first < 0) first = 0;
     if (first == shelf->scroll_first) return;
     shelf->scroll_first = first;
+#endif
     shelf_layout(shelf);
     shelf_repaint(shelf);
 }
@@ -260,27 +339,85 @@ void shelf_scroll_into_view(ShelfWindow *shelf, int index)
 {
     if (index < 0 || index >= shelf->model->count) return;
     shelf_layout(shelf);
+#ifdef LOOK_VARIANT_CARDS
+    float top = (float)(index / shelf_grid_columns_now(shelf)) * SHELF_ROW_PITCH;
+    float bottom = top + SHELF_SLOT_HEIGHT + 2 * SHELF_GRID_INSET;
+    float viewport = shelf->layout.list.bottom - shelf->layout.list.top - 2;
+    if (top < shelf->scroll_offset) shelf_set_scroll_offset(shelf, top);
+    else if (bottom > shelf->scroll_offset + viewport) shelf_set_scroll_offset(shelf, bottom - viewport);
+#else
     int rows = shelf_visible_rows(shelf);
     if (index < shelf->scroll_first) shelf_set_scroll(shelf, index);
     else if (index >= shelf->scroll_first + rows) shelf_set_scroll(shelf, index - rows + 1);
+#endif
 }
 
+#ifdef LOOK_VARIANT_CARDS
+GfxRect shelf_tile_rect(ShelfWindow *shelf, int index)
+#else
 GfxRect shelf_row_rect(ShelfWindow *shelf, int index)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    const ShelfLayout *layout = &shelf->layout;
+    int columns = shelf_grid_columns_now(shelf);
+    float width = layout->list.right - layout->list.left - 2;
+    // 多出的宽度平均分给列间距。
+    float step = columns > 1 ? (width - SHELF_SLOT_WIDTH) / (columns - 1) : 0;
+    int row = index / columns, column = index % columns;
+    float left = layout->list.left + 1 + column * step;
+    float top = layout->list.top + 1 + SHELF_GRID_INSET + row * SHELF_ROW_PITCH - shelf->scroll_offset;
+    return rect_of(left, top, SHELF_SLOT_WIDTH, SHELF_SLOT_HEIGHT);
+#else
     const GfxRect list = shelf->layout.list;
     float top = list.top + 1 + (float)(index - shelf->scroll_first) * SHELF_ROW_PITCH + 1;
     return (GfxRect){ list.left + 1, top, list.right - 1, top + SHELF_ROW_PITCH - 2 };
+#endif
 }
 
+#ifdef LOOK_VARIANT_CARDS
+GfxRect shelf_tile_card_rect(ShelfWindow *shelf, int index)
+#else
 GfxRect shelf_row_thumb_rect(ShelfWindow *shelf, int index)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    GfxRect slot = shelf_tile_rect(shelf, index);
+    float left = slot.left + (SHELF_SLOT_WIDTH - SHELF_CARD_WIDTH) / 2;
+    return rect_of(left, slot.top, SHELF_CARD_WIDTH, SHELF_CARD_HEIGHT);
+#else
     GfxRect row = shelf_row_rect(shelf, index);
     return rect_of(row.left + 6, row.top + 5, 32, 32);
+#endif
 }
 
+#ifdef LOOK_VARIANT_CARDS
+void shelf_visible_tiles(ShelfWindow *shelf, int *first, int *last)
+#else
 static GfxRect row_remove_rect(GfxRect row)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    const ShelfLayout *layout = &shelf->layout;
+    int columns = shelf_grid_columns_now(shelf), count = shelf->model->count;
+    int rows = (count + columns - 1) / columns;
+    float viewport = layout->list.bottom - layout->list.top - 2;
+    int first_row = (int)floorf((shelf->scroll_offset - SHELF_GRID_INSET) / SHELF_ROW_PITCH) - 1;
+    int last_row = (int)floorf((shelf->scroll_offset + viewport - SHELF_GRID_INSET) / SHELF_ROW_PITCH) + 1;
+    if (first_row < 0) first_row = 0;
+    if (last_row > rows - 1) last_row = rows - 1;
+    *first = first_row * columns;
+    *last = (last_row + 1) * columns - 1;
+    if (*last > count - 1) *last = count - 1;
+}
+
+/// 平铺里牌右上角的移除按钮：墨色小圆，伸出牌角 7。
+GfxRect shelf_tile_remove_rect(GfxRect card)
+{
+    return rect_of(card.right - 11, card.top - 7, 18, 18);
+#else
     return rect_of(row.right - 6 - 26, row.top + 5 + 3, 26, 26);
+#endif
 }
 
 static void clear_stack_summary(ShelfWindow *shelf)
@@ -296,7 +433,11 @@ static float mode_width(ShelfWindow *shelf)
     if (*cached > 0) return *cached;
     float icon = text_width(shelf->move_mode ? GLYPH_MOVE : GLYPH_COPY, 12, 400, GFX_FONT_ICON);
     float label = text_width(S(shelf->move_mode ? STR_TransferMove : STR_TransferCopy), 12, 400, GFX_FONT_TEXT);
+#ifdef LOOK_VARIANT_CARDS
+    float width = ceilf(1 + 7 + icon + 5 + label + 8 + 1);
+#else
     float width = ceilf(1 + 6 + icon + 5 + label + 8 + 1);
+#endif
     if (icon > 0 && label > 0) *cached = width;
     return width;
 }
@@ -357,28 +498,57 @@ void shelf_layout(ShelfWindow *shelf)
     // 列表：超出时右边有一条细滚动条（盖在内容上）。
     GfxRect list = layout->list;
     int count = shelf->model->count;
+#ifdef LOOK_VARIANT_CARDS
+    float grid_width = list.right - list.left - 2, viewport = list.bottom - list.top - 2;
+    layout->columns = shelf_grid_columns_for(grid_width);
+    int grid_rows = (count + layout->columns - 1) / layout->columns;
+    layout->extent = shelf_grid_height(grid_rows);
+    float maximum = layout->extent - viewport > 0 ? layout->extent - viewport : 0;
+    if (shelf->scroll_offset > maximum) shelf->scroll_offset = maximum;
+    if (shelf->scroll_offset < 0) shelf->scroll_offset = 0;
+    // 只给平铺里生成出来的牌（看得见的几行，上下各多一行）取缩略图。
+#else
     int rows = (int)floorf((list.bottom - list.top - 2) / SHELF_ROW_PITCH);
     if (rows < 1) rows = 1;
     int maximum_first = count - rows > 0 ? count - rows : 0;
     if (shelf->scroll_first > maximum_first) shelf->scroll_first = maximum_first;
     if (shelf->scroll_first < 0) shelf->scroll_first = 0;
     // 只给列表里显示出来的行取缩略图（多备一行，滚动时不用等）。
+#endif
     bool list_shown = shelf->model->expanded || shelf->switching;
+#ifdef LOOK_VARIANT_CARDS
+    int from = -1, to = -1;
+    if (list_shown)
+    {
+        // 看得见的几行，上下各多备一行（含两端）。
+        shelf_visible_tiles(shelf, &from, &to);
+    }
+#else
     int from = list_shown ? shelf->scroll_first : -1;
     int to = list_shown ? shelf->scroll_first + rows : -1;
+#endif
     if (from != shelf->model->visible_from || to != shelf->model->visible_to)
     {
         shelf->model->visible_from = from;
         shelf->model->visible_to = to;
         shelf_model_update_thumbnails(shelf->model);
     }
+#ifdef LOOK_VARIANT_CARDS
+    layout->scrollable = layout->extent > viewport + 0.5f;
+#else
     layout->scrollable = count * SHELF_ROW_PITCH > list.bottom - list.top - 2;
+#endif
     if (layout->scrollable)
     {
         layout->scroll_track = (GfxRect){ list.right - 1 - 1 - 12, list.top + 1 + 2, list.right - 1 - 1, list.bottom - 1 - 2 };
         float track = layout->scroll_track.bottom - layout->scroll_track.top;
+#ifdef LOOK_VARIANT_CARDS
+        float length = fmaxf(track * viewport / layout->extent, 16);
+        float top = layout->scroll_track.top + (maximum > 0 ? (track - length) * shelf->scroll_offset / maximum : 0);
+#else
         float length = fmaxf(track * rows / count, 16);
         float top = layout->scroll_track.top + (maximum_first > 0 ? (track - length) * shelf->scroll_first / maximum_first : 0);
+#endif
         float thumb = shelf->scroll_hovered || shelf->scroll_dragging ? 6.0f : 3.0f;
         float center = (layout->scroll_track.left + layout->scroll_track.right) / 2;
         layout->scroll_thumb = (GfxRect){ center - thumb / 2, top, center + thumb / 2, top + length };
@@ -403,6 +573,20 @@ void shelf_layout(ShelfWindow *shelf)
     float tiles_height = action_count > 0 ? (float)shelf->tiles_height.value : 0;
     layout->tiles_host = (GfxRect){ 0, height - tiles_height, width, height };
     layout->drop_zone = (GfxRect){ 10, SHELF_HEADER_HEIGHT + 2, width - 10, height - tiles_height - 6 };
+#ifdef LOOK_VARIANT_CARDS
+    // 放置区域里：上面是摊开的牌（176 × 108 的画布按比例缩进去，最高 104），下面一行字。
+    GfxRect zone = layout->drop_zone;
+    float zone_text = line_height(12, 600);
+    float row = zone.bottom - zone.top - 4 - zone_text;
+    float box = row < 104 ? row : 104;
+    if (box < 1) box = 1;
+    float zone_width = zone.right - zone.left;
+    float drop_scale = fminf(zone_width / 176, box / 108);
+    layout->drop_canvas_scale = drop_scale > 0.01f ? drop_scale : 0.01f;
+    layout->drop_canvas_x = zone.left + (zone_width - 176 * layout->drop_canvas_scale) / 2;
+    layout->drop_canvas_y = zone.top + (row - box) / 2 + (box - 108 * layout->drop_canvas_scale) / 2;
+    layout->drop_text = (GfxRect){ zone.left, zone.top + row + 4, zone.right, zone.top + row + 4 + zone_text };
+#endif
 
     // 提示：底部，外边距 10，内边距 10,7,12,8；带按钮时右边是按钮。
     if (shelf->toast_text)
@@ -445,11 +629,25 @@ static Color faded(Color color, float opacity)
 static void paint_icon_button(ShelfWindow *shelf, GfxRect rect, ShelfTarget target, const wchar_t *glyph, float size, Color text)
 {
     bool hovered = shelf->hovered == target, pressed = hovered && shelf->pressed == target;
+#ifdef LOOK_VARIANT_CARDS
+    gfx_fill_rounded(rect, 6, theme_color(pressed ? THEME_SUBTLE_PRESSED : hovered ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT));
+#else
     gfx_fill_rounded(rect, 4, theme_color(pressed ? THEME_SUBTLE_PRESSED : hovered ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT));
+#endif
     GfxTextStyle style = glyph_style(size);
     gfx_text_draw(glyph, rect, &style, text);
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 一张有底色、有描边的小牌（标题栏的“移动/复制”、底部的快速操作）：悬停时提亮、描边换成强调色，按下时变淡。
+static void paint_chip_card(GfxRect rect, float radius, ThemeColor border, bool hovered, bool pressed, float opacity)
+{
+    if (pressed) opacity *= 0.8f;
+    gfx_fill_rounded(rect, radius, faded(theme_color(hovered ? THEME_CARD_HOVER : THEME_CARD), opacity));
+    gfx_stroke_rounded(rect, radius, faded(theme_color(hovered ? THEME_ACCENT : border), opacity), 1);
+}
+
+#endif
 static void paint_header(ShelfWindow *shelf)
 {
     const ShelfLayout *layout = &shelf->layout;
@@ -460,16 +658,29 @@ static void paint_header(ShelfWindow *shelf)
 
     // 移动/复制：和普通按钮一样有底色和边框，一眼看出能点。
     bool hovered = shelf->hovered == TARGET_MODE, pressed = hovered && shelf->pressed == TARGET_MODE;
+#ifdef LOOK_VARIANT_CARDS
+    paint_chip_card(layout->mode, 4, THEME_CONTROL_STRONG_BORDER, hovered, pressed, 1);
+    Color text = faded(theme_color(THEME_TEXT_PRIMARY), pressed ? 0.8f : 1);
+#else
     gfx_fill_rounded(layout->mode, 4, theme_color(pressed ? THEME_CONTROL_PRESSED : hovered ? THEME_CONTROL_HOVER : THEME_CONTROL));
     gfx_stroke_rounded(layout->mode, 4, theme_color(THEME_CONTROL_BORDER), 1);
     Color text = theme_color(pressed ? THEME_TEXT_SECONDARY : THEME_TEXT_PRIMARY);
+#endif
     const wchar_t *glyph = shelf->move_mode ? GLYPH_MOVE : GLYPH_COPY;
     float glyph_width = text_width(glyph, 12, 400, GFX_FONT_ICON);
     GfxTextStyle icon = glyph_style(12);
+#ifdef LOOK_VARIANT_CARDS
+    gfx_text_draw(glyph, rect_of(layout->mode.left + 8, layout->mode.top + 1, glyph_width, 23), &icon, text);
+#else
     gfx_text_draw(glyph, rect_of(layout->mode.left + 7, layout->mode.top + 1, glyph_width, 23), &icon, text);
+#endif
     GfxTextStyle label = text_style(12, 400, GFX_ALIGN_START);
     gfx_text_draw(S(shelf->move_mode ? STR_TransferMove : STR_TransferCopy),
+#ifdef LOOK_VARIANT_CARDS
+        (GfxRect){ layout->mode.left + 8 + glyph_width + 5, layout->mode.top, layout->mode.right, layout->mode.bottom - 1 }, &label, text);
+#else
         (GfxRect){ layout->mode.left + 7 + glyph_width + 5, layout->mode.top, layout->mode.right, layout->mode.bottom - 1 }, &label, text);
+#endif
 
     // 收起时堆叠下方已显示名称和数量，标题只在展开列表时显示。
     if (shelf->model->expanded)
@@ -482,7 +693,11 @@ static void paint_header(ShelfWindow *shelf)
 
     Color primary = theme_color(THEME_TEXT_PRIMARY);
     if (shelf->model->count > 0)
+#ifdef LOOK_VARIANT_CARDS
+        paint_icon_button(shelf, layout->view, TARGET_VIEW, shelf->model->expanded ? GLYPH_COLLAPSE : GLYPH_SPREAD, 14,
+#else
         paint_icon_button(shelf, layout->view, TARGET_VIEW, shelf->model->expanded ? GLYPH_COLLAPSE : GLYPH_LIST, 14,
+#endif
             shelf->pressed == TARGET_VIEW && shelf->hovered == TARGET_VIEW ? theme_color(THEME_TEXT_SECONDARY) : primary);
     paint_icon_button(shelf, layout->more, TARGET_MORE, GLYPH_MORE, 14,
         shelf->pressed == TARGET_MORE && shelf->hovered == TARGET_MORE ? theme_color(THEME_TEXT_SECONDARY) : primary);
@@ -493,6 +708,18 @@ static void paint_header(ShelfWindow *shelf)
 static void paint_empty(ShelfWindow *shelf, float opacity)
 {
     GfxRect body = shelf->layout.body;
+#ifdef LOOK_VARIANT_CARDS
+    float first = line_height(13, 400), second = line_height(11, 400);
+    float total = 72 + 10 + first + 3 + second;
+    float top = (body.top + body.bottom - total) / 2, center = (body.left + body.right) / 2;
+    Color ink = faded(theme_color(THEME_TEXT_PRIMARY), opacity);
+    GfxRect slot = { center - 27, top, center + 27, top + 72 };
+    gfx_stroke_rounded_dashed(slot, 5, ink, 1.5f, 2, 1.3333f);
+    float middle = top + 36;
+    gfx_line(center, middle - 7, center, middle + 7, ink, 1.4f);
+    gfx_line(center - 7, middle, center + 7, middle, ink, 1.4f);
+    top += 72 + 10;
+#else
     gfx_stroke_rounded_dashed(body, 10, faded(theme_color(THEME_CONTROL_STRONG_BORDER), 0.45f * opacity), 1.2f, 4, 3);
     float glyph = line_height(26, 400) , first = line_height(13, 400), second = line_height(11, 400);
     GfxTextStyle icon = glyph_style(26);
@@ -502,11 +729,20 @@ static void paint_empty(ShelfWindow *shelf, float opacity)
     float top = (body.top + body.bottom - total) / 2;
     gfx_text_draw(GLYPH_DOWNLOAD, (GfxRect){ body.left, top, body.right, top + glyph }, &icon, faded(theme_color(THEME_TEXT_SECONDARY), opacity));
     top += glyph + 10;
+#endif
     GfxTextStyle style = text_style(13, 400, GFX_ALIGN_CENTER);
+#ifdef LOOK_VARIANT_CARDS
+    gfx_text_draw(S(STR_DropHere), (GfxRect){ body.left + 8, top, body.right - 8, top + first }, &style, ink);
+#else
     gfx_text_draw(S(STR_DropHere), (GfxRect){ body.left + 8, top, body.right - 8, top + first }, &style, faded(theme_color(THEME_TEXT_PRIMARY), opacity));
+#endif
     top += first + 3;
     style.size = 11;
+#ifdef LOOK_VARIANT_CARDS
+    gfx_text_draw(S(STR_OrPaste), (GfxRect){ body.left + 8, top, body.right - 8, top + second }, &style, faded(theme_color(THEME_TEXT_SECONDARY), opacity));
+#else
     gfx_text_draw(S(STR_OrPaste), (GfxRect){ body.left + 8, top, body.right - 8, top + second }, &style, faded(theme_color(THEME_TEXT_TERTIARY), opacity));
+#endif
 }
 
 /// 牌上的内容：缩略图按比例放进去，没有缩略图时是类型图标；已删除或移动的项目内容变淡。
@@ -526,35 +762,94 @@ static void paint_item_picture(ShelfItem *item, GfxRect area, float glyph_size, 
     gfx_text_draw(shelf_item_glyph(item), area, &style, faded(theme_color(THEME_TEXT_SECONDARY), content));
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 一张竖版的牌，中心在 (0, 0)：牌面上印着缩略图。下面几张换成牌桌上的牌面底色和下层牌的描边。
+static void paint_card_face(ShelfItem *item, bool top)
+{
+    float half_width = SHELF_CARD_WIDTH / 2, half_height = SHELF_CARD_HEIGHT / 2;
+    GfxRect rect = { -half_width, -half_height, half_width, half_height };
+    gfx_fill_rounded(rect, SHELF_CARD_RADIUS, theme_color(top ? THEME_SHELF_TILE : THEME_CARD));
+    gfx_stroke_rounded(rect, SHELF_CARD_RADIUS, theme_color(top ? THEME_SHELF_TILE_BORDER : THEME_SHELF_UNDER_CARD_BORDER), 1.2f);
+    if (item) paint_item_picture(item, (GfxRect){ rect.left + 7, rect.top + 20, rect.right - 7, rect.bottom - 16 }, 26, 1);
+}
+
+static GfxMatrix canvas_matrix(const ShelfLayout *layout, CardPose pose, float canvas_x, float canvas_y, float canvas_scale)
+{
+    (void)layout;
+    GfxMatrix matrix = gfx_matrix_scale(pose.scale, pose.scale, 0, 0);
+    matrix = gfx_matrix_multiply(matrix, gfx_matrix_rotate(pose.angle, 0, 0));
+    matrix = gfx_matrix_multiply(matrix, gfx_matrix_translate(pose.x, pose.y));
+    matrix = gfx_matrix_multiply(matrix, gfx_matrix_scale(canvas_scale, canvas_scale, 0, 0));
+    return gfx_matrix_multiply(matrix, gfx_matrix_translate(canvas_x, canvas_y));
+}
+
+#endif
 static void paint_card(ShelfWindow *shelf, int card, ShelfItem *item)
 {
     CardPose pose = shelf->card_posed[card] ? shelf->card_pose[card] : shelf_card_home(card);
     float opacity = pose.opacity * (float)item->dim.value;
     if (opacity <= 0.001f) return;
     const ShelfLayout *layout = &shelf->layout;
+#ifdef LOOK_VARIANT_CARDS
+    gfx_push_transform(canvas_matrix(layout, pose, layout->canvas_x, layout->canvas_y, layout->canvas_scale));
+#else
     GfxMatrix matrix = gfx_matrix_scale(pose.scale, pose.scale, 0, 0);
     matrix = gfx_matrix_multiply(matrix, gfx_matrix_rotate(pose.angle, 0, 0));
     matrix = gfx_matrix_multiply(matrix, gfx_matrix_translate(pose.x, pose.y));
     matrix = gfx_matrix_multiply(matrix, gfx_matrix_scale(layout->canvas_scale, layout->canvas_scale, 0, 0));
     matrix = gfx_matrix_multiply(matrix, gfx_matrix_translate(layout->canvas_x, layout->canvas_y));
     gfx_push_transform(matrix);
+#endif
     bool layered = opacity < 0.999f;
     if (layered) gfx_push_opacity(opacity);
+#ifdef LOOK_VARIANT_CARDS
+    paint_card_face(item, card == 0);
+#else
     float half = SHELF_CARD_SIZE / 2;
     GfxRect rect = { -half, -half, half, half };
     gfx_shadow(rect, 10, 10, 0, 1.5f, COLOR_ARGB(41, 0, 0, 0));
     gfx_fill_rounded(rect, 10, theme_color(THEME_SHELF_TILE));
     gfx_stroke_rounded(rect, 10, theme_color(THEME_SHELF_TILE_BORDER), 1);
     paint_item_picture(item, (GfxRect){ -half + 10, -half + 10, half - 10, half - 10 }, 34, 1);
+#endif
     if (layered) gfx_pop_layer();
     gfx_pop_transform();
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 最上面一张的牌角：项目数和数量最多的文件类型，右下角倒过来再印一个；裁在牌面以内。
+static void paint_rank(ShelfWindow *shelf, float opacity)
+#else
 static void paint_badge(ShelfWindow *shelf, float opacity)
+#endif
 {
+#ifdef LOOK_VARIANT_CARDS
+    if (shelf->rank_hidden || opacity <= 0.001f || shelf->model->count == 0) return;
+#else
     int count = shelf->mark_override ? shelf->mark_count : shelf->model->count;
     if (count < 2 || opacity <= 0) return;
+#endif
     const ShelfLayout *layout = &shelf->layout;
+#ifdef LOOK_VARIANT_CARDS
+    wchar_t count[16];
+    swprintf(count, ARRAYSIZE(count), L"%d", shelf->model->count);
+    if (!shelf->rank_suit_known)
+    {
+        shelf->rank_suit = shelf_model_suit(shelf->model);
+        shelf->rank_suit_known = true;
+    }
+    FileSuit suit = shelf->rank_suit;
+    gfx_push_transform(gfx_matrix_multiply(gfx_matrix_scale(layout->canvas_scale, layout->canvas_scale, 0, 0),
+        gfx_matrix_translate(layout->canvas_x, layout->canvas_y)));
+    GfxRect card = { 48, 12, 48 + SHELF_CARD_WIDTH, 12 + SHELF_CARD_HEIGHT };
+    gfx_push_clip(card);
+    static const CardCorner corner = { 15, 15, 6, 2 };
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    // 新牌落进来时数字从下面滚上来；花色和倒过来的那一个不动。
+    card_paint_corner_rolling(count, suit, &corner, card.left + 5, card.top + 4, ink, opacity, shelf->rank_shift, shelf->rank_opacity);
+    card_paint_corner_inverted(count, suit, &corner, card, 5, 4, ink, opacity);
+    gfx_pop_clip();
+#else
     wchar_t text[16];
     swprintf(text, 16, L"%d", count);
     float width = fmaxf(24, text_width(text, 11, 600, GFX_FONT_TEXT) + 12 + 4);
@@ -569,6 +864,7 @@ static void paint_badge(ShelfWindow *shelf, float opacity)
     GfxTextStyle style = text_style(11, 600, GFX_ALIGN_CENTER);
     style.ellipsis = false;
     gfx_text_draw(text, rect, &style, faded(theme_color(THEME_TEXT_ON_ACCENT), opacity));
+#endif
     gfx_pop_transform();
 }
 
@@ -580,7 +876,11 @@ static void paint_stack(ShelfWindow *shelf, float opacity)
         ShelfItem *item = shelf_model_from_end(shelf->model, card + 1);
         if (item) paint_card(shelf, card, item);
     }
+#ifdef LOOK_VARIANT_CARDS
+    paint_rank(shelf, shelf->mark_opacity);
+#else
     paint_badge(shelf, shelf->mark_opacity);
+#endif
     if (shelf->mark_opacity > 0)
     {
         const wchar_t *caption, *detail;
@@ -608,15 +908,55 @@ static void paint_stack(ShelfWindow *shelf, float opacity)
     if (opacity < 0.999f) gfx_pop_layer();
 }
 
+#ifdef LOOK_VARIANT_CARDS
+/// 平铺里的一张牌：竖版小牌印着缩略图，牌角印扩展名和花色，名字最多两行写在下面；悬停时抬起，选中时换成强调色描边。
+static void paint_tile(ShelfWindow *shelf, int index, ShelfItem *item)
+#else
 static void paint_row(ShelfWindow *shelf, int index, ShelfItem *item)
+#endif
 {
     const ShelfItemMotion *motion = &item->motion;
+#ifdef LOOK_VARIANT_CARDS
+    float opacity = motion->opacity * (float)item->dim.value;
+#else
     float opacity = motion->row_opacity * (float)item->dim.value * (item->available ? 1.0f : 0.5f);
+#endif
     if (opacity <= 0.001f) return;
+#ifdef LOOK_VARIANT_CARDS
+    GfxRect slot = shelf_tile_rect(shelf, index);
+    GfxRect card = shelf_tile_card_rect(shelf, index);
+    // 以牌面中心为原点缩放、转动，再平移；名字跟着一起动。
+    float cx = (card.left + card.right) / 2, cy = (card.top + card.bottom) / 2;
+    GfxMatrix matrix = gfx_matrix_scale(motion->scale, motion->scale, cx, cy);
+    matrix = gfx_matrix_multiply(matrix, gfx_matrix_rotate(motion->angle, cx, cy));
+    matrix = gfx_matrix_multiply(matrix, gfx_matrix_translate(motion->dx, motion->dy));
+    gfx_push_transform(matrix);
+#else
     GfxRect row = shelf_row_rect(shelf, index);
     gfx_push_transform(gfx_matrix_translate(motion->row_dx, motion->row_dy));
+#endif
     bool layered = opacity < 0.999f;
     if (layered) gfx_push_opacity(opacity);
+#ifdef LOOK_VARIANT_CARDS
+    bool hovered = shelf->hovered_row == index && (shelf->hovered == TARGET_ROW || shelf->hovered == TARGET_ROW_REMOVE) && !shelf->switching;
+    // 牌抬起时露出的桌面投影。
+    float lift = (float)item->lift.value;
+    if (hovered) gfx_fill_rounded(card, SHELF_CARD_RADIUS, faded(theme_color(THEME_SHELF_UNDER_CARD_BORDER), 0.18f));
+    GfxRect face = { card.left, card.top - 4 * lift, card.right, card.bottom - 4 * lift };
+    gfx_fill_rounded(face, SHELF_CARD_RADIUS, theme_color(THEME_SHELF_TILE));
+    if (item->selected) gfx_stroke_rounded(face, SHELF_CARD_RADIUS, theme_color(THEME_ACCENT), 2);
+    else gfx_stroke_rounded(face, SHELF_CARD_RADIUS, theme_color(THEME_SHELF_TILE_BORDER), 1.2f);
+    paint_item_picture(item, (GfxRect){ face.left + 7, face.top + 20, face.right - 7, face.bottom - 16 }, 26, 1);
+    wchar_t *mark = shelf_item_card_mark(item);
+    static const CardCorner corner = { 10, 10, 5, 2 };
+    Color ink = theme_color(THEME_TEXT_PRIMARY);
+    FileSuit suit = shelf_item_suit(item);
+    card_paint_corner(mark, suit, &corner, face.left + 4, face.top + 4, ink, 1);
+    card_paint_corner_inverted(mark, suit, &corner, face, 4, 4, ink, 1);
+    free(mark);
+    // 右上角的移除：墨色小圆里一个叉，悬停时变红。
+    if (hovered)
+#else
     bool hovered = shelf->hovered_row == index && (shelf->hovered == TARGET_ROW || shelf->hovered == TARGET_ROW_REMOVE);
     ThemeColor fill = item->selected ? THEME_ACCENT_SUBTLE : hovered ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT;
     gfx_fill_rounded(row, 6, theme_color(fill));
@@ -636,7 +976,12 @@ static void paint_row(ShelfWindow *shelf, int index, ShelfItem *item)
 
     float text_right = row.right - 6 - 26 - 4;
     if (motion->text_opacity > 0.001f)
+#endif
     {
+#ifdef LOOK_VARIANT_CARDS
+        GfxRect remove = shelf_tile_remove_rect(face);
+        float x = (remove.left + remove.right) / 2, y = (remove.top + remove.bottom) / 2;
+#else
         float name_height = line_height(13, 400), detail_height = line_height(11, 400);
         float top = thumb.top + (32 - name_height - detail_height) / 2;
         float left = row.left + 6 + 36 + 6 + motion->text_dx;
@@ -652,29 +997,65 @@ static void paint_row(ShelfWindow *shelf, int index, ShelfItem *item)
     if (hovered && !shelf->switching)
     {
         GfxRect remove = row_remove_rect(row);
+#endif
         bool over = shelf->hovered == TARGET_ROW_REMOVE;
+#ifdef LOOK_VARIANT_CARDS
+        Color paper = theme_color(THEME_SHELF_SOLID);
+        gfx_fill_ellipse(x, y, 9, 9, theme_color(over ? THEME_CRITICAL : THEME_TEXT_PRIMARY));
+        gfx_stroke_ellipse(x, y, 8.25f, 8.25f, paper, 1.5f);
+        gfx_line(x - 3, y - 3, x + 3, y + 3, paper, 1.4f);
+        gfx_line(x + 3, y - 3, x - 3, y + 3, paper, 1.4f);
+    }
+    // 名字：牌下面，最多两行；选中时铺一层淡淡的强调色。
+    float name_opacity = motion->name_opacity * (item->available ? 1.0f : 0.5f);
+    if (name_opacity > 0.001f)
+    {
+        GfxTextStyle name = { GFX_FONT_TEXT, 11, 400, true, true, GFX_ALIGN_CENTER, GFX_ALIGN_START, 14 };
+        GfxSize size = gfx_text_measure(shelf_item_display_name(item), &name, SHELF_SLOT_WIDTH - 6);
+        float height = fminf(size.height, 28), width = fminf(size.width, SHELF_SLOT_WIDTH - 6);
+        float top = card.bottom + 5;
+        if (item->selected)
+        {
+            float middle = (slot.left + slot.right) / 2;
+            gfx_fill_rounded((GfxRect){ middle - width / 2 - 3, top, middle + width / 2 + 3, top + height }, 4,
+                faded(theme_color(THEME_ACCENT_SUBTLE), name_opacity));
+        }
+        gfx_text_draw(shelf_item_display_name(item), (GfxRect){ slot.left + 3, top, slot.right - 3, top + height }, &name,
+            faded(theme_color(THEME_TEXT_PRIMARY), name_opacity));
+#else
         bool down = over && shelf->pressed == TARGET_ROW_REMOVE;
         gfx_fill_rounded(remove, 4, theme_color(down ? THEME_SUBTLE_PRESSED : over ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT));
         GfxTextStyle style = glyph_style(10);
         gfx_text_draw(GLYPH_CLOSE, remove, &style, theme_color(down ? THEME_TEXT_SECONDARY : THEME_TEXT_PRIMARY));
+#endif
     }
     if (layered) gfx_pop_layer();
     gfx_pop_transform();
 }
 
+#ifdef LOOK_VARIANT_CARDS
+static void paint_grid(ShelfWindow *shelf, float opacity)
+#else
 static void paint_list(ShelfWindow *shelf, float opacity)
+#endif
 {
     const ShelfLayout *layout = &shelf->layout;
     GfxRect list = layout->list;
     // 列表里的内容只显示在列表范围以内。
     gfx_push_clip((GfxRect){ list.left + 1, list.top + 1, list.right - 1, list.bottom - 1 });
     if (opacity < 0.999f) gfx_push_opacity(opacity);
+#ifdef LOOK_VARIANT_CARDS
+    int first, last;
+    shelf_visible_tiles(shelf, &first, &last);
+    for (int index = first; index <= last; index++) paint_tile(shelf, index, shelf->model->items[index]);
+#else
     for (int index = shelf->scroll_first > 0 ? shelf->scroll_first - 1 : 0; index < shelf->model->count; index++)
     {
         GfxRect row = shelf_row_rect(shelf, index);
         if (row.top > list.bottom + 60) break;
         paint_row(shelf, index, shelf->model->items[index]);
     }
+#endif
     if (layout->scrollable)
     {
         float alpha = shelf->scroll_hovered || shelf->scroll_dragging ? 1.0f : 0.55f;
@@ -690,15 +1071,22 @@ static void paint_action_bar(ShelfWindow *shelf, float opacity)
     int count = shelf->actions.count;
     if (count == 0 || opacity <= 0.001f) return;
     const ShelfLayout *layout = &shelf->layout;
+#ifndef LOOK_VARIANT_CARDS
     gfx_fill_rect(layout->action_divider, faded(theme_color(THEME_DIVIDER), opacity));
+#endif
     bool large = count <= 2;
     for (int index = 0; index < count; index++)
     {
         GfxRect button = layout->action_buttons[index];
         bool hovered = shelf->hovered == TARGET_ACTION && shelf->hovered_row == index;
         bool pressed = hovered && shelf->pressed == TARGET_ACTION && shelf->pressed_row == index;
+#ifdef LOOK_VARIANT_CARDS
+        paint_chip_card(button, 5, THEME_SHELF_UNDER_CARD_BORDER, hovered, pressed, opacity);
+        Color text = faded(theme_color(THEME_TEXT_PRIMARY), opacity * (pressed ? 0.8f : 1));
+#else
         gfx_fill_rounded(button, 4, faded(theme_color(pressed ? THEME_SUBTLE_PRESSED : hovered ? THEME_SUBTLE_HOVER : THEME_TRANSPARENT), opacity));
         Color text = faded(theme_color(pressed ? THEME_TEXT_SECONDARY : THEME_TEXT_PRIMARY), opacity);
+#endif
         const wchar_t *glyph = quick_action_glyph(&shelf->actions.items[index]);
         if (!large)
         {
@@ -735,13 +1123,22 @@ static void paint_tiles(ShelfWindow *shelf, float opacity)
         float scale = 1 + 0.04f * active;
         float cx = (tile.left + tile.right) / 2, cy = (tile.top + tile.bottom) / 2;
         gfx_push_transform(gfx_matrix_scale(scale, scale, cx, cy));
+#ifdef LOOK_VARIANT_CARDS
+        gfx_fill_rounded(tile, 6, theme_color(THEME_CARD));
+        gfx_stroke_rounded(tile, 6, theme_color(THEME_SHELF_UNDER_CARD_BORDER), 1);
+#else
         gfx_fill_rounded(tile, 10, theme_color(THEME_CARD));
         gfx_stroke_rounded(tile, 10, theme_color(THEME_CARD_BORDER), 1);
+#endif
         if (active > 0.001f)
         {
             // 强调色的一层连边框一起盖住。
             GfxRect cover = { tile.left - 0.5f, tile.top - 0.5f, tile.right + 0.5f, tile.bottom + 0.5f };
+#ifdef LOOK_VARIANT_CARDS
+            gfx_fill_rounded(cover, 6.5f, faded(theme_color(THEME_ACCENT), active));
+#else
             gfx_fill_rounded(cover, 10.5f, faded(theme_color(THEME_ACCENT), active));
+#endif
         }
         Color text = color_lerp(theme_color(THEME_TEXT_PRIMARY), theme_color(THEME_TEXT_ON_ACCENT), active);
         const wchar_t *glyph = quick_action_glyph(&shelf->actions.items[index]);
@@ -764,7 +1161,12 @@ static void paint_tiles(ShelfWindow *shelf, float opacity)
 
 static void paint_drop_overlay(ShelfWindow *shelf, float opacity)
 {
+#ifdef LOOK_VARIANT_CARDS
+    const ShelfLayout *layout = &shelf->layout;
+    GfxRect zone = layout->drop_zone;
+#else
     GfxRect zone = shelf->layout.drop_zone;
+#endif
     float cx = (zone.left + zone.right) / 2, cy = (zone.top + zone.bottom) / 2;
     // 可以合并时整个放置区域轻轻弹一下。
     float pulse = (float)shelf->drop_zone_scale.value;
@@ -776,16 +1178,63 @@ static void paint_drop_overlay(ShelfWindow *shelf, float opacity)
     {
         float scale = (float)shelf->merge_charge_scale.value;
         float half_width = (zone.right - zone.left) / 2 * scale, half_height = (zone.bottom - zone.top) / 2 * scale;
+#ifdef LOOK_VARIANT_CARDS
+        gfx_fill_rounded((GfxRect){ cx - half_width, cy - half_height, cx + half_width, cy + half_height }, 8 * scale,
+#else
         gfx_fill_rounded((GfxRect){ cx - half_width, cy - half_height, cx + half_width, cy + half_height }, 10 * scale,
+#endif
             faded(theme_color(THEME_ACCENT_SUBTLE), charge));
     }
+#ifndef LOOK_VARIANT_CARDS
     // 拖到快速操作上时虚线框和底色变淡，文字不变。
     float frame = opacity * (float)shelf->frame_opacity.value;
     gfx_fill_rounded(zone, 10, faded(theme_color(THEME_ACCENT_FAINT), frame));
     gfx_stroke_rounded_dashed(zone, 10, faded(theme_color(THEME_ACCENT), frame), 1.6f, 4, 3);
+#endif
     float label = opacity * (float)shelf->drop_label_opacity.value;
     if (label > 0.001f)
     {
+#ifdef LOOK_VARIANT_CARDS
+        // 拖到快速操作上时整组牌变淡，文字不变。
+        float group = label * (float)shelf->frame_opacity.value;
+        float progress = (float)shelf->fan.value;
+        gfx_push_opacity(group);
+        for (int index = 1; index >= 0; index--)
+        {
+            ShelfItem *item = shelf_model_from_end(shelf->model, index + 1);
+            if (!item) continue;
+            CardPose pose = shelf_fan_pose(index, progress);
+            gfx_push_transform(canvas_matrix(layout, pose, layout->drop_canvas_x, layout->drop_canvas_y, layout->drop_canvas_scale));
+            paint_card_face(item, index == 0);
+            gfx_pop_transform();
+        }
+        // 虚线空位：从略小、略低的地方浮起来。
+        float slot_scale = 0.9f + 0.1f * progress, slot_shift = 6 - 9 * progress;
+        CardPose slot = { 56 + 32, 10 + 43 + slot_shift, 0, slot_scale, 1 };
+        gfx_push_transform(canvas_matrix(layout, slot, layout->drop_canvas_x, layout->drop_canvas_y, layout->drop_canvas_scale));
+        gfx_push_opacity(progress);
+        GfxRect ghost = { -SHELF_CARD_WIDTH / 2, -SHELF_CARD_HEIGHT / 2, SHELF_CARD_WIDTH / 2, SHELF_CARD_HEIGHT / 2 };
+        gfx_fill_rounded(ghost, SHELF_CARD_RADIUS, theme_color(THEME_ACCENT_FAINT));
+        gfx_stroke_rounded_dashed(ghost, SHELF_CARD_RADIUS, theme_color(THEME_ACCENT), 1.5f, 2, 1.3333f);
+        gfx_pop_layer();
+        gfx_pop_transform();
+        if (shelf->incoming > 0)
+        {
+            wchar_t text[16];
+            swprintf(text, ARRAYSIZE(text), L"+%d", shelf->incoming);
+            GfxTextStyle number = { GFX_FONT_NUMBER, 12, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+            float width = text_width(text, 12, 400, GFX_FONT_NUMBER) + 14;
+            gfx_push_transform(gfx_matrix_multiply(gfx_matrix_scale(layout->drop_canvas_scale, layout->drop_canvas_scale, 0, 0),
+                gfx_matrix_translate(layout->drop_canvas_x, layout->drop_canvas_y)));
+            GfxRect badge = { 132, 0, 132 + width, 20 };
+            gfx_fill_rounded(badge, 10, theme_color(THEME_ACCENT));
+            gfx_text_draw(text, badge, &number, theme_color(THEME_TEXT_ON_ACCENT));
+            gfx_pop_transform();
+        }
+        gfx_pop_layer();
+        GfxTextStyle style = text_style(12, 600, GFX_ALIGN_CENTER);
+        gfx_text_draw(S(shelf->drop_zone_text), layout->drop_text, &style, faded(theme_color(THEME_TEXT_PRIMARY), label));
+#else
         GfxTextStyle icon = glyph_style(22);
         float glyph = gfx_text_measure(GLYPH_DOWNLOAD, &icon, 0).height;
         float text = line_height(12, 400);
@@ -794,6 +1243,7 @@ static void paint_drop_overlay(ShelfWindow *shelf, float opacity)
         gfx_text_draw(GLYPH_DOWNLOAD, (GfxRect){ zone.left, top, zone.right, top + glyph }, &icon, color);
         GfxTextStyle style = text_style(12, 400, GFX_ALIGN_CENTER);
         gfx_text_draw(S(shelf->drop_zone_text), (GfxRect){ zone.left, top + glyph + 6, zone.right, top + glyph + 6 + text }, &style, color);
+#endif
     }
     if (pulsing) gfx_pop_transform();
     paint_tiles(shelf, opacity * (float)shelf->tiles_opacity.value);
@@ -854,8 +1304,10 @@ static void paint(UiWindow *window, void *context, double time)
     (void)window;
     shelf_layout(shelf);
     const ShelfLayout *layout = &shelf->layout;
+#ifndef LOOK_VARIANT_CARDS
     if (ui_window_has_backdrop(shelf->ui))
         gfx_fill_rect((GfxRect){ 0, 0, layout->width, layout->height }, theme_color(THEME_SHELF_ACRYLIC_TINT));
+#endif
 
     // 整个内容一起缩放、淡入淡出（出场和离场），背景不动。
     float origin_x = layout->width * shelf->origin_x, origin_y = layout->height * shelf->origin_y;
@@ -874,8 +1326,15 @@ static void paint(UiWindow *window, void *context, double time)
         if (shelf->model->count == 0) paint_empty(shelf, body);
         bool show_list = shelf->switching || shelf->shown_expanded;
         bool show_stack = shelf->model->count > 0 && (shelf->switching || !shelf->shown_expanded);
+#ifdef LOOK_VARIANT_CARDS
+        // 平铺压在堆叠上面，切换时牌飞过堆叠不会被挡住。
+#else
         if (show_list) paint_list(shelf, body);
+#endif
         if (show_stack) paint_stack(shelf, body);
+#ifdef LOOK_VARIANT_CARDS
+        if (show_list) paint_grid(shelf, body);
+#endif
     }
     paint_action_bar(shelf, (float)shelf->bar_opacity.value);
     float overlay = (float)shelf->overlay_opacity.value;
@@ -910,8 +1369,14 @@ void shelf_request_refresh(ShelfWindow *shelf)
 void shelf_refresh_views(ShelfWindow *shelf)
 {
     bool switched = !shelf->count_changed && shelf->shown_expanded != shelf->model->expanded;
+#ifndef LOOK_VARIANT_CARDS
     bool counted = shelf->count_changed;
+#endif
     bool landing = shelf->landing, returning = shelf->returning;
+#ifdef LOOK_VARIANT_CARDS
+    // 松手时摊开的牌，先记下来：下面收尾时会把它清掉。
+    bool fan = shelf->fan_held;
+#endif
     float landing_x = shelf->landing_x, landing_y = shelf->landing_y;
     int landing_added = shelf->landing_added;
     ShelfItem **returning_items = shelf->returning_items;
@@ -929,16 +1394,36 @@ void shelf_refresh_views(ShelfWindow *shelf)
     }
     else
     {
+#ifdef LOOK_VARIANT_CARDS
+        shelf_update_window_size(shelf);
+        // 不播动画时平铺开也停在最新的项目上。
+#else
         double lead = counted && animate && shelf->model->expanded && !shelf->hold_size ? shelf_grow_for_rows(shelf) : 0;
         if (!shelf->hold_size && lead == 0) shelf_update_window_size(shelf);
         // 不播动画时展开列表也停在最新的项目上。
+#endif
         if (switched && shelf->model->expanded && shelf->model->count > 0) shelf_scroll_into_view(shelf, shelf->model->count - 1);
+#ifdef LOOK_VARIANT_CARDS
+        if (returning && animate) shelf_play_return(shelf, shelf->returning_x, shelf->returning_y, returning_items, returning_count);
+#else
         bool played = false;
         if (returning && animate) played |= shelf_play_return(shelf, shelf->returning_x, shelf->returning_y, returning_items, returning_count, lead);
+#endif
         if (landing && animate)
+#ifdef LOOK_VARIANT_CARDS
+        {
+            if (shelf->model->expanded) shelf_play_grid_landing(shelf, landing_x, landing_y, landing_added);
+            else
+            {
+                shelf->fan_held = fan;
+                shelf_play_landing(shelf, landing_x, landing_y, landing_added);
+            }
+        }
+#else
             played |= shelf->model->expanded ? shelf_play_list_landing(shelf, landing_x, landing_y, landing_added, lead)
                                              : shelf_play_landing(shelf, landing_x, landing_y, landing_added);
         if (lead > 0 && !played) shelf_finish_after(shelf, lead);
+#endif
     }
     for (int index = 0; index < returning_count; index++) shelf_item_release(returning_items[index]);
     free(returning_items);
@@ -953,9 +1438,16 @@ static void on_model_changed(void *context, ShelfChange change)
     switch (change)
     {
         case SHELF_CHANGED_ITEMS:
+#ifdef LOOK_VARIANT_CARDS
+            shelf->rank_suit_known = false;
+#endif
             clear_stack_summary(shelf);
             if (shelf->model->count != shelf->shown_count)
             {
+#ifdef LOOK_VARIANT_CARDS
+                // 新牌落进这一摞：牌角的数字从下面滚上来。
+                if (shelf->model->count > shelf->shown_count && shelf->shown_count > 0) shelf_roll_rank(shelf);
+#endif
                 shelf->shown_count = shelf->model->count;
                 shelf->count_changed = true;
                 shelf_request_refresh(shelf);
@@ -970,6 +1462,10 @@ static void on_model_changed(void *context, ShelfChange change)
             shelf_update_busy_overlay(shelf, false);
             break;
         case SHELF_CHANGED_ITEM_TEXT:
+#ifdef LOOK_VARIANT_CARDS
+            // 移动、改名或转成文件以后扩展名可能变了。
+            shelf->rank_suit_known = false;
+#endif
             clear_stack_summary(shelf);
             shelf_repaint(shelf);
             break;
@@ -999,6 +1495,9 @@ static void on_closed(UiWindow *window, void *context)
     ShelfWindow *shelf = context;
     shelf->closed = true;
     shelf->closing = true;
+#ifdef LOOK_VARIANT_CARDS
+    shelf_cancel_card(shelf);
+#endif
     shelf_stop_slide(shelf);
     shelf_stop_pop(shelf);
     shelf_merge_forget(shelf);
@@ -1037,7 +1536,11 @@ ShelfWindow *shelf_window_create(void)
     shelf->origin_x = 0.5f;
     shelf->origin_y = 0.4f;
     shelf->mark_opacity = 1;
+#ifdef LOOK_VARIANT_CARDS
+    shelf->rank_opacity = 1;
+#else
     shelf->badge_scale = 1;
+#endif
     shelf->hovered_row = shelf->pressed_row = -1;
     shelf->selection_anchor = -1;
     shelf->drop_zone_text = STR_ReleaseToHold;
@@ -1056,7 +1559,11 @@ ShelfWindow *shelf_window_create(void)
     options.width = width;
     options.height = height;
     options.frameless = true;
+#ifdef LOOK_VARIANT_CARDS
+    options.backdrop = UI_BACKDROP_NONE;
+#else
     options.backdrop = UI_BACKDROP_ACRYLIC;
+#endif
     options.background = THEME_SHELF_SOLID;
     options.context = shelf;
     options.paint = paint;
@@ -1101,6 +1608,9 @@ void shelf_window_release(ShelfWindow *shelf)
     free(shelf->tweens);
     free(shelf->removing);
     free(shelf->rows_before);
+#ifdef LOOK_VARIANT_CARDS
+    free(shelf->rows_before_x);
+#endif
     free(shelf->rows_before_y);
     free(shelf->toast_text);
     for (int index = 0; index < shelf->convert_count; index++) shelf_item_release(shelf->convert_items[index]);
@@ -1135,7 +1645,12 @@ bool shelf_window_is_reusable(const ShelfWindow *shelf)
 
 bool shelf_window_is_animating(const ShelfWindow *shelf)
 {
+#ifdef LOOK_VARIANT_CARDS
+    // 有牌在替它出场或离场时也算。
+    return shelf->sliding || shelf->popping || shelf->card || shelf->motion_running || shelf->receiving > 0 || shelf->closing;
+#else
     return shelf->sliding || shelf->popping || shelf->motion_running || shelf->receiving > 0 || shelf->closing;
+#endif
 }
 
 /// 以 center 为中心、完整落在那个显示器的工作区内；跨缩放比例不同的显示器时按实际大小再放一次。
@@ -1159,8 +1674,20 @@ static void center_on(ShelfWindow *shelf, POINT center)
 void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, ShelfEntranceKind entrance, ScreenEdge edge)
 {
     bool was_visible = shelf_window_is_visible(shelf);
+#ifdef LOOK_VARIANT_CARDS
+    // 复用正在出场的置物架时先让它落定，否则下一帧会把窗口拉回原来的位置。
+    if (was_visible)
+    {
+        shelf_stop_slide(shelf);
+        shelf_finish_entrance(shelf);
+    }
+    // 晃动和边缘呼出由一张牌替置物架出场：置物架先隐身，照常显示和绘制，牌落定时直接现身。
+    bool dealt = !was_visible && anim_enabled() && entrance != ENTRANCE_PLAIN;
+    if (dealt) window_set_cloaked(shelf->handle, true);
+#else
     // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
     if (was_visible) shelf_stop_slide(shelf);
+#endif
     RECT before = {0};
     if (was_visible) GetWindowRect(shelf->handle, &before);
     center_on(shelf, center);
@@ -1174,7 +1701,11 @@ void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, Shelf
         shelf->entrance = entrance;
         shelf->edge = edge;
         // 先把内容摆到出场的起点再显示，第一帧就不会闪出完整的内容。
+#ifdef LOOK_VARIANT_CARDS
+        shelf->surface_opacity = dealt ? 1.0f : 0.0f;
+#else
         shelf->surface_opacity = 0;
+#endif
     }
     if (!was_visible)
     {
@@ -1184,7 +1715,12 @@ void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, Shelf
         center_on(shelf, center);
     }
     else if (activate) SetForegroundWindow(shelf->handle);
+#ifdef LOOK_VARIANT_CARDS
+    if (dealt) shelf_deal_in(shelf, center);
+    else if (!was_visible || moved) shelf_animate_in(shelf);
+#else
     if (!was_visible || moved) shelf_animate_in(shelf, center);
+#endif
     shelf_repaint(shelf);
 }
 
@@ -1207,17 +1743,95 @@ void shelf_window_close_animated(ShelfWindow *shelf)
 {
     if (shelf->closing || shelf->closed) return;
     shelf->closing = true;
+#ifdef LOOK_VARIANT_CARDS
+    shelf_finish_entrance(shelf);
+    shelf_stop_slide(shelf);
+    shelf_stop_pop(shelf);
+    // 发牌、移除、补位和窗口大小的动画停在这一帧：截下的牌面和屏幕上一样。没做完的收尾（比如待移除的项目）在窗口关闭时补上。
+#else
     // 内容里的动画停在这一帧；没做完的收尾（比如待移除的项目）在窗口关闭时补上。
+#endif
     shelf_stop_motion(shelf);
+#ifdef LOOK_VARIANT_CARDS
+    if (!anim_enabled() || !shelf_window_is_visible(shelf) || !shelf_play_exit(shelf)) task_post(close_posted, shelf_window_retain(shelf));
+#else
     if (!anim_enabled() || !shelf_window_is_visible(shelf))
     {
         task_post(close_posted, shelf_window_retain(shelf));
         return;
     }
     shelf_start_leave(shelf);
+#endif
 }
 
 void shelf_window_add_paths(ShelfWindow *shelf, const StrList *paths)
 {
     shelf_add_paths(shelf, paths);
+}
+
+// ───────────── 换风格 ─────────────
+
+void shelf_window_leave_look(ShelfWindow *shelf)
+{
+    // 按原来的风格把正在播的动画都走到终点、收起提示和拖入时的放置区域，切换时不留下半截。
+#ifdef LOOK_VARIANT_CARDS
+    if (shelf->card) shelf_finish_entrance(shelf);
+#endif
+    shelf_finish_motion(shelf);
+    shelf_hide_toast(shelf);
+    shelf_end_drag(shelf);
+}
+
+void shelf_window_adopt_look(ShelfWindow *shelf)
+{
+    // 模型、窗口和拖放的回调都换成这种风格的一份。
+    ShelfModelEvents events = { shelf, on_model_changed, shelf_notify, shelf_remove_visibly, shelf_produced };
+    shelf->model->events = events;
+    UiWindowOptions handlers = { 0 };
+    handlers.paint = paint;
+    handlers.mouse = shelf_on_mouse;
+    handlers.key = shelf_on_key;
+    handlers.activated = on_activated;
+    handlers.moved = on_moved;
+    handlers.closed = on_closed;
+    handlers.animate = shelf_animate;
+    handlers.cursor = shelf_on_cursor;
+    handlers.message = shelf_on_message;
+    ui_window_set_handlers(shelf->ui, &handlers);
+    shelf_revoke_drop_target(shelf);
+    shelf_register_drop_target(shelf);
+#ifdef LOOK_VARIANT_CARDS
+    ui_window_set_backdrop(shelf->ui, UI_BACKDROP_NONE);
+    shelf->rank_opacity = 1;
+    shelf->rank_shift = 0;
+    shelf->rank_hidden = shelf->rank_rolling = false;
+    shelf->rank_suit_known = false;
+    shelf->fan_held = false;
+    anim_set(&shelf->fan, 0);
+#else
+    ui_window_set_backdrop(shelf->ui, UI_BACKDROP_ACRYLIC);
+    shelf->badge_scale = 1;
+    shelf->badge_popping = false;
+    shelf->mark_override = false;
+    shelf->hold_size = false;
+#endif
+    // 这种风格的视图从静止的样子开始：没有滚动、没有固定大小，项目都在原位。
+    shelf->mark_opacity = 1;
+    shelf->scroll_first = 0;
+    shelf->scroll_offset = 0;
+    shelf->stack_pinned = shelf->list_pinned = false;
+    shelf->switching = false;
+    for (int card = 0; card < 3; card++) shelf->card_posed[card] = false;
+    for (int index = 0; index < shelf->model->count; index++)
+    {
+        ShelfItem *item = shelf->model->items[index];
+        shelf_item_motion_reset(item);
+        anim_set(&item->lift, 0);
+        anim_set(&item->dim, 1);
+    }
+    shelf->shown_expanded = shelf->model->expanded;
+    update_thumbnail_size(shelf);
+    shelf_refresh_views(shelf);
+    shelf_update_window_size(shelf);
+    shelf_repaint(shelf);
 }

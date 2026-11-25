@@ -111,7 +111,8 @@ typedef struct AppSettings
     StrList blocked_apps;
 
     int theme;
-    wchar_t *accent_color;          // 自选的强调色（#RRGGBB）；NULL 时跟随 Windows
+    wchar_t *accent_color;          // 自选的强调色（#RRGGBB）；"system" 时跟随 Windows；NULL 时简洁跟随 Windows、纸牌用钴蓝
+    int look;                       // Look：简洁或纸牌
     int language;
     wchar_t *language_pack;         // 选用的语言包（文件名，不含扩展名）；NULL 时不使用
     bool start_with_windows;
@@ -133,6 +134,7 @@ typedef struct AppSettings
     bool has_completed_first_run;
     bool show_getting_started;      // 概览页的“快速上手”被关闭后不再显示
     bool has_asked_folder_watch;    // 问过要不要观察文件夹（第一次运行的引导里，或升级后单独问一次）
+    bool has_asked_look;            // 问过用哪种风格（第一次运行的引导里，或升级后单独问一次）
 
     // 以下只在读取旧版本的设置文件时用到，settings_normalize 之后都已迁移，不再写回文件。
     bool has_quick_action_slots;    // 文件里有没有写 QuickActionSlots；没有时按旧版本的设置迁移

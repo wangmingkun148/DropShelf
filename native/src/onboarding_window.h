@@ -2,6 +2,7 @@
 #pragma once
 
 #include "base.h"
+#include "ui.h"
 
 /// 打开引导窗口；已经打开时切到前面。关掉后记下已完成第一次运行，也算问过要不要观察文件夹。
 void onboarding_window_show(void);
@@ -18,3 +19,13 @@ const wchar_t *onboarding_window_title_text(void);
 const wchar_t *onboarding_window_body_text(void);
 const wchar_t *onboarding_window_next_text(void);
 const wchar_t *onboarding_window_add_folder_text(void);
+
+/// 换风格后换上那种风格的系统材质和图标（演示画面按新风格重画）。
+void onboarding_window_apply_look(void);
+
+/// 欢迎引导的窗口（换风格时一起翻牌）；没打开时是 NULL。
+UiWindow *onboarding_window_ui(void);
+
+/// 升级来的老用户：只问用哪种风格（引导里选风格的那一步），关掉后不再问。
+void onboarding_window_show_look(void);
+bool onboarding_window_is_look_only(void);

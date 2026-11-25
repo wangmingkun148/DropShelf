@@ -2,6 +2,7 @@
 // 点一张恢复成置物架；拖出窗口在松手处恢复；拖回牌堆里换位置。
 // 和 C# 版的 FanPanel、MainWindow.HistoryDrag.cs、CardGhostWindow 对应。
 #include "main_window_internal.h"
+#include "card_face.h"
 #include "shelf_history.h"
 #include "shelf_window.h"
 #include "task.h"
@@ -54,7 +55,10 @@ typedef struct Card
 {
     ShelfHistoryEntry *entry;
     wchar_t *title;
-    wchar_t *detail;
+    wchar_t *detail;        // 简洁：项目数和关闭时间
+    wchar_t *count;         // 纸牌：牌角上的数字（项目数）
+    wchar_t *clock, *day;   // 纸牌：右上角的关闭时刻和日子
+    FileSuit suit;          // 纸牌：数量最多的文件类型
     Thumb *stack[3];        // 最后放入的在最上面
     GfxRect base;           // 排版的位置（相对面板左上角）
     Anim scale, angle, x, y;
@@ -173,6 +177,9 @@ static void card_free(Card *card)
     shelf_history_entry_release(card->entry);
     free(card->title);
     free(card->detail);
+    free(card->count);
+    free(card->clock);
+    free(card->day);
     for (int index = 0; index < 3; index++) thumb_release(card->stack[index]);
 }
 
@@ -331,8 +338,9 @@ static void paint_mini_card(const Thumb *thumb, float left, float top, float ang
     float cx = left + 30, cy = top + 30;
     GfxMatrix matrix = gfx_matrix_multiply(gfx_matrix_rotate(angle, cx, cy), gfx_matrix_translate(x, y));
     gfx_push_transform(matrix);
-    gfx_fill_rounded(rect, 8, theme_color(THEME_SHELF_TILE));
-    gfx_stroke_rounded(rect, 8, theme_color(THEME_SHELF_TILE_BORDER), 1);
+    bool cards = theme_is_cards();
+    gfx_fill_rounded(rect, cards ? 4.0f : 8.0f, theme_color(THEME_SHELF_TILE));
+    gfx_stroke_rounded(rect, cards ? 4.0f : 8.0f, theme_color(THEME_SHELF_TILE_BORDER), cards ? 1.5f : 1.0f);
     GfxRect inner = { rect.left + 6, rect.top + 6, rect.right - 6, rect.bottom - 6 };
     if (thumb->image)
     {
@@ -351,8 +359,15 @@ static void paint_mini_card(const Thumb *thumb, float left, float top, float ang
     gfx_pop_transform();
 }
 
+/// 选出的牌右上角的删除按钮（24 × 24），纸牌离角近一点。
+static GfxRect remove_button_rect(float left, float top)
+{
+    float inset = theme_is_cards() ? 3.0f : 4.0f;
+    return (GfxRect){ left + CARD_WIDTH - inset - 24, top + inset, left + CARD_WIDTH - inset, top + inset + 24 };
+}
+
 /// 画一张牌，左上角在 (0, 0)：卡片底色、缩略图堆叠、标题、详情；选出时边框、“点击恢复”和删除按钮。
-static void paint_card_content(const Card *card, float left, float top, bool is_hot, float hint, bool remove_hovered)
+static void paint_card_content_simple(const Card *card, float left, float top, bool is_hot, float hint, bool remove_hovered)
 {
     GfxRect rect = { left, top, left + CARD_WIDTH, top + CARD_HEIGHT };
     gfx_fill_rounded(rect, 12, theme_color(THEME_FLYOUT));
@@ -389,11 +404,71 @@ static void paint_card_content(const Card *card, float left, float top, bool is_
     }
     if (is_hot)
     {
-        GfxRect close = { left + CARD_WIDTH - 4 - 24, top + 4, left + CARD_WIDTH - 4, top + 28 };
+        GfxRect close = remove_button_rect(left, top);
         if (remove_hovered) gfx_fill_rounded(close, 4, theme_color(remove_pressed ? THEME_SUBTLE_PRESSED : THEME_SUBTLE_HOVER));
         GfxTextStyle glyph = { GFX_FONT_ICON, 9, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
         gfx_text_draw(GLYPH_CLOSE, close, &glyph, theme_color(THEME_TEXT_PRIMARY));
     }
+}
+
+/// 纸牌：画一张历史牌，左上角在 (left, top)：左上角是项目数和数量最多的文件类型，右上角是关闭时间，中间的画框里是缩略图堆叠，
+/// 下面是名称，右下角是倒过来的角标。被选出时牌面提亮、描出墨色边框，显示“点击恢复”和删除按钮。
+static void paint_card_content_cards(const Card *card, float left, float top, bool is_hot, float hint, bool remove_hovered)
+{
+    GfxRect rect = { left, top, left + CARD_WIDTH, top + CARD_HEIGHT };
+    gfx_fill_rounded(rect, TILE_RADIUS, theme_color(is_hot ? THEME_CARD_HOVER : THEME_CARD));
+    if (is_hot) gfx_stroke_rounded(rect, TILE_RADIUS, theme_color(THEME_TEXT_PRIMARY), 1.5f);
+    else gfx_stroke_rounded(rect, TILE_RADIUS, theme_color(THEME_TABLE_CARD_BORDER), 1);
+    Color primary = theme_color(THEME_TEXT_PRIMARY), secondary = theme_color(THEME_TEXT_SECONDARY);
+
+    static const CardCorner big = { 26, 26, 8, 3 }, small = { 18, 18, 6, 2 };
+    card_paint_corner(card->count, card->suit, &big, left + 9, top + 7, primary, 1);
+    // 右上角：时刻和日子，靠右对齐；选出时让开删除按钮。
+    float time_right = left + CARD_WIDTH - (is_hot ? 30 : 9);
+    GfxTextStyle clock = { GFX_FONT_NUMBER, 11, 400, false, false, GFX_ALIGN_END, GFX_ALIGN_START };
+    GfxTextStyle day = { GFX_FONT_TEXT, 10, 400, false, false, GFX_ALIGN_END, GFX_ALIGN_START };
+    float clock_height = gfx_text_measure(L"0", &clock, 0).height;
+    gfx_text_draw(card->clock, (GfxRect){ left + 40, top + 9, time_right, top + 9 + clock_height }, &clock, secondary);
+    gfx_text_draw(card->day, (GfxRect){ left + 40, top + 9 + clock_height, time_right, top + 9 + clock_height + 16 }, &day, secondary);
+
+    // 画框：94 × 62，里面是 120 × 84 的缩略图画布按 52 高缩进去，居中。
+    GfxRect frame = { left + (CARD_WIDTH - 94) / 2, top + 38, left + (CARD_WIDTH + 94) / 2, top + 38 + 62 };
+    gfx_stroke_rounded(frame, 3, theme_color(THEME_ART_FRAME), 1);
+    float canvas_scale = 52.0f / 84.0f;
+    float canvas_left = frame.left + 1 + (92 - 120 * canvas_scale) / 2, canvas_top = frame.top + 1 + (60 - 52) / 2;
+    gfx_push_transform((GfxMatrix){ canvas_scale, 0, 0, canvas_scale, canvas_left, canvas_top });
+    paint_mini_card(card->stack[2], 30, 14, -10, -10, 2, 1);
+    paint_mini_card(card->stack[1], 30, 13, 7, 9, 1, 1);
+    paint_mini_card(card->stack[0], 30, 12, 0, 0, 0, 1);
+    gfx_pop_transform();
+
+    GfxTextStyle title = { GFX_FONT_TEXT, 12, 600, false, true, GFX_ALIGN_CENTER, GFX_ALIGN_START };
+    float title_height = gfx_text_measure(L"Ag", &title, 0).height;
+    gfx_text_draw(card->title, (GfxRect){ left + 10, top + 106, left + CARD_WIDTH - 10, top + 106 + title_height }, &title, primary);
+    if (hint > 0.001f)
+    {
+        GfxRect pill = { left + 16, top + 132, left + CARD_WIDTH - 16, top + 132 + 24 };
+        GfxTextStyle text = { GFX_FONT_TEXT, 11, 400, false, true, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        gfx_push_opacity(hint);
+        gfx_fill_rounded(pill, 12, theme_color(THEME_ACCENT));
+        gfx_text_draw(S(STR_ClickToRestore), (GfxRect){ pill.left + 4, pill.top, pill.right - 4, pill.bottom - 1 }, &text, theme_color(THEME_TEXT_ON_ACCENT));
+        gfx_pop_layer();
+    }
+    // 倒置角标比左上角的小一号，抽出时露出的“点击恢复”下面留得开。
+    card_paint_corner_inverted(card->count, card->suit, &small, rect, 9, 7, primary, 1);
+    if (is_hot)
+    {
+        GfxRect close = remove_button_rect(left, top);
+        if (remove_hovered) gfx_fill_rounded(close, 4, theme_color(remove_pressed ? THEME_SUBTLE_PRESSED : THEME_SUBTLE_HOVER));
+        GfxTextStyle glyph = { GFX_FONT_ICON, 9, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER };
+        gfx_text_draw(GLYPH_CLOSE, close, &glyph, primary);
+    }
+}
+
+static void paint_card_content(const Card *card, float left, float top, bool is_hot, float hint, bool remove_hovered)
+{
+    if (theme_is_cards()) paint_card_content_cards(card, left, top, is_hot, hint, remove_hovered);
+    else paint_card_content_simple(card, left, top, is_hot, hint, remove_hovered);
 }
 
 static bool remove_hovered_now;
@@ -472,8 +547,8 @@ static bool on_remove_button(float x, float y)
     GfxMatrix matrix = card_matrix(card, (float)card->goal_scale, (float)card->goal_angle, (float)card->goal_x, (float)card->goal_y), inverse;
     if (!gfx_matrix_invert(matrix, &inverse)) return false;
     gfx_matrix_apply(inverse, &x, &y);
-    float left = card->base.left + CARD_WIDTH - 4 - 24, top = card->base.top + 4;
-    return x >= left && x < left + 24 && y >= top && y < top + 24;
+    GfxRect close = remove_button_rect(card->base.left, card->base.top);
+    return x >= close.left && x < close.right && y >= close.top && y < close.bottom;
 }
 
 static int slot_at(float x)
@@ -666,6 +741,10 @@ static void ghost_begin(const Card *card, GhostPose start)
     ghost.card.entry = shelf_history_entry_retain(card->entry);
     ghost.card.title = wcs_dup(card->title);
     ghost.card.detail = wcs_dup(card->detail);
+    ghost.card.count = wcs_dup(card->count);
+    ghost.card.clock = wcs_dup(card->clock);
+    ghost.card.day = wcs_dup(card->day);
+    ghost.card.suit = card->suit;
     for (int index = 0; index < 3; index++) ghost.card.stack[index] = thumb_retain(card->stack[index]);
     ghost.pose = start;
     ghost.sway = 0;
@@ -992,6 +1071,16 @@ static void build_card(Card *card, ShelfHistoryEntry *entry)
     wchar_t *time = shelf_history_entry_time(entry);
     card->detail = str_history_card_detail(entry->count, time);
     free(time);
+    // 纸牌的牌角、右上角的时间和花色；两种风格的都备好，换风格时不用重建。
+    wchar_t count[16];
+    swprintf(count, ARRAYSIZE(count), L"%d", entry->count);
+    card->count = wcs_dup(count);
+    card->clock = shelf_history_entry_clock(entry);
+    card->day = shelf_history_entry_day(entry);
+    FileSuit *suits = xalloc((size_t)(entry->count > 0 ? entry->count : 1) * sizeof(FileSuit));
+    for (int index = 0; index < entry->count; index++) suits[index] = file_suit_of_path(entry->items[index].path);
+    card->suit = file_suit_dominant(suits, entry->count);
+    free(suits);
     // 最后放入的项目在最上面。
     for (int index = 0; index < 3 && index < entry->count; index++) card->stack[index] = thumb_create(entry->items[entry->count - 1 - index].path);
     anim_set(&card->scale, 1);

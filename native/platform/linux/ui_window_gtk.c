@@ -243,6 +243,36 @@ BOOL ScreenToClient(HWND handle, POINT *point)
     return TRUE;
 }
 
+BOOL ClientToScreen(HWND handle, POINT *point)
+{
+    UiWindow *window = window_of(handle);
+    if (!window || !point) return FALSE;
+    point->x += window->x;
+    point->y += window->y;
+    return TRUE;
+}
+
+/// 客户区的大小（物理像素）：我们的窗口没有标题栏，客户区就是整个窗口。
+BOOL GetClientRect(HWND handle, RECT *rect)
+{
+    UiWindow *window = window_of(handle);
+    if (!window || !rect) return FALSE;
+    float scale = ui_window_scale(window);
+    rect->left = 0;
+    rect->top = 0;
+    rect->right = (LONG)lroundf(window->width * scale);
+    rect->bottom = (LONG)lroundf(window->height * scale);
+    return TRUE;
+}
+
+UINT GetDpiForWindow(HWND handle)
+{
+    UiWindow *window = window_of(handle);
+    float scale = window ? ui_window_scale(window) : 1;
+    if (scale <= 0) scale = 1;
+    return (UINT)lroundf(scale * 96.0f);
+}
+
 BOOL SetWindowTextW(HWND handle, LPCWSTR text)
 {
     (void)handle;
@@ -1308,6 +1338,15 @@ BOOL ShowWindow(HWND handle, int command)
     return TRUE;
 }
 
+/// 隐身：Wayland 没有 DWM 那样的 cloak，用 0 透明度顶替。窗口照样映射、照样出帧，取消隐身后第一帧已经是画好的样子，
+/// 不会闪出空白或旧画面。
+void ui_window_set_cloaked(HWND handle, bool cloaked)
+{
+    UiWindow *window = (UiWindow *)handle;
+    if (!window || window->destroyed) return;
+    gtk_widget_set_opacity(window->window, cloaked ? 0 : 1);
+}
+
 void ui_window_set_click_through(UiWindow *window, bool on)
 {
     if (!window || window->destroyed) return;
@@ -1419,6 +1458,43 @@ void ui_window_set_border_color(UiWindow *window, const Color *color)
     (void)color;
 }
 
+/// 换成另一份回调（换风格时置物架从一种画法换到另一种）。其余选项不变。
+void ui_window_set_handlers(UiWindow *window, const UiWindowOptions *handlers)
+{
+    if (!window || window->destroyed || !handlers) return;
+    window->options.paint = handlers->paint;
+    window->options.mouse = handlers->mouse;
+    window->options.key = handlers->key;
+    window->options.activated = handlers->activated;
+    window->options.moved = handlers->moved;
+    window->options.closed = handlers->closed;
+    window->options.animate = handlers->animate;
+    window->options.cursor = handlers->cursor;
+    window->options.message = handlers->message;
+    ui_window_repaint(window);
+}
+
+void ui_window_set_backdrop(UiWindow *window, UiBackdrop backdrop)
+{
+    if (!window || window->destroyed) return;
+    // Wayland 没有 Mica/Acrylic；深浅两种风格都用自己的纯色背景，这里只记下选项。
+    window->options.backdrop = backdrop;
+    ui_window_repaint(window);
+}
+
+void ui_window_set_icon(UiWindow *window, HICON icon)
+{
+    (void)window;
+    (void)icon;
+    // Linux 的窗口图标跟着 .desktop 的 app id 走，切换风格时不用换。
+}
+
+/// Wayland 窗口没有系统画的圆角（Windows 11 的 DWM 会给），置物架是方角的，替它表演的牌也用方角（见 shelf_card.c）。
+bool ui_is_windows_11(void)
+{
+    return false;
+}
+
 void ui_window_set_maximize_button(UiWindow *window, UiElement *button)
 {
     if (window) window->maximize_button = button;
@@ -1487,6 +1563,21 @@ bool ui_window_snapshot(UiWindow *window, const wchar_t *path)
     }
     if (window->options.paint) window->options.paint(window, window->options.context, frames_time());
     return gfx_end_image(path);
+}
+
+/// 把窗口现在画的样子截成一张图片（换风格时盖在窗口上的那张牌正面就是它）。和 ui_window_snapshot 一样先离屏画一遍。
+GfxImage *ui_window_capture(UiWindow *window)
+{
+    if (!window || window->destroyed) return NULL;
+    int scale = (int)lroundf(ui_window_scale(window));
+    if (scale < 1) scale = 1;
+    int width = (int)lroundf(window->width) * scale, height = (int)lroundf(window->height) * scale;
+    if (width <= 0 || height <= 0) return NULL;
+    if (!gfx_begin_image(width, height, 96.0f * scale)) return NULL;
+    gfx_clear(window->options.popup ? COLOR_TRANSPARENT : theme_color(window->options.background));
+    if (window->options.paint) window->options.paint(window, window->options.context, frames_time());
+    if (window->root) ui_paint(window->root, frames_time());
+    return gfx_end_image_capture();
 }
 
 void ui_window_warm(UiWindow *window)

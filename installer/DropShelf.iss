@@ -1,5 +1,5 @@
 ﻿#define AppName "DropShelf"
-#define AppVersion "3.1.4"
+#define AppVersion "3.1.5"
 #define AppPublisher "DropShelf"
 #define AppExeName "DropShelf.exe"
 #define AppURL "https://github.com/wangmingkun148/dropshelf"
@@ -13,7 +13,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
 AppUpdatesURL={#AppURL}/releases/latest
-VersionInfoVersion=3.1.4.0
+VersionInfoVersion=3.1.5.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=DropShelf 安装程序
 VersionInfoProductName={#AppName}
@@ -26,7 +26,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\installer
 OutputBaseFilename=DropShelf-Setup-{#AppVersion}
-SetupIconFile=..\src\DropShelf\Assets\DropShelf.ico
+SetupIconFile=..\native\res\DropShelf.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
 UninstallFilesDir={app}

@@ -35,7 +35,7 @@ static void click(UiElement *element, float window_x, float window_y)
 
 int main(void)
 {
-    theme_initialize(THEME_SYSTEM, NULL);
+    theme_initialize(THEME_SYSTEM, NULL, LOOK_SIMPLE);
 
     UiElement *root = ui_stack(false, 8);
     ui_stack_set_padding(root, 20, 20, 20, 20);

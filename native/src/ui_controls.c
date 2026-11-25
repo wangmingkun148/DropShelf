@@ -592,7 +592,7 @@ static void button_paint(UiElement *element, double time)
     UiButton *button = (UiButton *)element;
     Color fill = COLOR_TRANSPARENT, border = COLOR_TRANSPARENT, text = theme_color(THEME_TEXT_PRIMARY);
     bool hovered = element->hovered && !element->disabled, pressed = element->pressed && element->hovered;
-    float radius = 4;
+    float radius = theme_is_cards() ? 6.0f : 4.0f;
     switch (button->kind)
     {
         case UI_BUTTON_STANDARD:
@@ -883,8 +883,15 @@ static void segmented_paint(UiElement *element, double time)
     if (anim_update(&segmented->slide, time)) ui_window_request_frame(element->window);
     float progress = (float)segmented->slide.value;
 
-    gfx_fill_rounded(element->bounds, 5, theme_color(THEME_CONTROL_ALT));
-    gfx_stroke_rounded(element->bounds, 5, theme_color(THEME_CONTROL_BORDER), 1);
+    // 简洁：浅底色加细边框；纸牌：只描一圈深色的边。
+    bool cards = theme_is_cards();
+    if (cards) gfx_stroke_rounded(element->bounds, 6, theme_color(THEME_CONTROL_STRONG_BORDER), 1);
+    else
+    {
+        gfx_fill_rounded(element->bounds, 5, theme_color(THEME_CONTROL_ALT));
+        gfx_stroke_rounded(element->bounds, 5, theme_color(THEME_CONTROL_BORDER), 1);
+    }
+    float inner_radius = cards ? 4.0f : 3.0f;
 
     // 选中块：在原来的和新的选项之间按进度过渡。
     if (segmented->selected >= 0)
@@ -895,7 +902,7 @@ static void segmented_paint(UiElement *element, double time)
             from.left + (to.left - from.left) * progress, to.top,
             from.right + (to.right - from.right) * progress, to.bottom
         };
-        gfx_fill_rounded(block, 3, theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_ACCENT));
+        gfx_fill_rounded(block, inner_radius, theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_ACCENT));
     }
 
     Color normal = theme_color(element->disabled ? THEME_TEXT_DISABLED : THEME_TEXT_PRIMARY);
@@ -907,7 +914,7 @@ static void segmented_paint(UiElement *element, double time)
         if (index == segmented->selected) color = color_lerp(normal, selected, progress);
         else if (index == segmented->previous) color = color_lerp(selected, normal, progress);
         else if (index == segmented->hovered_item && element->hovered && !element->disabled)
-            gfx_fill_rounded(bounds, 3, theme_color(THEME_SUBTLE_HOVER));
+            gfx_fill_rounded(bounds, inner_radius, theme_color(THEME_SUBTLE_HOVER));
         bounds.bottom -= 1;
         gfx_text_draw(text_get(&segmented->items[index]), bounds, &segment_text_style, color);
     }
@@ -995,7 +1002,9 @@ UiElement *ui_settings_card(const wchar_t *glyph, UiText header, UiText descript
     if (description_label) *description_label = NULL;
     UiElement *card = ui_stack(true, 0);
     ui_stack_set_padding(card, 16, 11, 16, 11);
-    ui_stack_set_background(card, THEME_CARD, THEME_CARD_BORDER, 6);
+    // 纸牌风格下设置行是牌面上浅一点的一块（主窗口换风格时整个重建，这里按建的时候的风格取）。
+    bool cards = theme_is_cards();
+    ui_stack_set_background(card, cards ? THEME_SETTING_ROW : THEME_CARD, cards ? THEME_SETTING_ROW_BORDER : THEME_CARD_BORDER, 6);
     card->minimum_height = 66;
     ui_set_margin(card, 0, 0, 0, 4);
 

@@ -1527,3 +1527,13 @@ void shelf_model_release_resources(ShelfModel *model)
     model->leaving = NULL;
     model->leaving_count = 0;
 }
+
+FileSuit shelf_model_suit(const ShelfModel *model)
+{
+    if (model->count == 0) return SUIT_OTHER;
+    FileSuit *suits = xalloc((size_t)model->count * sizeof(FileSuit));
+    for (int index = 0; index < model->count; index++) suits[index] = shelf_item_suit(model->items[index]);
+    FileSuit suit = file_suit_dominant(suits, model->count);
+    free(suits);
+    return suit;
+}

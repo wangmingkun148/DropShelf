@@ -322,9 +322,14 @@ void ui_scroll_set_bar_hidden(UiElement *element, bool hidden, bool fade_in)
 }
 
 // ───────────── 滑块 ─────────────
-// 高 32；轨道高 4，滑钮左边是强调色；滑钮直径 20，中心圆点 12，悬停时 14、按住时 10。
+// 简洁：高 32；轨道高 4，滑钮左边是强调色；滑钮直径 20，中心圆点 12，悬停时 14、按住时 10。
+// 纸牌：切牌滑块，高 32，轨道是一排 10 张小牌，滑钮是一张强调色的切牌卡（宽 14 的范围里一张 7 × 27 的牌，悬停或拖动时抽高到 31）。
+// 切牌卡越过哪张牌的中线，那张就翻成牌背，退回时再翻回牌面。和 C# style 版的 DeckSlider 对应。
 
-#define SLIDER_THUMB 20.0f
+#define SLIDER_THUMB (theme_is_cards() ? 14.0f : 20.0f)
+#define SLIDER_CARDS 10
+/// 翻一张牌：先压扁到 0，换面后再展开，各 0.13 秒。
+#define SLIDER_FLIP_SECONDS 0.26
 
 typedef struct UiSlider
 {
@@ -334,6 +339,8 @@ typedef struct UiSlider
     bool read_only;
     UiSliderHandler changed;
     void *context;
+    bool down[SLIDER_CARDS];        // 翻成牌背的（翻牌途中是要翻成的那一面）
+    Anim flip[SLIDER_CARDS];        // 翻牌的进度：0 到 0.5 压扁原来的一面，0.5 到 1 展开新的一面
 } UiSlider;
 
 static GfxSize slider_measure(UiElement *element, float available)
@@ -354,21 +361,100 @@ static float slider_thumb_center(const UiSlider *slider)
     return bounds->left + SLIDER_THUMB / 2 + (bounds->right - bounds->left - SLIDER_THUMB) * slider_fraction(slider);
 }
 
-static void slider_paint(UiElement *element, double time)
+/// 牌按滑钮能走到的范围等距排开，第 i 张的中线正好是取值 i×10+5 时滑钮的位置。
+static bool slider_card_down(const UiSlider *slider, int index)
 {
-    (void)time;
-    UiSlider *slider = (UiSlider *)element;
+    int range = slider->maximum - slider->minimum;
+    return range > 0 && (double)(slider->value - slider->minimum) / range >= (index + 0.5) / SLIDER_CARDS;
+}
+
+/// 值变了：越过中线的牌翻面。animate 为 false 时直接换面；翻到一半又退回时从当前宽度接着走。
+static void slider_update_cards(UiSlider *slider, bool animate)
+{
+    for (int index = 0; index < SLIDER_CARDS; index++)
+    {
+        bool down = slider_card_down(slider, index);
+        if (down == slider->down[index]) continue;
+        slider->down[index] = down;
+        Anim *flip = &slider->flip[index];
+        if (!animate)
+        {
+            anim_set(flip, 1);
+            continue;
+        }
+        // 翻到一半退回：从镜像的进度接着走，宽度不跳。
+        double from = flip->running ? 1 - flip->value : 0;
+        anim_set(flip, from);
+        anim_start(flip, 1, SLIDER_FLIP_SECONDS * (1 - from), EASE_OF(EASE_LINEAR));
+    }
+}
+
+/// 简洁的滑块：一条轨道，左边是强调色，滑钮是带强调色圆点的圆。
+static void slider_paint_simple(UiSlider *slider)
+{
+    UiElement *element = &slider->base;
     GfxRect bounds = element->bounds;
     float middle = (bounds.top + bounds.bottom) / 2;
     float center = slider_thumb_center(slider);
+    float thumb = SLIDER_THUMB;
     gfx_fill_rounded((GfxRect){ bounds.left, middle - 2, center, middle + 2 }, 2, theme_color(THEME_ACCENT));
     gfx_fill_rounded((GfxRect){ center, middle - 2, bounds.right, middle + 2 }, 2, theme_color(THEME_CONTROL_STRONG_BORDER));
-    gfx_fill_ellipse(center, middle, SLIDER_THUMB / 2, SLIDER_THUMB / 2, theme_color(THEME_FLYOUT));
-    gfx_stroke_ellipse(center, middle, SLIDER_THUMB / 2, SLIDER_THUMB / 2, theme_color(THEME_CONTROL_BORDER), 1);
+    gfx_fill_ellipse(center, middle, thumb / 2, thumb / 2, theme_color(THEME_FLYOUT));
+    gfx_stroke_ellipse(center, middle, thumb / 2, thumb / 2, theme_color(THEME_CONTROL_BORDER), 1);
     bool hovered = element->hovered && !slider->read_only;
     float core = slider->dragging ? 5.0f : hovered ? 7.0f : 6.0f;
     ThemeColor fill = slider->dragging ? THEME_ACCENT_PRESSED : hovered ? THEME_ACCENT_HOVER : THEME_ACCENT;
     gfx_fill_ellipse(center, middle, core, core, theme_color(fill));
+}
+
+static void slider_paint(UiElement *element, double time)
+{
+    UiSlider *slider = (UiSlider *)element;
+    if (!theme_is_cards())
+    {
+        slider_paint_simple(slider);
+        return;
+    }
+    GfxRect bounds = element->bounds;
+    float middle = (bounds.top + bounds.bottom) / 2;
+    float travel = bounds.right - bounds.left - SLIDER_THUMB;
+    ThemePattern back = theme_pattern(THEME_PATTERN_STACK_EDGE);
+    Color face = theme_color(THEME_SHELF_TILE), face_border = theme_color(THEME_SHELF_TILE_BORDER), back_border = theme_color(THEME_CARD_BACK_LINE);
+    Color pip = theme_color(THEME_TEXT_TERTIARY);
+    for (int index = 0; index < SLIDER_CARDS; index++)
+    {
+        Anim *flip = &slider->flip[index];
+        if (anim_update(flip, time)) ui_window_request_frame(element->window);
+        double progress = flip->value;
+        // 前半段压扁原来的一面（先慢后快），后半段展开新的一面（先快后慢）。
+        bool down = progress < 0.5 ? !slider->down[index] : slider->down[index];
+        double t = progress < 0.5 ? progress / 0.5 : (progress - 0.5) / 0.5;
+        float width = (float)(progress < 0.5 ? 1 - t * t : 1 - (1 - t) * (1 - t));
+        if (progress >= 1) width = 1;
+        float center = bounds.left + SLIDER_THUMB / 2 + travel * (index + 0.5f) / SLIDER_CARDS;
+        if (width < 0.01f) continue;
+        gfx_push_transform(gfx_matrix_scale(width, 1, center, middle));
+        GfxRect card = { center - 6, middle - 8, center + 6, middle + 8 };
+        if (down)
+        {
+            gfx_fill_rounded_pattern(card, 2, &back);
+            gfx_stroke_rounded(card, 2, back_border, 1);
+        }
+        else
+        {
+            gfx_fill_rounded(card, 2, face);
+            gfx_stroke_rounded(card, 2, face_border, 1);
+            float diamond[] = { center, middle - 2.1f, center + 2.1f, middle, center, middle + 2.1f, center - 2.1f, middle };
+            gfx_polygon(diamond, 4, pip, COLOR_TRANSPARENT, 0);
+        }
+        gfx_pop_transform();
+    }
+    // 滑钮：外面一圈设置行的底色把它和后面的小牌隔开，里面是强调色的牌。
+    float x = slider_thumb_center(slider);
+    bool raised = slider->dragging || (element->hovered && !slider->read_only);
+    float half = raised ? 15.5f : 13.5f;
+    gfx_fill_rounded((GfxRect){ x - 3.5f, middle - half, x + 3.5f, middle + half }, 3.5f, theme_color(THEME_SETTING_ROW));
+    gfx_fill_rounded((GfxRect){ x - 2, middle - half + 1.5f, x + 2, middle + half - 1.5f }, 2, theme_color(THEME_ACCENT));
 }
 
 static void slider_set(UiSlider *slider, int value, bool dragging)
@@ -377,6 +463,7 @@ static void slider_set(UiSlider *slider, int value, bool dragging)
     if (value > slider->maximum) value = slider->maximum;
     if (value == slider->value) return;
     slider->value = value;
+    slider_update_cards(slider, slider->base.window != NULL);
     ui_window_repaint(slider->base.window);
     if (slider->changed) slider->changed(value, dragging, slider->context);
 }
@@ -448,6 +535,11 @@ UiElement *ui_slider(int minimum_value, int maximum_value, int value, int step, 
     slider->step = step > 0 ? step : 1;
     slider->changed = changed;
     slider->context = context;
+    for (int index = 0; index < SLIDER_CARDS; index++)
+    {
+        slider->down[index] = slider_card_down(slider, index);
+        anim_set(&slider->flip[index], 1);
+    }
     return &slider->base;
 }
 
@@ -456,7 +548,16 @@ void ui_slider_set_value(UiElement *element, int value)
     UiSlider *slider = (UiSlider *)element;
     if (slider->dragging || slider->value == value) return;
     slider->value = value;
+    slider_update_cards(slider, element->window != NULL);
     ui_window_repaint(element->window);
+}
+
+int ui_slider_face_down_count(UiElement *element)
+{
+    UiSlider *slider = (UiSlider *)element;
+    int count = 0;
+    for (int index = 0; index < SLIDER_CARDS; index++) count += slider->down[index];
+    return count;
 }
 
 int ui_slider_value(UiElement *element)
@@ -472,7 +573,7 @@ void ui_slider_set_read_only(UiElement *element, bool read_only)
 }
 
 // ───────────── 输入框 ─────────────
-// 内边距 10,5,10,6，最小高 32，圆角 4；有焦点时底色变亮，底部一条 2 像素的强调色。
+// 内边距 10,5,10,6，最小高 32，圆角 4（纸牌 6）；有焦点时底色变亮，底部一条 2 像素的强调色。
 
 #define TEXTBOX_PADDING_LEFT 12.0f   // 10 加上文字自己的 2
 #define TEXTBOX_PADDING_RIGHT 10.0f
@@ -557,9 +658,11 @@ static void textbox_paint(UiElement *element, double time)
     UiTextbox *box = (UiTextbox *)element;
     GfxRect bounds = element->bounds;
     ThemeColor fill = element->focused ? THEME_FLYOUT : element->hovered ? THEME_CONTROL_HOVER : THEME_CONTROL;
-    gfx_fill_rounded(bounds, 4, theme_color(fill));
-    gfx_stroke_rounded(bounds, 4, theme_color(THEME_CONTROL_BORDER), 1);
-    if (element->focused) gfx_fill_rounded_corners((GfxRect){ bounds.left + 1, bounds.bottom - 2, bounds.right - 1, bounds.bottom }, 0, 3, theme_color(THEME_ACCENT));
+    float radius = theme_is_cards() ? 6.0f : 4.0f;
+    gfx_fill_rounded(bounds, radius, theme_color(fill));
+    gfx_stroke_rounded(bounds, radius, theme_color(THEME_CONTROL_BORDER), 1);
+    if (element->focused)
+        gfx_fill_rounded_corners((GfxRect){ bounds.left + 1, bounds.bottom - 2, bounds.right - 1, bounds.bottom }, 0, radius - 1, theme_color(THEME_ACCENT));
 
     GfxRect area = textbox_area(box);
     const wchar_t *text = textbox_chars(box);
@@ -919,9 +1022,10 @@ static void hotkey_box_paint(UiElement *element, double time)
     (void)time;
     UiHotkeyBox *box = (UiHotkeyBox *)element;
     GfxRect bounds = element->bounds;
-    gfx_fill_rounded(bounds, 4, theme_color(element->hovered || box->clear->hovered ? THEME_CONTROL_HOVER : THEME_CONTROL));
-    if (box->recording) gfx_stroke_rounded(bounds, 4, theme_color(THEME_ACCENT), 2);
-    else gfx_stroke_rounded(bounds, 4, theme_color(THEME_CONTROL_BORDER), 1);
+    float radius = theme_is_cards() ? 6.0f : 4.0f;
+    gfx_fill_rounded(bounds, radius, theme_color(element->hovered || box->clear->hovered ? THEME_CONTROL_HOVER : THEME_CONTROL));
+    if (box->recording) gfx_stroke_rounded(bounds, radius, theme_color(THEME_ACCENT), 2);
+    else gfx_stroke_rounded(bounds, radius, theme_color(THEME_CONTROL_BORDER), 1);
     gfx_text_draw(L"\xE765", (GfxRect){ bounds.left + 10, bounds.top + 1, bounds.left + 32, bounds.bottom }, &hotkey_glyph_style,
         theme_color(THEME_TEXT_SECONDARY));
     gfx_text_draw(hotkey_box_text(box), (GfxRect){ bounds.left + 32, bounds.top, bounds.right - 34, bounds.bottom - 1 }, &hotkey_text_style,

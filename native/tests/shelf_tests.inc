@@ -834,6 +834,91 @@ static void test_drop_read(void)
 
 // ───────────── 置物架窗口 ─────────────
 
+/// C# 版 TestFileSuits：牌角的花色按文件类型。
+static void test_file_suits(void)
+{
+    CHECK(file_suit_of_path(L"C:\\a\\photo.JPG") == SUIT_IMAGE && file_suit_of_path(L"C:\\a\\report.pdf") == SUIT_DOCUMENT, "图片或文档的花色不正确");
+    CHECK(file_suit_of_path(L"C:\\a\\Downloads") == SUIT_FOLDER && file_suit_of_path(L"C:\\a\\Downloads\\") == SUIT_FOLDER, "没有扩展名的应按文件夹算");
+    CHECK(file_suit_of_path(L"C:\\a\\setup.exe") == SUIT_OTHER, "其他文件的花色不正确");
+    FileSuit suits[] = { SUIT_IMAGE, SUIT_DOCUMENT, SUIT_IMAGE };
+    CHECK(file_suit_dominant(suits, 3) == SUIT_IMAGE, "应取数量最多的花色");
+    CHECK(file_suit_dominant(suits, 2) == SUIT_DOCUMENT, "数量相同时应取最后放入的");
+    CHECK(file_suit_dominant(NULL, 0) == SUIT_OTHER, "没有项目时应为其他");
+    ShelfItem *link = shelf_item_new(ITEM_LINK, L"https://example.com", NULL, false);
+    ShelfItem *photo = shelf_item_new(ITEM_FILE, L"C:\\a\\photo.jpeg", NULL, false);
+    ShelfItem *folder = shelf_item_new(ITEM_FOLDER, L"C:\\a\\Downloads", NULL, false);
+    ShelfItem *plain = shelf_item_new(ITEM_FILE, L"C:\\a\\README", NULL, false);
+    CHECK(shelf_item_suit(link) == SUIT_OTHER, "链接的花色不正确");
+    wchar_t *photo_mark = shelf_item_card_mark(photo), *link_mark = shelf_item_card_mark(link);
+    wchar_t *folder_mark = shelf_item_card_mark(folder), *plain_mark = shelf_item_card_mark(plain);
+    CHECK(wcscmp(photo_mark, L"JPEG") == 0 && shelf_item_suit(photo) == SUIT_IMAGE && wcscmp(link_mark, L"URL") == 0, "牌角应印扩展名或链接");
+    CHECK(!*folder_mark && !*plain_mark && shelf_item_suit(folder) == SUIT_FOLDER, "文件夹和没有扩展名的文件牌角不印文字");
+    free(photo_mark);
+    free(link_mark);
+    free(folder_mark);
+    free(plain_mark);
+    shelf_item_release(link);
+    shelf_item_release(photo);
+    shelf_item_release(folder);
+    shelf_item_release(plain);
+}
+
+static bool card_at_home(CardKey pose, bool with_turn)
+{
+    return pose.x == 0 && pose.y == 0 && pose.scale == 1 && pose.angle == 0 && (!with_turn || pose.turn == 0) && pose.opacity == 1;
+}
+
+/// C# 版 TestShelfMotion（纸牌）：出场离场的牌落点、版本轮换和平铺的行列。
+static void test_shelf_motion(void)
+{
+    RECT target = { 1500, 300, 1720, 573 }, work = { 0, 0, 1920, 1040 };
+    double half = (target.right - target.left) / 2.0;
+    bool alternates = true, hidden = true, outside = true, lands = true;
+    double last_shake = NAN, last_edge = NAN;
+    for (int round = 0; round < 20; round++)
+    {
+        CardMotion shake = card_motion_shake_in(30, 40);
+        CardMotion right = card_motion_edge_in(EDGE_RIGHT, target, work, 1);
+        if (shake.keys[0].angle == last_shake || right.keys[0].angle == last_edge) alternates = false;
+        last_shake = shake.keys[0].angle;
+        last_edge = right.keys[0].angle;
+        CardKey start = card_motion_at(&shake, 0);
+        if (start.turn != 180 || start.opacity != 0) hidden = false;
+        if (!(target.left + half + card_motion_at(&right, 0).x - half > work.right)) outside = false;
+        if (!card_at_home(card_motion_at(&shake, card_motion_duration(&shake) + 1), true) ||
+            !card_at_home(card_motion_at(&right, card_motion_duration(&right) + 1), true))
+            lands = false;
+    }
+    CHECK(alternates, "相邻两次呼出不应用同一个版本");
+    CHECK(hidden, "晃动呼出应从还看不见的牌背开始");
+    CHECK(outside, "从右边缘呼出时牌应从屏幕外开始");
+    CHECK(lands, "出场的牌最后应正好落在置物架的位置");
+    bool sides = true;
+    for (int round = 0; round < 8; round++)
+    {
+        CardMotion left = card_motion_edge_in(EDGE_LEFT, target, work, 1), top = card_motion_edge_in(EDGE_TOP, target, work, 1);
+        if (!card_at_home(card_motion_at(&left, card_motion_duration(&left) + 1), false) ||
+            !card_at_home(card_motion_at(&top, card_motion_duration(&top) + 1), false))
+            sides = false;
+    }
+    CHECK(sides, "从左边和顶边呼出的牌最后应正好落在置物架的位置");
+
+    CardMotion toss = card_motion_exit(EDGE_LEFT, false, target, work, 1);
+    CardMotion flip = card_motion_exit(EDGE_NONE, true, target, work, 1);
+    CardKey toss_start = card_motion_at(&toss, 0), toss_end = card_motion_at(&toss, card_motion_duration(&toss));
+    CHECK(toss_start.x == 0 && toss_start.scale == 1 && toss_end.x < -target.left, "边缘呼出的置物架关闭时应甩回那条边");
+    CardKey flip_end = card_motion_at(&flip, card_motion_duration(&flip));
+    CHECK(flip.horizontal_axis && flip_end.turn == 180 && flip_end.opacity == 0, "其余的置物架关闭时应按出场的方向翻回背面淡出");
+
+    CardMotion line = { .count = 2, .fade_in_ms = 50 };
+    line.keys[0] = (CardKey){ 0, 0, 0, 1, 0, 0, 1, false, EASE_OF(EASE_LINEAR) };
+    line.keys[1] = (CardKey){ 100, 10, 0, 1, 0, 0, 1, false, EASE_OF(EASE_LINEAR) };
+    CHECK(fabs(card_motion_at(&line, 50).x - 5) < 1e-9 && fabs(card_motion_at(&line, 25).opacity - 0.5) < 1e-9, "关键帧之间应按时间插值，开头按时间淡入");
+
+    CHECK(cards_shelf_grid_columns_for(280) == 4 && cards_shelf_grid_rows_for(5, 280) == 2 && cards_shelf_grid_rows_for(4, 280) == 1, "平铺应一行四张");
+    CHECK(fabsf(cards_shelf_grid_height(2) - 266) < 1e-4f && cards_shelf_grid_height(0) == 0, "平铺的高度不正确");
+}
+
 static void test_stack_labels(ShelfWindow *shelf)
 {
     CHECK(wcs_equal(shelf->stack_caption, L"2 个文件") && wcs_equal(shelf->stack_detail, L"3 B"), "堆叠汇总不正确");

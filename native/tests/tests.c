@@ -18,6 +18,9 @@
 #include "shelf_peek.h"
 #include "shelf_model.h"
 #include "shelf_window.h"
+#include "shelf_card.h"
+#include "look_dispatch.h"
+#include "look_switch.h"
 #include "task.h"
 #include "foreground.h"
 #include "gesture.h"
@@ -40,6 +43,7 @@
 #include "onboarding_window.h"
 #include "update_check.h"
 
+#include <dwmapi.h>
 #include <limits.h>
 #include <math.h>
 #include <shlobj.h>
@@ -470,6 +474,15 @@ static void test_settings_normalization(void)
     CHECK(normalized.auto_open_trigger == TRIGGER_BOTH && normalized.edge_dwell == DWELL_MEDIUM, "异常呼出方式没有恢复默认值");
     CHECK(normalized.drag_out_mode == TRANSFER_MOVE, "异常拖出方式没有恢复默认值");
     CHECK(normalized.theme == THEME_SYSTEM && normalized.accent_color == NULL, "异常主题或强调色没有恢复默认值");
+    AppSettings follow = {0};
+    settings_init(&follow);
+    free(follow.accent_color);
+    follow.accent_color = wcs_dup(L"system");
+    follow.look = 7;
+    settings_normalize(&follow);
+    CHECK(wcs_equal(follow.accent_color, L"system"), "跟随 Windows 的强调色不应被清除");
+    CHECK(follow.look == LOOK_SIMPLE, "异常的风格没有恢复成简洁");
+    settings_free(&follow);
     CHECK(normalized.language == LANGUAGE_SYSTEM && normalized.quick_shelf_size == SHELF_SIZE_MEDIUM, "异常语言或尺寸没有恢复默认值");
     CHECK(normalized.quick_action_layout == LAYOUT_FOUR, "异常按钮数量没有恢复默认值");
     CHECK(list_is(&normalized.blocked_apps, 2, L"game.exe", L"paint.exe"), "屏蔽的应用没有去掉空白、路径和重复");
@@ -871,8 +884,8 @@ static void test_theme(void)
     CHECK(!accent_palette_parse(bytes, 4, &palette), "不完整的调色板应被忽略");
 
     Color dark[THEME_COLOR_COUNT], light[THEME_COLOR_COUNT];
-    theme_build_palette(true, palette, dark);
-    theme_build_palette(false, accent_palette_default(), light);
+    theme_build_palette(LOOK_SIMPLE, true, palette, dark);
+    theme_build_palette(LOOK_SIMPLE, false, accent_palette_default(), light);
     CHECK(color_equal(dark[THEME_TEXT_ON_ACCENT], COLOR_WHITE), "深色强调色上应使用白字");
     CHECK(color_contrast_ratio(dark[THEME_ACCENT_TEXT], COLOR_RGB(0x20, 0x20, 0x20)) >= 4.5, "强调色文字对比度不足");
     CHECK(color_equal(light[THEME_ACCENT], accent_palette_default().dark1) && color_equal(light[THEME_TEXT_ON_ACCENT], COLOR_WHITE), "默认浅色强调色不正确");
@@ -881,6 +894,24 @@ static void test_theme(void)
     CHECK(color_equal(light[THEME_ACCENT_HOVER], COLOR_ARGB(0xE6, 0x00, 0x67, 0xC0)) && color_equal(light[THEME_STACK_EDGE], COLOR_ARGB(0x0D, 0x00, 0x67, 0xC0)) &&
           color_equal(light[THEME_SHEET_GLOW], COLOR_ARGB(0x19, 0x00, 0x67, 0xC0)) && color_equal(light[THEME_TEXT_PRIMARY], COLOR_ARGB(0xE4, 0, 0, 0)),
         "浅色调色板与 C# 版算出来的不一致");
+
+    // 纸牌：和 C# style 版 ThemeService.BuildPalette 算出来的一致。
+    Color dark_background = COLOR_RGB(0x1C, 0x1B, 0x19);
+    Color cobalt[THEME_COLOR_COUNT], dark_cobalt[THEME_COLOR_COUNT];
+    theme_build_palette(LOOK_CARDS, false, accent_palette_from_color(THEME_COBALT), cobalt);
+    theme_build_palette(LOOK_CARDS, true, accent_palette_from_color(THEME_COBALT), dark_cobalt);
+    CHECK(color_equal(cobalt[THEME_CARD_BACK_FILL], THEME_COBALT) && color_equal(cobalt[THEME_TABLE_TEXT], COLOR_WHITE), "钴蓝牌背或牌桌文字不正确");
+    CHECK(color_contrast_ratio(dark_cobalt[THEME_ACCENT_TEXT], dark_background) >= 4.5, "深色主题下钴蓝文字对比度不足");
+    CHECK(color_equal(cobalt[THEME_ACCENT_HOVER], COLOR_ARGB(0xE6, 0x2B, 0x4E, 0xFF)) && color_equal(cobalt[THEME_CARD_BACK_LINE], COLOR_RGB(0x20, 0x3A, 0xBF)) &&
+          color_equal(dark_cobalt[THEME_CARD_BACK_FILL], COLOR_RGB(0x18, 0x2B, 0x8C)) && color_equal(cobalt[THEME_TEXT_PRIMARY], COLOR_RGB(0x15, 0x17, 0x1C)) &&
+          color_equal(cobalt[THEME_WINDOW_BACKGROUND], COLOR_RGB(0xE8, 0xE5, 0xDE)) && color_equal(dark_cobalt[THEME_TABLE_TEXT], COLOR_RGB(0xED, 0xEA, 0xE3)),
+        "纸牌的调色板与 C# style 版算出来的不一致");
+    ThemePattern patterns[THEME_PATTERN_COUNT];
+    theme_build_patterns(false, cobalt, patterns);
+    CHECK(patterns[THEME_PATTERN_SHEET_BORDER].kind == THEME_PATTERN_LATTICE && patterns[THEME_PATTERN_SHEET_BORDER].size == 8 &&
+          color_equal(patterns[THEME_PATTERN_SHEET_BORDER].line, COLOR_ARGB(0x29, 255, 255, 255)) &&
+          patterns[THEME_PATTERN_STACK_EDGE].kind == THEME_PATTERN_STRIPES && patterns[THEME_PATTERN_TABLE].size == 12,
+        "牌背、牌边或牌桌的图案不正确");
 
     AccentPalette custom = accent_palette_from_color(COLOR_RGB(0x87, 0x64, 0xB8));
     CHECK(color_equal(custom.base, COLOR_RGB(0x87, 0x64, 0xB8)) && custom.light1.r > custom.base.r && custom.dark1.r < custom.base.r, "由一个颜色生成的深浅不正确");
@@ -898,6 +929,19 @@ static void test_theme(void)
         "切换到深色和自选强调色后颜色不正确");
     theme_set_mode(THEME_LIGHT, NULL);
     CHECK(!theme_is_dark() && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0xFD, 0xFC, 0xF8)), "切换回浅色后颜色不正确");
+
+    // 换成纸牌：没有自选强调色时是钴蓝；"system" 时跟随 Windows；色板里不再有 Windows 默认的蓝色。
+    int simple_presets = theme_accent_preset_count();
+    theme_set_look(LOOK_CARDS);
+    CHECK(theme_is_cards() && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0xFB, 0xFA, 0xF6)) && color_equal(theme_accent().base, THEME_COBALT),
+        "换成纸牌后颜色不正确，或默认强调色不是钴蓝");
+    CHECK(theme_accent_preset_count() == simple_presets - 1 && !wcs_equal_ignore_case(theme_accent_preset(0), L"#0078D4"), "纸牌的强调色色板不应有 Windows 默认的蓝色");
+    theme_set_mode(THEME_LIGHT, L"system");
+    CHECK(!color_equal(theme_accent().base, THEME_COBALT) || color_equal(theme_color(THEME_SYSTEM_ACCENT), THEME_COBALT), "纸牌选了跟随 Windows 时不应是钴蓝");
+    theme_set_mode(THEME_LIGHT, NULL);
+    theme_set_look(LOOK_SIMPLE);
+    CHECK(!theme_is_cards() && color_equal(theme_color(THEME_FLYOUT), COLOR_RGB(0xFD, 0xFC, 0xF8)) && theme_accent_preset_count() == simple_presets,
+        "换回简洁后颜色或色板不正确");
 }
 
 // ───────────── 动画 ─────────────
@@ -1661,6 +1705,8 @@ int main(int argc, char **argv)
     run("program resources", test_program_resources);
     run("log", test_log);
     run("theme", test_theme);
+    run("file suits", test_file_suits);
+    run("shelf motion", test_shelf_motion);
     run("animation", test_animation);
     run("layout and controls", test_layout);
     run("shake detection", test_shake_detection);
@@ -1680,6 +1726,8 @@ int main(int argc, char **argv)
     run("shelf sizes", test_shelf_sizes);
     run("shelf window", test_shelf_window);
     run("shelf window actions", test_shelf_window_actions);
+    run("cards shelf sizes", test_shelf_sizes_cards);
+    run("cards shelf window actions", test_shelf_window_actions_cards);
     run("spare shelf receives paths", test_spare_shelf_receives_paths);
     run("shell thumbnail and imaging thread", test_shell_thumbnail);
     run("file operations", test_file_operations);
@@ -1707,6 +1755,7 @@ int main(int argc, char **argv)
     run("gfx layers", test_gfx_layers);
     run("main window", test_main_window);
     run("main window settings", test_main_window_settings);
+    run("look switch", test_look_switch);
     run("calibration dialog", test_calibration_dialog);
     run("about and onboarding", test_about_and_onboarding);
 

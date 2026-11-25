@@ -31,6 +31,11 @@ static Color mix(Color from, Color to, double amount)
     return COLOR_RGB(mix_channel(from.r, to.r, amount), mix_channel(from.g, to.g, amount), mix_channel(from.b, to.b, amount));
 }
 
+Color color_mix(Color from, Color to, double amount)
+{
+    return mix(from, to, amount);
+}
+
 Color color_over(Color top, Color bottom)
 {
     double top_alpha = top.a / 255.0, bottom_alpha = bottom.a / 255.0;
@@ -107,6 +112,12 @@ bool color_prefers_dark_text(Color fill)
     return color_contrast_ratio(fill, COLOR_BLACK) > color_contrast_ratio(fill, COLOR_WHITE);
 }
 
+bool color_prefers_dark_text_cards(Color fill)
+{
+    // Windows 默认的蓝色上黑字的对比度略高一点，但白字也够清楚，按惯例用白字。
+    return color_contrast_ratio(fill, COLOR_WHITE) < 4.5;
+}
+
 Color color_ensure_contrast(Color color, Color background, double ratio, bool lighten)
 {
     Color target = lighten ? COLOR_WHITE : COLOR_BLACK;
@@ -124,7 +135,8 @@ typedef struct NeutralColor
     uint32_t dark;
 } NeutralColor;
 
-static const NeutralColor neutral_palette[] = {
+// 简洁：和 Windows 11 的设置一样，半透明的白（深色主题下是白色的低透明度）叠在系统材质上。
+static const NeutralColor simple_palette[] = {
     { THEME_TEXT_PRIMARY, 0xE4000000, 0xFFFFFFFF },
     { THEME_TEXT_SECONDARY, 0x9E000000, 0xC5FFFFFF },
     { THEME_TEXT_TERTIARY, 0x72000000, 0x87FFFFFF },
@@ -157,6 +169,49 @@ static const NeutralColor neutral_palette[] = {
     { THEME_SMOKE, 0xCCFBF9F3, 0xCC2B2B2B },
 };
 
+#define CARDS_LIGHT_BACKGROUND 0xFFE8E5DE
+#define CARDS_DARK_BACKGROUND 0xFF1C1B19
+#define CARDS_INK 0xFF15171C
+
+// 纸牌：浅色是象牙白的牌桌和牌面，深色是暖调的深炭色，两套的冷暖一致。
+static const NeutralColor cards_palette[] = {
+    { THEME_TEXT_PRIMARY, CARDS_INK, 0xFFEDEAE3 },
+    { THEME_TEXT_SECONDARY, 0xFF575A63, 0xFFA6A39C },
+    { THEME_TEXT_TERTIARY, 0xFF7A7D85, 0xFF86837C },
+    { THEME_TEXT_DISABLED, 0xFFA3A5AB, 0xFF5F5C56 },
+    { THEME_WINDOW_BACKGROUND, CARDS_LIGHT_BACKGROUND, CARDS_DARK_BACKGROUND },
+    { THEME_LAYER, 0x00000000, 0x00000000 },
+    { THEME_CARD, 0xFFFBFAF6, 0xFF262522 },
+    { THEME_CARD_HOVER, 0xFFFFFFFF, 0xFF2E2D2A },
+    { THEME_CARD_BORDER, 0xFFD2CEC5, 0xFF34322E },
+    { THEME_TABLE_CARD_BORDER, 0xFFC9C5BB, 0xFF3D3B36 },
+    { THEME_CONTROL, 0xFFFBFAF6, 0xFF2A2926 },
+    { THEME_CONTROL_HOVER, 0xFFFFFFFF, 0xFF32312D },
+    { THEME_CONTROL_PRESSED, 0xFFF2EFE8, 0xFF262522 },
+    { THEME_CONTROL_BORDER, 0xFFBDB8AE, 0xFF4A4843 },
+    { THEME_CONTROL_STRONG_BORDER, 0xFF5E6066, 0xFFA6A39C },
+    { THEME_CONTROL_ALT, 0x0D15171C, 0x14EDEAE3 },
+    { THEME_SUBTLE_HOVER, 0x0F15171C, 0x12EDEAE3 },
+    { THEME_SUBTLE_PRESSED, 0x0A15171C, 0x0AEDEAE3 },
+    { THEME_SUBTLE_SELECTED, 0x1415171C, 0x1AEDEAE3 },
+    { THEME_DIVIDER, 0xFFDDD9D0, 0xFF34322E },
+    { THEME_FLYOUT, 0xFFFBFAF6, 0xFF262522 },
+    { THEME_FLYOUT_BORDER, 0xFFC9C5BB, 0xFF3D3B36 },
+    { THEME_SETTING_ROW, 0xFFF2EFE8, 0xFF2E2D2A },
+    { THEME_SETTING_ROW_BORDER, 0xFFE2DED5, 0xFF3A3834 },
+    { THEME_SHELF_SOLID, CARDS_LIGHT_BACKGROUND, CARDS_DARK_BACKGROUND },
+    { THEME_SHELF_BORDER, 0xFFB4AFA4, 0xFF3A3834 },
+    { THEME_SHELF_TILE, 0xFFFFFFFF, 0xFF2E2D2A },
+    { THEME_SHELF_TILE_BORDER, CARDS_INK, 0xFFA6A39C },
+    { THEME_SHELF_UNDER_CARD_BORDER, CARDS_INK, 0xFF6E6B65 },
+    { THEME_ART_FRAME, 0xFFDDD9D0, 0xFF3A3834 },
+    { THEME_SCROLL_THUMB, 0xFF8A8C93, 0xFF6E6B65 },
+    { THEME_SUCCESS, 0xFF0F7B0F, 0xFF6CCB5F },
+    { THEME_CAUTION, 0xFF9D5D00, 0xFFFCE100 },
+    { THEME_CRITICAL, 0xFFC42B1C, 0xFFFF99A4 },
+    { THEME_SMOKE, 0xCCE8E5DE, 0xCC1C1B19 },
+};
+
 static Color color_from_argb(uint32_t value)
 {
     return COLOR_ARGB((uint8_t)(value >> 24), (uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value);
@@ -171,7 +226,7 @@ static Color tint(Color color, double alpha, double shade)
         (uint8_t)rint(color.b * k));
 }
 
-void theme_build_palette(bool dark, AccentPalette accent, Color palette[THEME_COLOR_COUNT])
+static void build_simple_palette(bool dark, AccentPalette accent, Color palette[THEME_COLOR_COUNT])
 {
     Color fill = dark ? accent.light2 : accent.dark1;
     Color background = dark ? COLOR_RGB(0x20, 0x20, 0x20) : COLOR_RGB(0xF9, 0xF7, 0xF1);
@@ -186,12 +241,56 @@ void theme_build_palette(bool dark, AccentPalette accent, Color palette[THEME_CO
     palette[THEME_STACK_EDGE] = tint(fill, 0.05, dark ? 0.12 : 0);
     palette[THEME_SHEET_GLOW] = tint(fill, 0.10, dark ? 0.12 : 0);
     palette[THEME_SHEET_BORDER] = color_with_alpha(fill, 0x29);
-    for (size_t index = 0; index < sizeof(neutral_palette) / sizeof(neutral_palette[0]); index++)
-        palette[neutral_palette[index].id] = color_from_argb(dark ? neutral_palette[index].dark : neutral_palette[index].light);
+    for (size_t index = 0; index < sizeof(simple_palette) / sizeof(simple_palette[0]); index++)
+        palette[simple_palette[index].id] = color_from_argb(dark ? simple_palette[index].dark : simple_palette[index].light);
     // 按强调色的实际亮度选择对比度更高的黑字或白字。
     palette[THEME_TEXT_ON_ACCENT] = color_prefers_dark_text(fill) ? COLOR_ARGB(0xE4, 0, 0, 0) : COLOR_WHITE;
     palette[THEME_SYSTEM_ACCENT] = accent.base;
     palette[THEME_TRANSPARENT] = COLOR_TRANSPARENT;
+}
+
+static void build_cards_palette(bool dark, AccentPalette accent, Color palette[THEME_COLOR_COUNT])
+{
+    Color fill = accent.base;
+    Color background = color_from_argb(dark ? CARDS_DARK_BACKGROUND : CARDS_LIGHT_BACKGROUND);
+    // 牌背和牌桌：浅色主题直接用强调色，深色主题压暗，免得在暗处一大片发亮。
+    Color back = dark ? mix(fill, COLOR_BLACK, 0.45) : fill;
+    Color table = dark ? mix(fill, COLOR_BLACK, 0.52) : fill;
+    memset(palette, 0, sizeof(Color) * THEME_COLOR_COUNT);
+    palette[THEME_ACCENT] = fill;
+    palette[THEME_ACCENT_HOVER] = color_with_alpha(fill, 0xE6);
+    palette[THEME_ACCENT_PRESSED] = color_with_alpha(fill, 0xCC);
+    palette[THEME_ACCENT_TEXT] = color_ensure_contrast(fill, background, 4.5, dark);
+    palette[THEME_ACCENT_SUBTLE] = color_with_alpha(fill, dark ? 0x2E : 0x1F);
+    palette[THEME_ACCENT_FAINT] = color_with_alpha(fill, dark ? 0x18 : 0x10);
+    palette[THEME_CARD_BACK_FILL] = back;
+    palette[THEME_CARD_BACK_LINE] = mix(back, COLOR_BLACK, 0.25);
+    palette[THEME_STACK_EDGE] = back;
+    palette[THEME_SHEET_BORDER] = back;
+    palette[THEME_TABLE_FILL] = table;
+    for (size_t index = 0; index < sizeof(cards_palette) / sizeof(cards_palette[0]); index++)
+        palette[cards_palette[index].id] = color_from_argb(dark ? cards_palette[index].dark : cards_palette[index].light);
+    // 强调色由用户自选，可能很暗也可能很亮：白字够清楚就用白字，和 Windows 一样，太亮的强调色上换成黑字。
+    Color ink = color_from_argb(CARDS_INK);
+    palette[THEME_TEXT_ON_ACCENT] = color_prefers_dark_text_cards(fill) ? ink : COLOR_WHITE;
+    palette[THEME_TABLE_TEXT] = color_prefers_dark_text_cards(table) ? ink : dark ? palette[THEME_TEXT_PRIMARY] : COLOR_WHITE;
+    palette[THEME_SYSTEM_ACCENT] = accent.base;
+    palette[THEME_TRANSPARENT] = COLOR_TRANSPARENT;
+}
+
+void theme_build_palette(Look look, bool dark, AccentPalette accent, Color palette[THEME_COLOR_COUNT])
+{
+    if (look == LOOK_CARDS) build_cards_palette(dark, accent, palette);
+    else build_simple_palette(dark, accent, palette);
+}
+
+void theme_build_patterns(bool dark, const Color palette[THEME_COLOR_COUNT], ThemePattern patterns[THEME_PATTERN_COUNT])
+{
+    Color back = palette[THEME_CARD_BACK_FILL];
+    // 牌背：斜格纹；设置页四周那圈边框和翻牌途中的轮廓都用它。牌背露出的窄边改用斜条纹，几像素宽也看得清。
+    patterns[THEME_PATTERN_SHEET_BORDER] = (ThemePattern){ THEME_PATTERN_LATTICE, back, color_with_alpha(COLOR_WHITE, dark ? 0x1F : 0x29), 8 };
+    patterns[THEME_PATTERN_STACK_EDGE] = (ThemePattern){ THEME_PATTERN_STRIPES, back, mix(back, COLOR_WHITE, dark ? 0.15 : 0.3), 0 };
+    patterns[THEME_PATTERN_TABLE] = (ThemePattern){ THEME_PATTERN_LATTICE, palette[THEME_TABLE_FILL], color_with_alpha(COLOR_WHITE, dark ? 0x0F : 0x12), 12 };
 }
 
 // ───────────── 当前主题 ─────────────
@@ -203,11 +302,14 @@ typedef struct Listener
 } Listener;
 
 static int current_mode = THEME_SYSTEM;
+static Look current_look = LOOK_SIMPLE;
+static bool follow_system_accent;
 static bool has_custom_accent;
 static Color custom_accent;
 static bool current_is_dark;
 static AccentPalette current_accent;
 static Color current_palette[THEME_COLOR_COUNT];
+static ThemePattern current_patterns[THEME_PATTERN_COUNT];
 static bool palette_ready;
 static Listener *listeners;
 static int listener_count;
@@ -216,14 +318,20 @@ static const wchar_t *const accent_presets[] = {
     L"#0078D4", L"#8764B8", L"#C239B3", L"#E74856", L"#CA5010", L"#498205", L"#038387", L"#68768A"
 };
 
+/// 纸牌的默认强调色是钴蓝，色板里就不再放 Windows 默认的蓝色。
+static int first_preset(void)
+{
+    return current_look == LOOK_CARDS ? 1 : 0;
+}
+
 int theme_accent_preset_count(void)
 {
-    return (int)(sizeof(accent_presets) / sizeof(accent_presets[0]));
+    return (int)(sizeof(accent_presets) / sizeof(accent_presets[0])) - first_preset();
 }
 
 const wchar_t *theme_accent_preset(int index)
 {
-    return accent_presets[index];
+    return accent_presets[index + first_preset()];
 }
 
 #ifdef _WIN32
@@ -270,15 +378,18 @@ bool theme_resolve_is_dark(int mode, bool system_is_dark)
 void theme_refresh(void)
 {
     AccentPalette system = read_system_accent();
-    AccentPalette accent = has_custom_accent ? accent_palette_from_color(custom_accent) : system;
+    // 自选的颜色两种风格一样；没有自选时简洁跟随 Windows，纸牌用钴蓝（存为 "system" 时也跟随 Windows）。
+    AccentPalette accent = has_custom_accent ? accent_palette_from_color(custom_accent)
+                           : current_look == LOOK_CARDS && !follow_system_accent ? accent_palette_from_color(THEME_COBALT) : system;
     bool dark = theme_resolve_is_dark(current_mode, read_system_dark_mode());
 
     Color palette[THEME_COLOR_COUNT];
-    theme_build_palette(dark, accent, palette);
+    theme_build_palette(current_look, dark, accent, palette);
     palette[THEME_SYSTEM_ACCENT] = system.base;
     // Windows 的任何设置变化都会走到这里，颜色没变时不用通知。
     if (palette_ready && dark == current_is_dark && memcmp(palette, current_palette, sizeof(palette)) == 0) return;
     memcpy(current_palette, palette, sizeof(palette));
+    theme_build_patterns(dark, current_palette, current_patterns);
     current_is_dark = dark;
     current_accent = accent;
     palette_ready = true;
@@ -294,15 +405,40 @@ void theme_refresh(void)
 void theme_set_mode(int mode, const wchar_t *accent)
 {
     current_mode = mode;
+    follow_system_accent = accent && wcscmp(accent, THEME_SYSTEM_ACCENT_VALUE) == 0;
     COLORREF rgb;
     has_custom_accent = accent_color_parse(accent, &rgb);
     if (has_custom_accent) custom_accent = COLOR_RGB(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb));
     theme_refresh();
 }
 
-void theme_initialize(int mode, const wchar_t *accent)
+void theme_initialize(int mode, const wchar_t *accent, Look look)
 {
+    current_look = look == LOOK_CARDS ? LOOK_CARDS : LOOK_SIMPLE;
     theme_set_mode(mode, accent);
+}
+
+void theme_set_look(Look look)
+{
+    look = look == LOOK_CARDS ? LOOK_CARDS : LOOK_SIMPLE;
+    if (look == current_look) return;
+    current_look = look;
+    theme_refresh();
+}
+
+Look theme_look(void)
+{
+    return current_look;
+}
+
+bool theme_is_cards(void)
+{
+    return current_look == LOOK_CARDS;
+}
+
+int theme_icon_resource(void)
+{
+    return current_look == LOOK_CARDS ? 2 : 1;
 }
 
 bool theme_is_dark(void)
@@ -315,6 +451,12 @@ Color theme_color(ThemeColor id)
 {
     if (!palette_ready) theme_refresh();
     return id >= 0 && id < THEME_COLOR_COUNT ? current_palette[id] : COLOR_TRANSPARENT;
+}
+
+ThemePattern theme_pattern(ThemePatternId id)
+{
+    if (!palette_ready) theme_refresh();
+    return id >= 0 && id < THEME_PATTERN_COUNT ? current_patterns[id] : (ThemePattern){ THEME_PATTERN_LATTICE, COLOR_TRANSPARENT, COLOR_TRANSPARENT, 8 };
 }
 
 AccentPalette theme_accent(void)

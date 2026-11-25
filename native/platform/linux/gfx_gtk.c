@@ -260,6 +260,19 @@ bool gfx_end_image(const wchar_t *path)
     return status == CAIRO_STATUS_SUCCESS;
 }
 
+GfxImage *gfx_end_image_capture(void)
+{
+    if (!offscreen_image) return NULL;
+    finish_image();
+    GfxImage *image = xcalloc(1, sizeof(*image));
+    image->surface = offscreen_image;
+    image->width = cairo_image_surface_get_width(offscreen_image);
+    image->height = cairo_image_surface_get_height(offscreen_image);
+    image->references = 1;
+    offscreen_image = NULL;
+    return image;
+}
+
 HBITMAP gfx_end_image_bitmap(void)
 {
     // Wayland 没有跟手的拖动图像；这个接口留给以后的自绘拖放。
@@ -574,6 +587,103 @@ void gfx_pop_layer(void)
 }
 
 // ───────────── 渐变 ─────────────
+
+// ───────────── 图案（纸牌风格的牌背、牌桌） ─────────────
+
+/// 图案的画刷源，从 (x, y) 开始平铺；建不了时返回 NULL，调用方改用底色。坐标是 DIP。
+static cairo_pattern_t *pattern_source(const ThemePattern *pattern, float x, float y)
+{
+    cairo_pattern_t *source = NULL;
+    if (pattern->kind == THEME_PATTERN_LATTICE && pattern->size > 0)
+    {
+        // 斜格纹：一格画一个叉，平铺后连成菱形格子；线宽 1。
+        int pixels = (int)lroundf(pattern->size);
+        if (pixels < 2) pixels = 2;
+        cairo_surface_t *tile = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pixels, pixels);
+        if (cairo_surface_status(tile) != CAIRO_STATUS_SUCCESS)
+        {
+            cairo_surface_destroy(tile);
+            return NULL;
+        }
+        cairo_t *tile_cairo = cairo_create(tile);
+        set_color(tile_cairo, pattern->fill);
+        cairo_paint(tile_cairo);
+        set_color(tile_cairo, pattern->line);
+        cairo_set_line_width(tile_cairo, 1);
+        cairo_move_to(tile_cairo, 0, 0);
+        cairo_line_to(tile_cairo, pixels, pixels);
+        cairo_stroke(tile_cairo);
+        cairo_move_to(tile_cairo, pixels, 0);
+        cairo_line_to(tile_cairo, 0, pixels);
+        cairo_stroke(tile_cairo);
+        cairo_destroy(tile_cairo);
+        source = cairo_pattern_create_for_surface(tile);
+        cairo_surface_destroy(tile);
+        if (cairo_pattern_status(source) != CAIRO_STATUS_SUCCESS)
+        {
+            cairo_pattern_destroy(source);
+            return NULL;
+        }
+        cairo_pattern_set_extend(source, CAIRO_EXTEND_REPEAT);
+    }
+    else
+    {
+        // 45° 的条纹，两种颜色各 2 DIP 宽：从 (0, 0) 到 (2.83, 2.83) 正好一个周期，重复平铺。
+        source = cairo_pattern_create_linear(0, 0, 2.83, 2.83);
+        cairo_pattern_add_color_stop_rgba(source, 0, pattern->fill.r / 255.0, pattern->fill.g / 255.0, pattern->fill.b / 255.0,
+            pattern->fill.a / 255.0);
+        cairo_pattern_add_color_stop_rgba(source, 0.5, pattern->fill.r / 255.0, pattern->fill.g / 255.0, pattern->fill.b / 255.0,
+            pattern->fill.a / 255.0);
+        cairo_pattern_add_color_stop_rgba(source, 0.5, pattern->line.r / 255.0, pattern->line.g / 255.0, pattern->line.b / 255.0,
+            pattern->line.a / 255.0);
+        cairo_pattern_add_color_stop_rgba(source, 1, pattern->line.r / 255.0, pattern->line.g / 255.0, pattern->line.b / 255.0,
+            pattern->line.a / 255.0);
+        cairo_pattern_set_extend(source, CAIRO_EXTEND_REPEAT);
+    }
+    cairo_matrix_t matrix;
+    cairo_matrix_init_translate(&matrix, -x, -y);
+    cairo_pattern_set_matrix(source, &matrix);
+    return source;
+}
+
+void gfx_fill_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern)
+{
+    cairo_t *cairo = current();
+    if (!cairo || !pattern || rect.right <= rect.left || rect.bottom <= rect.top) return;
+    cairo_pattern_t *source = pattern_source(pattern, rect.left, rect.top);
+    if (!source) return;
+    rounded_path_uniform(cairo, rect, radius);
+    cairo_set_source(cairo, source);
+    cairo_fill(cairo);
+    cairo_pattern_destroy(source);
+}
+
+void gfx_stroke_rounded_pattern(GfxRect rect, float radius, const ThemePattern *pattern, float width)
+{
+    cairo_t *cairo = current();
+    if (!cairo || !pattern || width <= 0 || rect.right <= rect.left || rect.bottom <= rect.top) return;
+    GfxRect inner = inset(rect, width / 2);
+    if (inner.right < inner.left || inner.bottom < inner.top) return;
+    cairo_pattern_t *source = pattern_source(pattern, rect.left, rect.top);
+    if (!source) return;
+    rounded_path_uniform(cairo, inner, radius > width / 2 ? radius - width / 2 : 0);
+    cairo_set_source(cairo, source);
+    cairo_set_line_width(cairo, width);
+    cairo_stroke(cairo);
+    cairo_pattern_destroy(source);
+}
+
+void gfx_fill_rounded_corners_pattern(GfxRect rect, float top, float bottom, const ThemePattern *pattern)
+{
+    cairo_t *cairo = current();
+    if (!cairo || !pattern) return;
+    cairo_pattern_t *source = pattern_source(pattern, rect.left, rect.top);
+    if (!source) return;
+    rounded_path(cairo, rect, top, bottom);
+    cairo_set_source(cairo, source);
+    cairo_fill(cairo);
+    cairo_pattern_destroy(source);
+}
 
 static void set_gradient_stops(cairo_pattern_t *pattern, const GfxStop *stops, int count)
 {

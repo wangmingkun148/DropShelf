@@ -1,4 +1,4 @@
-# 改动 C 版（native 目录）或它用到的版本号、清单、安装脚本时，编译并运行 C 版的测试。
+# 改动 C 版（native 目录）或安装脚本时，编译并运行 C 版的测试。
 # 测试会打开窗口、用剪贴板，设置和日志写到临时文件夹；构建机的屏幕较小时，个别需要大窗口的检查会跳过。
 name: Build
 
@@ -8,17 +8,11 @@ on:
     branches: ['**']
     paths:
       - 'native/**'
-      - 'src/DropShelf/DropShelf.csproj'
-      - 'src/DropShelf/app.manifest'
-      - 'src/DropShelf/Assets/**'
       - 'installer/**'
       - '.github/workflows/build.yml'
   pull_request:
     paths:
       - 'native/**'
-      - 'src/DropShelf/DropShelf.csproj'
-      - 'src/DropShelf/app.manifest'
-      - 'src/DropShelf/Assets/**'
       - 'installer/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
