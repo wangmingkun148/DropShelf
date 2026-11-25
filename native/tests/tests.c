@@ -250,7 +250,8 @@ static void test_settings_round_trip(void)
 {
     AppSettings defaults;
     settings_load(&defaults);
-    CHECK(defaults.close_when_empty && defaults.show_getting_started && defaults.performance_mode == PERFORMANCE_AUTO, "默认开关不正确");
+    CHECK(defaults.close_when_empty && defaults.pause_in_fullscreen && defaults.show_getting_started && defaults.performance_mode == PERFORMANCE_AUTO,
+        "默认开关不正确");
     CHECK(defaults.accent_color == NULL, "默认强调色应跟随 Windows");
     CHECK(defaults.quick_shelf_size == SHELF_SIZE_MEDIUM, "默认尺寸不是中档");
     CHECK(defaults.quick_action_layout == LAYOUT_FOUR &&
@@ -286,6 +287,7 @@ static void test_settings_round_trip(void)
     strlist_add(&defaults.quick_action_slots, L"CopyFullPath");
     strlist_add(&defaults.quick_action_slots, L"MoveTo");
     defaults.close_when_empty = false;
+    defaults.pause_in_fullscreen = false;
     defaults.show_getting_started = false;
     defaults.performance_mode = PERFORMANCE_NORMAL;
     defaults.accent_color = wcs_dup(L"#8764B8");
@@ -313,7 +315,8 @@ static void test_settings_round_trip(void)
     CHECK(loaded.custom_action_count == 2 && wcscmp(loaded.custom_actions[1].id, custom_id) == 0 &&
           wcscmp(loaded.custom_actions[1].folder, temporary_directory) == 0 && loaded.custom_actions[1].folder_mode == TRANSFER_COPY &&
           wcscmp(loaded.custom_actions[1].name, L"素材") == 0, "自定义操作未恢复");
-    CHECK(!loaded.close_when_empty && !loaded.show_getting_started && loaded.performance_mode == PERFORMANCE_NORMAL, "开关未恢复");
+    CHECK(!loaded.close_when_empty && !loaded.pause_in_fullscreen && !loaded.show_getting_started && loaded.performance_mode == PERFORMANCE_NORMAL,
+        "开关未恢复");
     CHECK(wcs_equal(loaded.accent_color, L"#8764B8") && wcscmp(loaded.hotkey, L"Ctrl+Alt+D") == 0 && loaded.has_completed_first_run, "强调色、快捷键或首次运行状态未恢复");
     CHECK(loaded.window_left == 624 && loaded.window_top == 160.5, "窗口位置未恢复");
     CHECK(list_is(&loaded.watched_folders, 2, L"C:\\Users\\me\\Downloads", L"D:\\收件") && loaded.watch_peek_seconds == 25 &&

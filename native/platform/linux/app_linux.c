@@ -264,7 +264,7 @@ static bool gestures_blocked_at(POINT point)
         log_info(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
         return true;
     }
-    if (foreground_is_fullscreen())
+    if (app_settings()->pause_in_fullscreen && foreground_is_fullscreen())
     {
         log_info(L"识别到手势 (%ld, %ld)，但前台全屏，不弹出置物架", point.x, point.y);
         return true;
@@ -322,8 +322,8 @@ static bool gestures_paused;
 
 static void pause_if_blocked(void)
 {
-    // 全屏或屏蔽的应用在前台时，手势和快捷键都让给前台。
-    bool blocked = foreground_watcher_is_blocked() || foreground_is_fullscreen();
+    // 全屏（设置里开着“全屏时暂停”时）或屏蔽的应用在前台时，手势和快捷键都让给前台。
+    bool blocked = foreground_watcher_is_blocked() || (app_settings()->pause_in_fullscreen && foreground_is_fullscreen());
     gesture_service_set_paused(blocked);
     hotkey_service_set_paused(blocked);
     if (blocked == gestures_paused) return;

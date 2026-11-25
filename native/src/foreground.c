@@ -118,6 +118,21 @@ void foreground_watcher_stop(void)
     is_blocked = false;
 }
 
+bool foreground_is_fullscreen(void)
+{
+    // 盖满所在显示器的窗口算全屏。最大化的不算：任务栏自动隐藏时它也盖满屏幕；
+    // 桌面也不算：从桌面拖文件是最常见的用法。
+    HWND window = GetForegroundWindow();
+    if (!window || window == GetShellWindow() || IsZoomed(window)) return false;
+    wchar_t name[16];
+    if (GetClassNameW(window, name, ARRAYSIZE(name)) && (wcscmp(name, L"WorkerW") == 0 || wcscmp(name, L"Progman") == 0)) return false;
+    RECT rect;
+    MONITORINFO monitor = { .cbSize = sizeof(monitor) };
+    if (!GetWindowRect(window, &rect) || !GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONULL), &monitor)) return false;
+    return rect.left <= monitor.rcMonitor.left && rect.top <= monitor.rcMonitor.top &&
+           rect.right >= monitor.rcMonitor.right && rect.bottom >= monitor.rcMonitor.bottom;
+}
+
 // ───────────── 有窗口的程序 ─────────────
 
 typedef struct ProcessSet

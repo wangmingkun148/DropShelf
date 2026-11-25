@@ -332,9 +332,17 @@ static double milliseconds_since(LARGE_INTEGER start)
 
 static bool is_blocked_at(POINT point)
 {
-    if (!foreground_watcher_is_blocked_at(point)) return false;
-    log_trace(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
-    return true;
+    if (foreground_watcher_is_blocked_at(point))
+    {
+        log_trace(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
+        return true;
+    }
+    if (settings.pause_in_fullscreen && foreground_is_fullscreen())
+    {
+        log_trace(L"识别到手势 (%ld, %ld)，但前台是全屏的程序，不弹出置物架", point.x, point.y);
+        return true;
+    }
+    return false;
 }
 
 static void on_gesture(GestureEvent event, ScreenEdge edge, POINT point)
@@ -477,8 +485,9 @@ static HWND create_message_window(HINSTANCE instance)
 
 static void on_hotkey_pressed(void)
 {
-    // 屏蔽的应用在前台时不响应（快捷键本该已经注销，这里再确认一次）。
-    if (!foreground_watcher_check()) app_new_shelf();
+    // 屏蔽的应用在前台时不响应（快捷键本该已经注销，这里再确认一次）；全屏的程序在前台时也不响应。
+    if (foreground_watcher_check() || (settings.pause_in_fullscreen && foreground_is_fullscreen())) return;
+    app_new_shelf();
 }
 
 bool app_start(HINSTANCE instance, bool start_in_background)

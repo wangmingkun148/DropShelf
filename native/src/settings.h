@@ -109,6 +109,8 @@ typedef struct AppSettings
 
     /// 这些程序（文件名，如 Photoshop.exe）在前台时不自动弹出置物架，也不响应快捷键。
     StrList blocked_apps;
+    /// 全屏的程序（游戏、全屏视频、演示）在前台时，晃动、边缘停留和快捷键都不弹出置物架。
+    bool pause_in_fullscreen;
 
     int theme;
     wchar_t *accent_color;          // 自选的强调色（#RRGGBB）；"system" 时跟随 Windows；NULL 时简洁跟随 Windows、纸牌用钴蓝

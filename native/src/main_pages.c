@@ -36,7 +36,7 @@ static struct
     UiElement *hotkey, *hotkey_description;
     UiElement *performance, *performance_description;
     UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
-    UiElement *blocked_list;
+    UiElement *blocked_list, *pause_fullscreen;
     UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
     UiElement *shelf_size, *drag_out_mode, *close_when_empty;
     UiElement *history_description, *clear_history;
@@ -93,6 +93,9 @@ static void on_layout(int index, void *context)
 
 static void change_close_when_empty(AppSettings *settings, void *context) { settings->close_when_empty = *(bool *)context; }
 static void on_close_when_empty(bool checked, void *context) { (void)context; app_update_settings(change_close_when_empty, &checked); }
+
+static void change_pause_fullscreen(AppSettings *settings, void *context) { settings->pause_in_fullscreen = *(bool *)context; }
+static void on_pause_fullscreen(bool checked, void *context) { (void)context; app_update_settings(change_pause_fullscreen, &checked); }
 
 static bool startup_failed;
 
@@ -1129,6 +1132,8 @@ static void build_shelf_page(void)
     const StringId dwells[3] = { STR_DwellShort, STR_DwellMedium, STR_DwellLong };
     P.edge_dwell = segmented(dwells, 3, settings->edge_dwell, on_edge_dwell);
     P.edge_dwell_card = add_card(content, GLYPH_TIMER, UI_STR(STR_EdgeDwellHeader), UI_STR(STR_EdgeDwellDescription), P.edge_dwell, NULL);
+    P.pause_fullscreen = ui_toggle(settings->pause_in_fullscreen, on_pause_fullscreen, NULL);
+    add_card(content, GLYPH_EXPAND, UI_STR(STR_PauseInFullscreen), UI_STR(STR_PauseInFullscreenDescription), P.pause_fullscreen, NULL);
     P.add_app_button = wide_button(STR_AddApp, on_add_app);
     add_card(content, GLYPH_SHIELD, UI_STR(STR_BlockedAppsHeader), UI_STR(STR_BlockedAppsDescription), P.add_app_button, NULL);
     P.blocked_list = ui_stack(false, 0);
@@ -1832,6 +1837,7 @@ void pages_refresh(void)
     }
     update_sensitivity_description();
     ui_segmented_set_selected(P.edge_dwell, settings->edge_dwell);
+    ui_toggle_set_checked(P.pause_fullscreen, settings->pause_in_fullscreen);
     rebuild_blocked_list();
     ui_segmented_set_selected(P.shelf_size, settings->quick_shelf_size);
     ui_segmented_set_selected(P.drag_out_mode, settings->drag_out_mode);

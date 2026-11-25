@@ -19,6 +19,10 @@ bool foreground_watcher_check(void);
 bool foreground_watcher_is_blocked_at(POINT point);
 void foreground_watcher_stop(void);
 
+/// 前台窗口是不是全屏的程序（游戏、全屏视频、演示）。识别到手势和按快捷键时现查，不跟踪变化：
+/// 同一个窗口进出全屏（按 F11、双击视频）时没有通知，暂停状态一旦记下就恢复不了。
+bool foreground_is_fullscreen(void);
+
 /// 当前有可见窗口的程序文件名，按名称排序，不含本程序。
 void foreground_windowed_apps(StrList *names);
 

@@ -90,6 +90,8 @@ STR(EdgeDwellDescription, L"拖到屏幕左、右或上边缘后，停留多久�
 STR(DwellShort, L"0.3 秒", L"0.3 s")
 STR(DwellMedium, L"0.6 秒", L"0.6 s")
 STR(DwellLong, L"1 秒", L"1 s")
+STR(PauseInFullscreen, L"全屏时暂停", L"Pause in fullscreen")
+STR(PauseInFullscreenDescription, L"全屏的程序（游戏、全屏视频、演示）在前台时，晃动、边缘停留和快捷键都不弹出置物架", L"Shake, screen-edge pause and the keyboard shortcut don't open a shelf while a fullscreen app (a game, fullscreen video or presentation) is in front")
 STR(BlockedAppsHeader, L"屏蔽的应用", L"Excluded apps")
 STR(BlockedAppsDescription, L"这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", L"Shelves don't open while one of these apps is in the foreground or while you drag over its windows, and the keyboard shortcut goes to the app instead")
 STR(AddApp, L"添加应用", L"Add app")
