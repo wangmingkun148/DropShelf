@@ -162,6 +162,10 @@ Linux：
 
 代码签名和提交到 winget 是可选的，配置好之后发布时自动进行，做法见 [docs/publishing.md](docs/publishing.md)。
 
+## 致谢
+
+- Linux 版（原生 Wayland，C + GTK 4 + gtk4-layer-shell）由 [@pingod](https://github.com/pingod) 贡献（[#4](https://github.com/wangmingkun148/DropShelf/pull/4)），XWayland 程序的拖放来自 [#5](https://github.com/wangmingkun148/DropShelf/pull/5)。
+
 ## 许可证
 
 [MIT](LICENSE)

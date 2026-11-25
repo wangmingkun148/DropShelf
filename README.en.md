@@ -157,6 +157,10 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
 
+## Acknowledgements
+
+- The Linux version (native Wayland, C + GTK 4 + gtk4-layer-shell) was contributed by [@pingod](https://github.com/pingod) in [#4](https://github.com/wangmingkun148/DropShelf/pull/4); drag and drop with XWayland apps comes from [#5](https://github.com/wangmingkun148/DropShelf/pull/5).
+
 ## License
 
 [MIT](LICENSE)
