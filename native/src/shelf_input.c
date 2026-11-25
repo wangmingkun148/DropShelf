@@ -1813,7 +1813,12 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     (void)window;
     ShelfWindow *shelf = context;
     ShelfModel *model = shelf->model;
-    if (shelf->closing || shelf->closed || model->busy || shelf->dragging_out) return NULL;
+    if (shelf->closing || shelf->closed || model->busy || shelf->dragging_out)
+    {
+        log_trace(L"拖出：这次还不能开始（关闭 %ls，忙 %ls，已经在拖出 %ls）", shelf->closing || shelf->closed ? L"是" : L"否",
+            model->busy ? L"是" : L"否", shelf->dragging_out ? L"是" : L"否");
+        return NULL;
+    }
     int count = 0;
     ShelfItem **items = drag_items_at(shelf, x, y, &count);
     if (!items || count == 0)
@@ -1841,42 +1846,67 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             has_temporary |= item->temporary;
         }
     }
-    // 有文件要拖出时，一起选中的文字和链接各写成一个文件跟着走，不再被落下。
+    // 文件和文字一起选中时按设置决定送哪些。文档程序一次只肯插入一种内容：
+    // 自动分批按置物架里的顺序一项一项地送；智能把文字和图片合成一份 HTML，放下后再补送文字。
+    int mixed = app_settings()->mixed_drag;
+    bool mixed_selection = file_count > 0 && other_count > 0;
+    if (mixed_selection && mixed == MIXED_DRAG_TEXT) file_count = 0;
+    bool mixed_text = file_count > 0 && other_count > 0 && mixed != MIXED_DRAG_FILES;
+    bool mixed_smart = mixed_text && mixed == MIXED_DRAG_SMART;
+    bool mixed_batch = mixed_text && mixed == MIXED_DRAG_BATCH;
+    // 一起送的时候，文字和链接各写成一个文件跟着走：走 GTK 拖动的 Wayland 程序收到的还是文件列表。
     StrList extra = {0};
-    if (file_count > 0 && other_count > 0) shelf_model_write_for_drag(model, others, other_count, &extra);
-    bool carried = file_count > 0 && extra.count == other_count && other_count > 0;
+    if (mixed_text) shelf_model_write_for_drag(model, others, other_count, &extra);
+    // 文字和链接连在一起：智能模式用来合成 HTML，也可以直接当作文字拖出。
+    WStr joined = {0};
+    for (int index = 0; index < other_count; index++)
+    {
+        if (others[index]->kind != ITEM_TEXT && others[index]->kind != ITEM_LINK) continue;
+        if (joined.length > 0) wstr_append(&joined, L"\n");
+        wstr_append(&joined, others[index]->value);
+    }
+    char *utf8_text = joined.length > 0 ? utf8_from_wide(joined.data, NULL) : NULL;
+    wstr_free(&joined);
+    bool text_planned = mixed_text && utf8_text && *utf8_text;
     ShelfItem **dragged = xalloc((size_t)count * sizeof(ShelfItem *));
     int dragged_count = 0;
     if (file_count > 0)
     {
         memcpy(dragged, files, (size_t)file_count * sizeof(ShelfItem *));
         dragged_count = file_count;
-        if (carried)
+        // 一起送的模式把文字也交给对方（HTML、补送或分批）；只送文件时文字留在置物架。
+        if (text_planned)
         {
             memcpy(dragged + dragged_count, others, (size_t)other_count * sizeof(ShelfItem *));
             dragged_count += other_count;
         }
         for (int index = 0; index < dragged_count; index++) shelf_item_retain(dragged[index]);
-        StrList paths = {0};
-        for (int index = 0; index < file_count; index++) strlist_add(&paths, files[index]->value);
-        for (int index = 0; index < extra.count; index++) strlist_add(&paths, extra.items[index]);
-        GFile **objects = g_new0(GFile *, (gsize)paths.count);
-        // 路径的 UTF-8 版本留一份：光标停在 XWayland 程序上时，自己的 X11 拖动源要用。
-        char **names = xalloc((size_t)paths.count * sizeof(char *));
-        int object_count = 0;
-        for (int index = 0; index < paths.count; index++)
+        // 走 GTK 拖动的 Wayland 程序：临时 .txt 跟着文件列表一起给。
+        StrList provider_paths = {0};
+        for (int index = 0; index < file_count; index++) strlist_add(&provider_paths, files[index]->value);
+        for (int index = 0; index < extra.count; index++) strlist_add(&provider_paths, extra.items[index]);
+        GFile **objects = g_new0(GFile *, (gsize)provider_paths.count);
+        int list_count = 0;
+        for (int index = 0; index < provider_paths.count; index++)
         {
-            size_t length = 0;
-            char *utf8 = utf8_from_wide(paths.items[index], &length);
+            char *utf8 = utf8_from_wide(provider_paths.items[index], NULL);
             if (!utf8) continue;
-            objects[object_count] = g_file_new_for_path(utf8);
-            names[object_count] = utf8;
-            object_count++;
+            objects[list_count++] = g_file_new_for_path(utf8);
+            free(utf8);
         }
-        strlist_clear(&paths);
-        GdkFileList *list = object_count > 0 ? gdk_file_list_new_from_array(objects, (gsize)object_count) : NULL;
-        for (int index = 0; index < object_count; index++) g_object_unref(objects[index]);
+        strlist_clear(&provider_paths);
+        GdkFileList *list = list_count > 0 ? gdk_file_list_new_from_array(objects, (gsize)list_count) : NULL;
+        for (int index = 0; index < list_count; index++) g_object_unref(objects[index]);
         g_free(objects);
+        // 自己的 X11 拖动源只给真正的文件：文字要么在 HTML 里，要么补送，不再混一个 .txt 进去。
+        char **names = xalloc((size_t)(file_count ? file_count : 1) * sizeof(char *));
+        int object_count = 0;
+        for (int index = 0; index < file_count; index++)
+        {
+            char *utf8 = utf8_from_wide(files[index]->value, NULL);
+            if (!utf8) continue;
+            names[object_count++] = utf8;
+        }
         if (list)
         {
             provider = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
@@ -1885,7 +1915,51 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             g_boxed_free(GDK_TYPE_FILE_LIST, list);
             *actions = gdk_action(drag_allowed_effects(shelf->move_mode, has_temporary || extra.count > 0));
             if (!*actions) *actions = GDK_ACTION_COPY;
-            xdnd_source_set_payload((const char *const *)names, object_count, NULL, (*actions & GDK_ACTION_MOVE) != 0);
+            bool move = (*actions & GDK_ACTION_MOVE) != 0;
+            if (mixed_batch)
+            {
+                // 自动分批：按置物架里的顺序一项一项地送。第一批跟着这次拖动走，
+                // 后面的排进 X11 拖动源，真正放下以后一批一批自动送过去。
+                bool first = true;
+                for (int index = 0; index < count; index++)
+                {
+                    ShelfItem *item = items[index];
+                    char *one = NULL;
+                    if (shelf_item_is_file_system(item))
+                    {
+                        if (!shelf_item_refresh_availability(item)) continue;
+                        one = utf8_from_wide(item->value, NULL);
+                    }
+                    else if (item->kind == ITEM_TEXT || item->kind == ITEM_LINK)
+                    {
+                        if (item->value && *item->value) one = utf8_from_wide(item->value, NULL);
+                    }
+                    if (!one || !*one)
+                    {
+                        free(one);
+                        continue;
+                    }
+                    if (first)
+                    {
+                        if (shelf_item_is_file_system(item)) xdnd_source_set_payload((const char *const *)&one, 1, NULL, NULL, move);
+                        else xdnd_source_set_payload(NULL, 0, one, NULL, false);
+                        first = false;
+                    }
+                    else if (shelf_item_is_file_system(item)) xdnd_source_add_batch((const char *const *)&one, 1, NULL);
+                    else xdnd_source_add_batch(NULL, 0, one);
+                    free(one);
+                }
+                // 一个能送的都没有（文件全找不到了）：还是按整组文件交过去，至少不让这次拖动变成空的。
+                if (first) xdnd_source_set_payload((const char *const *)names, object_count, NULL, NULL, move);
+            }
+            else
+            {
+                char *html = mixed_smart ? xdnd_source_html_build(utf8_text, (const char *const *)names, object_count) : NULL;
+                xdnd_source_set_payload((const char *const *)names, object_count, NULL, html, move);
+                // 智能：HTML 里已经有文字，可文档程序常常只肯从文件列表里插图片；放下后再补一批纯文字。
+                if (text_planned) xdnd_source_add_batch(NULL, 0, utf8_text);
+                free(html);
+            }
         }
         for (int index = 0; index < object_count; index++) free(names[index]);
         free(names);
@@ -1893,28 +1967,18 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     else
     {
         // 没有文件：文字和链接连在一起当作文字拖出。
-        WStr text = {0};
         for (int index = 0; index < other_count; index++)
-        {
-            if (others[index]->kind != ITEM_TEXT && others[index]->kind != ITEM_LINK) continue;
-            if (text.length > 0) wstr_append(&text, L"\n");
-            wstr_append(&text, others[index]->value);
-            dragged[dragged_count++] = shelf_item_retain(others[index]);
-        }
-        if (text.length > 0)
+            if (others[index]->kind == ITEM_TEXT || others[index]->kind == ITEM_LINK)
+                dragged[dragged_count++] = shelf_item_retain(others[index]);
+        if (utf8_text && *utf8_text)
         {
             // GTK 要的是 UTF-8：直接给 wchar_t 那边收到的是乱码，拖出去的文字也会坏掉。
-            char *utf8_text = utf8_from_wide(text.data, NULL);
-            if (utf8_text)
-            {
-                provider = gdk_content_provider_new_typed(G_TYPE_STRING, utf8_text);
-                xdnd_source_set_payload(NULL, 0, utf8_text, false);
-                free(utf8_text);
-            }
+            provider = gdk_content_provider_new_typed(G_TYPE_STRING, utf8_text);
+            xdnd_source_set_payload(NULL, 0, utf8_text, NULL, false);
         }
-        wstr_free(&text);
         *actions = GDK_ACTION_COPY;
     }
+    free(utf8_text);
     strlist_clear(&extra);
     free(files);
     free(others);
@@ -2140,7 +2204,23 @@ static ShelfTarget hit_test(ShelfWindow *shelf, float x, float y, int *row)
     if (!in_rect(layout->body, x, y)) return TARGET_NONE;
     if (shelf->model->count == 0) return TARGET_EMPTY;
     if (shelf->switching) return TARGET_NONE;
-    if (!shelf->shown_expanded) return in_rect(layout->stack, x, y) ? TARGET_STACK : TARGET_NONE;
+    if (!shelf->shown_expanded)
+    {
+        // 堆叠下面的分类标签在堆叠范围里，先看它们。
+        for (int index = 0; index < layout->caption_tag_count; index++)
+            if (in_rect(layout->caption_tags[index], x, y))
+            {
+                *row = layout->caption_tag_kinds[index];
+                return TARGET_FILTER;
+            }
+        return in_rect(layout->stack, x, y) ? TARGET_STACK : TARGET_NONE;
+    }
+    for (int index = 0; index < layout->list_tag_count; index++)
+        if (in_rect(layout->list_tags[index], x, y))
+        {
+            *row = layout->list_tag_kinds[index];
+            return TARGET_FILTER;
+        }
     if (!in_rect(layout->list, x, y)) return TARGET_NONE;
     if (layout->scrollable && x >= layout->scroll_track.left) return TARGET_SCROLLBAR;
 #ifdef LOOK_VARIANT_CARDS
@@ -2355,6 +2435,19 @@ static void click(ShelfWindow *shelf, ShelfTarget target, int row)
             break;
         case TARGET_ACTION:
             run_action(shelf, row);
+            break;
+        case TARGET_FILTER:
+            if (row >= 0 && row < SHELF_KIND_COUNT)
+            {
+                model->has_interacted = true;
+                if (shelf_model_filter_kind(model) == row) shelf_model_set_filter(model, SHELF_FILTER_NONE);
+                else
+                {
+                    shelf_model_set_filter(model, row);
+                    // 点标签就是想看这一类：收起时顺手把列表摊开。
+                    if (!model->expanded) expand(shelf);
+                }
+            }
             break;
         default:
             break;
@@ -2590,6 +2683,7 @@ LPCWSTR shelf_on_cursor(UiWindow *window, void *context, float x, float y)
         case TARGET_ROW_REMOVE:
         case TARGET_TOAST_ACTION:
         case TARGET_ACTION:
+        case TARGET_FILTER:
             return IDC_HAND;
         default:
             return IDC_ARROW;

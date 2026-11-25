@@ -59,12 +59,31 @@ void xdnd_remove_sink(XdndSink *sink);
 // ───────────── 从置物架拖到 XWayland 程序 ─────────────
 
 /// 把这次要拖出的东西交给 X11 拖动源：paths 是 UTF-8 的文件路径（没有文件时传 NULL），
-/// text 是纯文字。move_allowed 表示置物架那边按“移动”算。
-void xdnd_source_set_payload(const char *const *paths, int count, const char *text, bool move_allowed);
+/// text 是纯文字；html 是一份 HTML（混合拖出时把文字和图片放在一起），没有时传 NULL。
+/// move_allowed 表示置物架那边按“移动”算。
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed);
+
+/// 再排一批：这次拖动真正放下以后，自动按排队的顺序一批一批地送给同一个窗口
+/// （每一批都被对方收下才接着送下一批）。paths 是这一批的文件，text 是这一批的纯文字，内容会被复制。
+void xdnd_source_add_batch(const char *const *paths, int count, const char *text);
+
+/// 把文字和文件路径里的图片合成一份 HTML：文字按段落排，图片用 file:// 地址。
+/// 什么都没排出来时返回 NULL。调用方负责 free。
+char *xdnd_source_html_build(const char *text, const char *const *paths, int count);
 
 /// 从置物架往外拖的时候看一眼光标底下：停在 XWayland 程序上够久、而且真能找到它的 X 窗口时返回 true。
 /// 只在这时候才值得把 GTK 的 Wayland 拖动换成自己的 Xdnd。
 bool xdnd_source_should_take_over(void);
+
+/// 这次拖出只按复制（复制模式，或者文字、链接这种本来就不能移走的）：可以保留 Hyprland 的旧 Xdnd，
+/// 只接管它的 selection 数据，免得目标程序同时见到新旧两个拖动源。
+bool xdnd_source_copy_only(void);
+
+/// 保留 Hyprland 的旧 Xdnd，只临时接管它的 selection 数据。失败时返回 false，交给自建拖动源。
+bool xdnd_source_assist_begin(void);
+
+/// GTK 拖动结束后调用：等接收方把数据取完，再交回 selection。
+void xdnd_source_assist_finish(void);
 
 /// 接管这次拖出（先把 GTK 的拖动取消掉再调用）。真正开始发 Xdnd 要等一小会儿。
 bool xdnd_source_begin(void);

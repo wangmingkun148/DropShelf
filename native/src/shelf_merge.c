@@ -586,7 +586,7 @@ static void set_merge_target(ShelfWindow *shelf, ShelfWindow *target)
     if (target == shelf->merge_target) return;
     if (shelf->merge_target) show_merge_hint(shelf->merge_target, MERGE_HINT_NONE, 0);
     set_reference(&shelf->merge_target, target);
-    if (target) show_merge_hint(target, MERGE_HINT_ARMED, shelf->model->count);
+    if (target) show_merge_hint(target, MERGE_HINT_ARMED, shelf->model->all_count);
     ease_to(&shelf->merge_dim, target ? MERGE_DIM : 1, DIM_DURATION, EASE_OF(EASE_CUBIC_OUT));
     request_frame(shelf);
     if (target)
@@ -649,11 +649,11 @@ void shelf_merge_on_dwell(ShelfWindow *shelf)
 /// 合并：全部项目交给 target，从这个置物架所在的位置飞进它的堆叠或列表；这边带着原来的样子淡出关闭，不留下一个空置物架，也不记进最近关闭。
 static void merge_into(ShelfWindow *shelf, ShelfWindow *target)
 {
-    int count = shelf->model->count;
+    int count = shelf->model->all_count;
     if (count == 0 || shelf->closing || target->closing || target->closed) return;
     shelf_finish_motion(shelf);
     ShelfItem **items = xalloc((size_t)count * sizeof(ShelfItem *));
-    for (int index = 0; index < count; index++) items[index] = shelf_item_retain(shelf->model->items[index]);
+    for (int index = 0; index < count; index++) items[index] = shelf_item_retain(shelf->model->all_items[index]);
     RECT rect;
     GetWindowRect(shelf->handle, &rect);
     POINT center = { rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2 };
@@ -676,7 +676,7 @@ void shelf_move_by_hand(ShelfWindow *shelf)
 {
     // 有东西的置物架拖到另一个置物架上松手就合并：移动途中留意光标下面是不是别的置物架。
     ShelfModel *model = shelf->model;
-    shelf->merge_watch = model->count > 0 && !model->busy && !shelf->dragging_out && !shelf->closing;
+    shelf->merge_watch = model->all_count > 0 && !model->busy && !shelf->dragging_out && !shelf->closing;
     shelf_window_retain(shelf);
     ui_window_begin_move(shelf->ui);
     shelf->merge_watch = false;

@@ -35,6 +35,99 @@
 #define GLYPH_COMPLETED L"\xE930"
 #define GLYPH_WARNING L"\xE7BA"
 
+// ───────────── 分类标签 ─────────────
+
+// 堆叠下面那行汇总和展开列表上方那一行：每一类一个彩色小标签，点一下只看这一类。
+#define TAG_HEIGHT 18.0f
+#define TAG_FONT 10.0f
+#define TAG_PAD_X 7.0f
+#define TAG_GAP_X 5.0f
+#define TAG_GAP_Y 3.0f
+#define TAG_LIST_GAP 6.0f      // 展开列表：标签行和第一行之间
+
+// 量文字、排版用的工具在下面才定义，这里先用。
+static float line_height(float size, int weight);
+static float text_width(const wchar_t *text, float size, int weight, GfxFont font);
+static GfxRect rect_of(float left, float top, float width, float height);
+
+static float tag_label_width(const ShelfWindow *shelf, int index)
+{
+    return text_width(shelf->tag_labels[index], TAG_FONT, 600, GFX_FONT_TEXT) + 2 * TAG_PAD_X;
+}
+
+/// 按现在的项目重新准备标签的文案；项目、语言或筛选变了以后由 clear_stack_summary 清掉重建。
+/// 只有一项时不用标签，直接用项目自己的名字。
+static void build_tags(ShelfWindow *shelf)
+{
+    if (shelf->tag_labels_built) return;
+    shelf->tag_labels_built = true;
+    shelf->tag_count = 0;
+    int counts[SHELF_KIND_COUNT];
+    shelf_model_kind_counts(shelf->model, counts);
+    int total = 0;
+    for (int kind = 0; kind < SHELF_KIND_COUNT; kind++) total += counts[kind];
+    if (total < 2) return;
+    for (int kind = 0; kind < SHELF_KIND_COUNT; kind++)
+    {
+        if (counts[kind] == 0) continue;
+        wchar_t *label = kind == ITEM_FILE     ? str_file_count(counts[kind])
+                       : kind == ITEM_FOLDER   ? str_folder_count(counts[kind])
+                       : kind == ITEM_TEXT     ? str_text_count(counts[kind])
+                                               : str_link_count(counts[kind]);
+        shelf->tag_labels[shelf->tag_count] = label;
+        shelf->tag_kinds[shelf->tag_count] = kind;
+        shelf->tag_counts[shelf->tag_count] = counts[kind];
+        shelf->tag_count++;
+    }
+}
+
+/// 把标签在 width 宽里从左到右排开，放不下就换一行；每行居中。返回整块的高度。
+/// rects、kinds、count 可以是 NULL（只量高度时）。
+static float layout_tag_rows(ShelfWindow *shelf, float left, float top, float width, GfxRect *rects, int *kinds, int *count)
+{
+    if (count) *count = 0;
+    if (shelf->tag_count == 0) return 0;
+    float widths[SHELF_KIND_COUNT];
+    int row_of[SHELF_KIND_COUNT];
+    float row_width[SHELF_KIND_COUNT] = {0};
+    int rows = 0;
+    for (int index = 0; index < shelf->tag_count; index++)
+    {
+        widths[index] = tag_label_width(shelf, index);
+        if (rows == 0)
+        {
+            rows = 1;
+            row_width[0] = widths[index];
+            row_of[index] = 0;
+        }
+        else if (row_width[rows - 1] + TAG_GAP_X + widths[index] <= width)
+        {
+            row_width[rows - 1] += TAG_GAP_X + widths[index];
+            row_of[index] = rows - 1;
+        }
+        else
+        {
+            rows++;
+            row_width[rows - 1] = widths[index];
+            row_of[index] = rows - 1;
+        }
+    }
+    for (int row = 0; row < rows; row++)
+    {
+        float x = left + (width - row_width[row]) / 2;
+        float y = top + (float)row * (TAG_HEIGHT + TAG_GAP_Y);
+        for (int index = 0; index < shelf->tag_count; index++)
+        {
+            if (row_of[index] != row) continue;
+            if (rects) rects[index] = rect_of(x, y, widths[index], TAG_HEIGHT);
+            if (kinds) kinds[index] = shelf->tag_kinds[index];
+            x += widths[index] + TAG_GAP_X;
+        }
+    }
+    if (count) *count = shelf->tag_count;
+    return (float)rows * TAG_HEIGHT + (float)(rows - 1) * TAG_GAP_Y;
+}
+
 // ───────────── 尺寸 ─────────────
 
 static float resolve_width(int size)
@@ -81,6 +174,7 @@ float shelf_grid_height(int rows)
 #endif
 void shelf_target_size(ShelfWindow *shelf, bool expanded, float *width, float *height)
 {
+    build_tags(shelf);
 #ifdef LOOK_VARIANT_CARDS
     // 平铺时窗口按一行的牌数定宽：内容区左右各留 10，平铺区域四周还有 1，少算这 2 就会少放一列。
     *width = expanded ? shelf_grid_columns(shelf->size) * SHELF_SLOT_WIDTH + 22 : resolve_width(shelf->size);
@@ -94,6 +188,13 @@ void shelf_target_size(ShelfWindow *shelf, bool expanded, float *width, float *h
     int rows = count < 2 ? 2 : count > 6 ? 6 : count;
     float body = expanded ? rows * SHELF_ROW_HEIGHT + 6 : resolve_stack_height(shelf->size) + SHELF_CAPTION_HEIGHT;
 #endif
+    // 展开后列表上方还有一行分类标签；堆叠下面那一行也要放得下，比原来的一行字高时窗口跟着长高。
+    if (shelf->tag_count > 0)
+    {
+        float tag_width = expanded ? *width - 24 : resolve_width(shelf->size) - 14;
+        float tag_height = layout_tag_rows(shelf, 0, 0, tag_width, NULL, NULL, NULL);
+        body += expanded ? tag_height + TAG_LIST_GAP : tag_height - line_height(13, 600);
+    }
     bool has_actions = shelf->actions.count > 0;
     float actions = has_actions ? SHELF_ACTION_BAR_HEIGHT : 10;
     // 拖入时上方的放置区域至少留 66，下方是展开的一行快速操作。
@@ -425,6 +526,13 @@ static void clear_stack_summary(ShelfWindow *shelf)
     free(shelf->stack_caption);
     free(shelf->stack_detail);
     shelf->stack_caption = shelf->stack_detail = NULL;
+    for (int index = 0; index < SHELF_KIND_COUNT; index++)
+    {
+        free(shelf->tag_labels[index]);
+        shelf->tag_labels[index] = NULL;
+    }
+    shelf->tag_count = 0;
+    shelf->tag_labels_built = false;
 }
 
 static float mode_width(ShelfWindow *shelf)
@@ -481,8 +589,11 @@ void shelf_layout(ShelfWindow *shelf)
     layout->list = layout->body;
     if (shelf->list_pinned) layout->list = rect_of(layout->body.left, layout->body.top, shelf->list_pin.width, shelf->list_pin.height);
 
-    // 堆叠：下面两行文字（外边距 2,2,2,4），上面是按比例缩放的 160×116 画布。
+    // 堆叠：下面两行（外边距 2,2,2,4；多项时上面那一行是分类标签），上面是按比例缩放的 160×116 画布。
+    build_tags(shelf);
     float caption_height = line_height(13, 600), detail_height = line_height(11, 400);
+    if (shelf->tag_count > 0)
+        caption_height = layout_tag_rows(shelf, 0, 0, layout->stack.right - layout->stack.left - 4, NULL, NULL, NULL);
     float panel = 2 + caption_height + 1 + detail_height + 4;
     GfxRect stack = layout->stack;
     float canvas_width = stack.right - stack.left, canvas_height = stack.bottom - stack.top - panel;
@@ -492,8 +603,24 @@ void shelf_layout(ShelfWindow *shelf)
     layout->canvas_x = stack.left + (canvas_width - SHELF_CANVAS_WIDTH * scale) / 2;
     layout->canvas_y = stack.top + (canvas_height - SHELF_CANVAS_HEIGHT * scale) / 2;
     float caption_top = stack.bottom - panel + 2;
+    layout->caption_tag_count = 0;
+    layout->caption_tags_height = 0;
+    if (shelf->tag_count > 0)
+        layout->caption_tags_height = layout_tag_rows(shelf, stack.left + 2, caption_top, stack.right - stack.left - 4,
+            layout->caption_tags, layout->caption_tag_kinds, &layout->caption_tag_count);
     layout->caption = (GfxRect){ stack.left + 2, caption_top, stack.right - 2, caption_top + caption_height };
     layout->detail = (GfxRect){ stack.left + 2, layout->caption.bottom + 1, stack.right - 2, layout->caption.bottom + 1 + detail_height };
+
+    // 列表上方也显示同一行标签；列表在它下面，窗口的高度在 shelf_target_size 里已经把这一行算进去了。
+    layout->list_tag_count = 0;
+    layout->list_tags_height = 0;
+    if (shelf->tag_count > 0)
+    {
+        GfxRect area = layout->list;
+        layout->list_tags_height = layout_tag_rows(shelf, area.left + 2, area.top + 1, area.right - area.left - 4,
+            layout->list_tags, layout->list_tag_kinds, &layout->list_tag_count);
+        layout->list = rect_of(area.left, area.top + layout->list_tags_height + TAG_LIST_GAP, area.right, area.bottom);
+    }
 
     // 列表：超出时右边有一条细滚动条（盖在内容上）。
     GfxRect list = layout->list;
@@ -868,6 +995,45 @@ static void paint_badge(ShelfWindow *shelf, float opacity)
     gfx_pop_transform();
 }
 
+/// 每一类材料的标签颜色：文件跟强调色，文件夹用警示的橙黄，文本用成功的绿，链接用强调色和红色混出的紫。
+static Color tag_base_color(int kind)
+{
+    switch (kind)
+    {
+        case ITEM_FILE: return theme_color(THEME_ACCENT);
+        case ITEM_FOLDER: return theme_color(THEME_CAUTION);
+        case ITEM_TEXT: return theme_color(THEME_SUCCESS);
+        default: return color_mix(theme_color(THEME_ACCENT), theme_color(THEME_CRITICAL), 0.5);
+    }
+}
+
+/// 分类标签：没选中的是淡淡的同色底、同色字；选中的实心，字用黑白里清楚的那个。悬停、按下时底色浓一点。
+static void paint_tags(ShelfWindow *shelf, const GfxRect *rects, const int *kinds, int count, float opacity)
+{
+    if (count <= 0) return;
+    int active = shelf_model_filter_kind(shelf->model);
+    bool dark = theme_is_dark();
+    for (int index = 0; index < count && index < shelf->tag_count; index++)
+    {
+        int kind = kinds[index];
+        GfxRect rect = rects[index];
+        bool hovered = shelf->hovered == TARGET_FILTER && shelf->hovered_row == kind;
+        bool pressed = hovered && shelf->pressed == TARGET_FILTER;
+        Color base = tag_base_color(kind);
+        Color fill;
+        if (active == kind) fill = base;
+        else fill = color_with_alpha(base, (uint8_t)(pressed ? (dark ? 0x55 : 0x40) : hovered ? (dark ? 0x3C : 0x2C) : (dark ? 0x26 : 0x18)));
+        gfx_fill_rounded(rect, (rect.bottom - rect.top) / 2, faded(fill, opacity));
+        Color text;
+        if (active == kind)
+            text = (theme_is_cards() ? color_prefers_dark_text_cards(base) : color_prefers_dark_text(base)) ? COLOR_BLACK : COLOR_WHITE;
+        else
+            text = color_ensure_contrast(base, theme_color(THEME_SHELF_SOLID), 4.5, dark);
+        GfxTextStyle style = text_style(TAG_FONT, 600, GFX_ALIGN_CENTER);
+        gfx_text_draw(shelf->tag_labels[index], rect, &style, faded(text, opacity));
+    }
+}
+
 static void paint_stack(ShelfWindow *shelf, float opacity)
 {
     if (opacity < 0.999f) gfx_push_opacity(opacity);
@@ -883,8 +1049,10 @@ static void paint_stack(ShelfWindow *shelf, float opacity)
 #endif
     if (shelf->mark_opacity > 0)
     {
-        const wchar_t *caption, *detail;
-        if (shelf->model->count == 1)
+        const ShelfLayout *layout = &shelf->layout;
+        const wchar_t *caption = NULL, *detail;
+        bool single = shelf_model_all_count(shelf->model) == 1;
+        if (single)
         {
             ShelfItem *item = shelf->model->items[0];
             caption = shelf_item_display_name(item);
@@ -892,18 +1060,22 @@ static void paint_stack(ShelfWindow *shelf, float opacity)
         }
         else
         {
-            if (!shelf->stack_caption)
-            {
-                shelf->stack_caption = shelf_model_stack_caption(shelf->model);
-                shelf->stack_detail = shelf_model_stack_detail(shelf->model);
-            }
-            caption = shelf->stack_caption;
+            if (!shelf->stack_detail) shelf->stack_detail = shelf_model_stack_detail(shelf->model);
             detail = shelf->stack_detail;
+            if (layout->caption_tag_count == 0)
+            {
+                if (!shelf->stack_caption) shelf->stack_caption = shelf_model_stack_caption(shelf->model);
+                caption = shelf->stack_caption;
+            }
         }
-        GfxTextStyle style = text_style(13, 600, GFX_ALIGN_CENTER);
-        gfx_text_draw(caption, shelf->layout.caption, &style, faded(theme_color(THEME_TEXT_PRIMARY), shelf->mark_opacity));
-        style = text_style(11, 400, GFX_ALIGN_CENTER);
-        gfx_text_draw(detail, shelf->layout.detail, &style, faded(theme_color(THEME_TEXT_SECONDARY), shelf->mark_opacity));
+        if (caption)
+        {
+            GfxTextStyle style = text_style(13, 600, GFX_ALIGN_CENTER);
+            gfx_text_draw(caption, layout->caption, &style, faded(theme_color(THEME_TEXT_PRIMARY), shelf->mark_opacity));
+        }
+        else paint_tags(shelf, layout->caption_tags, layout->caption_tag_kinds, layout->caption_tag_count, shelf->mark_opacity);
+        GfxTextStyle style = text_style(11, 400, GFX_ALIGN_CENTER);
+        gfx_text_draw(detail, layout->detail, &style, faded(theme_color(THEME_TEXT_SECONDARY), shelf->mark_opacity));
     }
     if (opacity < 0.999f) gfx_pop_layer();
 }
@@ -1041,6 +1213,8 @@ static void paint_list(ShelfWindow *shelf, float opacity)
 {
     const ShelfLayout *layout = &shelf->layout;
     GfxRect list = layout->list;
+    // 列表上方那行分类标签在列表的范围之外，先画。
+    paint_tags(shelf, layout->list_tags, layout->list_tag_kinds, layout->list_tag_count, opacity);
     // 列表里的内容只显示在列表范围以内。
     gfx_push_clip((GfxRect){ list.left + 1, list.top + 1, list.right - 1, list.bottom - 1 });
     if (opacity < 0.999f) gfx_push_opacity(opacity);
@@ -1505,7 +1679,7 @@ static void on_closed(UiWindow *window, void *context)
     shelf_finish_motion(shelf);
     shelf_revoke_drop_target(shelf);
     // 关闭时仍有文件的置物架记入最近关闭，误关或退出后可以恢复；合并到别的置物架之后关闭的不记，项目已经在那边了。
-    if (!shelf->merged_away && shelf->model->count > 0) shelf_history_record(shelf->model->items, shelf->model->count);
+    if (!shelf->merged_away && shelf->model->all_count > 0) shelf_history_record(shelf->model->all_items, shelf->model->all_count);
     power_hold(shelf, false);
     shelf->ui = NULL;
     shelf->handle = NULL;
@@ -1640,7 +1814,7 @@ bool shelf_window_is_visible(const ShelfWindow *shelf)
 bool shelf_window_is_reusable(const ShelfWindow *shelf)
 {
     const ShelfModel *model = shelf->model;
-    return !shelf->closing && !shelf->closed && model->count == 0 && !model->busy && !model->has_interacted;
+    return !shelf->closing && !shelf->closed && model->all_count == 0 && !model->busy && !model->has_interacted;
 }
 
 bool shelf_window_is_animating(const ShelfWindow *shelf)
@@ -1822,9 +1996,9 @@ void shelf_window_adopt_look(ShelfWindow *shelf)
     shelf->stack_pinned = shelf->list_pinned = false;
     shelf->switching = false;
     for (int card = 0; card < 3; card++) shelf->card_posed[card] = false;
-    for (int index = 0; index < shelf->model->count; index++)
+    for (int index = 0; index < shelf->model->all_count; index++)
     {
-        ShelfItem *item = shelf->model->items[index];
+        ShelfItem *item = shelf->model->all_items[index];
         shelf_item_motion_reset(item);
         anim_set(&item->lift, 0);
         anim_set(&item->dim, 1);

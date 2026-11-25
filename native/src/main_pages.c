@@ -38,7 +38,7 @@ static struct
     UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
     UiElement *blocked_list;
     UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
-    UiElement *shelf_size, *drag_out_mode, *close_when_empty;
+    UiElement *shelf_size, *drag_out_mode, *mixed_drag, *close_when_empty;
     UiElement *respond_fullscreen;      // 只有 Linux 有：全屏时也响应晃动和快捷键
     UiElement *history_description, *clear_history;
     UiElement *layout, *layout_description;
@@ -85,6 +85,7 @@ static void on_trigger(int index, void *context) { (void)context; SET_INT(auto_o
 static void on_edge_dwell(int index, void *context) { (void)context; SET_INT(edge_dwell, index); }
 static void on_shelf_size(int index, void *context) { (void)context; SET_INT(quick_shelf_size, index); }
 static void on_drag_out(int index, void *context) { (void)context; app_update_drag_out_mode(index); }
+static void on_mixed_drag(int index, void *context) { (void)context; app_update_mixed_drag(index); }
 static void on_layout(int index, void *context)
 {
     (void)context;
@@ -1150,6 +1151,12 @@ static void build_shelf_page(void)
     const StringId transfers[2] = { STR_TransferMove, STR_TransferCopy };
     P.drag_out_mode = segmented(transfers, 2, settings->drag_out_mode, on_drag_out);
     add_card(content, GLYPH_MOVE, UI_STR(STR_DragOutModeHeader), UI_STR(STR_DragOutModeDescription), P.drag_out_mode, NULL);
+#ifdef __linux__
+    // 一次拖放里 WPS 这类 X11 程序只肯插入一种内容，怎么把文件和文字都送过去只有 Linux 版管得上。
+    const StringId mixed[4] = { STR_MixedDragSmart, STR_MixedDragBatch, STR_MixedDragFiles, STR_MixedDragText };
+    P.mixed_drag = segmented(mixed, 4, settings->mixed_drag, on_mixed_drag);
+    add_card(content, GLYPH_DOCUMENT, UI_STR(STR_MixedDragHeader), UI_STR(STR_MixedDragDescription), P.mixed_drag, NULL);
+#endif
     P.close_when_empty = ui_toggle(settings->close_when_empty, on_close_when_empty, NULL);
     add_card(content, GLYPH_CLEAR, UI_STR(STR_CloseWhenEmpty), UI_STR(STR_CloseWhenEmptyDescription), P.close_when_empty, NULL);
     P.clear_history = wide_button(STR_Clear, on_clear_history);
@@ -1847,6 +1854,9 @@ void pages_refresh(void)
 #endif
     ui_segmented_set_selected(P.shelf_size, settings->quick_shelf_size);
     ui_segmented_set_selected(P.drag_out_mode, settings->drag_out_mode);
+#ifdef __linux__
+    ui_segmented_set_selected(P.mixed_drag, settings->mixed_drag);
+#endif
     ui_toggle_set_checked(P.close_when_empty, settings->close_when_empty);
     int history_count = 0;
     shelf_history_entries(&history_count);
@@ -1939,6 +1949,7 @@ UiElement *pages_control(PagesControl control)
         case PAGES_EDGE_DWELL: return P.edge_dwell;
         case PAGES_SHELF_SIZE: return P.shelf_size;
         case PAGES_DRAG_OUT_MODE: return P.drag_out_mode;
+        case PAGES_MIXED_DRAG: return P.mixed_drag;
         case PAGES_CLOSE_WHEN_EMPTY: return P.close_when_empty;
         case PAGES_WATCH_LIST: return P.watch_list;
         case PAGES_PEEK_SECONDS: return P.peek_seconds;

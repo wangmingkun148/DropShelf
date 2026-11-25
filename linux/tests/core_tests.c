@@ -522,6 +522,98 @@ static void test_shelf_model_move(void)
     shelf_model_release(model);
 }
 
+/// 分类筛选：只看一类时显示的数量变少，但项目都还在；取消后按原来的先后全部回来。
+static void test_shelf_model_filter(void)
+{
+    wchar_t *root = path_join(L"/tmp", L"dropshelf-filter-test");
+    directory_delete_tree(root);
+    CHECK(directory_create(root));
+    wchar_t *file = path_join(root, L"one.txt");
+    CHECK(file_write_atomic(file, "x", 1));
+    wchar_t *folder = path_join(root, L"sub");
+    CHECK(directory_create(folder));
+    wchar_t *folder2 = path_join(root, L"sub2");
+    CHECK(directory_create(folder2));
+
+    ShelfModel *model = shelf_model_new(NULL);
+    DropReadResult *result = xcalloc(1, sizeof(DropReadResult));
+    result->entries = xcalloc(4, sizeof(DroppedEntry));
+    result->entries[0].kind = ITEM_FILE;
+    result->entries[0].value = wcs_dup(file);
+    result->entries[1].kind = ITEM_TEXT;
+    result->entries[1].value = wcs_dup(L"甲");
+    result->entries[2].kind = ITEM_FOLDER;
+    result->entries[2].value = wcs_dup(folder);
+    result->entries[3].kind = ITEM_TEXT;
+    result->entries[3].value = wcs_dup(L"乙");
+    result->count = 4;
+    CHECK(shelf_model_add(model, result).added == 4);
+    drop_result_free(result);
+    CHECK(model->count == 4 && shelf_model_all_count(model) == 4);
+
+    int counts[SHELF_KIND_COUNT];
+    shelf_model_kind_counts(model, counts);
+    CHECK(counts[ITEM_FILE] == 1 && counts[ITEM_FOLDER] == 1 && counts[ITEM_TEXT] == 2 && counts[ITEM_LINK] == 0);
+
+    shelf_model_set_filter(model, ITEM_TEXT);
+    CHECK(shelf_model_filter_kind(model) == ITEM_TEXT);
+    CHECK(model->count == 2 && shelf_model_all_count(model) == 4);
+    CHECK(model->items[0]->kind == ITEM_TEXT && model->items[1]->kind == ITEM_TEXT);
+
+    // 没显示出来的文件也在置物架上：再放同一个仍然算重复。
+    DropReadResult *duplicate = xcalloc(1, sizeof(DropReadResult));
+    duplicate->entries = xcalloc(1, sizeof(DroppedEntry));
+    duplicate->entries[0].kind = ITEM_FILE;
+    duplicate->entries[0].value = wcs_dup(file);
+    duplicate->count = 1;
+    CHECK(shelf_model_add(model, duplicate).duplicates == 1);
+    drop_result_free(duplicate);
+    CHECK(model->count == 2 && shelf_model_all_count(model) == 4);
+
+    // 筛选时新放进来的别类项目先藏着，同类项目马上出现。
+    DropReadResult *hidden = xcalloc(1, sizeof(DropReadResult));
+    hidden->entries = xcalloc(1, sizeof(DroppedEntry));
+    hidden->entries[0].kind = ITEM_FOLDER;
+    hidden->entries[0].value = wcs_dup(folder2);
+    hidden->count = 1;
+    CHECK(shelf_model_add(model, hidden).added == 1);
+    drop_result_free(hidden);
+    CHECK(model->count == 2 && shelf_model_all_count(model) == 5);
+
+    DropReadResult *visible = xcalloc(1, sizeof(DropReadResult));
+    visible->entries = xcalloc(1, sizeof(DroppedEntry));
+    visible->entries[0].kind = ITEM_TEXT;
+    visible->entries[0].value = wcs_dup(L"丙");
+    visible->count = 1;
+    CHECK(shelf_model_add(model, visible).added == 1);
+    drop_result_free(visible);
+    CHECK(model->count == 3 && shelf_model_all_count(model) == 6);
+
+    // 取消筛选：六项按原来的先后回来。
+    shelf_model_set_filter(model, SHELF_FILTER_NONE);
+    CHECK(shelf_model_filter_kind(model) == SHELF_FILTER_NONE);
+    CHECK(model->count == 6 && shelf_model_all_count(model) == 6);
+    const ShelfItemKind order[6] = { ITEM_FILE, ITEM_TEXT, ITEM_FOLDER, ITEM_TEXT, ITEM_FOLDER, ITEM_TEXT };
+    for (int index = 0; index < 6; index++) CHECK(model->items[index]->kind == order[index]);
+
+    // 筛选到某一类以后把这一类全移除：自动取消筛选，剩下的项目马上显示出来。
+    shelf_model_set_filter(model, ITEM_FOLDER);
+    CHECK(model->count == 2);
+    ShelfItem *folders[2] = { model->items[0], model->items[1] };
+    ShelfRemoval *removal = shelf_model_remove(model, folders, 2);
+    CHECK(removal != NULL);
+    CHECK(shelf_model_filter_kind(model) == SHELF_FILTER_NONE);
+    CHECK(model->count == 4 && shelf_model_all_count(model) == 4);
+    shelf_removal_free(removal);
+
+    shelf_model_release(model);
+    free(file);
+    free(folder);
+    free(folder2);
+    CHECK(directory_delete_tree(root));
+    free(root);
+}
+
 static void test_write_for_drag(void)
 {
     ShelfModel *model = shelf_model_new(NULL);
@@ -655,6 +747,7 @@ int main(void)
     test_drop_read_paths();
     test_shelf_model();
     test_shelf_model_move();
+    test_shelf_model_filter();
     test_write_for_drag();
     test_hyprland_monitors();
     test_gesture_edges();

@@ -32,6 +32,7 @@ ShelfModel *shelf_model_new(const ShelfModelEvents *events)
     model->id = new_guid_text();
     model->pinned = true;
     model->thumbnail_size = 128;
+    model->filter_kind = SHELF_FILTER_NONE;
     model->visible_from = model->visible_to = -1;
     model->busy_text = wcs_dup(L"");
     if (events) model->events = *events;
@@ -51,6 +52,7 @@ void shelf_model_release(ShelfModel *model)
     free(model->id);
     free(model->busy_text);
     free(model->items);
+    free(model->all_items);
     free(model);
 }
 
@@ -58,6 +60,8 @@ static void changed(ShelfModel *model, ShelfChange change)
 {
     if (!model->released && model->events.changed) model->events.changed(model->events.context, change);
 }
+
+static void rebuild_view(ShelfModel *model);
 
 static void notify(ShelfModel *model, const wchar_t *message, bool success)
 {
@@ -71,18 +75,31 @@ int shelf_model_index_of(const ShelfModel *model, const ShelfItem *item)
     return -1;
 }
 
+/// 项目在全部项目里的位置（筛选时没显示出来的也能找到），不在置物架上时是 -1。
+static int all_index_of(const ShelfModel *model, const ShelfItem *item)
+{
+    for (int index = 0; index < model->all_count; index++)
+        if (model->all_items[index] == item) return index;
+    return -1;
+}
+
+int shelf_model_all_count(const ShelfModel *model)
+{
+    return model->all_count;
+}
+
 bool shelf_model_contains(const ShelfModel *model, const ShelfItem *item)
 {
-    return shelf_model_index_of(model, item) >= 0;
+    return all_index_of(model, item) >= 0;
 }
 
 bool shelf_model_all_items_in(const ShelfModel *model, ShelfItem *const *items, int count)
 {
-    if (count < model->count) return false;
+    if (count < model->all_count) return false;
     // 用项目指针判断，重复项和其他置物架上的项目都不能代替这一架上的项目。
     for (int index = 0; index < count; index++) items[index]->marked = true;
     bool all = true;
-    for (int index = 0; index < model->count && all; index++) all = model->items[index]->marked;
+    for (int index = 0; index < model->all_count && all; index++) all = model->all_items[index]->marked;
     for (int index = 0; index < count; index++) items[index]->marked = false;
     return all;
 }
@@ -101,6 +118,39 @@ void shelf_model_set_expanded(ShelfModel *model, bool expanded)
     shelf_model_update_thumbnails(model);
 }
 
+int shelf_model_filter_kind(const ShelfModel *model)
+{
+    return model->filter_kind;
+}
+
+void shelf_model_kind_counts(const ShelfModel *model, int counts[SHELF_KIND_COUNT])
+{
+    for (int kind = 0; kind < SHELF_KIND_COUNT; kind++) counts[kind] = 0;
+    for (int index = 0; index < model->all_count; index++)
+        if (model->all_items[index]->kind >= 0 && model->all_items[index]->kind < SHELF_KIND_COUNT) counts[model->all_items[index]->kind]++;
+}
+
+void shelf_model_set_filter(ShelfModel *model, int kind)
+{
+    if (model->released) return;
+    if (kind < 0) kind = SHELF_FILTER_NONE;
+    if (kind >= SHELF_KIND_COUNT) return;
+    if (model->filter_kind == kind) return;
+    if (kind != SHELF_FILTER_NONE)
+    {
+        bool any = false;
+        for (int index = 0; index < model->all_count && !any; index++) any = (int)model->all_items[index]->kind == kind;
+        if (!any) return;
+    }
+    model->filter_kind = kind;
+    // 筛选换了，原来选中的可能已经看不见；统一清掉，免得拖出时带上没显示的项目。
+    for (int index = 0; index < model->all_count; index++) model->all_items[index]->selected = false;
+    model->has_interacted = true;
+    rebuild_view(model);
+    changed(model, SHELF_CHANGED_ITEMS);
+    shelf_model_update_thumbnails(model);
+}
+
 void shelf_model_set_busy(ShelfModel *model, const wchar_t *text)
 {
     if (text)
@@ -116,19 +166,60 @@ void shelf_model_set_busy(ShelfModel *model, const wchar_t *text)
 
 static void reserve_items(ShelfModel *model, int count)
 {
-    if (count <= model->capacity) return;
-    int capacity = model->capacity ? model->capacity * 2 : 8;
-    model->capacity = count > capacity ? count : capacity;
-    model->items = xrealloc(model->items, (size_t)model->capacity * sizeof(ShelfItem *));
+    if (count > model->capacity)
+    {
+        int capacity = model->capacity ? model->capacity * 2 : 8;
+        model->capacity = count > capacity ? count : capacity;
+        model->items = xrealloc(model->items, (size_t)model->capacity * sizeof(ShelfItem *));
+    }
+    if (count > model->all_capacity)
+    {
+        int capacity = model->all_capacity ? model->all_capacity * 2 : 8;
+        model->all_capacity = count > capacity ? count : capacity;
+        model->all_items = xrealloc(model->all_items, (size_t)model->all_capacity * sizeof(ShelfItem *));
+    }
 }
 
+/// 按全部项目里的位置放进一项；筛选时它正好属于这一类才出现在显示的列表里，位置和全部项目里一致。
 static void insert_item(ShelfModel *model, int index, ShelfItem *item)
 {
-    reserve_items(model, model->count + 1);
-    if (index < 0 || index > model->count) index = model->count;
-    memmove(&model->items[index + 1], &model->items[index], (size_t)(model->count - index) * sizeof(ShelfItem *));
-    model->items[index] = item;
+    reserve_items(model, model->all_count + 1);
+    if (index < 0 || index > model->all_count) index = model->all_count;
+    memmove(&model->all_items[index + 1], &model->all_items[index], (size_t)(model->all_count - index) * sizeof(ShelfItem *));
+    model->all_items[index] = item;
+    model->all_count++;
+    if (model->filter_kind != SHELF_FILTER_NONE && (int)item->kind != model->filter_kind) return;
+    int at;
+    if (model->filter_kind == SHELF_FILTER_NONE) at = index;
+    else
+    {
+        // 显示的列表和全部项目的先后一致，数一数前面同类（也就是显示出来的）的项就知道插在哪。
+        at = 0;
+        for (int position = 0; position < index; position++)
+            if ((int)model->all_items[position]->kind == model->filter_kind) at++;
+    }
+    memmove(&model->items[at + 1], &model->items[at], (size_t)(model->count - at) * sizeof(ShelfItem *));
+    model->items[at] = item;
     model->count++;
+}
+
+/// 按筛选条件从全部项目重新算出显示的列表。这一类一项也没有时自动恢复显示全部。
+static void rebuild_view(ShelfModel *model)
+{
+    if (model->filter_kind != SHELF_FILTER_NONE)
+    {
+        bool any = false;
+        for (int index = 0; index < model->all_count && !any; index++) any = (int)model->all_items[index]->kind == model->filter_kind;
+        if (!any) model->filter_kind = SHELF_FILTER_NONE;
+    }
+    int count = 0;
+    for (int index = 0; index < model->all_count; index++)
+        if (model->filter_kind == SHELF_FILTER_NONE || (int)model->all_items[index]->kind == model->filter_kind) count++;
+    reserve_items(model, count);
+    int out = 0;
+    for (int index = 0; index < model->all_count; index++)
+        if (model->filter_kind == SHELF_FILTER_NONE || (int)model->all_items[index]->kind == model->filter_kind) model->items[out++] = model->all_items[index];
+    model->count = out;
 }
 
 /// 从各个附带的记录里去掉这一项（拖出用的文件、等着移走的）。
@@ -156,7 +247,8 @@ static void forget_item(ShelfModel *model, ShelfItem *item)
 /// 数量变了：空了就收起列表，再告诉窗口，最后按新的顶部三张和显示的行更新缩略图。
 static void items_changed(ShelfModel *model)
 {
-    if (model->count == 0 && model->expanded)
+    rebuild_view(model);
+    if (model->all_count == 0 && model->expanded)
     {
         model->expanded = false;
         model->visible_from = model->visible_to = -1;
@@ -269,9 +361,9 @@ static void measure_folder(ShelfModel *model, ShelfItem *item)
 
 static bool has_value(const ShelfModel *model, const wchar_t *value, bool file_system)
 {
-    for (int index = 0; index < model->count; index++)
+    for (int index = 0; index < model->all_count; index++)
     {
-        const ShelfItem *item = model->items[index];
+        const ShelfItem *item = model->all_items[index];
         if (shelf_item_is_file_system(item) != file_system) continue;
         if (file_system ? wcs_equal_ignore_case(item->value, value) : wcs_equal(item->value, value)) return true;
     }
@@ -301,7 +393,7 @@ static void value_index_begin(ValueIndex *index, const ShelfModel *model, int in
 {
     *index = (ValueIndex){ .model = model, .sorted = incoming >= SORTED_FROM_COUNT };
     index->paths.ignore_case = true;
-    for (int at = 0; index->sorted && at < model->count; at++) value_index_add(index, model->items[at]);
+    for (int at = 0; index->sorted && at < model->all_count; at++) value_index_add(index, model->all_items[at]);
 }
 
 static bool value_index_has(const ValueIndex *index, const wchar_t *value, bool file_system)
@@ -465,7 +557,7 @@ int shelf_model_adopt(ShelfModel *model, ShelfItem *const *items, int count, She
 void shelf_model_move(ShelfModel *model, ShelfItem *const *items, int count, int index)
 {
     if (model->released || count <= 0 || count > model->count) return;
-    // 这些项目得都在这个置物架上，并且记下 index 前面有几个会被挪走。
+    // 这些项目得都显示着，并且记下 index 前面有几个会被挪走。
     int moved_before = 0;
     for (int each = 0; each < count; each++)
     {
@@ -499,10 +591,29 @@ void shelf_model_move(ShelfModel *model, ShelfItem *const *items, int count, int
     }
     if (target < 0) target = 0;
     if (target > rest_count) target = rest_count;
-    memcpy(model->items, rest, (size_t)target * sizeof(ShelfItem *));
-    memcpy(&model->items[target], moving, (size_t)moving_count * sizeof(ShelfItem *));
-    memcpy(&model->items[target + moving_count], &rest[target], (size_t)(rest_count - target) * sizeof(ShelfItem *));
-    model->count = rest_count + moving_count;
+    // 在全部项目里挪到同一位置：排在被挪走的这些前面的是 rest[target]，没有就放到最后。
+    // 筛选时没显示出来的项目留在原处，只把挪走的这些抽出来插进去。
+    ShelfItem *anchor = target < rest_count ? rest[target] : NULL;
+    ShelfItem **rebuilt = xalloc((size_t)(model->all_count ? model->all_count : 1) * sizeof(ShelfItem *));
+    int out = 0;
+    bool inserted = false;
+    for (int position = 0; position < model->all_count; position++)
+    {
+        ShelfItem *item = model->all_items[position];
+        bool moved = false;
+        for (int each = 0; each < moving_count && !moved; each++) moved = moving[each] == item;
+        if (moved) continue;
+        if (!inserted && item == anchor)
+        {
+            for (int each = 0; each < moving_count; each++) rebuilt[out++] = moving[each];
+            inserted = true;
+        }
+        rebuilt[out++] = item;
+    }
+    if (!inserted)
+        for (int each = 0; each < moving_count; each++) rebuilt[out++] = moving[each];
+    memcpy(model->all_items, rebuilt, (size_t)out * sizeof(ShelfItem *));
+    free(rebuilt);
     free(moving);
     free(rest);
     model->has_interacted = true;
@@ -515,14 +626,14 @@ ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int
 {
     ShelfRemoval *removal = NULL;
     int kept = 0;
-    // 要移除的先做上记号，置物架从头到尾只走一遍；不用每一项都去 items 里找（全选几千项再移除时是几百万次）。
+    // 要移除的先做上记号，全部项目从头到尾只走一遍；不用每一项都去数组里找（全选几千项再移除时是几百万次）。
     for (int index = 0; index < count; index++) items[index]->marked = true;
-    for (int index = 0; index < model->count; index++)
+    for (int index = 0; index < model->all_count; index++)
     {
-        ShelfItem *item = model->items[index];
+        ShelfItem *item = model->all_items[index];
         if (!item->marked)
         {
-            model->items[kept++] = item;
+            model->all_items[kept++] = item;
             continue;
         }
         item->marked = false;
@@ -532,7 +643,7 @@ ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int
             removal->items = xalloc((size_t)count * sizeof(ShelfItem *));
             removal->indices = xalloc((size_t)count * sizeof(int));
         }
-        // 记录里拿着项目原来那份引用。
+        // 记录里拿着项目原来那份引用。撤销时按它在全部项目里的位置放回去。
         forget_item(model, item);
         removal->items[removal->count] = item;
         removal->indices[removal->count++] = index;
@@ -540,7 +651,7 @@ ShelfRemoval *shelf_model_remove(ShelfModel *model, ShelfItem *const *items, int
     // 不在置物架上的也把记号清掉。
     for (int index = 0; index < count; index++) items[index]->marked = false;
     if (!removal) return NULL;
-    model->count = kept;
+    model->all_count = kept;
     items_changed(model);
     return removal;
 }
@@ -556,7 +667,7 @@ void shelf_removal_free(ShelfRemoval *removal)
 
 static void insert_restored_items(ShelfModel *model, ShelfItem *const *items, const int *positions, int count)
 {
-    int kept = model->count;
+    int kept = model->all_count;
     reserve_items(model, kept + count);
     // 位置从前到后排列。从尾部合并，原有项目只需搬一次，也不会覆盖还没搬的项目。
     for (int index = count - 1; index >= 0; index--)
@@ -564,11 +675,11 @@ static void insert_restored_items(ShelfModel *model, ShelfItem *const *items, co
         int at = positions[index];
         int before = at - index;    // 减去排在前面的恢复项，剩下的是原有项目的数量。
         if (kept > before)
-            memmove(&model->items[at + 1], &model->items[before], (size_t)(kept - before) * sizeof(ShelfItem *));
-        model->items[at] = items[index];
+            memmove(&model->all_items[at + 1], &model->all_items[before], (size_t)(kept - before) * sizeof(ShelfItem *));
+        model->all_items[at] = items[index];
         kept = before;
     }
-    model->count += count;
+    model->all_count += count;
 }
 
 int shelf_model_restore(ShelfModel *model, const ShelfRemoval *removal, ShelfItem ***restored)
@@ -586,7 +697,7 @@ int shelf_model_restore(ShelfModel *model, const ShelfRemoval *removal, ShelfIte
         ShelfItem *item = removal->items[index];
         // 项目本身还在置物架上时，它的内容当然也在，不用另外按项目再找一遍。
         if (value_index_has(&existing, item->value, shelf_item_is_file_system(item))) continue;
-        int length = model->count + (positions ? count : 0);
+        int length = model->all_count + (positions ? count : 0);
         int at = removal->indices[index] < length ? removal->indices[index] : length;
         if (positions) positions[count] = at;
         else insert_item(model, at, item);
@@ -748,7 +859,7 @@ int shelf_model_convert_to_files(ShelfModel *model, ShelfItem *const *items, int
     {
         ShelfItem *item = items[index];
         if (shelf_item_is_file_system(item)) continue;
-        int at = shelf_model_index_of(model, item);
+        int at = all_index_of(model, item);
         if (at < 0) continue;
         const wchar_t *directory = own_cache(model);
         wchar_t *path = directory ? write_item_file(item, directory) : NULL;
@@ -765,7 +876,7 @@ int shelf_model_convert_to_files(ShelfModel *model, ShelfItem *const *items, int
         file->type_name = file_type_name(path);
         file->selected = item->selected;
         forget_item(model, item);
-        model->items[at] = file;
+        model->all_items[at] = file;
         shelf_item_release(item);
         free(path);
         converted++;
@@ -825,10 +936,10 @@ static void remove_shown(ShelfModel *model, ShelfItem *const *items, int count)
     ShelfItem **removing = xalloc((size_t)(count ? count : 1) * sizeof(ShelfItem *));
     int removing_count = 0;
     // 置物架上的先做上记号，再按传入的顺序挑出还在的。
-    for (int index = 0; index < model->count; index++) model->items[index]->marked = true;
+    for (int index = 0; index < model->all_count; index++) model->all_items[index]->marked = true;
     for (int index = 0; index < count; index++)
         if (items[index]->marked) removing[removing_count++] = items[index];
-    for (int index = 0; index < model->count; index++) model->items[index]->marked = false;
+    for (int index = 0; index < model->all_count; index++) model->all_items[index]->marked = false;
     if (removing_count > 0)
     {
         if (model->events.remove_visibly && !model->released) model->events.remove_visibly(model->events.context, removing, removing_count);
@@ -1047,8 +1158,8 @@ void shelf_model_reveal(ShelfModel *model, ShelfItem *const *items, int count)
 
 static int index_of_path(const ShelfModel *model, const wchar_t *path)
 {
-    for (int index = 0; index < model->count; index++)
-        if (shelf_item_is_file_system(model->items[index]) && wcs_equal_ignore_case(model->items[index]->value, path)) return index;
+    for (int index = 0; index < model->all_count; index++)
+        if (shelf_item_is_file_system(model->all_items[index]) && wcs_equal_ignore_case(model->all_items[index]->value, path)) return index;
     return -1;
 }
 
@@ -1109,7 +1220,7 @@ static void apply_moves(ShelfModel *model, const StrList *sources, const StrList
     {
         int at = index_of_path(model, sources->items[index]);
         if (at < 0) continue;
-        ShelfItem *item = model->items[at];
+        ShelfItem *item = model->all_items[at];
         free(item->value);
         item->value = wcs_dup(destinations->items[index]);
         // 移出了临时文件夹，不再是临时附件。
@@ -1135,7 +1246,7 @@ static void apply_replacements(ShelfModel *model, const StrList *sources, const 
             strlist_add(&additions, outputs->items[index]);
             continue;
         }
-        ShelfItem *old = model->items[at];
+        ShelfItem *old = model->all_items[at];
         ShelfItem *item = shelf_item_new(ITEM_FILE, outputs->items[index], NULL, false);
         free(item->id);
         item->id = wcs_dup(old->id);
@@ -1145,7 +1256,7 @@ static void apply_replacements(ShelfModel *model, const StrList *sources, const 
         file_identity_get(item->value, &item->identity);
         item->selected = old->selected;
         forget_item(model, old);
-        model->items[at] = item;
+        model->all_items[at] = item;
         shelf_item_release(old);
         replaced = true;
     }
@@ -1179,7 +1290,7 @@ static void action_done(QuickActionResult *result, void *context)
         if (result->produced_new_items && result->outputs.count > 0)
         {
             // 空置物架直接放入；已有内容时放进新的置物架，不和原来的项目混在一起。
-            if (model->count == 0) shelf_model_add_files(model, &result->outputs);
+            if (model->all_count == 0) shelf_model_add_files(model, &result->outputs);
             else if (model->events.produced) model->events.produced(model->events.context, &result->outputs);
         }
         if (!result->cancelled) notify(model, result->message, result->succeeded);
@@ -1246,11 +1357,11 @@ void shelf_model_run_action(ShelfModel *model, const QuickAction *action, ShelfI
         for (int index = 0; index < count; index++)
         {
             if (shelf_item_is_file_system(items[index]) || shelf_model_contains(model, items[index])) continue;
-            for (int at = 0; at < model->count; at++)
+            for (int at = 0; at < model->all_count; at++)
             {
-                if (!wcs_equal(model->items[at]->id, items[index]->id)) continue;
+                if (!wcs_equal(model->all_items[at]->id, items[index]->id)) continue;
                 shelf_item_release(items[index]);
-                items[index] = shelf_item_retain(model->items[at]);
+                items[index] = shelf_item_retain(model->all_items[at]);
                 break;
             }
         }
@@ -1269,7 +1380,7 @@ void shelf_model_run_action(ShelfModel *model, const QuickAction *action, ShelfI
     if (paths.count == 0)
     {
         changed(model, SHELF_CHANGED_ITEM_TEXT);
-        finish_without_running(model, model->count == 0 ? STR_AddFilesFirst : STR_FilesAndFoldersOnly, finished, context);
+        finish_without_running(model, model->all_count == 0 ? STR_AddFilesFirst : STR_FilesAndFoldersOnly, finished, context);
         return;
     }
     run_core(model, action, &paths, temporary, owner, finished, context);
@@ -1378,8 +1489,8 @@ void shelf_model_refresh_availability_in_background(ShelfModel *model)
 {
     if (model->checking_availability || model->released) return;
     int count = 0;
-    for (int index = 0; index < model->count; index++)
-        if (shelf_item_is_file_system(model->items[index])) count++;
+    for (int index = 0; index < model->all_count; index++)
+        if (shelf_item_is_file_system(model->all_items[index])) count++;
     if (count == 0) return;
     AvailabilityCheck *check = xcalloc(1, sizeof(AvailabilityCheck));
     check->model = shelf_model_retain(model);
@@ -1389,9 +1500,9 @@ void shelf_model_refresh_availability_in_background(ShelfModel *model)
     check->present = xcalloc((size_t)count, sizeof(bool));
     check->identities = xalloc((size_t)count * sizeof(FileIdentity));
     check->moved = xcalloc((size_t)count, sizeof(wchar_t *));
-    for (int index = 0; index < model->count; index++)
+    for (int index = 0; index < model->all_count; index++)
     {
-        ShelfItem *item = model->items[index];
+        ShelfItem *item = model->all_items[index];
         if (!shelf_item_is_file_system(item)) continue;
         check->items[check->count] = shelf_item_retain(item);
         check->identities[check->count] = item->identity;
@@ -1411,12 +1522,12 @@ wchar_t *shelf_model_title(const ShelfModel *model)
 
 wchar_t *shelf_model_stack_caption(ShelfModel *model)
 {
-    if (model->count == 0) return wcs_dup(L"");
-    if (model->count == 1) return wcs_dup(shelf_item_display_name(model->items[0]));
+    if (model->all_count == 0) return wcs_dup(L"");
+    if (model->all_count == 1) return wcs_dup(shelf_item_display_name(model->all_items[0]));
     int files = 0, folders = 0, texts = 0, links = 0;
-    for (int index = 0; index < model->count; index++)
+    for (int index = 0; index < model->all_count; index++)
     {
-        switch (model->items[index]->kind)
+        switch (model->all_items[index]->kind)
         {
             case ITEM_FILE: files++; break;
             case ITEM_FOLDER: folders++; break;
@@ -1441,7 +1552,7 @@ wchar_t *shelf_model_stack_caption(ShelfModel *model)
 
 wchar_t *shelf_model_stack_detail(ShelfModel *model)
 {
-    if (model->count == 1) return wcs_dup(shelf_item_detail(model->items[0]));
+    if (model->all_count == 1) return wcs_dup(shelf_item_detail(model->all_items[0]));
     long long total = 0;
     for (int index = 0; index < model->count; index++)
         if (shelf_item_is_file_system(model->items[index]) && model->items[index]->has_size) total += model->items[index]->size_bytes;
@@ -1513,12 +1624,12 @@ void shelf_model_release_resources(ShelfModel *model)
     strlist_clear(&model->caches);
     free(model->own_cache);
     model->own_cache = NULL;
-    for (int index = 0; index < model->count; index++)
+    for (int index = 0; index < model->all_count; index++)
     {
-        forget_item(model, model->items[index]);
-        shelf_item_release(model->items[index]);
+        forget_item(model, model->all_items[index]);
+        shelf_item_release(model->all_items[index]);
     }
-    model->count = 0;
+    model->count = model->all_count = 0;
     for (int index = 0; index < model->drag_count; index++) free(model->drag_paths[index]);
     free(model->drag_items);
     free(model->drag_paths);

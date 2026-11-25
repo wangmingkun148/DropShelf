@@ -221,6 +221,16 @@ void app_update_drag_out_mode(int mode)
     app_update_settings(change_drag_out_mode, &mode);
 }
 
+static void change_mixed_drag(AppSettings *target, void *context)
+{
+    target->mixed_drag = *(int *)context;
+}
+
+void app_update_mixed_drag(int mode)
+{
+    app_update_settings(change_mixed_drag, &mode);
+}
+
 bool app_set_start_with_windows(bool enabled)
 {
     if (!startup_set_enabled(enabled)) return false;

@@ -79,7 +79,9 @@ struct UiWindow
     bool drag_active;
     bool drag_saw_button;               // 这次拖动期间至少看到过一次左键按着
     bool drag_stale;                    // 已经替 GTK 收过尾、GTK 那边还挂着：下次从这里拖出前取消掉
+    guint stale_cancel_source;          // 过一会儿还没收到 drag-end，就把挂着的拖动取消掉
     bool drag_taken_over;               // 这次拖出已经交给 X11 拖动源，收尾由它来做
+    GtkWidget *drag_icon_label;         // 文字拖动图标里那个截短了的标签，拖动结束前要留着
     UiWindow *next;
 };
 
@@ -94,6 +96,10 @@ static void update_editor(UiWindow *window);
 static void drag_guard_stop(UiWindow *window);
 static void finish_stale_drag(UiWindow *window);
 static void release_active_drag(UiWindow *window);
+static void cancel_stale_drags(void);
+static void schedule_stale_cancel(UiWindow *window);
+static void stop_stale_cancel(UiWindow *window);
+static void release_drag_icon_label(UiWindow *window);
 
 // Win32 的鼠标捕获和按键状态。GTK 的鼠标手势本来就会抓住指针，这里只把状态记下来给共享代码看。
 static HWND capture_window;
@@ -673,6 +679,9 @@ static void on_pressed(GtkGestureClick *gesture, int press_count, double x, doub
     window->pointer_y = (float)y;
     window->pointer_inside = true;
     ui_pointer_seen_global(window->x + (int)lroundf((float)x), window->y + (int)lroundf((float)y));
+    // 新的一次按下：先把上一轮已经收过尾、GTK 那边还挂着的拖动取消掉。
+    // 要在这里取消，不能等 drag-prepare——那时候 GTK 已经在准备这次新拖动了，容易把新的取消掉。
+    cancel_stale_drags();
     // 新的一次按下：上一次拖动不管因为什么没收到 release，都在这里结束掉。
     end_move(window, L"新的按下");
     // 点一下就把键盘焦点收到自绘区域：层壳窗口靠“点击后按需获得键盘”才收得到快捷键。
@@ -947,6 +956,9 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
     window->drag_stale = false;
     window->drag = NULL;
     drag_guard_stop(window);
+    stop_stale_cancel(window);
+    xdnd_source_assist_finish();
+    release_drag_icon_label(window);
     window->drag_source = NULL;
     stop_frames(window);
     if (window->move_source)
@@ -1115,8 +1127,8 @@ GdkDrag *ui_active_drag(void)
 /// 合成器不一定会把拖动的结束事件送回来（Hyprland 上拖到没有窗口的地方就是这样），
 /// GTK 的拖动会一直挂着：之后从别的程序拖进来的东西都会被当成自己的拖动，怎么都放不进置物架。
 /// 这里盯着全局左键：已经松开而 GTK 还没结束，就主动取消这次拖动。
-#define DRAG_GUARD_POLL_MILLISECONDS 200
-#define DRAG_GUARD_GRACE_MICROSECONDS 600000
+#define DRAG_GUARD_POLL_MILLISECONDS 50
+#define DRAG_GUARD_GRACE_MICROSECONDS 100000
 // 松开以后还等一会儿：给合成器和接收方正常结束的机会，迟迟等不到才当作漏发。
 #define DRAG_GUARD_RELEASE_DELAY_MICROSECONDS 1000000
 
@@ -1143,6 +1155,14 @@ static bool take_over_for_x11(void)
         && cursor.y < frame_y + frame_height)
         return false;
     if (!xdnd_source_should_take_over()) return false;
+    // 复制模式（以及文字、链接这种本来就不能移走的）只接管旧拖动的数据 selection：
+    // Hyprland 的拖动还留着，目标程序不会同时看到两个拖动源，也就不会把剪贴板里的东西再放一遍。
+    // 移动模式要答应“移动”，旧拖动做不到，仍由自己的 X11 拖动源负责。
+    if (xdnd_source_copy_only() && xdnd_source_assist_begin())
+    {
+        log_info(L"拖出：保留 Hyprland 的拖动，只替 X11 接收方提供数据");
+        return false;
+    }
     if (!xdnd_source_begin()) return false;
     if (!ui_drag_take_over(owner))
     {
@@ -1192,6 +1212,53 @@ static void drag_guard_stop(UiWindow *window)
     window->drag_guard = 0;
 }
 
+static void stop_stale_cancel(UiWindow *window)
+{
+    if (!window->stale_cancel_source) return;
+    g_source_remove(window->stale_cancel_source);
+    window->stale_cancel_source = 0;
+}
+
+static gboolean stale_cancel_fired(gpointer data)
+{
+    UiWindow *window = data;
+    window->stale_cancel_source = 0;
+    if (window->destroyed || !window->drag_stale) return G_SOURCE_REMOVE;
+    GtkDragSource *source = window->drag_source;
+    window->drag_stale = false;
+    window->drag = NULL;
+    if (!source) return G_SOURCE_REMOVE;
+    log_info(L"拖出：GTK 那边一直没结束，取消挂着的拖动");
+    gtk_drag_source_drag_cancel(source);
+    return G_SOURCE_REMOVE;
+}
+
+/// 收过尾以后 GdkDrag 还挂在合成器那边：取消得太早可能把接收方还在读的数据掐掉，
+/// 太晚又会让 Hyprland 以为我们还在拖，拖进来的东西进不来。等一小会儿再取消。
+#define STALE_CANCEL_MILLISECONDS 1500
+
+static void schedule_stale_cancel(UiWindow *window)
+{
+    if (!window->drag_stale || window->stale_cancel_source) return;
+    window->stale_cancel_source = g_timeout_add(STALE_CANCEL_MILLISECONDS, stale_cancel_fired, window);
+}
+
+/// 新的按下：不用再等，马上把挂着的拖动取消掉。
+static void cancel_stale_drags(void)
+{
+    for (UiWindow *window = windows; window; window = window->next)
+    {
+        if (!window->drag_stale) continue;
+        GtkDragSource *source = window->drag_source;
+        stop_stale_cancel(window);
+        window->drag_stale = false;
+        window->drag = NULL;
+        if (!source) continue;
+        log_info(L"拖出：新的按下，取消上一轮挂着的 GTK 拖动");
+        gtk_drag_source_drag_cancel(source);
+    }
+}
+
 /// 合成器迟迟不把拖动的结束送回来时，替 GTK 按“这次拖动已经结束”收尾：
 /// 通知 GDK 到此为止（藏起跟着光标的拖动图标、清掉全局的拖动状态），置物架这边也恢复原样。
 /// 但 GdkDrag 和它的数据源故意留着不取消——接收方这时可能还在取数据，
@@ -1206,8 +1273,18 @@ static void finish_stale_drag(UiWindow *window)
     window->drag_data = NULL;
     active_drag = NULL;
     drag_guard_stop(window);
+    schedule_stale_cancel(window);
+    xdnd_source_assist_finish();
     if (drag) gdk_drag_drop_done(drag, TRUE);
+    release_drag_icon_label(window);
     if (window->drag_end && data) window->drag_end(window, window->drag_context, data, drag ? gdk_drag_get_selected_action(drag) : 0);
+}
+
+static void release_drag_icon_label(UiWindow *window)
+{
+    if (!window->drag_icon_label) return;
+    g_object_unref(window->drag_icon_label);
+    window->drag_icon_label = NULL;
 }
 
 /// 窗口关掉或不再管拖放时，GTK 不会替我们结束进行中的拖动，先取消掉，别让拖动状态卡在全局。
@@ -1219,7 +1296,10 @@ static void release_active_drag(UiWindow *window)
     window->drag = NULL;
     active_drag = NULL;
     drag_guard_stop(window);
+    stop_stale_cancel(window);
+    xdnd_source_assist_finish();
     if (window->drag_source) gtk_drag_source_drag_cancel(window->drag_source);
+    release_drag_icon_label(window);
 }
 
 bool ui_drag_take_over(UiWindow *window)
@@ -1235,6 +1315,7 @@ bool ui_drag_take_over(UiWindow *window)
     // 取消 GTK 的拖动：Hyprland 那边那次拖动跟着结束，对方也就不会再收到它发过去的 Xdnd，
     // 免得两个拖动源同时往一个窗口上放。drag-end 可能紧接着就到，收尾留给 X11 拖动源。
     gtk_drag_source_drag_cancel(drag_source);
+    release_drag_icon_label(window);
     return true;
 }
 
@@ -1276,17 +1357,109 @@ void ui_window_set_drag_handler(UiWindow *window, UiDragPrepare prepare, UiDragE
     window->drag_context = context;
 }
 
+/// GTK 默认把拖出去的文字整段做成拖动图标里的一个 GtkLabel。文字很长时这个标签会宽得
+/// 离谱（很多行时还会非常高），拖动图标窗口跟着变得巨大：GL 渲染时 NVIDIA 会报
+/// Xid 13“3D HEIGHT CT Violation”，显卡通道被重置，严重时整个桌面一起崩。
+/// 图标只需要让人看出拖的是什么，这里只留开头几十个字符。
+#define DRAG_ICON_TEXT_CHARACTERS 32
+
+static char *drag_icon_preview(const char *text)
+{
+    GString *out = g_string_sized_new(4 * DRAG_ICON_TEXT_CHARACTERS);
+    int characters = 0;
+    bool space = false;
+    const char *cursor = text;
+    while (*cursor && characters < DRAG_ICON_TEXT_CHARACTERS)
+    {
+        gunichar code = g_utf8_get_char(cursor);
+        if (g_unichar_isspace(code))
+        {
+            if (out->len > 0) space = true;
+        }
+        else
+        {
+            if (space)
+            {
+                g_string_append_c(out, ' ');
+                characters++;
+                space = false;
+                if (characters >= DRAG_ICON_TEXT_CHARACTERS) break;
+            }
+            char bytes[8];
+            int length = g_unichar_to_utf8(code, bytes);
+            g_string_append_len(out, bytes, length);
+            characters++;
+        }
+        cursor = g_utf8_next_char(cursor);
+    }
+    if (*cursor) g_string_append(out, "…");
+    return g_string_free(out, FALSE);
+}
+
+/// 文字拖动时换成一个截短的、单行的拖动图标；文件等其它内容仍用 GTK 自己的默认图标。
+static void set_drag_icon(UiWindow *window, GtkDragSource *source, GdkContentProvider *provider)
+{
+    bool text = false;
+    GdkContentFormats *formats = gdk_content_provider_ref_formats(provider);
+    if (formats) text = gdk_content_formats_contain_gtype(formats, G_TYPE_STRING);
+    gdk_content_formats_unref(formats);
+    if (!text)
+    {
+        // 上一次拖文字设过的图标不能用在下一次拖文件上。
+        release_drag_icon_label(window);
+        gtk_drag_source_set_icon(source, NULL, 0, 0);
+        return;
+    }
+    char *preview = NULL;
+    GValue value = G_VALUE_INIT;
+    if (gdk_content_provider_get_value(provider, &value, NULL))
+    {
+        if (G_VALUE_HOLDS_STRING(&value)) preview = drag_icon_preview(g_value_get_string(&value));
+        g_value_unset(&value);
+    }
+    // 取不到文字（或者全是空白）也不能退回 GTK 的默认图标：那正是照整段文字生成大标签的路径。
+    if (preview && !*preview)
+    {
+        g_free(preview);
+        preview = NULL;
+    }
+    // GTK 看到没有图标就会照整段文字生成一个标签。先放一个 1x1 的透明图标挡住它，
+    // 真正的截短标签在 drag-begin 里换进拖动图标（见 on_drag_begin）。
+    static const guint8 transparent[4] = { 0, 0, 0, 0 };
+    GBytes *bytes = g_bytes_new_static(transparent, sizeof transparent);
+    GdkTexture *texture = gdk_memory_texture_new(1, 1, GDK_MEMORY_DEFAULT, bytes, 4);
+    g_bytes_unref(bytes);
+    gtk_drag_source_set_icon(source, GDK_PAINTABLE(texture), 0, 0);
+    g_object_unref(texture);
+    release_drag_icon_label(window);
+    if (!preview) return;
+    GtkWidget *label = gtk_label_new(preview);
+    g_free(preview);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_lines(GTK_LABEL(label), 1);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), DRAG_ICON_TEXT_CHARACTERS);
+    window->drag_icon_label = label;
+}
+
 static GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y, gpointer data)
 {
     UiWindow *window = data;
     if (!window->drag_prepare || window->destroyed) return NULL;
-    // 上一轮拖动我们替 GTK 收过尾，但 GTK 那边还挂着。现在要开始新的拖动，先把旧的那次真正取消掉：
-    // 它的数据源留到这时候，接收方早该取完了；不取消的话，旧的结束通知万一迟到，会打乱这次新拖动。
+    // GTK 已经在准备新一次拖动了，说明上一次拖动对它来说早该结束了。可 WPS 这类程序常常
+    // 不回结束通知，置物架还停在“正在拖出”，新的拖出就会被自己挡回去。这里先按漏发收尾。
+    // 不先收掉的话，用户越急着连续拖，左键一直按着，拖动的兜底收尾也永远等不到松开。
+    if (window->drag_active)
+    {
+        log_info(L"拖出：上一次拖动还挂着，先收尾再开始新的拖动");
+        finish_stale_drag(window);
+    }
+    // 正常情况下按下时已经取消过上一轮挂着的拖动了（见 cancel_stale_drags）。这里只把指针放掉，
+    // 不能再调 gtk_drag_source_drag_cancel：这时候 GTK 正在准备当前这次拖动，会把新的取消掉。
     if (window->drag_stale)
     {
+        stop_stale_cancel(window);
         window->drag_stale = false;
         window->drag = NULL;
-        gtk_drag_source_drag_cancel(source);
     }
     GdkDragAction actions = GDK_ACTION_COPY;
     window->drag_data = NULL;
@@ -1297,6 +1470,7 @@ static GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, doub
         return NULL;
     }
     gtk_drag_source_set_actions(source, actions ? actions : GDK_ACTION_COPY);
+    set_drag_icon(window, source, provider);
     return provider;
 }
 
@@ -1305,6 +1479,8 @@ static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data)
     UiWindow *window = data;
     // 上一轮拖动没收到结束通知的话，新的拖动一开就把旧的那次忘掉。
     if (active_drag && active_drag != drag) log_info(L"上一次拖动没有收到结束通知，新的拖动开始时忘掉它");
+    log_info(L"拖出：GTK 拖动开始");
+    stop_stale_cancel(window);
     active_drag = drag;
     window->drag_source = source;
     window->drag = drag;
@@ -1313,6 +1489,12 @@ static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data)
     window->drag_saw_button = gesture_left_button_state() == 1;
     window->drag_released_at = 0;
     window->drag_began_at = g_get_monotonic_time();
+    // 文字拖动：把截短的标签换进拖动图标（prepare 里只放了个透明占位）。
+    if (window->drag_icon_label)
+    {
+        GtkWidget *icon = gtk_drag_icon_get_for_drag(drag);
+        if (icon) gtk_drag_icon_set_child(GTK_DRAG_ICON(icon), window->drag_icon_label);
+    }
     if (!window->drag_guard) window->drag_guard = g_timeout_add(DRAG_GUARD_POLL_MILLISECONDS, drag_guard_tick, window);
 }
 
@@ -1323,14 +1505,32 @@ static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_da
     UiWindow *window = data;
     if (window->destroyed) return;
     if (active_drag == drag) active_drag = NULL;
-    if (window->drag == drag) window->drag = NULL;
+    // 迟到的结束通知：可能是更早一次拖动的，也可能已经由 finish_stale_drag 收过尾了。
+    // 不认准是哪一个就收尾，会把正在进行的拖动或置物架状态弄乱。
+    if (window->drag != drag)
+    {
+        log_info(L"拖出结束：收到更早一次拖动的结束通知，忽略");
+        return;
+    }
+    bool was_stale = window->drag_stale;
+    window->drag = NULL;
     window->drag_active = false;
     window->drag_stale = false;
     drag_guard_stop(window);
+    stop_stale_cancel(window);
+    // 复制模式接管过 selection 的话，等接收方把数据取完再交回去。
+    xdnd_source_assist_finish();
+    release_drag_icon_label(window);
     if (window->drag_taken_over)
     {
         // 这次拖出已经交给 X11 拖动源：GTK 的拖动只是被取消了，收尾等 X11 那边谈完再说。
         log_info(L"拖出结束：GTK 的拖动收起来了，由 X11 拖动源继续");
+        return;
+    }
+    if (was_stale)
+    {
+        // 已经按漏发收过尾、也回调过置物架了，这里只把 GTK 拖动的残留清掉。
+        log_info(L"拖出结束：收到迟到的 GTK 结束通知");
         return;
     }
     log_info(L"拖出结束：收到 GTK 的结束通知，动作 0x%x", (unsigned)gdk_drag_get_selected_action(drag));

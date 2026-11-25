@@ -22,6 +22,8 @@ void app_update_settings(void (*change)(AppSettings *settings, void *context), v
 
 /// 改所有置物架拖出时移动还是复制（TransferMode）。
 void app_update_drag_out_mode(int mode);
+/// 文件和文字一起拖出时送哪些（MixedDragMode）；只有 Linux 版真正用得上。
+void app_update_mixed_drag(int mode);
 
 /// 观察文件夹：加入（已经有了不重复加）、移除。
 void app_watch_folder(const wchar_t *folder);

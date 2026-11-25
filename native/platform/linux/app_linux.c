@@ -84,6 +84,16 @@ void app_update_drag_out_mode(int mode)
     app_update_settings(set_drag_out_mode, &mode);
 }
 
+static void set_mixed_drag(AppSettings *settings, void *context)
+{
+    settings->mixed_drag = *(int *)context;
+}
+
+void app_update_mixed_drag(int mode)
+{
+    app_update_settings(set_mixed_drag, &mode);
+}
+
 bool app_is_hotkey_registered(void)
 {
     return hotkey_registered;

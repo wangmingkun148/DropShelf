@@ -144,6 +144,7 @@ typedef enum ShelfTarget
     TARGET_TOAST,
     TARGET_TOAST_ACTION,
     TARGET_ACTION,              // 底部的快速操作按钮（序号放在 row 里）
+    TARGET_FILTER,              // 分类标签（类型放在 row 里）
     TARGET_BLOCKED              // 正在处理的遮罩
 } ShelfTarget;
 
@@ -156,6 +157,13 @@ typedef struct ShelfLayout
     GfxRect stack, list;        // 堆叠和列表各自占的范围（动画期间可能固定为别的大小）
     float canvas_x, canvas_y, canvas_scale;     // 堆叠画布左上角和缩放
     GfxRect caption, detail;
+    // 分类标签（文件、文件夹、文本、链接）：堆叠下面的那一行，和展开后列表上方的那一行。
+    GfxRect caption_tags[SHELF_KIND_COUNT];
+    int caption_tag_kinds[SHELF_KIND_COUNT], caption_tag_count;
+    float caption_tags_height;
+    GfxRect list_tags[SHELF_KIND_COUNT];
+    int list_tag_kinds[SHELF_KIND_COUNT], list_tag_count;
+    float list_tags_height;
     GfxRect drop_zone;
     float drop_canvas_x, drop_canvas_y, drop_canvas_scale;     // 纸牌：放置区域里摊开的牌，176 × 108 的画布按比例缩进去
     GfxRect drop_text;
@@ -269,6 +277,12 @@ struct ShelfWindow
     unsigned label_generation;
     float mode_widths[2];       // DIP，复制和移动分别量一次。
     wchar_t *stack_caption, *stack_detail;    // 多个项目的汇总；单项直接用项目自己的文字。
+    // 分类标签的文案和计数：按文件、文件夹、文本、链接的顺序，只放有内容的几类。
+    wchar_t *tag_labels[SHELF_KIND_COUNT];
+    int tag_kinds[SHELF_KIND_COUNT];
+    int tag_counts[SHELF_KIND_COUNT];
+    int tag_count;
+    bool tag_labels_built;
 
     // 鼠标
     ShelfTarget hovered;

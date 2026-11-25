@@ -818,7 +818,7 @@ void shelf_remove_with_motion(ShelfWindow *shelf, ShelfItem **items, int count, 
         shelf_perform_remove(shelf, leaving, leaving_count, kind, expanded_before);
     else
     {
-        bool remains = leaving_count < shelf->model->count;
+        bool remains = leaving_count < shelf->model->all_count;
         shelf->remove_expanded_before = expanded_before;
         if (shelf->model->expanded) remove_tiles(shelf, leaving, leaving_count, kind, remains);
         else remove_from_stack(shelf, leaving, leaving_count, kind, remains, expanded_before);

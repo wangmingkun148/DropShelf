@@ -58,7 +58,7 @@ typedef struct Atoms
 {
     xcb_atom_t aware, enter, position, status, leave, drop, finished, selection, type_list, incr;
     xcb_atom_t action_copy, action_move;
-    xcb_atom_t uri_list, image_png, image_jpeg, text_utf8, text_plain, utf8_string;
+    xcb_atom_t uri_list, image_png, image_jpeg, text_utf8, text_plain, utf8_string, text_html;
     xcb_atom_t data_property;
     xcb_atom_t targets, net_wm_pid;
 } Atoms;
@@ -142,6 +142,7 @@ static void intern_atoms(void)
     atoms->text_utf8 = intern("text/plain;charset=utf-8");
     atoms->text_plain = intern("text/plain");
     atoms->utf8_string = intern("UTF8_STRING");
+    atoms->text_html = intern("text/html");
     atoms->data_property = intern(DATA_PROPERTY);
     atoms->targets = intern("TARGETS");
     atoms->net_wm_pid = intern("_NET_WM_PID");
@@ -597,6 +598,16 @@ static void read_property_chunk(bool first)
 #define SOURCE_FINISH_TIMEOUT_MICROSECONDS 3000000
 /// 自己送太久（看不到按键状态时会这样）就不再挂着。
 #define SOURCE_TIMEOUT_MICROSECONDS 30000000
+/// 放下以后隔多久送下一批：给接收方一点时间把上一批收完。
+#define BATCH_DELAY_MILLISECONDS 450
+/// 送下一批时等接收方回应 XdndPosition 的上限。
+#define BATCH_ACCEPT_TIMEOUT_MICROSECONDS 1500000
+/// 一次最多排这么多批：选中的东西再多也不会一直送个不停。
+#define MAXIMUM_BATCHES 16
+/// 发出 XdndDrop 以后对方取过哪些格式。
+#define DROP_TYPE_URI_LIST 1u
+#define DROP_TYPE_TEXT 2u
+#define DROP_TYPE_HTML 4u
 
 static struct
 {
@@ -604,13 +615,27 @@ static struct
     bool prepared;
     char *uri_list;                 // text/uri-list 的内容（\r\n 分隔）
     char *text;                     // 纯文字；有文件时是路径列表
+    char *html;                     // text/html：混合拖出时把文字和图片放在一起
     bool move_allowed;
+    uint32_t drop_types;            // 发出 XdndDrop 以后对方取了哪些格式（DROP_TYPE_*）
+    // 自动分批：一次拖出分成几批送给同一个窗口，不用鼠标按键。
+    bool batching;
+    guint batch_timer;
+    GdkDragAction batch_report;      // 分批全部送完后告诉置物架的动作
+    xcb_window_t batch_window;
+    int batch_pid;
+    RECT batch_rect;
+    int batch_target_x, batch_target_y, batch_target_width, batch_target_height;
+    int batch_point_x, batch_point_y;
+    uint32_t batch_time;
     // 光标底下停在哪；两次轮询之间不做别的。
     int dwell_pid;
     gint64 dwell_since;
     // 取消 GTK 的拖动以后，等一小会儿再真正接管。
     bool starting;
     gint64 start_at;
+    bool assisting;                  // 保留旧 Xdnd，只替它提供 selection 数据
+    guint assist_clear_source;       // 拖动结束后延迟交回 selection
     // 接管以后。
     bool active;
     xcb_window_t window;            // 我们自己的 selection 窗口
@@ -634,13 +659,58 @@ static struct
 } source;
 
 static void source_finish(bool dropped);
+static gboolean source_batch_start(gpointer data);
+
+/// 排着队、主拖动放下后一批一批送出去的内容。
+typedef struct SourceBatch
+{
+    char *uri_list;
+    char *text;
+} SourceBatch;
+
+static GQueue batches = G_QUEUE_INIT;
+
+static void source_batch_free(SourceBatch *batch)
+{
+    if (!batch) return;
+    g_free(batch->uri_list);
+    g_free(batch->text);
+    g_free(batch);
+}
+
+static void source_batches_clear(void)
+{
+    SourceBatch *batch;
+    while ((batch = g_queue_pop_head(&batches)) != NULL) source_batch_free(batch);
+}
+
+/// 撤掉还没送出的批次。report 时把置物架那次拖出的收尾补上（分批排着的时候收尾是推迟的）。
+static void source_batches_cancel(bool report)
+{
+    bool pending = source.batch_timer != 0;
+    if (source.batch_timer)
+    {
+        g_source_remove(source.batch_timer);
+        source.batch_timer = 0;
+    }
+    source_batches_clear();
+    // 正在送某一批时收尾还没推迟：source_finish 会自己处理，这里不做。
+    if (!pending) return;
+    GdkDragAction action = source.batch_report;
+    source.batch_report = 0;
+    log_info(L"X11 拖动源：取消排着的分批");
+    // 分批排着的时候，置物架那次拖出的收尾是推迟的；取消时补上，别让它一直停在“正在拖”。
+    if (report) ui_drag_taken_over_finished(action);
+}
 
 static void source_clear_payload(void)
 {
     g_free(source.uri_list);
     g_free(source.text);
+    g_free(source.html);
     source.uri_list = NULL;
     source.text = NULL;
+    source.html = NULL;
     source.prepared = false;
 }
 
@@ -663,11 +733,11 @@ static void append_uri_path(GString *out, const char *path)
     }
 }
 
-void xdnd_source_set_payload(const char *const *paths, int count, const char *text, bool move_allowed)
+/// 把一组路径做成 text/uri-list 和一行一条的纯文字。
+static void source_paths_build(const char *const *paths, int count, char **uri_list, char **text)
 {
-    if (source.active || source.starting) return;
-    source_clear_payload();
-    source.move_allowed = move_allowed;
+    *uri_list = NULL;
+    *text = NULL;
     GString *list = g_string_new(NULL);
     GString *plain = g_string_new(NULL);
     for (int index = 0; paths && index < count; index++)
@@ -682,20 +752,124 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
     if (list->len > 0)
     {
         g_string_append(list, "\r\n");
-        source.uri_list = g_string_free(list, FALSE);
-        source.text = g_string_free(plain, FALSE);
+        *uri_list = g_string_free(list, FALSE);
+        *text = g_string_free(plain, FALSE);
     }
     else
     {
         g_string_free(list, TRUE);
         g_string_free(plain, TRUE);
-        if (text && *text) source.text = g_strdup(text);
     }
-    source.prepared = source.uri_list != NULL || source.text != NULL;
+}
+
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed)
+{
+    if (source.active || source.starting) return;
+    // 上一次拖出还留着 selection：新的一次要开始了，立刻收回来，别让旧数据再被取到。
+    if (source.assist_clear_source)
+    {
+        g_source_remove(source.assist_clear_source);
+        source.assist_clear_source = 0;
+    }
+    if (source.assisting && bridge.connection)
+        xcb_set_selection_owner(bridge.connection, XCB_ATOM_NONE, bridge.atoms.selection, XCB_CURRENT_TIME);
+    source.assisting = false;
+    source_batches_cancel(true);
+    source_clear_payload();
+    source.move_allowed = move_allowed;
+    source.html = html && *html ? g_strdup(html) : NULL;
+    source.drop_types = 0;
+    source_paths_build(paths, count, &source.uri_list, &source.text);
+    if (!source.uri_list && !source.text && text && *text) source.text = g_strdup(text);
+    source.prepared = source.uri_list != NULL || source.text != NULL || source.html != NULL;
     source.proposed = source.move_allowed ? bridge.atoms.action_move : bridge.atoms.action_copy;
-    log_trace(L"X11 拖动源：准备好内容（%d 个文件，文字 %ls，%ls），提议动作 0x%x（移动 0x%x，复制 0x%x）", count,
-        text ? L"有" : L"无", source.move_allowed ? L"可移动" : L"只复制", (unsigned)source.proposed,
+    log_trace(L"X11 拖动源：准备好内容（%d 个文件，文字 %ls，HTML %ls，排着 %u 批，%ls），提议动作 0x%x（移动 0x%x，复制 0x%x）", count,
+        source.text ? L"有" : L"无", source.html ? L"有" : L"无", g_queue_get_length(&batches),
+        source.move_allowed ? L"可移动" : L"只复制", (unsigned)source.proposed,
         (unsigned)bridge.atoms.action_move, (unsigned)bridge.atoms.action_copy);
+    if (source.text) log_trace(L"X11 拖动源：要拖出去的文字 %zu 字节", strlen(source.text));
+}
+
+void xdnd_source_add_batch(const char *const *paths, int count, const char *text)
+{
+    SourceBatch *batch = g_new0(SourceBatch, 1);
+    source_paths_build(paths, count, &batch->uri_list, &batch->text);
+    if (!batch->uri_list && !batch->text && text && *text) batch->text = g_strdup(text);
+    if (!batch->uri_list && !batch->text)
+    {
+        source_batch_free(batch);
+        return;
+    }
+    if (g_queue_get_length(&batches) >= MAXIMUM_BATCHES)
+    {
+        log_info(L"X11 拖动源：排着的批次到了上限 %d，后面的不送了", MAXIMUM_BATCHES);
+        source_batch_free(batch);
+        return;
+    }
+    g_queue_push_tail(&batches, batch);
+    log_trace(L"X11 拖动源：排入一批（%ls）", batch->uri_list ? L"文件" : L"文字");
+}
+
+static bool path_is_image(const char *path)
+{
+    static const char *const extensions[] = {
+        ".png", ".jpg", ".jpeg", ".jfif", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tif", ".tiff"
+    };
+    size_t length = strlen(path);
+    for (size_t index = 0; index < sizeof extensions / sizeof extensions[0]; index++)
+    {
+        size_t extension = strlen(extensions[index]);
+        if (length > extension && g_ascii_strcasecmp(path + length - extension, extensions[index]) == 0) return true;
+    }
+    return false;
+}
+
+static void append_html_text(GString *out, const char *text)
+{
+    for (const char *cursor = text; *cursor; cursor++)
+    {
+        char character = *cursor;
+        if (character == '&') g_string_append(out, "&amp;");
+        else if (character == '<') g_string_append(out, "&lt;");
+        else if (character == '>') g_string_append(out, "&gt;");
+        else if (character == '"') g_string_append(out, "&quot;");
+        else if (character == '\r')
+        {
+            if (cursor[1] != '\n') g_string_append(out, "<br>");
+        }
+        else if (character == '\n') g_string_append(out, "<br>");
+        else g_string_append_c(out, character);
+    }
+}
+
+char *xdnd_source_html_build(const char *text, const char *const *paths, int count)
+{
+    GString *out = g_string_new("<html><head><meta charset=\"utf-8\"></head><body>");
+    bool any = false;
+    if (text && *text)
+    {
+        g_string_append(out, "<div>");
+        append_html_text(out, text);
+        g_string_append(out, "</div>");
+        any = true;
+    }
+    for (int index = 0; paths && index < count; index++)
+    {
+        const char *path = paths[index];
+        if (!path || !*path || !path_is_image(path)) continue;
+        // 图片用本地 file:// 地址：文档程序读得到本机文件，不用把整张图再塞进 selection。
+        g_string_append(out, "<p><img src=\"file://");
+        append_uri_path(out, path);
+        g_string_append(out, "\"></p>");
+        any = true;
+    }
+    g_string_append(out, "</body></html>");
+    if (!any)
+    {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
 }
 
 static uint32_t window_pid(xcb_window_t window)
@@ -785,6 +959,8 @@ static bool source_find_target(int pid, const RECT *rect)
 static int source_type_atoms(xcb_atom_t *out, int max)
 {
     int count = 0;
+    // HTML 放最前面：认 HTML 的程序（文档程序）拿到它就能一次把文字和图片都插进去。
+    if (source.html && count < max) out[count++] = bridge.atoms.text_html;
     if (source.uri_list && count < max) out[count++] = bridge.atoms.uri_list;
     if (source.text)
     {
@@ -818,6 +994,55 @@ static bool source_take_ownership(void)
     free(reply);
     if (!owned) log_info(L"X11 拖动源：XdndSelection 没抢到");
     return owned;
+}
+
+bool xdnd_source_copy_only(void)
+{
+    // 混合拖出（带 HTML、排着几批）不能只替 Hyprland 的拖动提供数据：放下以后还要由我们自己
+    // 跟对方一批一批地谈完，第几批送到了、还差几批都只有我们知道。
+    if (source.html || !g_queue_is_empty(&batches)) return false;
+    return source.prepared && !source.move_allowed;
+}
+
+bool xdnd_source_assist_begin(void)
+{
+    if (!bridge.connection || !source.prepared || source.active || source.starting || source.assisting) return false;
+    if (!source_create_window() || !source_take_ownership()) return false;
+    source.assisting = true;
+    log_info(L"X11 拖动源：保留 Hyprland 的拖动，接管它的数据 selection");
+    return true;
+}
+
+/// 松手以后接收方可能还在读数据；等够了再放手，下一次拖动开始前也会立刻清掉。
+#define ASSIST_CLEAR_MICROSECONDS 5000000
+
+static gboolean assist_clear(gpointer data)
+{
+    (void)data;
+    source.assist_clear_source = 0;
+    if (!source.assisting) return G_SOURCE_REMOVE;
+    source.assisting = false;
+    if (bridge.connection && source.window && bridge.atoms.selection)
+    {
+        // 这期间可能已经有别的程序开始拖动、接管了 selection，别把它清掉。
+        xcb_get_selection_owner_reply_t *reply =
+            xcb_get_selection_owner_reply(bridge.connection, xcb_get_selection_owner(bridge.connection, bridge.atoms.selection), NULL);
+        bool ours = reply && reply->owner == source.window;
+        free(reply);
+        if (ours)
+        {
+            xcb_set_selection_owner(bridge.connection, XCB_ATOM_NONE, bridge.atoms.selection, XCB_CURRENT_TIME);
+            xcb_flush(bridge.connection);
+            log_info(L"X11 拖动源：交回拖动的数据 selection");
+        }
+    }
+    return G_SOURCE_REMOVE;
+}
+
+void xdnd_source_assist_finish(void)
+{
+    if (!source.assisting || source.assist_clear_source) return;
+    source.assist_clear_source = g_timeout_add(ASSIST_CLEAR_MICROSECONDS / 1000, assist_clear, NULL);
 }
 
 static void source_send_enter(xcb_window_t window)
@@ -874,7 +1099,13 @@ static void source_send_position(void)
 {
     if (!source.active || !source.entered) return;
     int root_x = 0, root_y = 0;
-    if (!source_root_position(&root_x, &root_y)) return;
+    // 自动分批时鼠标早就离开了：还用上次放下的那个点，光标现在的坐标跟接收窗口没关系。
+    if (source.batching)
+    {
+        root_x = source.point_x;
+        root_y = source.point_y;
+    }
+    else if (!source_root_position(&root_x, &root_y)) return;
     if (source.have_point && root_x == source.point_x && root_y == source.point_y) return;
     source.have_point = true;
     source.point_x = root_x;
@@ -923,13 +1154,55 @@ static bool source_start(void)
     return true;
 }
 
+/// 排着的批次不再送了：清掉队列，把置物架那次拖出的收尾补上。
+static void source_batches_abort(void)
+{
+    source_batches_cancel(false);
+    GdkDragAction action = source.batch_report;
+    source.batch_report = 0;
+    ui_drag_taken_over_finished(action);
+}
+
 static void source_finish(bool dropped)
 {
     if (!source.active && !source.starting) return;
+    bool batching = source.batching;
     GdkDragAction action = 0;
-    if (dropped && source.accepted)
+    if (batching) action = source.batch_report;
+    else if (dropped && source.accepted)
         action = source.action == bridge.atoms.action_move && source.move_allowed ? GDK_ACTION_MOVE : GDK_ACTION_COPY;
     log_info(L"X11 拖动源：%ls（动作 0x%x）", dropped ? L"放下完成" : L"取消", (unsigned)action);
+    // 还有排着的批次、而且这一批真的放下了：记下窗口和落点，等一下接着送下一批。
+    // 主拖动被拒或者取消时就不再送了，剩下的内容留在置物架上。
+    bool next = dropped && source.accepted && !g_queue_is_empty(&batches);
+    if (next)
+    {
+        source.batch_window = source.target;
+        source.batch_pid = source.target_pid;
+        source.batch_rect = source.target_rect;
+        source.batch_target_x = source.target_x;
+        source.batch_target_y = source.target_y;
+        source.batch_target_width = source.target_width;
+        source.batch_target_height = source.target_height;
+        source.batch_time = source.time;
+        source.batch_point_x = source.point_x;
+        source.batch_point_y = source.point_y;
+        if (!batching)
+        {
+            // 主拖动刚松手：落点就是最后一次 XdndPosition 报的点；没报过才按光标现算。
+            // 后面几批都落在同一个点。
+            if (!source.have_point)
+            {
+                int root_x = 0, root_y = 0;
+                if (source_root_position(&root_x, &root_y))
+                {
+                    source.batch_point_x = root_x;
+                    source.batch_point_y = root_y;
+                }
+            }
+            source.batch_report = action;
+        }
+    }
     if (source.active && bridge.connection)
     {
         if (!dropped) source_send_leave();
@@ -940,6 +1213,7 @@ static void source_finish(bool dropped)
     }
     source.starting = false;
     source.active = false;
+    source.batching = false;
     source.target = 0;
     source.entered = 0;
     source.accepted = false;
@@ -949,7 +1223,80 @@ static void source_finish(bool dropped)
     source.owner_retries = 0;
     source.dwell_pid = 0;
     source.dwell_since = 0;
+    source.drop_types = 0;
+    if (next)
+    {
+        log_info(L"X11 拖动源：还有 %u 批，%d 毫秒后接着送下一批", g_queue_get_length(&batches), BATCH_DELAY_MILLISECONDS);
+        source.batch_timer = g_timeout_add(BATCH_DELAY_MILLISECONDS, source_batch_start, NULL);
+        return;
+    }
+    source_batches_clear();
+    source.batch_report = 0;
     ui_drag_taken_over_finished(action);
+}
+
+/// 送下一批：取出排在最前面的一批，重新和同一个窗口走一遍 Xdnd，不需要鼠标按键。
+static gboolean source_batch_start(gpointer data)
+{
+    (void)data;
+    source.batch_timer = 0;
+    SourceBatch *batch = g_queue_pop_head(&batches);
+    if (!batch)
+    {
+        source_batches_abort();
+        return G_SOURCE_REMOVE;
+    }
+    if (source.active || source.starting || source.assisting || !bridge.connection)
+    {
+        log_info(L"X11 拖动源：下一批开始前状态变了，剩下 %u 批不送了", g_queue_get_length(&batches) + 1);
+        source_batch_free(batch);
+        source_batches_abort();
+        return G_SOURCE_REMOVE;
+    }
+    source.batching = true;
+    source.active = true;
+    source.target = source.batch_window;
+    source.target_pid = source.batch_pid;
+    source.target_rect = source.batch_rect;
+    source.target_x = source.batch_target_x;
+    source.target_y = source.batch_target_y;
+    source.target_width = source.batch_target_width;
+    source.target_height = source.batch_target_height;
+    source.point_x = source.batch_point_x;
+    source.point_y = source.batch_point_y;
+    source.have_point = false;
+    source.time = source.batch_time;
+    source.entered = 0;
+    source.waiting_finish = false;
+    source.accepted = false;
+    source.action = 0;
+    source.started_at = g_get_monotonic_time();
+    source.checked_at = source.started_at;
+    source.owner_retries = 0;
+    source.drop_types = 0;
+    g_free(source.uri_list);
+    source.uri_list = batch->uri_list;
+    batch->uri_list = NULL;
+    g_free(source.text);
+    source.text = batch->text;
+    batch->text = NULL;
+    g_free(source.html);
+    source.html = NULL;
+    source_batch_free(batch);
+    source.prepared = source.uri_list != NULL || source.text != NULL;
+    source.move_allowed = false;
+    source.proposed = bridge.atoms.action_copy;
+    if (!source_create_window() || !source_take_ownership())
+    {
+        log_info(L"X11 拖动源：下一批抢不到 XdndSelection，剩下的不送了");
+        source_finish(false);
+        return G_SOURCE_REMOVE;
+    }
+    source_send_enter(source.target);
+    source_send_position();
+    log_info(L"X11 拖动源：自动再送一批（%ls，还有 %u 批）到窗口 0x%x", source.uri_list ? L"文件" : L"文字",
+        g_queue_get_length(&batches), (unsigned)source.target);
+    return G_SOURCE_REMOVE;
 }
 
 static void source_handle_status(xcb_client_message_event_t *event)
@@ -1016,11 +1363,13 @@ static void source_serve_selection(xcb_selection_request_event_t *request)
         xcb_atom_t atoms[8];
         int count = 0;
         atoms[count++] = bridge.atoms.targets;
+        if (source.html) atoms[count++] = bridge.atoms.text_html;
         if (source.uri_list) atoms[count++] = bridge.atoms.uri_list;
         if (source.text)
         {
             atoms[count++] = bridge.atoms.utf8_string;
             atoms[count++] = bridge.atoms.text_plain;
+            atoms[count++] = bridge.atoms.text_utf8;
         }
         xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, XCB_ATOM_ATOM, 32, (uint32_t)count, atoms);
         source_send_notify(request, property);
@@ -1028,31 +1377,58 @@ static void source_serve_selection(xcb_selection_request_event_t *request)
     }
     const char *data = NULL;
     xcb_atom_t type = XCB_ATOM_NONE;
+    uint32_t drop_type = 0;
     if (request->target == bridge.atoms.uri_list && source.uri_list)
     {
         data = source.uri_list;
         type = bridge.atoms.uri_list;
+        drop_type = DROP_TYPE_URI_LIST;
+    }
+    else if (request->target == bridge.atoms.text_html && source.html)
+    {
+        data = source.html;
+        type = bridge.atoms.text_html;
+        drop_type = DROP_TYPE_HTML;
     }
     else if ((request->target == bridge.atoms.utf8_string || request->target == bridge.atoms.text_plain
                  || request->target == bridge.atoms.text_utf8) && source.text)
     {
         data = source.text;
         type = bridge.atoms.utf8_string;
+        drop_type = DROP_TYPE_TEXT;
     }
     if (!data)
     {
+        log_trace(L"X11 拖动源：对方要了不支持的格式（atom 0x%x）", (unsigned)request->target);
         source_send_notify(request, XCB_ATOM_NONE);
         return;
     }
+    // 发出 XdndDrop 以后才来要的格式才是对方真的在取：记下来，出问题时从日志里能看出它取了什么。
+    if (source.waiting_finish)
+    {
+        if (!(source.drop_types & drop_type)) log_info(L"X11 拖动源：对方放下时取了%ls", type == bridge.atoms.uri_list ? L"文件列表"
+            : type == bridge.atoms.text_html ? L"HTML" : L"文字");
+        source.drop_types |= drop_type;
+    }
     size_t length = strlen(data);
     xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, type, 8, (uint32_t)length, data);
-    log_info(L"X11 拖动源：对方来要数据（%ls），给了 %zu 字节", type == bridge.atoms.uri_list ? L"文件列表" : L"文字", length);
+    log_info(L"X11 拖动源：对方来要数据（%ls），给了 %zu 字节",
+        type == bridge.atoms.uri_list ? L"文件列表" : type == bridge.atoms.text_html ? L"HTML" : L"文字", length);
     source_send_notify(request, property);
 }
 
 static void source_handle_selection_clear(xcb_selection_clear_event_t *event)
 {
-    if (!source.active || event->selection != bridge.atoms.selection || event->owner == source.window) return;
+    if (event->selection != bridge.atoms.selection || event->owner == source.window) return;
+    if (source.assisting && !source.assist_clear_source)
+    {
+        // 拖到一半 selection 又被别人（多半是 Hyprland 原来那次拖动）抢回去：
+        // 不马上拿回来，目标程序就会读到拿不到数据的那一边，退回粘贴剪贴板。
+        log_trace(L"X11 拖动源：XdndSelection 被 0x%x 抢走了，重新接管", (unsigned)event->owner);
+        source_take_ownership();
+        return;
+    }
+    if (!source.active) return;
     // Hyprland 结束它那次拖动时会把 selection 收回去，下一拍再抢回来。
     log_trace(L"X11 拖动源：XdndSelection 被 0x%x 抢走了", (unsigned)event->owner);
     source.owner_retries = 0;
@@ -1068,6 +1444,30 @@ static void source_tick(gint64 now)
         return;
     }
     if (!source.active || !bridge.connection) return;
+    if (source.batching)
+    {
+        // 自动分批不跟着鼠标走，也不看按键：接受了就放下，等 XdndFinished 收尾。
+        if (source.waiting_finish)
+        {
+            if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
+            {
+                log_info(L"X11 拖动源：这一批等 XdndFinished 等太久，按已放下收尾");
+                source_finish(true);
+            }
+            return;
+        }
+        if (source.accepted)
+        {
+            source_send_drop();
+            return;
+        }
+        if (now - source.started_at >= BATCH_ACCEPT_TIMEOUT_MICROSECONDS)
+        {
+            log_info(L"X11 拖动源：接收方不理这一批，剩下的不送了");
+            source_finish(false);
+        }
+        return;
+    }
     if (source.waiting_finish)
     {
         if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
@@ -1129,7 +1529,7 @@ static void source_tick(gint64 now)
 bool xdnd_source_should_take_over(void)
 {
     if (!bridge.connection || !bridge.atoms.selection) return false;
-    if (source.active || source.starting || !source.prepared) return false;
+    if (source.active || source.starting || source.assisting || !source.prepared) return false;
     if (!hyprland_available()) return false;
     POINT cursor;
     if (!GetCursorPos(&cursor)) return false;
@@ -1146,13 +1546,16 @@ bool xdnd_source_should_take_over(void)
         (int)client.rect.left, (int)client.rect.top, (int)(client.rect.right - client.rect.left),
         (int)(client.rect.bottom - client.rect.top));
     gint64 now = g_get_monotonic_time();
+    // 移动模式要换成自己的拖动源（会取消 GTK 那次），得确认光标真的停在 XWayland 程序上，
+    // 免得只是路过就把拖动打断了。复制模式只是接管 selection，不打断拖动，看到目标就立刻接管。
+    bool copy_only = !source.move_allowed;
     if (source.dwell_pid != client.pid || source.dwell_since == 0)
     {
         source.dwell_pid = client.pid;
         source.dwell_since = now;
-        return false;
+        if (!copy_only) return false;
     }
-    if (now - source.dwell_since < TAKEOVER_DWELL_MICROSECONDS) return false;
+    if (!copy_only && now - source.dwell_since < TAKEOVER_DWELL_MICROSECONDS) return false;
     // 真找到那个 X 窗口才动手：找不到就别把 GTK 的拖动打断。
     if (!source_find_target(client.pid, &client.rect))
     {
@@ -1182,6 +1585,16 @@ bool xdnd_source_active(void)
 
 void xdnd_source_abort(void)
 {
+    if (source.assisting)
+    {
+        xdnd_source_assist_finish();
+        return;
+    }
+    if (source.batch_timer)
+    {
+        source_batches_cancel(true);
+        return;
+    }
     if (!source.active && !source.starting) return;
     source_finish(false);
 }
@@ -1505,8 +1918,22 @@ void xdnd_stop(void)
     target = NULL;
     reset_drag();
     // 自己当拖动源的那套也一起收掉，不再回调置物架。
+    if (source.assist_clear_source)
+    {
+        g_source_remove(source.assist_clear_source);
+        source.assist_clear_source = 0;
+    }
     source.starting = false;
     source.active = false;
+    source.batching = false;
+    source.assisting = false;
+    if (source.batch_timer)
+    {
+        g_source_remove(source.batch_timer);
+        source.batch_timer = 0;
+    }
+    source_batches_clear();
+    source.batch_report = 0;
     source.target = 0;
     source.entered = 0;
     source.waiting_finish = false;

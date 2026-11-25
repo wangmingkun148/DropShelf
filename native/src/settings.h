@@ -21,6 +21,16 @@ typedef enum QuickShelfSize { SHELF_SIZE_SMALL, SHELF_SIZE_MEDIUM, SHELF_SIZE_LA
 /// 移动或复制：用于拖出置物架，也用于“发送到文件夹”的自定义操作。
 typedef enum TransferMode { TRANSFER_MOVE, TRANSFER_COPY } TransferMode;
 
+/// 置物架里同时选中了文件和文字、一起拖出时怎么办。文档程序一次只能插入一种内容，
+/// 所以默认先把它们合成一份 HTML 交给对方，再自动补送没送到的部分。只有 Linux 版用得上。
+typedef enum MixedDragMode
+{
+    MIXED_DRAG_SMART,               // 一起送：文件加一份把文字和图片放在一起的 HTML，放下后再补送文字
+    MIXED_DRAG_BATCH,               // 自动分批：按顺序一项一项地拖出去，每项单独放下一次
+    MIXED_DRAG_FILES,               // 只送文件和文件夹，文字和链接留在置物架
+    MIXED_DRAG_TEXT                 // 只送文字和链接，文件和文件夹留在置物架
+} MixedDragMode;
+
 /// 置物架底部显示几个快速操作。两个时与四个占用相同空间，每个按钮更大。
 typedef enum QuickActionLayout { LAYOUT_OFF = 0, LAYOUT_TWO = 2, LAYOUT_FOUR = 4 } QuickActionLayout;
 
@@ -120,6 +130,7 @@ typedef struct AppSettings
     bool start_with_windows;
     int quick_shelf_size;
     int drag_out_mode;              // 从置物架拖出文件时默认移动还是复制
+    int mixed_drag;                 // 文件和文字一起选中时送哪些（见 MixedDragMode）
     int quick_action_layout;
 
     /// 四个位置上的快速操作标识，按从左到右的顺序；只显示两个时使用前两个。

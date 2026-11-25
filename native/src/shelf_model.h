@@ -29,12 +29,20 @@ typedef struct ShelfModelEvents
     void (*produced)(void *context, const StrList *paths);
 } ShelfModelEvents;
 
+/// 不筛选，显示置物架上的全部项目。
+#define SHELF_FILTER_NONE (-1)
+/// 项目的四类：文件、文件夹、文本、链接。
+#define SHELF_KIND_COUNT 4
+
 struct ShelfModel
 {
     LONG references;
     wchar_t *id;
-    ShelfItem **items;          // 从旧到新；堆叠最上面是最新放入的
+    ShelfItem **items;          // 现在显示的项目，从旧到新；堆叠最上面是最新放入的
     int count, capacity;
+    ShelfItem **all_items;      // 置物架上的全部项目（筛选时没显示出来的也在这里），从旧到新
+    int all_count, all_capacity;
+    int filter_kind;            // 只看这一类；SHELF_FILTER_NONE 表示全部
     bool expanded;
     bool pinned;                // 置顶，默认开启
     bool busy;
@@ -67,6 +75,16 @@ void shelf_model_release(ShelfModel *model);
 bool shelf_model_contains(const ShelfModel *model, const ShelfItem *item);
 int shelf_model_index_of(const ShelfModel *model, const ShelfItem *item);
 bool shelf_model_all_items_in(const ShelfModel *model, ShelfItem *const *items, int count);
+
+/// 置物架上总共有几项（含筛选时没显示出来的）。
+int shelf_model_all_count(const ShelfModel *model);
+
+/// 当前筛选的类型，没有筛选时是 SHELF_FILTER_NONE。
+int shelf_model_filter_kind(const ShelfModel *model);
+/// 只看某一类（SHELF_FILTER_NONE 恢复全部）。切到一类时清空选中；这一类一项也没有时什么也不做。
+void shelf_model_set_filter(ShelfModel *model, int kind);
+/// 四类各有多少项（含筛选时没显示出来的），按文件、文件夹、文本、链接的顺序写进 counts[4]。
+void shelf_model_kind_counts(const ShelfModel *model, int counts[SHELF_KIND_COUNT]);
 
 /// 第 position 新的项目（1 是最新的）；不够时返回 NULL。
 ShelfItem *shelf_model_from_end(const ShelfModel *model, int position);
