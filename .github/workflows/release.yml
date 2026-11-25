@@ -70,34 +70,6 @@ jobs:
           Compress-Archive -LiteralPath "artifacts\win-x64\DropShelf.exe" -DestinationPath $portable -Force
           $files = @($installer, $portable)
 
-          # 主线版本（v 开头的标签）附带一份 Scoop 清单，指向这一版的便携版；用
-          #   scoop install https://github.com/<仓库>/releases/latest/download/dropshelf.json
-          # 就能安装，之后 scoop update dropshelf 按清单里的规则找新版本。
-          if ($tag -like 'v*') {
-              $base = "https://github.com/$env:GITHUB_REPOSITORY"
-              $scoop = "artifacts\dropshelf.json"
-              [ordered]@{
-                  version      = $version
-                  description  = "A temporary file shelf for Windows. Shake the mouse while dragging and a shelf pops up."
-                  homepage     = $base
-                  license      = "MIT"
-                  architecture = [ordered]@{
-                      "64bit" = [ordered]@{
-                          url  = "$base/releases/download/$tag/DropShelf-$version-portable.zip"
-                          hash = (Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash.ToLowerInvariant()
-                      }
-                  }
-                  shortcuts    = @(, @("DropShelf.exe", "DropShelf"))
-                  checkver     = "github"
-                  autoupdate   = [ordered]@{
-                      architecture = [ordered]@{
-                          "64bit" = [ordered]@{ url = "$base/releases/download/v`$version/DropShelf-`$version-portable.zip" }
-                      }
-                  }
-              } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $scoop -Encoding utf8
-              $files += $scoop
-          }
-
           # 已经在 Releases 页面建好（说明也在那里写好了）时只附上文件。还没有时新建一个：
           # 仓库里有这一版的发布说明 docs/releases/<标签>.md 就用它，没有时按提交记录自动生成。
           gh release view $tag *> $null
@@ -131,7 +103,7 @@ jobs:
           .\wingetcreate.exe update $env:PACKAGE_ID --version $version --urls $url --submit --token $env:WINGET_TOKEN
           if ($LASTEXITCODE -ne 0) { throw "提交到 winget 失败。" }
 
-  # Linux 便携版：在 Arch 容器里编译，把 tar.gz 附到同一个 Release。
+  # Linux 版：在 Arch 容器里编译，把 AppImage 和 pacman 包附到同一个 Release。
   linux:
     runs-on: ubuntu-latest
     container: archlinux:latest
@@ -150,8 +122,9 @@ jobs:
 
       - name: 编译并打包
         run: |
-          ./linux/package.sh "$GITHUB_WORKSPACE/dist"
-          ./linux/package-formats.sh linux/build "$GITHUB_WORKSPACE/dist"
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build linux/build
+          DROPSHELF_FORMATS="archlinux appimage" ./linux/package-formats.sh linux/build "$GITHUB_WORKSPACE/dist"
           ls -lh dist
 
       - name: 发布到 Release

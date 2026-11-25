@@ -31,6 +31,7 @@ Windows 版和原生 Wayland 的 Linux 版（C + GTK 4 + gtk4-layer-shell）都�
 
 - `DropShelf-Setup-版本号.exe`：安装包。
 - `DropShelf-版本号-portable.zip`：便携版，解压后运行 `DropShelf.exe`。
+- `DropShelf-版本号-x86_64.AppImage`、`dropshelf-版本号-1-x86_64.pkg.tar.zst`：Linux 版（Wayland），说明见 [linux/README-linux.md](linux/README-linux.md)。
 
 DropShelf 没有代码签名，首次运行时 Windows 可能显示“Windows 已保护你的电脑”。这是 SmartScreen 对新发布、下载量还少的程序的常规提示，并不代表检测到病毒。点“更多信息”，再点“仍要运行”即可。浏览器下载时提示“不常下载”也一样，选择“保留”。
 
@@ -158,7 +159,7 @@ Linux：
 
 1. 修改 `native/CMakeLists.txt`、`native/res/app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
 2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.9`，须与版本号一致）并发布。也可以把发布说明写在 `docs/releases/v版本号.md`，再直接推送这个标签：Actions 新建 Release 时用这份说明，没有这个文件时按提交记录自动生成。
-3. GitHub Actions 会自动编译 C 版的安装包和便携版，几分钟后附加到这个 Release 上；`v` 开头的标签还会附带一份 Scoop 清单 `dropshelf.json`。改动 `native` 里的代码时，Actions 还会编译并运行 C 版的测试（`.github/workflows/build.yml`）。
+3. GitHub Actions 会自动编译 C 版的安装包和便携版，几分钟后附加到这个 Release 上，Linux 版的 AppImage 和 pacman 包也一起附上。改动 `native` 里的代码时，Actions 还会编译并运行 C 版的测试（`.github/workflows/build.yml`）。
 
 代码签名和提交到 winget 是可选的，配置好之后发布时自动进行，做法见 [docs/publishing.md](docs/publishing.md)。
 

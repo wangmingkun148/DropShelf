@@ -1,8 +1,8 @@
-# 代码签名与上架 winget、Scoop
+# 代码签名与上架 winget
 
-这三件事都需要项目维护者自己的账号或证书，仓库里只准备好了接入的位置：没有配置时，发布流程和原来完全一样。
+这两件事都需要项目维护者自己的账号或证书，仓库里只准备好了接入的位置：没有配置时，发布流程和原来完全一样。
 
-安装包、便携版、Scoop 清单和提交到 winget 的都是 C 版（`native` 文件夹）：`installer/Build-Installer.ps1` 先用 `native/build.ps1` 编译出一个不依赖其他文件的 `DropShelf.exe`（运行库静态链接，不需要 .NET 或另外安装 VC++ 运行库），放到 `artifacts\win-x64`，再交给 Inno Setup。构建机要有 Visual Studio 2022 或 Build Tools 的 C++ 工具（GitHub 的 `windows-latest` 自带）。原来的 C# 版已停用，放在 `legacy/csharp`，不再发布。
+安装包、便携版和提交到 winget 的都是 C 版（`native` 文件夹）：`installer/Build-Installer.ps1` 先用 `native/build.ps1` 编译出一个不依赖其他文件的 `DropShelf.exe`（运行库静态链接，不需要 .NET 或另外安装 VC++ 运行库），放到 `artifacts\win-x64`，再交给 Inno Setup。构建机要有 Visual Studio 2022 或 Build Tools 的 C++ 工具（GitHub 的 `windows-latest` 自带）。原来的 C# 版已停用，放在 `legacy/csharp`，不再发布。
 
 ## 代码签名
 
@@ -43,20 +43,9 @@ Inno Setup 自己生成的 `unins000.exe` 不经过这个钩子；要连它一�
 
 这两项都设置了，发布 `v` 开头的标签时 `release.yml` 的最后一步会运行 `wingetcreate update … --submit`。这一步失败不影响已经发布的文件，可以到 Actions 的日志里看原因后手动补交。
 
-## Scoop
+## Linux 版
 
-发布 `v` 开头的标签时，`release.yml` 会生成一份 Scoop 清单 `dropshelf.json` 附在 Release 上，指向这一版的便携版并带有校验值。不需要任何配置，用下面的命令就能安装：
-
-```powershell
-scoop install https://github.com/wangmingkun148/dropshelf/releases/latest/download/dropshelf.json
-```
-
-想让用户用 `scoop install dropshelf` 这样的短名字安装，需要把清单放进一个 bucket：可以自己建一个 bucket 仓库放这份清单（清单里的 `checkver` 和 `autoupdate` 已经写好，bucket 的自动更新能跟上新版本），或者按 Scoop 官方 bucket 的收录要求提交到 `extras`。
-
-上架之后可以在 README 的“下载”一节补上对应的安装命令。
-
-## Linux 便携版
-
-发布标签时，`release.yml` 里的 `linux` 任务会在 Arch Linux 容器里编译，并运行 `linux/package.sh` 生成
-`DropShelf-<版本号>-linux-<架构>.tar.gz`，附加到同一个 Release。它只构建 x86_64；需要 aarch64 时在
-对应的机器上运行 `linux/package.sh`，或用 `linux/PKGBUILD` 在本机打包。
+发布标签时，`release.yml` 里的 `linux` 任务会在 Arch Linux 容器里编译，并运行 `linux/package-formats.sh` 生成
+`DropShelf-<版本号>-x86_64.AppImage` 和 pacman 包 `dropshelf-<版本号>-1-x86_64.pkg.tar.zst`，附加到同一个 Release。
+它只构建 x86_64；deb、rpm、便携 tar.gz 或 aarch64 版需要时在对应的机器上运行 `linux/package-formats.sh`、
+`linux/package.sh`，或用 `linux/PKGBUILD` 在本机打包。

@@ -51,7 +51,7 @@ linux/package.sh        # 生成 dist/DropShelf-<版本>-linux-<架构>.tar.gz
 linux/package-formats.sh   # 生成到 dist/，工具自动下载到 linux/build/packaging-tools
 ```
 
-每次发布都会附上这四种安装包和便携版；也可以从 Releases 页面直接下载。
+每次发布附上 AppImage 和 pacman 包；deb、rpm 和便携版用上面的命令自己生成。
 其中 AppImage 自带 GTK 等依赖，解压即用；deb/rpm/pacman 包依赖系统里的
 GTK 4、gtk4-layer-shell、gdk-pixbuf、libarchive、curl、fontconfig 和 libxcb。
 

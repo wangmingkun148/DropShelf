@@ -31,6 +31,7 @@ Get the latest version from [Releases](https://github.com/wangmingkun148/dropshe
 
 - `DropShelf-Setup-<version>.exe`: installer (in Simplified Chinese).
 - `DropShelf-<version>-portable.zip`: portable version. Unzip it and run `DropShelf.exe`.
+- `DropShelf-<version>-x86_64.AppImage`, `dropshelf-<version>-1-x86_64.pkg.tar.zst`: Linux version (Wayland); see [linux/README-linux.md](linux/README-linux.md) (in Chinese).
 
 DropShelf is not code-signed, so Windows may show "Windows protected your PC" the first time you run it. SmartScreen shows this for new programs that haven't been downloaded much yet; it doesn't mean a virus was found. Click "More info", then "Run anyway". If your browser says the file isn't commonly downloaded, choose "Keep".
 
@@ -153,7 +154,7 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 1. Update the version in `native/CMakeLists.txt`, `native/res/app.manifest` and both `.iss` files under `installer`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish. Alternatively, write the release notes in `docs/releases/v<version>.md` and just push the tag: Actions then creates the release with those notes, or generates notes from the commits if the file is missing.
-3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. Tags starting with `v` also get a Scoop manifest, `dropshelf.json`. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
+3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. The Linux AppImage and pacman package are attached too. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
 
 Code signing and submitting to winget are optional and run automatically at release time once configured; see [docs/publishing.md](docs/publishing.md) (in Chinese).
 
