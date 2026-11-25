@@ -1770,18 +1770,11 @@ static void handle_property_notify(xcb_property_notify_event_t *event)
     read_property_chunk(false);
 }
 
-static gboolean on_x_event(GIOChannel *channel, GIOCondition condition, gpointer data)
+/// 处理 xcb 手里所有的事件。等回复的同步请求（问 selection 归谁、找窗口……）会顺手把
+/// 后面的事件读进 xcb 自己的队列，套接字上就没东西可读了，光靠可读通知它们会一直搁着
+/// （对方来要数据没人理，等 XdndFinished 等到超时），所以定时那一拍也要来清一遍。
+static void dispatch_x_events(void)
 {
-    (void)channel;
-    (void)data;
-    if (!bridge.connection) return G_SOURCE_REMOVE;
-    if (condition & (G_IO_HUP | G_IO_ERR))
-    {
-        log_info(L"X11 拖放：X 连接断了，拖放桥停用");
-        bridge.io_source = 0;       // 正在处理的就是它，别让 xdnd_stop 再去删一遍
-        xdnd_stop();
-        return G_SOURCE_REMOVE;
-    }
     while (true)
     {
         xcb_generic_event_t *event = xcb_poll_for_event(bridge.connection);
@@ -1822,6 +1815,21 @@ static gboolean on_x_event(GIOChannel *channel, GIOCondition condition, gpointer
         free(event);
     }
     xcb_flush(bridge.connection);
+}
+
+static gboolean on_x_event(GIOChannel *channel, GIOCondition condition, gpointer data)
+{
+    (void)channel;
+    (void)data;
+    if (!bridge.connection) return G_SOURCE_REMOVE;
+    if (condition & (G_IO_HUP | G_IO_ERR))
+    {
+        log_info(L"X11 拖放：X 连接断了，拖放桥停用");
+        bridge.io_source = 0;       // 正在处理的就是它，别让 xdnd_stop 再去删一遍
+        xdnd_stop();
+        return G_SOURCE_REMOVE;
+    }
+    dispatch_x_events();
     return G_SOURCE_CONTINUE;
 }
 
@@ -1831,6 +1839,8 @@ static gboolean poll_tick(gpointer data)
 {
     (void)data;
     if (!bridge.connection || !bridge.window) return G_SOURCE_CONTINUE;
+    dispatch_x_events();
+    if (!bridge.connection) return G_SOURCE_CONTINUE;
     if (!probe_active && !sinks && !drag_active && !xdnd_source_active())
     {
         if (bridge.mapped) hide_window();

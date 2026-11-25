@@ -81,6 +81,7 @@ struct UiWindow
     bool drag_stale;                    // 已经替 GTK 收过尾、GTK 那边还挂着：下次从这里拖出前取消掉
     guint stale_cancel_source;          // 过一会儿还没收到 drag-end，就把挂着的拖动取消掉
     bool drag_taken_over;               // 这次拖出已经交给 X11 拖动源，收尾由它来做
+    bool drag_cancelled;                // GTK 报过这次拖动失败（松手处没有接收方、被拒）
     GtkWidget *drag_icon_label;         // 文字拖动图标里那个截短了的标签，拖动结束前要留着
     UiWindow *next;
 };
@@ -1173,6 +1174,13 @@ static bool take_over_for_x11(void)
     return true;
 }
 
+/// 这次拖出的结果。拖动失败时 GDK 留着的还是最后协商出的动作——拖动一开始先经过置物架自己，
+/// 那时就定成了复制——不能当成送到了，否则在空白处松手，项目也会从置物架上消失。
+static GdkDragAction drag_result(UiWindow *window, GdkDrag *drag)
+{
+    return drag && !window->drag_cancelled ? gdk_drag_get_selected_action(drag) : 0;
+}
+
 static gboolean drag_guard_tick(gpointer data)
 {
     UiWindow *window = data;
@@ -1199,7 +1207,7 @@ static gboolean drag_guard_tick(gpointer data)
     if (!window->drag_released_at) window->drag_released_at = g_get_monotonic_time();
     if (g_get_monotonic_time() - window->drag_released_at < DRAG_GUARD_RELEASE_DELAY_MICROSECONDS) return G_SOURCE_CONTINUE;
     log_info(L"GTK 拖动没有收到结束通知：左键已经松开，按拖动结束收尾（动作 0x%x，数据源留着让接收方取完）",
-        window->drag ? (unsigned)gdk_drag_get_selected_action(window->drag) : 0u);
+        (unsigned)drag_result(window, window->drag));
     window->drag_guard = 0;
     finish_stale_drag(window);
     return G_SOURCE_REMOVE;
@@ -1277,7 +1285,7 @@ static void finish_stale_drag(UiWindow *window)
     xdnd_source_assist_finish();
     if (drag) gdk_drag_drop_done(drag, TRUE);
     release_drag_icon_label(window);
-    if (window->drag_end && data) window->drag_end(window, window->drag_context, data, drag ? gdk_drag_get_selected_action(drag) : 0);
+    if (window->drag_end && data) window->drag_end(window, window->drag_context, data, drag_result(window, drag));
 }
 
 static void release_drag_icon_label(UiWindow *window)
@@ -1486,6 +1494,7 @@ static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data)
     window->drag = drag;
     window->drag_active = true;
     window->drag_stale = false;
+    window->drag_cancelled = false;
     window->drag_saw_button = gesture_left_button_state() == 1;
     window->drag_released_at = 0;
     window->drag_began_at = g_get_monotonic_time();
@@ -1496,6 +1505,18 @@ static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data)
         if (icon) gtk_drag_icon_set_child(GTK_DRAG_ICON(icon), window->drag_icon_label);
     }
     if (!window->drag_guard) window->drag_guard = g_timeout_add(DRAG_GUARD_POLL_MILLISECONDS, drag_guard_tick, window);
+}
+
+static gboolean on_drag_cancel(GtkDragSource *source, GdkDrag *drag, GdkDragCancelReason reason, gpointer data)
+{
+    (void)source;
+    UiWindow *window = data;
+    if (!window->destroyed && window->drag == drag)
+    {
+        window->drag_cancelled = true;
+        log_info(L"拖出：GTK 拖动没有送出去（原因 %d）", (int)reason);
+    }
+    return FALSE;
 }
 
 static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_data, gpointer data)
@@ -1533,8 +1554,9 @@ static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_da
         log_info(L"拖出结束：收到迟到的 GTK 结束通知");
         return;
     }
-    log_info(L"拖出结束：收到 GTK 的结束通知，动作 0x%x", (unsigned)gdk_drag_get_selected_action(drag));
-    if (window->drag_end) window->drag_end(window, window->drag_context, window->drag_data, gdk_drag_get_selected_action(drag));
+    GdkDragAction action = drag_result(window, drag);
+    log_info(L"拖出结束：收到 GTK 的结束通知，动作 0x%x", (unsigned)action);
+    if (window->drag_end) window->drag_end(window, window->drag_context, window->drag_data, action);
     window->drag_data = NULL;
 }
 
@@ -1649,6 +1671,7 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
     gtk_drag_source_set_actions(source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
     g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), window);
     g_signal_connect(source, "drag-begin", G_CALLBACK(on_drag_begin), window);
+    g_signal_connect(source, "drag-cancel", G_CALLBACK(on_drag_cancel), window);
     g_signal_connect(source, "drag-end", G_CALLBACK(on_drag_end), window);
     gtk_widget_add_controller(window->area, GTK_EVENT_CONTROLLER(source));
 
