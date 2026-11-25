@@ -1382,6 +1382,8 @@ struct LinuxDragOut
     ShelfWindow *shelf;
     ShelfItem **items;
     int count;
+    // 改由 X11 拖动源分几批送时，每项跟着第几批走（-1 是没送）；NULL 表示都在第一批里。
+    int *parts;
     bool transferred;           // 已经交给别的置物架，结束时不要再按拖出的结果处理
 };
 typedef struct LinuxDragOut LinuxDragOut;
@@ -1463,7 +1465,8 @@ static bool shelf_drop_phase(ShelfWindow *shelf, UiDropPhase phase, DropContentK
                 }
                 return false;
             }
-            if (kind == DROP_NONE || shelf->model->busy) return false;
+            // 没有数据（X11 那边的图片解不开、文件列表是空的）就是没收下，不能告诉来源成功了。
+            if (kind == DROP_NONE || shelf->model->busy || !value) return false;
             shelf->model->has_interacted = true;
             GType type = value ? G_VALUE_TYPE(value) : G_TYPE_INVALID;
             if (type == GDK_TYPE_FILE_LIST)
@@ -1631,10 +1634,10 @@ static void x11_drag_leave(void *context)
     shelf_drop_phase(shelf, UI_DROP_LEAVE, DROP_NONE, false, NULL, 0, 0, &action);
 }
 
-static void x11_drag_drop(void *context, const XdndPayload *payload, double x, double y)
+static bool x11_drag_drop(void *context, const XdndPayload *payload, double x, double y)
 {
     ShelfWindow *shelf = context;
-    if (!payload) return;
+    if (!payload) return false;
     GValue value = G_VALUE_INIT;
     bool have_value = false;
     if (payload->kind == XDND_KIND_FILES)
@@ -1673,8 +1676,9 @@ static void x11_drag_drop(void *context, const XdndPayload *payload, double x, d
     }
     log_info(L"X11 拖入：在（%g, %g）放下，%ls", x, y, xdnd_kind_name(payload->kind));
     GdkDragAction action = GDK_ACTION_COPY;
-    shelf_drop_phase(shelf, UI_DROP_DROP, xdnd_kind(payload->kind), false, have_value ? &value : NULL, x, y, &action);
+    bool accepted = shelf_drop_phase(shelf, UI_DROP_DROP, xdnd_kind(payload->kind), false, have_value ? &value : NULL, x, y, &action);
     if (G_IS_VALUE(&value)) g_value_unset(&value);
+    return accepted;
 }
 
 static bool x11_drag_frame(void *context, int *x, int *y, int *width, int *height)
@@ -1767,17 +1771,34 @@ static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDr
         else if (!out->transferred && action != 0)
         {
             DragOutResult result = (action & GDK_ACTION_MOVE) ? DRAG_OUT_MOVED : (action & GDK_ACTION_LINK) ? DRAG_OUT_LINKED : DRAG_OUT_COPIED;
+            // 改由 X11 拖动源送的时候，只算对方确认收下的那几批；被拒、超时、没送出去的项目留在置物架上。
+            ShelfItem **sent = out->items;
+            int sent_count = out->count;
+            uint32_t delivered = 0;
+            if (xdnd_source_delivered(&delivered))
+            {
+                sent = xalloc((size_t)out->count * sizeof(ShelfItem *));
+                sent_count = 0;
+                for (int index = 0; index < out->count; index++)
+                {
+                    int part = out->parts ? out->parts[index] : 0;
+                    if (part >= 0 && part < 32 && (delivered >> part & 1u)) sent[sent_count++] = out->items[index];
+                }
+                log_info(L"拖出：X11 拖动源确认送到 %d / %d 项", sent_count, out->count);
+            }
             // 聊天软件和浏览器常在放下之后才读取文件，临时附件多保留一会儿。
-            for (int index = 0; index < out->count; index++)
-                if (out->items[index]->temporary || !shelf_item_is_file_system(out->items[index]))
+            for (int index = 0; index < sent_count; index++)
+                if (sent[index]->temporary || !shelf_item_is_file_system(sent[index]))
                     shelf_model_keep_temporary_files(shelf->model);
-            shelf_model_apply_drag_out(shelf->model, out->items, out->count, result, close_when_empty());
+            if (sent_count > 0) shelf_model_apply_drag_out(shelf->model, sent, sent_count, result, close_when_empty());
+            if (sent != out->items) free(sent);
         }
         shelf_restore_dimmed(shelf);
     }
     current_drag_out = NULL;
     for (int index = 0; index < out->count; index++) shelf_item_release(out->items[index]);
     free(out->items);
+    free(out->parts);
     shelf_window_release(out->shelf);
     free(out);
 }
@@ -1842,6 +1863,13 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     char *utf8_text = joined.length > 0 ? utf8_from_wide(joined.data, NULL) : NULL;
     wstr_free(&joined);
     bool text_planned = mixed_text && utf8_text && *utf8_text;
+    // 分批送的时候每项跟着第几批走（和 items 对齐，-1 是没送），收尾时只移走对方确认收下的那几批。
+    int *item_parts = NULL;
+    if (mixed_text)
+    {
+        item_parts = xalloc((size_t)count * sizeof(int));
+        for (int index = 0; index < count; index++) item_parts[index] = -1;
+    }
     ShelfItem **dragged = xalloc((size_t)count * sizeof(ShelfItem *));
     int dragged_count = 0;
     if (file_count > 0)
@@ -1895,6 +1923,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                 // 自动分批：按置物架里的顺序一项一项地送。第一批跟着这次拖动走，
                 // 后面的排进 X11 拖动源，真正放下以后一批一批自动送过去。
                 bool first = true;
+                int part = 0;
                 for (int index = 0; index < count; index++)
                 {
                     ShelfItem *item = items[index];
@@ -1918,20 +1947,31 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                         if (shelf_item_is_file_system(item)) xdnd_source_set_payload((const char *const *)&one, 1, NULL, NULL, move);
                         else xdnd_source_set_payload(NULL, 0, one, NULL, false);
                         first = false;
+                        item_parts[index] = 0;
                     }
-                    else if (shelf_item_is_file_system(item)) xdnd_source_add_batch((const char *const *)&one, 1, NULL);
-                    else xdnd_source_add_batch(NULL, 0, one);
+                    else if (shelf_item_is_file_system(item) ? xdnd_source_add_batch((const char *const *)&one, 1, NULL)
+                                                             : xdnd_source_add_batch(NULL, 0, one))
+                        item_parts[index] = ++part;
                     free(one);
                 }
                 // 一个能送的都没有（文件全找不到了）：还是按整组文件交过去，至少不让这次拖动变成空的。
-                if (first) xdnd_source_set_payload((const char *const *)names, object_count, NULL, NULL, move);
+                if (first)
+                {
+                    xdnd_source_set_payload((const char *const *)names, object_count, NULL, NULL, move);
+                    for (int index = 0; index < count; index++)
+                        if (shelf_item_is_file_system(items[index])) item_parts[index] = 0;
+                }
             }
             else
             {
                 char *html = mixed_smart ? xdnd_source_html_build(utf8_text, (const char *const *)names, object_count) : NULL;
                 xdnd_source_set_payload((const char *const *)names, object_count, NULL, html, move);
                 // 智能：HTML 里已经有文字，可文档程序常常只肯从文件列表里插图片；放下后再补一批纯文字。
-                if (text_planned) xdnd_source_add_batch(NULL, 0, utf8_text);
+                // 文字算在补送的那批里：HTML 对方未必用了，补送那批被拒时文字留在置物架上。
+                bool text_queued = text_planned && xdnd_source_add_batch(NULL, 0, utf8_text);
+                if (item_parts)
+                    for (int index = 0; index < count; index++)
+                        item_parts[index] = shelf_item_is_file_system(items[index]) ? 0 : text_queued ? 1 : -1;
                 free(html);
             }
         }
@@ -1961,6 +2001,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         if (provider) g_object_unref(provider);
         for (int index = 0; index < dragged_count; index++) shelf_item_release(dragged[index]);
         free(dragged);
+        free(item_parts);
         shelf->dragging_out = false;
         model->dragging_out = false;
         free(items);
@@ -1972,6 +2013,17 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     out->shelf = shelf_window_retain(shelf);
     out->items = dragged;
     out->count = dragged_count;
+    if (item_parts)
+    {
+        out->parts = xalloc((size_t)dragged_count * sizeof(int));
+        for (int index = 0; index < dragged_count; index++)
+        {
+            out->parts[index] = -1;
+            for (int search = 0; search < count; search++)
+                if (items[search] == dragged[index]) out->parts[index] = item_parts[search];
+        }
+        free(item_parts);
+    }
     current_drag_out = out;
     shelf_dim_dragged(shelf, items, count);
     // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。

@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum XdndKind
 {
@@ -44,12 +45,12 @@ void xdnd_probe_hide(void);
 
 /// 置物架登记成拖放目标。x、y、width、height 是接放窗口要盖住的位置和大小
 /// （和 Hyprland 的布局坐标、光标坐标同一套）；置物架不可见时 frame 返回 false。
-/// 坐标以置物架左上角为原点，和 GTK 拖放回调里拿到的一样。
+/// 坐标以置物架左上角为原点，和 GTK 拖放回调里拿到的一样。drop 返回置物架有没有真的收下。
 XdndSink *xdnd_add_sink(void *context,
     void (*enter)(void *context, XdndKind kind, double x, double y),
     void (*motion)(void *context, XdndKind kind, double x, double y),
     void (*leave)(void *context),
-    void (*drop)(void *context, const XdndPayload *payload, double x, double y),
+    bool (*drop)(void *context, const XdndPayload *payload, double x, double y),
     bool (*frame)(void *context, int *x, int *y, int *width, int *height));
 void xdnd_remove_sink(XdndSink *sink);
 
@@ -62,7 +63,8 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
 
 /// 再排一批：这次拖动真正放下以后，自动按排队的顺序一批一批地送给同一个窗口
 /// （每一批都被对方收下才接着送下一批）。paths 是这一批的文件，text 是这一批的纯文字，内容会被复制。
-void xdnd_source_add_batch(const char *const *paths, int count, const char *text);
+/// 没排上（空的，或者排满了）返回 false。
+bool xdnd_source_add_batch(const char *const *paths, int count, const char *text);
 
 /// 把文字和文件路径里的图片合成一份 HTML：文字按段落排，图片用 file:// 地址。
 /// 什么都没排出来时返回 NULL。调用方负责 free。
@@ -84,6 +86,10 @@ void xdnd_source_assist_finish(void);
 
 /// 接管这次拖出（先把 GTK 的拖动取消掉再调用）。真正开始发 Xdnd 要等一小会儿。
 bool xdnd_source_begin(void);
+
+/// 上一次拖出改由自己的 X11 拖动源送了吗。送了的话 parts 里第 n 位表示第 n 批（0 是跟着拖动走的那批，
+/// 之后按 xdnd_source_add_batch 的顺序）被对方用 XdndFinished 确认收下了。没接管时 GTK 报的动作就是整次的结果。
+bool xdnd_source_delivered(uint32_t *parts);
 
 /// 自己正在（或者马上要）当 X11 拖动源。
 bool xdnd_source_active(void);

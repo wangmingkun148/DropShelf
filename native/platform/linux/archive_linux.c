@@ -5,6 +5,7 @@
 #endif
 
 #include "archive.h"
+#include "archive_paths.h"
 #include "file_ops.h"
 #include "log.h"
 
@@ -16,48 +17,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-// ───────────── 来源和输出位置 ─────────────
-
-static bool is_separator(wchar_t character)
-{
-    return character == L'/' || character == L'\\';
-}
-
-static StrList normalize_sources(const StrList *paths)
-{
-    StrList sources = {0};
-    TextSet seen = { .ignore_case = true };
-    for (int index = 0; index < paths->count; index++)
-    {
-        if (!path_is_available(paths->items[index])) continue;
-        wchar_t *full = path_full(paths->items[index]);
-        if (text_set_add(&seen, full)) strlist_add_owned(&sources, full);
-        else free(full);
-    }
-    text_set_clear(&seen);
-    return sources;
-}
-
-static wchar_t *destination_directory(const wchar_t *source, const wchar_t *requested)
-{
-    if (!wcs_is_blank(requested)) return directory_create(requested) ? wcs_dup(requested) : NULL;
-    wchar_t *trimmed = path_trim_end_separator(source);
-    wchar_t *parent = path_directory(trimmed);
-    if (parent && wcslen(parent) >= wcslen(trimmed))
-    {
-        free(parent);
-        parent = NULL;
-    }
-    free(trimmed);
-    return parent;
-}
-
-static wchar_t *source_name(const wchar_t *source)
-{
-    if (!path_is_directory(source)) return path_file_stem(source);
-    return path_folder_name(source);
-}
 
 /// 写入压缩包时的条目名：统一用 /，去掉开头的分隔符。
 static char *entry_name(const char *prefix, const char *name)
@@ -74,7 +33,8 @@ static char *narrow(const wchar_t *path)
 // ───────────── 写入 ZIP ─────────────
 
 /// 递归加入文件。符号链接不打包，免得解压后指向压缩包外面。
-static bool add_tree(mz_zip_archive *zip, const char *disk, const char *entry)
+/// 里面什么都没写进去的文件夹（空文件夹）单独留一个条目，解压后还在。wrote 记下写进了东西。
+static bool add_tree(mz_zip_archive *zip, const char *disk, const char *entry, bool *wrote)
 {
     struct stat info;
     if (lstat(disk, &info) != 0) return false;
@@ -87,38 +47,47 @@ static bool add_tree(mz_zip_archive *zip, const char *disk, const char *entry)
             log_error(L"压缩时无法读取文件夹");
             return false;
         }
-        bool ok = true;
+        bool ok = true, inner = false;
         struct dirent *item;
         while (ok && (item = readdir(directory)) != NULL)
         {
             if (strcmp(item->d_name, ".") == 0 || strcmp(item->d_name, "..") == 0) continue;
             char *child_disk = g_build_filename(disk, item->d_name, NULL);
             char *child_entry = entry_name(entry, item->d_name);
-            ok = add_tree(zip, child_disk, child_entry);
+            ok = add_tree(zip, child_disk, child_entry, &inner);
             g_free(child_disk);
             g_free(child_entry);
         }
         closedir(directory);
+        if (ok && !inner)
+        {
+            char *folder = g_strdup_printf("%s/", entry);
+            ok = mz_zip_writer_add_mem(zip, folder, NULL, 0, MZ_NO_COMPRESSION) != 0;
+            g_free(folder);
+        }
+        if (ok) *wrote = true;
         return ok;
     }
     if (!S_ISREG(info.st_mode)) return true;
-    return mz_zip_writer_add_file(zip, entry, disk, NULL, 0, MZ_DEFAULT_COMPRESSION) != 0;
+    if (!mz_zip_writer_add_file(zip, entry, disk, NULL, 0, MZ_DEFAULT_COMPRESSION)) return false;
+    *wrote = true;
+    return true;
 }
 
 void archive_compress(const StrList *paths, const wchar_t *output_directory, QuickActionResult *result)
 {
-    StrList sources = normalize_sources(paths);
+    StrList sources = archive_sources(paths);
     if (sources.count == 0)
     {
         quick_action_result_fail(result, STR_NothingToCompress);
         return;
     }
-    wchar_t *directory = destination_directory(sources.items[0], output_directory);
+    wchar_t *directory = archive_output_directory(sources.items[0], output_directory);
     wchar_t *output = NULL;
     bool ok = directory != NULL;
     if (ok)
     {
-        wchar_t *name = sources.count == 1 ? source_name(sources.items[0]) : wcs_dup(S(STR_DefaultArchiveName));
+        wchar_t *name = sources.count == 1 ? archive_source_name(sources.items[0]) : wcs_dup(S(STR_DefaultArchiveName));
         output = path_available(directory, name, L".zip");
         free(name);
         ok = output != NULL;
@@ -132,17 +101,23 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
         ok = mz_zip_writer_init_file(&zip, output_narrow, 0) != 0;
         if (!ok) log_error(L"无法创建压缩文件");
     }
+    // 条目名和 Windows 版一样：文件带扩展名，文件夹用它的名称，重名的加 (2)。
+    StrList used = {0};
     for (int index = 0; ok && index < sources.count; index++)
     {
-        char *disk = narrow(sources.items[index]);
-        if (!disk) { ok = false; break; }
-        wchar_t *name = sources.count == 1 ? source_name(sources.items[index]) : wcs_dup(path_file_name(sources.items[index]));
-        char *entry = utf8_from_wide(name, NULL);
+        const wchar_t *source = sources.items[index];
+        char *disk = narrow(source);
+        wchar_t *requested = path_is_directory(source) ? path_folder_name(source) : wcs_dup(path_file_name(source));
+        wchar_t *name = requested ? archive_entry_name(requested, &used) : NULL;
+        free(requested);
+        char *entry = name ? utf8_from_wide(name, NULL) : NULL;
         free(name);
-        ok = entry && add_tree(&zip, disk, entry);
+        bool wrote = false;
+        ok = disk && entry && add_tree(&zip, disk, entry, &wrote);
         free(entry);
         free(disk);
     }
+    strlist_clear(&used);
     if (ok) ok = mz_zip_writer_finalize_archive(&zip) != 0;
     if (!ok && output_narrow && path_exists(output)) io_delete_file(output);
     if (zip.m_zip_mode != MZ_ZIP_MODE_INVALID) mz_zip_writer_end(&zip);
@@ -281,7 +256,7 @@ static void delete_tree(const char *path)
 
 static void extract(const wchar_t *source, const wchar_t *output_directory, bool seven_zip, QuickActionResult *result)
 {
-    wchar_t *parent = destination_directory(source, output_directory);
+    wchar_t *parent = archive_output_directory(source, output_directory);
     wchar_t *stem = path_file_stem(source);
     wchar_t *destination = parent ? path_available(parent, stem, L"") : NULL;
     free(stem);
@@ -325,7 +300,7 @@ static void extract(const wchar_t *source, const wchar_t *output_directory, bool
 
 void archive_run(const StrList *paths, const wchar_t *output_directory, QuickActionResult *result)
 {
-    StrList sources = normalize_sources(paths);
+    StrList sources = archive_sources(paths);
     if (sources.count == 0) quick_action_result_fail(result, STR_NothingToArchive);
     else if (sources.count == 1 && !path_is_directory(sources.items[0]))
     {

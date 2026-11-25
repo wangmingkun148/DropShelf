@@ -38,6 +38,53 @@ static char *read_file(const char *path)
     return text;
 }
 
+/// 压缩 paths 再解压到 unpack，返回解压出来的文件夹（g_free）；哪一步失败都返回 NULL。
+static char *round_trip(const char *const *paths, int count, const char *output, const char *unpack)
+{
+    StrList list = {0};
+    for (int index = 0; index < count; index++)
+    {
+        wchar_t *wide = wide_from_utf8(paths[index], strlen(paths[index]));
+        strlist_add(&list, wide);
+        free(wide);
+    }
+    wchar_t *wide_output = wide_from_utf8(output, strlen(output));
+    wchar_t *wide_unpack = wide_from_utf8(unpack, strlen(unpack));
+    QuickActionResult packed = {0};
+    archive_compress(&list, wide_output, &packed);
+    char *folder = NULL;
+    if (packed.succeeded && packed.outputs.count == 1)
+    {
+        StrList one = {0};
+        strlist_add(&one, packed.outputs.items[0]);
+        QuickActionResult extracted = {0};
+        archive_run(&one, wide_unpack, &extracted);
+        if (extracted.succeeded && extracted.outputs.count == 1)
+        {
+            char *narrow = utf8_from_wide(extracted.outputs.items[0], NULL);
+            folder = g_strdup(narrow);
+            free(narrow);
+        }
+        quick_action_result_free(&extracted);
+        strlist_clear(&one);
+    }
+    quick_action_result_free(&packed);
+    strlist_clear(&list);
+    free(wide_output);
+    free(wide_unpack);
+    return folder;
+}
+
+static bool file_has(const char *folder, const char *name, const char *text)
+{
+    char *path = g_build_filename(folder, name, NULL);
+    char *content = read_file(path);
+    bool same = content && strcmp(content, text) == 0;
+    free(content);
+    g_free(path);
+    return same;
+}
+
 static void remove_tree(const char *path)
 {
     struct stat info;
@@ -156,6 +203,73 @@ int main(void)
         free(wide_unpack);
     }
     g_free(seven);
+
+    // 单个文件：压缩包按文件名去掉扩展名命名，里面的条目保留扩展名。
+    // 大小写不同的两个文件（Linux 上是两个文件）都要打进去；文件夹里的空文件夹解压后还在。
+    {
+        char *cases = g_dir_make_tmp("dropshelf-archive-cases-XXXXXX", NULL);
+        char *upper = g_build_filename(cases, "photo.JPG", NULL);
+        char *lower = g_build_filename(cases, "photo.jpg", NULL);
+        write_file(upper, "upper");
+        write_file(lower, "lower");
+        char *tree = g_build_filename(cases, "tree", NULL);
+        char *empty = g_build_filename(tree, "empty", NULL);
+        char *inside = g_build_filename(tree, "inside.txt", NULL);
+        g_mkdir_with_parents(empty, 0755);
+        write_file(inside, "in");
+        char *bare = g_build_filename(cases, "bare", NULL);
+        g_mkdir_with_parents(bare, 0755);
+
+        const char *single[] = { upper };
+        char *output_single = g_build_filename(cases, "out1", NULL);
+        char *unpack_single = g_build_filename(cases, "unpack1", NULL);
+        g_mkdir_with_parents(output_single, 0755);
+        g_mkdir_with_parents(unpack_single, 0755);
+        char *folder = round_trip(single, 1, output_single, unpack_single);
+        check(folder && g_str_has_suffix(folder, "/photo"), "单个文件的压缩包没有按文件名命名");
+        check(folder && file_has(folder, "photo.JPG", "upper"), "单个文件压缩后丢了扩展名");
+        g_free(folder);
+
+        const char *both[] = { upper, lower };
+        char *output_both = g_build_filename(cases, "out2", NULL);
+        char *unpack_both = g_build_filename(cases, "unpack2", NULL);
+        g_mkdir_with_parents(output_both, 0755);
+        g_mkdir_with_parents(unpack_both, 0755);
+        folder = round_trip(both, 2, output_both, unpack_both);
+        check(folder && file_has(folder, "photo.JPG", "upper"), "大小写不同的两个文件压缩后少了 photo.JPG");
+        check(folder && file_has(folder, "photo (2).jpg", "lower"), "大小写不同的两个文件压缩后少了 photo.jpg");
+        g_free(folder);
+
+        const char *trees[] = { tree, bare };
+        char *output_tree = g_build_filename(cases, "out3", NULL);
+        char *unpack_tree = g_build_filename(cases, "unpack3", NULL);
+        g_mkdir_with_parents(output_tree, 0755);
+        g_mkdir_with_parents(unpack_tree, 0755);
+        folder = round_trip(trees, 2, output_tree, unpack_tree);
+        check(folder && file_has(folder, "tree/inside.txt", "in"), "文件夹压缩后少了文件");
+        char *empty_out = folder ? g_build_filename(folder, "tree", "empty", NULL) : NULL;
+        char *bare_out = folder ? g_build_filename(folder, "bare", NULL) : NULL;
+        check(empty_out && g_file_test(empty_out, G_FILE_TEST_IS_DIR), "文件夹里的空文件夹压缩后丢了");
+        check(bare_out && g_file_test(bare_out, G_FILE_TEST_IS_DIR), "空文件夹本身压缩后丢了");
+        g_free(empty_out);
+        g_free(bare_out);
+        g_free(folder);
+
+        remove_tree(cases);
+        g_free(output_single);
+        g_free(unpack_single);
+        g_free(output_both);
+        g_free(unpack_both);
+        g_free(output_tree);
+        g_free(unpack_tree);
+        g_free(upper);
+        g_free(lower);
+        g_free(tree);
+        g_free(empty);
+        g_free(inside);
+        g_free(bare);
+        g_free(cases);
+    }
 
     free(archive);
     strlist_clear(&paths);

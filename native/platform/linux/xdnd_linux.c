@@ -47,7 +47,7 @@ struct XdndSink
     void (*enter)(void *context, XdndKind kind, double x, double y);
     void (*motion)(void *context, XdndKind kind, double x, double y);
     void (*leave)(void *context);
-    void (*drop)(void *context, const XdndPayload *payload, double x, double y);
+    bool (*drop)(void *context, const XdndPayload *payload, double x, double y);
     bool (*frame)(void *context, int *x, int *y, int *width, int *height);
     bool entered;           // 已经给它发过 enter
     XdndSink *next;
@@ -493,6 +493,8 @@ static void deliver_data(void)
     }
     log_info(L"X11 拖放：数据读完了，%ls %zu 字节", drag_kind == XDND_KIND_IMAGE ? L"图片" : drag_kind == XDND_KIND_FILES ? L"文件列表" : L"文字",
         (size_t)(incoming ? incoming->len : 0));
+    // 只有置物架真的收下了才告诉来源成功：松手时已经离开置物架、数据解不开都算没收下。
+    bool accepted = false;
     if (target && target->drop)
     {
         int point_x = drag_has_position ? drag_point_x : 0, point_y = drag_has_position ? drag_point_y : 0;
@@ -506,10 +508,10 @@ static void deliver_data(void)
             }
         }
         int local_x = 0, local_y = 0;
-        if (sink_contains(target, point_x, point_y, &local_x, &local_y)) target->drop(target->context, &payload, local_x, local_y);
+        if (sink_contains(target, point_x, point_y, &local_x, &local_y)) accepted = target->drop(target->context, &payload, local_x, local_y);
         else log_info(L"X11 拖放：松手时已经不在置物架上，丢弃");
     }
-    send_finished(target != NULL);
+    send_finished(accepted);
     g_free(text);
     reset_drag();
 }
@@ -601,6 +603,10 @@ static struct
     char *html;                     // text/html：混合拖出时把文字和图片放在一起
     bool move_allowed;
     uint32_t drop_types;            // 发出 XdndDrop 以后对方取了哪些格式（DROP_TYPE_*）
+    // 这次拖出有没有改由自己送，送到第几批（0 是跟着拖动走的那批），哪几批对方用 XdndFinished 确认收下了。
+    bool took_over;
+    int part;
+    uint32_t delivered;
     // 自动分批：一次拖出分成几批送给同一个窗口，不用鼠标按键。
     bool batching;
     guint batch_timer;
@@ -762,6 +768,9 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
     source.move_allowed = move_allowed;
     source.html = html && *html ? g_strdup(html) : NULL;
     source.drop_types = 0;
+    source.took_over = false;
+    source.part = 0;
+    source.delivered = 0;
     source_paths_build(paths, count, &source.uri_list, &source.text);
     if (!source.uri_list && !source.text && text && *text) source.text = g_strdup(text);
     source.prepared = source.uri_list != NULL || source.text != NULL || source.html != NULL;
@@ -773,7 +782,7 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
     if (source.text) log_trace(L"X11 拖动源：要拖出去的文字 %zu 字节", strlen(source.text));
 }
 
-void xdnd_source_add_batch(const char *const *paths, int count, const char *text)
+bool xdnd_source_add_batch(const char *const *paths, int count, const char *text)
 {
     SourceBatch *batch = g_new0(SourceBatch, 1);
     source_paths_build(paths, count, &batch->uri_list, &batch->text);
@@ -781,16 +790,17 @@ void xdnd_source_add_batch(const char *const *paths, int count, const char *text
     if (!batch->uri_list && !batch->text)
     {
         source_batch_free(batch);
-        return;
+        return false;
     }
     if (g_queue_get_length(&batches) >= MAXIMUM_BATCHES)
     {
         log_info(L"X11 拖动源：排着的批次到了上限 %d，后面的不送了", MAXIMUM_BATCHES);
         source_batch_free(batch);
-        return;
+        return false;
     }
     g_queue_push_tail(&batches, batch);
     log_trace(L"X11 拖动源：排入一批（%ls）", batch->uri_list ? L"文件" : L"文字");
+    return true;
 }
 
 static bool path_is_image(const char *path)
@@ -1125,6 +1135,7 @@ static bool source_start(void)
     if (!bridge.connection || !source.target) return false;
     if (!source_create_window() || !source_take_ownership()) return false;
     source.active = true;
+    source.took_over = true;
     source.waiting_finish = false;
     source.have_point = false;
     source.owner_retries = 0;
@@ -1238,6 +1249,7 @@ static gboolean source_batch_start(gpointer data)
     }
     source.batching = true;
     source.active = true;
+    source.part++;
     source.target = source.batch_window;
     source.target_pid = source.batch_pid;
     source.target_rect = source.batch_rect;
@@ -1315,6 +1327,8 @@ static void source_handle_finished(xcb_client_message_event_t *event)
     bool success = event->data.data32[1] != 0;
     if (success && event->data.data32[2] == bridge.atoms.action_move) source.action = bridge.atoms.action_move;
     log_info(L"X11 拖动源：对方收完了%ls", success ? L"" : L"（没收下）");
+    // 只有这里算确认送到：等 XdndFinished 超时、被拒或取消的那批，项目留在置物架上。
+    if (success && source.part < 32) source.delivered |= 1u << source.part;
     source_finish(success);
 }
 
@@ -1513,6 +1527,9 @@ bool xdnd_source_should_take_over(void)
 {
     if (!bridge.connection || !bridge.atoms.selection) return false;
     if (source.active || source.starting || source.assisting || !source.prepared) return false;
+    // 自己当拖动源时靠左键松开来放下；读不到按键状态就等不到松手，拖动会一直挂着，还是交给 GTK。
+    // 只替 Hyprland 的拖动提供数据（复制）不用管松手，照样可以。
+    if (gesture_left_button_state() < 0 && !xdnd_source_copy_only()) return false;
     if (!hyprland_available()) return false;
     POINT cursor;
     if (!GetCursorPos(&cursor)) return false;
@@ -1559,6 +1576,12 @@ bool xdnd_source_begin(void)
     source.dwell_pid = 0;
     source.dwell_since = 0;
     return true;
+}
+
+bool xdnd_source_delivered(uint32_t *parts)
+{
+    if (parts) *parts = source.delivered;
+    return source.took_over;
 }
 
 bool xdnd_source_active(void)
@@ -1973,7 +1996,7 @@ XdndSink *xdnd_add_sink(void *context,
     void (*enter)(void *context, XdndKind kind, double x, double y),
     void (*motion)(void *context, XdndKind kind, double x, double y),
     void (*leave)(void *context),
-    void (*drop)(void *context, const XdndPayload *payload, double x, double y),
+    bool (*drop)(void *context, const XdndPayload *payload, double x, double y),
     bool (*frame)(void *context, int *x, int *y, int *width, int *height))
 {
     if (!bridge.connection) return NULL;

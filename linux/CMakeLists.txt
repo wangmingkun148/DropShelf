@@ -51,6 +51,7 @@ add_library(dropshelf_core STATIC
     "${DROPSHELF_SOURCE_DIR}/look_switch.c"
     "${DROPSHELF_SOURCE_DIR}/history_menu.c"
     "${DROPSHELF_SOURCE_DIR}/file_identity.c"
+    "${DROPSHELF_SOURCE_DIR}/archive_paths.c"
     "${DROPSHELF_SOURCE_DIR}/attachment_cache.c"
     "${DROPSHELF_SOURCE_DIR}/shelf_peek.c"
     "${DROPSHELF_SOURCE_DIR}/shelf_merge.c"

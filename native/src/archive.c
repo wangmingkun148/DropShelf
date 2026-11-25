@@ -1,4 +1,5 @@
 #include "archive.h"
+#include "archive_paths.h"
 #include "attachment_cache.h"
 #include "file_ops.h"
 #include "log.h"
@@ -14,47 +15,6 @@
 static bool is_separator(wchar_t character)
 {
     return character == L'\\' || character == L'/';
-}
-
-// ───────────── 来源和输出位置 ─────────────
-
-/// 存在的路径，转成完整路径，去掉重复（不分大小写）。
-static StrList normalize_sources(const StrList *paths)
-{
-    StrList sources = {0};
-    // 查重用排好序的集合：一次压缩几千个文件时不用两两比较。
-    TextSet seen = { .ignore_case = true };
-    for (int index = 0; index < paths->count; index++)
-    {
-        if (!path_is_available(paths->items[index])) continue;
-        wchar_t *full = path_full(paths->items[index]);
-        if (text_set_add(&seen, full)) strlist_add_owned(&sources, full);
-        else free(full);
-    }
-    text_set_clear(&seen);
-    return sources;
-}
-
-/// 输出放在哪里：指定了就用指定的；否则文件放在它旁边，文件夹放在它的上一级（磁盘根目录不行）。
-static wchar_t *destination_directory(const wchar_t *source, const wchar_t *requested)
-{
-    if (!wcs_is_blank(requested)) return directory_create(requested) ? wcs_dup(requested) : NULL;
-    wchar_t *trimmed = path_trim_end_separator(source);
-    wchar_t *parent = path_directory(trimmed);
-    if (parent && wcslen(parent) >= wcslen(trimmed))
-    {
-        free(parent);
-        parent = NULL;
-    }
-    free(trimmed);
-    return parent;
-}
-
-/// 文件去掉扩展名，文件夹用它的名称。
-static wchar_t *source_name(const wchar_t *source)
-{
-    if (!path_is_directory(source)) return path_file_stem(source);
-    return path_folder_name(source);
 }
 
 static wchar_t *temporary_name(const wchar_t *directory, const wchar_t *suffix)
@@ -194,34 +154,13 @@ static bool add_folder_entry(mz_zip_archive *zip, const wchar_t *entry_name)
     return ok;
 }
 
-/// 压缩包里还没用过的名称：重名时加 (2)、(3)，分隔符换成 /。
-static wchar_t *available_entry_name(const wchar_t *requested, StrList *used)
-{
-    wchar_t *candidate = wcs_dup(requested);
-    wchar_t *stem, *extension;
-    path_split_name(requested, &stem, &extension);
-    for (int suffix = 2; strlist_index_of(used, candidate, true) >= 0; suffix++)
-    {
-        free(candidate);
-        WStr next = {0};
-        wstr_appendf(&next, L"%ls (%d)%ls", stem, suffix, extension);
-        candidate = wstr_take(&next);
-    }
-    free(stem);
-    free(extension);
-    strlist_add(used, candidate);
-    for (wchar_t *cursor = candidate; *cursor; cursor++)
-        if (*cursor == L'\\') *cursor = L'/';
-    return candidate;
-}
-
 /// 整棵目录树只走一遍：每个文件夹列一次，文件直接写入，子文件夹排队，什么都没有的文件夹留一个空条目。
 /// 符号链接和目录联接不跟进也不写入，但所在的文件夹不算空。OneDrive 等按需下载的文件和文件夹也带重解析点属性，
 /// 但是真正的内容，照常压缩（见 find_data_is_link）。
 static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList *used)
 {
     wchar_t *folder_name = path_folder_name(directory);
-    wchar_t *root_name = available_entry_name(folder_name, used);
+    wchar_t *root_name = archive_entry_name(folder_name, used);
     free(folder_name);
     bool ok = true, has_entries = false, first = true;
     StrList pending_paths = {0}, pending_names = {0};
@@ -286,18 +225,18 @@ static bool add_directory(mz_zip_archive *zip, const wchar_t *directory, StrList
 
 void archive_compress(const StrList *paths, const wchar_t *output_directory, QuickActionResult *result)
 {
-    StrList sources = normalize_sources(paths);
+    StrList sources = archive_sources(paths);
     if (sources.count == 0)
     {
         quick_action_result_fail(result, STR_NothingToCompress);
         return;
     }
-    wchar_t *directory = destination_directory(sources.items[0], output_directory);
+    wchar_t *directory = archive_output_directory(sources.items[0], output_directory);
     wchar_t *output = NULL, *temporary = NULL;
     bool ok = directory != NULL;
     if (ok)
     {
-        wchar_t *name = sources.count == 1 ? source_name(sources.items[0]) : wcs_dup(S(STR_DefaultArchiveName));
+        wchar_t *name = sources.count == 1 ? archive_source_name(sources.items[0]) : wcs_dup(S(STR_DefaultArchiveName));
         output = path_available(directory, name, L".zip");
         free(name);
         temporary = temporary_name(directory, L".tmp");
@@ -325,7 +264,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
             if (path_is_directory(source)) ok = add_directory(&zip, source, &used);
             else
             {
-                wchar_t *entry = available_entry_name(path_file_name(source), &used);
+                wchar_t *entry = archive_entry_name(path_file_name(source), &used);
                 ok = add_file(&zip, source, entry);
                 free(entry);
             }
@@ -545,7 +484,7 @@ static void finish_extraction(const wchar_t *source, wchar_t *temporary, const w
 
 static void extract_zip(const wchar_t *source, const wchar_t *output_directory, QuickActionResult *result)
 {
-    wchar_t *parent = destination_directory(source, output_directory);
+    wchar_t *parent = archive_output_directory(source, output_directory);
     wchar_t *stem = path_file_stem(source);
     wchar_t *destination = parent ? path_available(parent, stem, L"") : NULL;
     wchar_t *temporary = parent ? temporary_name(parent, L"") : NULL;
@@ -796,7 +735,7 @@ static void extract_7zip(const wchar_t *source, const wchar_t *output_directory,
         quick_action_result_fail(result, STR_SevenZipUnsupported);
         return;
     }
-    wchar_t *parent = destination_directory(source, output_directory);
+    wchar_t *parent = archive_output_directory(source, output_directory);
     wchar_t *stem = path_file_stem(source);
     wchar_t *destination = parent ? path_available(parent, stem, L"") : NULL;
     wchar_t *temporary = parent ? temporary_name(parent, L"") : NULL;
@@ -833,7 +772,7 @@ static void extract_7zip(const wchar_t *source, const wchar_t *output_directory,
 
 void archive_run(const StrList *paths, const wchar_t *output_directory, QuickActionResult *result)
 {
-    StrList sources = normalize_sources(paths);
+    StrList sources = archive_sources(paths);
     if (sources.count == 0) quick_action_result_fail(result, STR_NothingToArchive);
     else if (sources.count == 1 && !path_is_directory(sources.items[0]))
     {
