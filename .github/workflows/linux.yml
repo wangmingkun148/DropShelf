@@ -32,7 +32,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel cmake ninja pkgconf \
             gtk4 gtk4-layer-shell gdk-pixbuf2 curl glib2 libarchive fontconfig \
-            file desktop-file-utils librsvg patchelf zsync
+            file desktop-file-utils librsvg patchelf zsync appstream
 
       - uses: actions/checkout@v5
 

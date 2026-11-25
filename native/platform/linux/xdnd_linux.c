@@ -816,7 +816,11 @@ static gboolean poll_tick(gpointer data)
 
     // 什么时候挂窗口：探针亮着的时候，或者光标正落在置物架上——都是用户要把东西放进置物架的时候。
     // 别的 X11 拖动（在 Obsidian 里挪图片、往桌面拖文件……）一概不碰，否则会被我们截下来。
-    bool interested = drag_active || (dragging && (probe_active || under != NULL));
+    // 还要按住左键：有的程序（WPS）拖完不把 XdndSelection 交回来，之后一直像“正在拖”，
+    // 只凭这个就把窗口挂上去的话，那块铺满屏幕的窗口会把置物架上的点击全吃掉，开关都点不动。
+    // 真正拖动时左键一定是按着的；看不到按键状态的设备（负数）照旧，免得把正常拖动挡掉。
+    bool holding = gesture_left_button_state() != 0;
+    bool interested = drag_active || (dragging && holding && (probe_active || under != NULL));
 
     // 接放窗口铺满整个 X 屏幕。拖动源是拿 X 光标的位置去找窗口的，而 XWayland 里的 X 光标
     // 会落后、跳来跳去（合成器给的坐标和光标真实位置能差几百像素），窗口跟着光标走就总有盖不住的时候；

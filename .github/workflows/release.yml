@@ -18,120 +18,122 @@ permissions:
 concurrency: release-${{ inputs.tag || github.ref_name }}
 
 jobs:
-  release:
-    runs-on: windows-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tag || github.ref }}
+# 这个仓库只发布 Linux 版：Windows 的打包作业整段注释掉了（编译检查还在 build.yml 里）。
+# 要恢复的话，把下面这段里的行首 "# " 去掉，并删掉这两行说明。
+#   release:
+#     runs-on: windows-latest
+#     env:
+#       GH_TOKEN: ${{ github.token }}
+#     steps:
+#       - uses: actions/checkout@v5
+#         with:
+#           ref: ${{ inputs.tag || github.ref }}
 
-      # 先编译并跑一遍测试，没通过就不发布；下一步生成安装包时接着用这次的编译结果，不会重新编译一遍。
-      - name: 编译并运行测试
-        shell: pwsh
-        run: .\native\build.ps1
+#       # 先编译并跑一遍测试，没通过就不发布；下一步生成安装包时接着用这次的编译结果，不会重新编译一遍。
+#       - name: 编译并运行测试
+#         shell: pwsh
+#         run: .\native\build.ps1
 
-      - name: 安装 Inno Setup
-        shell: pwsh
-        run: |
-          choco install innosetup -y --no-progress
-          $iscc = Get-ChildItem "${env:ProgramFiles}\Inno Setup*\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-          if (-not $iscc) { throw "未找到 Inno Setup 编译器。" }
-          # Inno Setup 6 不自带简体中文界面文件。版本要和构建机上的 Inno Setup（目前是 6.7.1）一致，旧版本的文件缺少新增的提示，安装时会显示英文。
-          $language = Join-Path $iscc.DirectoryName "Languages\ChineseSimplified.isl"
-          if (-not (Test-Path -LiteralPath $language)) {
-              Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_1/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $language
-          }
-          "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
+#       - name: 安装 Inno Setup
+#         shell: pwsh
+#         run: |
+#           choco install innosetup -y --no-progress
+#           $iscc = Get-ChildItem "${env:ProgramFiles}\Inno Setup*\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+#               Select-Object -First 1
+#           if (-not $iscc) { throw "未找到 Inno Setup 编译器。" }
+#           # Inno Setup 6 不自带简体中文界面文件。版本要和构建机上的 Inno Setup（目前是 6.7.1）一致，旧版本的文件缺少新增的提示，安装时会显示英文。
+#           $language = Join-Path $iscc.DirectoryName "Languages\ChineseSimplified.isl"
+#           if (-not (Test-Path -LiteralPath $language)) {
+#               Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_1/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $language
+#           }
+#           "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
 
-      # 代码签名是可选的：在仓库的 Variables 里设置 SIGN_COMMAND（见 docs/publishing.md）后才会签名，没有设置时照常生成未签名的文件。
-      # 三个 AZURE_ 开头的密钥只有用 Azure 的签名服务时才需要，没有设置时是空的。
-      - name: 生成安装包和便携版
-        shell: pwsh
-        env:
-          DROPSHELF_SIGN_COMMAND: ${{ vars.SIGN_COMMAND }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        run: .\installer\Build-Installer.ps1 -InnoCompilerPath $env:ISCC
+#       # 代码签名是可选的：在仓库的 Variables 里设置 SIGN_COMMAND（见 docs/publishing.md）后才会签名，没有设置时照常生成未签名的文件。
+#       # 三个 AZURE_ 开头的密钥只有用 Azure 的签名服务时才需要，没有设置时是空的。
+#       - name: 生成安装包和便携版
+#         shell: pwsh
+#         env:
+#           DROPSHELF_SIGN_COMMAND: ${{ vars.SIGN_COMMAND }}
+#           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+#           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+#           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+#         run: .\installer\Build-Installer.ps1 -InnoCompilerPath $env:ISCC
 
-      - name: 发布到 Release
-        shell: pwsh
-        env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          $tag = $env:TAG
-          $version = $tag -replace '^\D+', ''
-          $installer = "artifacts\installer\DropShelf-Setup-$version.exe"
-          if (-not (Test-Path -LiteralPath $installer)) { throw "标签 $tag 与安装包版本号不一致，请先修改版本号。" }
-          $portable = "artifacts\DropShelf-$version-portable.zip"
-          Compress-Archive -LiteralPath "artifacts\win-x64\DropShelf.exe" -DestinationPath $portable -Force
-          $files = @($installer, $portable)
+#       - name: 发布到 Release
+#         shell: pwsh
+#         env:
+#           TAG: ${{ inputs.tag || github.ref_name }}
+#         run: |
+#           $tag = $env:TAG
+#           $version = $tag -replace '^\D+', ''
+#           $installer = "artifacts\installer\DropShelf-Setup-$version.exe"
+#           if (-not (Test-Path -LiteralPath $installer)) { throw "标签 $tag 与安装包版本号不一致，请先修改版本号。" }
+#           $portable = "artifacts\DropShelf-$version-portable.zip"
+#           Compress-Archive -LiteralPath "artifacts\win-x64\DropShelf.exe" -DestinationPath $portable -Force
+#           $files = @($installer, $portable)
 
-          # 主线版本（v 开头的标签）附带一份 Scoop 清单，指向这一版的便携版；用
-          #   scoop install https://github.com/<仓库>/releases/latest/download/dropshelf.json
-          # 就能安装，之后 scoop update dropshelf 按清单里的规则找新版本。
-          if ($tag -like 'v*') {
-              $base = "https://github.com/$env:GITHUB_REPOSITORY"
-              $scoop = "artifacts\dropshelf.json"
-              [ordered]@{
-                  version      = $version
-                  description  = "A temporary file shelf for Windows. Shake the mouse while dragging and a shelf pops up."
-                  homepage     = $base
-                  license      = "MIT"
-                  architecture = [ordered]@{
-                      "64bit" = [ordered]@{
-                          url  = "$base/releases/download/$tag/DropShelf-$version-portable.zip"
-                          hash = (Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash.ToLowerInvariant()
-                      }
-                  }
-                  shortcuts    = @(, @("DropShelf.exe", "DropShelf"))
-                  checkver     = "github"
-                  autoupdate   = [ordered]@{
-                      architecture = [ordered]@{
-                          "64bit" = [ordered]@{ url = "$base/releases/download/v`$version/DropShelf-`$version-portable.zip" }
-                      }
-                  }
-              } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $scoop -Encoding utf8
-              $files += $scoop
-          }
+#           # 主线版本（v 开头的标签）附带一份 Scoop 清单，指向这一版的便携版；用
+#           #   scoop install https://github.com/<仓库>/releases/latest/download/dropshelf.json
+#           # 就能安装，之后 scoop update dropshelf 按清单里的规则找新版本。
+#           if ($tag -like 'v*') {
+#               $base = "https://github.com/$env:GITHUB_REPOSITORY"
+#               $scoop = "artifacts\dropshelf.json"
+#               [ordered]@{
+#                   version      = $version
+#                   description  = "A temporary file shelf for Windows. Shake the mouse while dragging and a shelf pops up."
+#                   homepage     = $base
+#                   license      = "MIT"
+#                   architecture = [ordered]@{
+#                       "64bit" = [ordered]@{
+#                           url  = "$base/releases/download/$tag/DropShelf-$version-portable.zip"
+#                           hash = (Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash.ToLowerInvariant()
+#                       }
+#                   }
+#                   shortcuts    = @(, @("DropShelf.exe", "DropShelf"))
+#                   checkver     = "github"
+#                   autoupdate   = [ordered]@{
+#                       architecture = [ordered]@{
+#                           "64bit" = [ordered]@{ url = "$base/releases/download/v`$version/DropShelf-`$version-portable.zip" }
+#                       }
+#                   }
+#               } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $scoop -Encoding utf8
+#               $files += $scoop
+#           }
 
-          # 已经在 Releases 页面建好（说明也在那里写好了）时只附上文件。还没有时新建一个：
-          # 仓库里有这一版的发布说明 docs/releases/<标签>.md 就用它，没有时按提交记录自动生成。
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-              gh release upload $tag @files --clobber
-          } else {
-              $notes = "docs\releases\$tag.md"
-              if (Test-Path -LiteralPath $notes) {
-                  gh release create $tag @files --title "DropShelf $version" --notes-file $notes
-              } else {
-                  gh release create $tag @files --title "DropShelf $version" --generate-notes
-              }
-          }
-          if ($LASTEXITCODE -ne 0) { throw "无法发布到 Release。" }
+#           # 已经在 Releases 页面建好（说明也在那里写好了）时只附上文件。还没有时新建一个：
+#           # 仓库里有这一版的发布说明 docs/releases/<标签>.md 就用它，没有时按提交记录自动生成。
+#           gh release view $tag *> $null
+#           if ($LASTEXITCODE -eq 0) {
+#               gh release upload $tag @files --clobber
+#           } else {
+#               $notes = "docs\releases\$tag.md"
+#               if (Test-Path -LiteralPath $notes) {
+#                   gh release create $tag @files --title "DropShelf $version" --notes-file $notes
+#               } else {
+#                   gh release create $tag @files --title "DropShelf $version" --generate-notes
+#               }
+#           }
+#           if ($LASTEXITCODE -ne 0) { throw "无法发布到 Release。" }
 
-      # 可选：把新版本提交到 winget。第一次要先手动提交一次（见 docs/publishing.md），之后在仓库里设置
-      # Variables 里的 WINGET_PACKAGE_ID 和 Secrets 里的 WINGET_TOKEN，这一步才会运行；失败不影响已经发布的文件。
-      - name: 提交到 winget
-        if: ${{ vars.WINGET_PACKAGE_ID != '' && startsWith(inputs.tag || github.ref_name, 'v') }}
-        continue-on-error: true
-        shell: pwsh
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          PACKAGE_ID: ${{ vars.WINGET_PACKAGE_ID }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          if (-not $env:WINGET_TOKEN) { Write-Host "没有设置 WINGET_TOKEN，跳过。"; exit 0 }
-          $version = $env:TAG -replace '^\D+', ''
-          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$($env:TAG)/DropShelf-Setup-$version.exe"
-          Invoke-WebRequest "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
-          .\wingetcreate.exe update $env:PACKAGE_ID --version $version --urls $url --submit --token $env:WINGET_TOKEN
-          if ($LASTEXITCODE -ne 0) { throw "提交到 winget 失败。" }
+#       # 可选：把新版本提交到 winget。第一次要先手动提交一次（见 docs/publishing.md），之后在仓库里设置
+#       # Variables 里的 WINGET_PACKAGE_ID 和 Secrets 里的 WINGET_TOKEN，这一步才会运行；失败不影响已经发布的文件。
+#       - name: 提交到 winget
+#         if: ${{ vars.WINGET_PACKAGE_ID != '' && startsWith(inputs.tag || github.ref_name, 'v') }}
+#         continue-on-error: true
+#         shell: pwsh
+#         env:
+#           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+#           PACKAGE_ID: ${{ vars.WINGET_PACKAGE_ID }}
+#           TAG: ${{ inputs.tag || github.ref_name }}
+#         run: |
+#           if (-not $env:WINGET_TOKEN) { Write-Host "没有设置 WINGET_TOKEN，跳过。"; exit 0 }
+#           $version = $env:TAG -replace '^\D+', ''
+#           $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$($env:TAG)/DropShelf-Setup-$version.exe"
+#           Invoke-WebRequest "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
+#           .\wingetcreate.exe update $env:PACKAGE_ID --version $version --urls $url --submit --token $env:WINGET_TOKEN
+#           if ($LASTEXITCODE -ne 0) { throw "提交到 winget 失败。" }
 
-  # Linux 便携版：在 Arch 容器里编译，把 tar.gz 附到同一个 Release。
+#   # Linux 便携版：在 Arch 容器里编译，把 tar.gz 附到同一个 Release。
   linux:
     runs-on: ubuntu-latest
     container: archlinux:latest
@@ -142,7 +144,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel cmake ninja pkgconf \
             gtk4 gtk4-layer-shell gdk-pixbuf2 curl glib2 libarchive fontconfig github-cli git \
-            file desktop-file-utils librsvg patchelf zsync
+            file desktop-file-utils librsvg patchelf zsync appstream
 
       - uses: actions/checkout@v5
         with:
