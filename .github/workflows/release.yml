@@ -158,4 +158,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" dist/* --clobber
+        run: |
+          # 容器里以 root 运行，检出目录归另一个用户，gh 调用 git 时会当成可疑仓库拒绝执行。
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          gh release upload "$TAG" dist/* --clobber
