@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # 版本号改动时同步 res/app.manifest 和 installer 下的两个 .iss 文件（见仓库根目录的 CLAUDE.md）。
-project(DropShelf VERSION 3.1.5 LANGUAGES C CXX RC)
+project(DropShelf VERSION 3.1.0 LANGUAGES C CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "DropShelf 只支持用 MSVC 编译")

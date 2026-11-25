@@ -1,6 +1,6 @@
 # 版本号规则
 
-版本号格式为 `主.次.修订`，版本号写在 `native/CMakeLists.txt`（`project(DropShelf VERSION …)`）、`native/res/app.manifest`、`installer/DropShelf.iss`、`installer/UninstallLauncher.iss` 四处，需同步修改。
+版本号格式为 `主.次.修订`，版本号写在 `native/CMakeLists.txt`（`project(DropShelf VERSION …)`）、`native/res/app.manifest`、`installer/DropShelf.iss`、`installer/UninstallLauncher.iss`、`linux/PKGBUILD`（`pkgver`）五处，需同步修改；`linux/io.github.wangmingkun148.DropShelf.metainfo.xml` 里的 `<release>` 也跟着改。
 
 - 每次修改应用代码，修订号加一（如 2.2.0 → 2.2.1）。
 - 某一位加到 10 时归零并向前一位进一（如 2.2.9 → 2.3.0，2.9.9 → 3.0.0）。
@@ -10,6 +10,11 @@
 # C# 版
 
 - `legacy/csharp` 是原来的 C# 版（2.x），已不再使用、不再发布，只留作参考。不要改它，也不要再同步它的版本号；新功能和修复只做在 `native` 里。
+
+# Linux 版
+
+- Linux 版（原生 Wayland，C + GTK 4 + gtk4-layer-shell）和 Windows 版共用 `native/src`，平台层在 `native/platform/linux`，构建、打包和测试在 `linux/`。
+- 改 `native/src` 里的共享代码时两边都要能编译：Windows 专用的部分用 `#ifdef _WIN32` 包起来，Linux 的实现放在 `native/platform/linux`。CI 里 `build.yml`（Windows）和 `linux.yml`（Linux）都要通过。
 
 # 两种风格
 

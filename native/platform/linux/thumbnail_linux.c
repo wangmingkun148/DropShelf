@@ -115,16 +115,20 @@ static char *find_icon_in_theme(const char *theme, const char *name, const char 
 
 static char *find_icon_file(const char *name, const char *category, int size)
 {
-    // 先找用户当前的图标主题（能读到 GTK 设置时），再是 Adwaita 和 hicolor。
-    const char *themes[4] = { "Adwaita", "hicolor", NULL, NULL };
+    // 先找用户当前的图标主题（能读到 GNOME 的设置时），再是 Adwaita 和 hicolor。
+    // 没装 gsettings-desktop-schemas 时 g_settings_new 会直接终止程序，所以先查这份设置在不在。
+    const char *themes[4] = { NULL, "Adwaita", "hicolor", NULL };
     char *configured = NULL;
-    GSettings *settings = g_settings_new("org.gnome.desktop.interface");
-    if (settings)
+    GSettingsSchemaSource *source = g_settings_schema_source_get_default();
+    GSettingsSchema *schema = source ? g_settings_schema_source_lookup(source, "org.gnome.desktop.interface", TRUE) : NULL;
+    if (schema && g_settings_schema_has_key(schema, "icon-theme"))
     {
+        GSettings *settings = g_settings_new_full(schema, NULL, NULL);
         configured = g_settings_get_string(settings, "icon-theme");
-        if (configured && *configured) themes[2] = configured;
+        if (configured && *configured) themes[0] = configured;
         g_object_unref(settings);
     }
+    if (schema) g_settings_schema_unref(schema);
     char *found = NULL;
     for (int index = 0; index < 3 && !found; index++)
     {

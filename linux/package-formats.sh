@@ -75,7 +75,7 @@ description: |
   A temporary file shelf for Wayland desktops.
   Shake the mouse while dragging and a shelf pops up.
 vendor: DropShelf
-homepage: https://github.com/pingod/DropShelf
+homepage: https://github.com/wangmingkun148/DropShelf
 license: MIT
 contents:
   - src: $stage/usr
