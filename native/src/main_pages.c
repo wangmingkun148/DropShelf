@@ -39,6 +39,7 @@ static struct
     UiElement *blocked_list;
     UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
     UiElement *shelf_size, *drag_out_mode, *close_when_empty;
+    UiElement *respond_fullscreen;      // 只有 Linux 有：全屏时也响应晃动和快捷键
     UiElement *history_description, *clear_history;
     UiElement *layout, *layout_description;
     UiElement *look;
@@ -93,6 +94,9 @@ static void on_layout(int index, void *context)
 
 static void change_close_when_empty(AppSettings *settings, void *context) { settings->close_when_empty = *(bool *)context; }
 static void on_close_when_empty(bool checked, void *context) { (void)context; app_update_settings(change_close_when_empty, &checked); }
+
+static void change_respond_fullscreen(AppSettings *settings, void *context) { settings->respond_when_fullscreen = *(bool *)context; }
+static void on_respond_fullscreen(bool checked, void *context) { (void)context; app_update_settings(change_respond_fullscreen, &checked); }
 
 static bool startup_failed;
 
@@ -1133,6 +1137,11 @@ static void build_shelf_page(void)
     add_card(content, GLYPH_SHIELD, UI_STR(STR_BlockedAppsHeader), UI_STR(STR_BlockedAppsDescription), P.add_app_button, NULL);
     P.blocked_list = ui_stack(false, 0);
     ui_add(content, P.blocked_list);
+#ifdef __linux__
+    // Windows 版本来就只在屏蔽列表里暂停，没有全屏这一层，这个开关只给 Linux。
+    P.respond_fullscreen = ui_toggle(settings->respond_when_fullscreen, on_respond_fullscreen, NULL);
+    add_card(content, GLYPH_EXPAND, UI_STR(STR_RespondInFullscreen), UI_STR(STR_RespondInFullscreenDescription), P.respond_fullscreen, NULL);
+#endif
 
     section_header(content, STR_Shelf, 24, 8);
     const StringId sizes[3] = { STR_SizeSmall, STR_SizeMedium, STR_SizeLarge };
@@ -1833,6 +1842,9 @@ void pages_refresh(void)
     update_sensitivity_description();
     ui_segmented_set_selected(P.edge_dwell, settings->edge_dwell);
     rebuild_blocked_list();
+#ifdef __linux__
+    ui_toggle_set_checked(P.respond_fullscreen, settings->respond_when_fullscreen);
+#endif
     ui_segmented_set_selected(P.shelf_size, settings->quick_shelf_size);
     ui_segmented_set_selected(P.drag_out_mode, settings->drag_out_mode);
     ui_toggle_set_checked(P.close_when_empty, settings->close_when_empty);

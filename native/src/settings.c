@@ -665,6 +665,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         }
         else if (wcscmp(key, L"EdgeDwell") == 0) ok = read_enum(value, &dwell_table, &settings->edge_dwell);
         else if (wcscmp(key, L"BlockedApps") == 0) ok = read_string_list(value, &settings->blocked_apps, NULL);
+        else if (wcscmp(key, L"RespondInFullscreen") == 0) ok = read_bool(value, &settings->respond_when_fullscreen);
         else if (wcscmp(key, L"Theme") == 0) ok = read_enum(value, &theme_table, &settings->theme);
         else if (wcscmp(key, L"AccentColor") == 0) ok = read_string(value, &settings->accent_color);
         else if (wcscmp(key, L"Look") == 0) ok = read_enum(value, &look_table, &settings->look);
@@ -727,6 +728,7 @@ wchar_t *settings_serialize(const AppSettings *settings)
     json_write_int(&writer, L"ShakeSensitivity", settings->shake_sensitivity);
     write_enum(&writer, L"EdgeDwell", &dwell_table, settings->edge_dwell);
     write_string_list(&writer, L"BlockedApps", &settings->blocked_apps);
+    json_write_bool(&writer, L"RespondInFullscreen", settings->respond_when_fullscreen);
     write_enum(&writer, L"Theme", &theme_table, settings->theme);
     json_write_string(&writer, L"AccentColor", settings->accent_color);
     write_enum(&writer, L"Look", &look_table, settings->look);
