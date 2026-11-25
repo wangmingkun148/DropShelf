@@ -197,6 +197,8 @@ static char *icon_path(void)
 }
 
 /// IconPixmap 属性的值：32 位的 ARGB 像素，按尺寸从大到小给几个。
+/// 状态栏（quickshell 等）只在 IconName 为空时才看 IconPixmap，而 AppImage 里的图标
+/// 不在系统图标主题里，所以 IconName 留空，全靠这里。
 static GVariant *icon_pixmap(void)
 {
     GVariantBuilder builder;
@@ -204,10 +206,16 @@ static GVariant *icon_pixmap(void)
     char *path = icon_path();
     if (path)
     {
-        GError *error = NULL;
-        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(path, 32, 32, TRUE, &error);
-        if (pixbuf)
+        static const int sizes[] = { 32, 64, 128 };
+        for (unsigned at = 0; at < G_N_ELEMENTS(sizes); at++)
         {
+            GError *error = NULL;
+            GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(path, sizes[at], sizes[at], TRUE, &error);
+            if (!pixbuf)
+            {
+                if (error) g_error_free(error);
+                continue;
+            }
             int width = gdk_pixbuf_get_width(pixbuf);
             int height = gdk_pixbuf_get_height(pixbuf);
             int channels = gdk_pixbuf_get_n_channels(pixbuf);
@@ -237,7 +245,6 @@ static GVariant *icon_pixmap(void)
             g_bytes_unref(bytes);
             g_object_unref(pixbuf);
         }
-        if (error) g_error_free(error);
         g_free(path);
     }
     return g_variant_builder_end(&builder);
@@ -506,7 +513,8 @@ static GVariant *on_sni_property(GDBusConnection *bus, const char *sender, const
     if (strcmp(property, "Title") == 0) return g_variant_new_string("DropShelf");
     if (strcmp(property, "Status") == 0) return g_variant_new_string("Active");
     if (strcmp(property, "WindowId") == 0) return g_variant_new_int32(0);
-    if (strcmp(property, "IconName") == 0) return g_variant_new_string("io.github.wangmingkun148.DropShelf");
+    // 留空才让状态栏用下面的 IconPixmap；图标名字在 AppImage 里查不到，写上只会显示成粉黑格子。
+    if (strcmp(property, "IconName") == 0) return g_variant_new_string("");
     if (strcmp(property, "IconPixmap") == 0) return icon_pixmap();
     if (strcmp(property, "OverlayIconName") == 0) return g_variant_new_string("");
     if (strcmp(property, "AttentionIconName") == 0) return g_variant_new_string("");
@@ -516,7 +524,7 @@ static GVariant *on_sni_property(GDBusConnection *bus, const char *sender, const
     {
         GVariantBuilder builder;
         g_variant_builder_init(&builder, G_VARIANT_TYPE("a(iiay)"));
-        return g_variant_new("(s@a(iiay)ss)", "DropShelf", g_variant_builder_end(&builder), "", "");
+        return g_variant_new("(s@a(iiay)ss)", "", g_variant_builder_end(&builder), "DropShelf", "");
     }
     return NULL;
 }
