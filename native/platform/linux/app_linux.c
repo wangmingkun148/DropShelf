@@ -26,6 +26,7 @@
 #include "theme.h"
 #include "tray.h"
 #include "ui.h"
+#include "xdnd_linux.h"
 
 #include <gtk/gtk.h>
 #include <stdlib.h>
@@ -219,6 +220,7 @@ void app_prepare_for_shutdown(void)
     folder_watch_stop();
     shelf_peek_close();
     probe_destroy();
+    xdnd_stop();
     if (message_window)
     {
         ui_window_close(message_window);
@@ -264,7 +266,7 @@ static bool gestures_blocked_at(POINT point)
         log_info(L"识别到手势 (%ld, %ld)，但前台或光标下是屏蔽的应用，不弹出置物架", point.x, point.y);
         return true;
     }
-    if (foreground_is_fullscreen())
+    if (!app_settings()->respond_when_fullscreen && foreground_is_fullscreen())
     {
         log_info(L"识别到手势 (%ld, %ld)，但前台全屏，不弹出置物架", point.x, point.y);
         return true;
@@ -285,6 +287,12 @@ static void on_probe_detected(void)
     shelves_open_at(cursor, true, false, pending_edge);
 }
 
+/// X11（XWayland）应用的拖动落不到 Wayland 探针上，由 X11 拖放桥确认（见 xdnd_linux.c）。
+static void on_x11_drag_detected(void)
+{
+    on_probe_detected();
+}
+
 static void on_gesture(GestureEvent event, ScreenEdge edge, POINT point)
 {
     switch (event)
@@ -293,16 +301,21 @@ static void on_gesture(GestureEvent event, ScreenEdge edge, POINT point)
             if (gestures_blocked_at(point)) return;
             log_info(L"识别到晃动 (%ld, %ld)，显示探针窗口", point.x, point.y);
             pending_edge = EDGE_NONE;
+            // 先挂 X11 的接放窗口再显示探针：探针一露脸，XWayland 那边的光标就停在原地，
+            // 拖动源不会再重新找落点，接放窗口就等不到拖动了（见 xdnd_linux.c）。
+            xdnd_probe_show();
             probe_show_at(point);
             break;
         case GESTURE_EDGE_DWELL:
             if (gestures_blocked_at(point)) return;
             log_info(L"在屏幕边缘停留 (%ld, %ld)，显示探针窗口", point.x, point.y);
             pending_edge = edge;
+            xdnd_probe_show();
             probe_show_at(point);
             break;
         case GESTURE_RELEASED:
             probe_hide();
+            xdnd_probe_hide();
             shelves_drag_released();
             break;
     }
@@ -322,13 +335,22 @@ static bool gestures_paused;
 
 static void pause_if_blocked(void)
 {
-    // 全屏或屏蔽的应用在前台时，手势和快捷键都让给前台。
-    bool blocked = foreground_watcher_is_blocked() || foreground_is_fullscreen();
+    // 全屏或屏蔽的应用在前台时，手势和快捷键都让给前台；设置里可以允许全屏时也响应。
+    bool blocked = foreground_watcher_is_blocked();
+    if (!blocked && !app_settings()->respond_when_fullscreen) blocked = foreground_is_fullscreen();
     gesture_service_set_paused(blocked);
     hotkey_service_set_paused(blocked);
     if (blocked == gestures_paused) return;
     gestures_paused = blocked;
-    log_info(blocked ? L"前台是全屏或屏蔽的应用，手势暂停" : L"手势恢复");
+    if (blocked)
+    {
+        // 把是哪个程序拦住的写进日志，之后“在某个程序里晃不出来”有据可查。
+        wchar_t *name = foreground_active_name();
+        log_info(L"前台是全屏或屏蔽的应用（%ls），手势暂停", name ? name : L"未知");
+        free(name);
+    }
+    else
+        log_info(L"手势恢复");
 }
 
 static void on_blocked_changed(bool blocked)
@@ -378,6 +400,7 @@ bool app_start(HINSTANCE instance, bool start_in_background)
     message_window = ui_window_create(&options);
     if (!message_window) log_info(L"消息窗口创建失败");
     if (!probe_create(NULL, on_probe_detected)) log_info(L"探针窗口创建失败");
+    if (!xdnd_start(on_x11_drag_detected)) log_info(L"X11 拖放桥没有启动（连不上 X 服务器），X11 应用的拖放接不进来");
 
     TrayActions tray_actions = { app_show_main_window, app_new_shelf, app_exit, tray_hotkey_text };
     tray_create(message_window ? ui_window_handle(message_window) : NULL, &tray_actions);

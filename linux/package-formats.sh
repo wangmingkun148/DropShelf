@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 从构建结果生成 Linux 发行版安装包：AppImage、deb、rpm、pacman（.pkg.tar.zst）。
 # 用法：linux/package-formats.sh [构建目录] [输出目录]（默认 linux/build 和 dist）
+# 只打其中几种：DROPSHELF_FORMATS="appimage" linux/package-formats.sh（默认全打）。
 # nfpm、linuxdeploy、appimagetool 和 GTK 插件会自动下载到构建目录下的 packaging-tools。
 set -euo pipefail
 
@@ -8,6 +9,8 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 build="${1:-$root/linux/build}"
 out="${2:-$root/dist}"
 tools="$build/packaging-tools"
+formats=" ${DROPSHELF_FORMATS:-deb rpm archlinux appimage} "
+wants_format() { case "$formats" in *" $1 "*) return 0 ;; esac; return 1; }
 arch="$(uname -m)"
 case "$arch" in
     x86_64) nfpm_arch=x86_64; package_arch=amd64 ;;
@@ -107,8 +110,15 @@ overrides:
       - fontconfig
 EOF
 for format in deb rpm archlinux; do
+    wants_format "$format" || continue
     "$tools/nfpm" package --config "$tmp/nfpm.yaml" --packager "$format" --target "$out"
 done
+
+# 只要 deb/rpm/pacman 时这里就完了；AppImage 在下面单独做。
+if ! wants_format appimage; then
+    ls -lh "$out"
+    exit 0
+fi
 
 # ── AppImage ──
 appdir="$tmp/AppDir"

@@ -12,6 +12,7 @@
 #include "ui_linux.h"
 #include "gfx_gtk.h"
 #include "gesture_linux.h"
+#include "xdnd_linux.h"
 #include "lang.h"
 #include "log.h"
 
@@ -39,6 +40,7 @@ struct UiWindow
     int x, y;                       // 屏幕上的位置（逻辑像素）
     float width, height;            // 客户区（DIP）
     bool layer;
+    bool keyboard_deferred;         // 开着的时候 X11 正在拖东西，键盘先没要，点一下再要
     bool visible;
     bool active;
     bool layout_dirty;
@@ -69,15 +71,28 @@ struct UiWindow
     UiDragEnd drag_end;
     void *drag_context;
     void *drag_data;
+    GtkDragSource *drag_source;         // 拖出用的拖动源
+    GdkDrag *drag;                      // 这次拖出的拖动；GTK 等不到结束通知时由我们替它收尾
+    guint drag_guard;                   // 拖动期间定时确认左键还按着
+    gint64 drag_began_at;
+    gint64 drag_released_at;            // 第一次看到左键松开的时间，0 表示还没松开
+    bool drag_active;
+    bool drag_saw_button;               // 这次拖动期间至少看到过一次左键按着
+    bool drag_stale;                    // 已经替 GTK 收过尾、GTK 那边还挂着：下次从这里拖出前取消掉
     UiWindow *next;
 };
 
 static UiWindow *windows;
+// 本程序正在进行的拖出；拖动结束时在 drag-end 里清掉，窗口关掉时也会清掉。
+static GdkDrag *active_drag;
 static bool css_installed;
 static GtkCssProvider *editor_css;
 
 // 输入框的 GtkEntry 覆盖层：焦点、位置和文字同步见文件后面的实现。
 static void update_editor(UiWindow *window);
+static void drag_guard_stop(UiWindow *window);
+static void finish_stale_drag(UiWindow *window);
+static void release_active_drag(UiWindow *window);
 
 // Win32 的鼠标捕获和按键状态。GTK 的鼠标手势本来就会抓住指针，这里只把状态记下来给共享代码看。
 static HWND capture_window;
@@ -660,6 +675,13 @@ static void on_pressed(GtkGestureClick *gesture, int press_count, double x, doub
     // 新的一次按下：上一次拖动不管因为什么没收到 release，都在这里结束掉。
     end_move(window, L"新的按下");
     // 点一下就把键盘焦点收到自绘区域：层壳窗口靠“点击后按需获得键盘”才收得到快捷键。
+    // 开着的时候 X11 正在拖东西、当时没要键盘的，这时候再要。
+    if (window->keyboard_deferred)
+    {
+        window->keyboard_deferred = false;
+        gtk_layer_set_keyboard_mode(GTK_WINDOW(window->window), GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
+        gtk_window_present(GTK_WINDOW(window->window));
+    }
     gtk_widget_grab_focus(window->area);
     bool right = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3;
     if (right) right_button_down = true;
@@ -912,6 +934,17 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
     UiWindow *window = data;
     if (window->destroyed) return;
     window->destroyed = true;
+    // 拖动还挂着（GTK 没收到结束通知，或者窗口在拖动中被关掉）时，把挂在这个源上的回调断开：
+    // 窗口马上要释放，迟到的结束通知不能再回调进来。拖动源这时还被 GdkDrag 撑着（GTK 为拖动多引用了一份），
+    // 断开是安全的；拖动和数据源本身不碰，接收方还能把数据取完。
+    if ((window->drag_active || window->drag_stale) && window->drag_source)
+        g_signal_handlers_disconnect_by_data(window->drag_source, window);
+    if (window->drag_active) active_drag = NULL;
+    window->drag_active = false;
+    window->drag_stale = false;
+    window->drag = NULL;
+    drag_guard_stop(window);
+    window->drag_source = NULL;
     stop_frames(window);
     if (window->move_source)
     {
@@ -1071,6 +1104,83 @@ bool ui_drag_is_local(GdkDrag *drag)
     return false;
 }
 
+GdkDrag *ui_active_drag(void)
+{
+    return active_drag;
+}
+
+/// 合成器不一定会把拖动的结束事件送回来（Hyprland 上拖到没有窗口的地方就是这样），
+/// GTK 的拖动会一直挂着：之后从别的程序拖进来的东西都会被当成自己的拖动，怎么都放不进置物架。
+/// 这里盯着全局左键：已经松开而 GTK 还没结束，就主动取消这次拖动。
+#define DRAG_GUARD_POLL_MILLISECONDS 200
+#define DRAG_GUARD_GRACE_MICROSECONDS 600000
+// 松开以后还等一会儿：给合成器和接收方正常结束的机会，迟迟等不到才当作漏发。
+#define DRAG_GUARD_RELEASE_DELAY_MICROSECONDS 1000000
+
+static gboolean drag_guard_tick(gpointer data)
+{
+    UiWindow *window = data;
+    if (window->destroyed || !window->drag_active)
+    {
+        window->drag_guard = 0;
+        return G_SOURCE_REMOVE;
+    }
+    if (g_get_monotonic_time() - window->drag_began_at < DRAG_GUARD_GRACE_MICROSECONDS) return G_SOURCE_CONTINUE;
+    int buttons = gesture_left_button_state();
+    // 没看到过按下就松开的不算：可能是触摸板这种看不到左键的设备，宁可不收也不能把正常拖动掐掉。
+    if (buttons == 1)
+    {
+        window->drag_saw_button = true;
+        window->drag_released_at = 0;
+        return G_SOURCE_CONTINUE;
+    }
+    if (buttons != 0 || !window->drag_saw_button) return G_SOURCE_CONTINUE;
+    if (!window->drag_released_at) window->drag_released_at = g_get_monotonic_time();
+    if (g_get_monotonic_time() - window->drag_released_at < DRAG_GUARD_RELEASE_DELAY_MICROSECONDS) return G_SOURCE_CONTINUE;
+    log_info(L"GTK 拖动没有收到结束通知：左键已经松开，按拖动结束收尾（动作 0x%x，数据源留着让接收方取完）",
+        window->drag ? (unsigned)gdk_drag_get_selected_action(window->drag) : 0u);
+    window->drag_guard = 0;
+    finish_stale_drag(window);
+    return G_SOURCE_REMOVE;
+}
+
+static void drag_guard_stop(UiWindow *window)
+{
+    if (!window->drag_guard) return;
+    g_source_remove(window->drag_guard);
+    window->drag_guard = 0;
+}
+
+/// 合成器迟迟不把拖动的结束送回来时，替 GTK 按“这次拖动已经结束”收尾：
+/// 通知 GDK 到此为止（藏起跟着光标的拖动图标、清掉全局的拖动状态），置物架这边也恢复原样。
+/// 但 GdkDrag 和它的数据源故意留着不取消——接收方这时可能还在取数据，
+/// 提前取消会把内容掐断（拖到 WPS 里就是内容不全、图片放不进去）。留着的那次拖动等下次从这里拖出时再真正取消。
+static void finish_stale_drag(UiWindow *window)
+{
+    if (!window->drag_active) return;
+    GdkDrag *drag = window->drag;
+    void *data = window->drag_data;
+    window->drag_active = false;
+    window->drag_stale = true;
+    window->drag_data = NULL;
+    active_drag = NULL;
+    drag_guard_stop(window);
+    if (drag) gdk_drag_drop_done(drag, TRUE);
+    if (window->drag_end && data) window->drag_end(window, window->drag_context, data, drag ? gdk_drag_get_selected_action(drag) : 0);
+}
+
+/// 窗口关掉或不再管拖放时，GTK 不会替我们结束进行中的拖动，先取消掉，别让拖动状态卡在全局。
+static void release_active_drag(UiWindow *window)
+{
+    if (!window->drag_active) return;
+    window->drag_active = false;
+    window->drag_stale = false;
+    window->drag = NULL;
+    active_drag = NULL;
+    drag_guard_stop(window);
+    if (window->drag_source) gtk_drag_source_drag_cancel(window->drag_source);
+}
+
 void ui_window_set_drop_handler(UiWindow *window, UiDropHandler handler, void *context)
 {
     if (!window) return;
@@ -1082,6 +1192,8 @@ void ui_window_set_drop_handler(UiWindow *window, UiDropHandler handler, void *c
 void ui_window_set_drag_handler(UiWindow *window, UiDragPrepare prepare, UiDragEnd end, void *context)
 {
     if (!window) return;
+    // 收掉处理器时如果还在拖动，先让它按取消收尾，再换掉回调，否则这次拖动永远结束不了。
+    if (!prepare) release_active_drag(window);
     window->drag_prepare = prepare;
     window->drag_end = end;
     window->drag_context = context;
@@ -1091,6 +1203,14 @@ static GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, doub
 {
     UiWindow *window = data;
     if (!window->drag_prepare || window->destroyed) return NULL;
+    // 上一轮拖动我们替 GTK 收过尾，但 GTK 那边还挂着。现在要开始新的拖动，先把旧的那次真正取消掉：
+    // 它的数据源留到这时候，接收方早该取完了；不取消的话，旧的结束通知万一迟到，会打乱这次新拖动。
+    if (window->drag_stale)
+    {
+        window->drag_stale = false;
+        window->drag = NULL;
+        gtk_drag_source_drag_cancel(source);
+    }
     GdkDragAction actions = GDK_ACTION_COPY;
     window->drag_data = NULL;
     GdkContentProvider *provider = window->drag_prepare(window, window->drag_context, x, y, &actions, &window->drag_data);
@@ -1103,11 +1223,34 @@ static GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, doub
     return provider;
 }
 
+static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data)
+{
+    UiWindow *window = data;
+    // 上一轮拖动没收到结束通知的话，新的拖动一开就把旧的那次忘掉。
+    if (active_drag && active_drag != drag) log_info(L"上一次拖动没有收到结束通知，新的拖动开始时忘掉它");
+    active_drag = drag;
+    window->drag_source = source;
+    window->drag = drag;
+    window->drag_active = true;
+    window->drag_stale = false;
+    window->drag_saw_button = gesture_left_button_state() == 1;
+    window->drag_released_at = 0;
+    window->drag_began_at = g_get_monotonic_time();
+    if (!window->drag_guard) window->drag_guard = g_timeout_add(DRAG_GUARD_POLL_MILLISECONDS, drag_guard_tick, window);
+}
+
 static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_data, gpointer data)
 {
     (void)source;
     (void)delete_data;
     UiWindow *window = data;
+    if (window->destroyed) return;
+    if (active_drag == drag) active_drag = NULL;
+    if (window->drag == drag) window->drag = NULL;
+    window->drag_active = false;
+    window->drag_stale = false;
+    drag_guard_stop(window);
+    log_info(L"拖出结束：收到 GTK 的结束通知，动作 0x%x", (unsigned)gdk_drag_get_selected_action(drag));
     if (window->drag_end) window->drag_end(window, window->drag_context, window->drag_data, gdk_drag_get_selected_action(drag));
     window->drag_data = NULL;
 }
@@ -1222,6 +1365,7 @@ UiWindow *ui_window_create(const UiWindowOptions *options)
     GtkDragSource *source = gtk_drag_source_new();
     gtk_drag_source_set_actions(source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
     g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), window);
+    g_signal_connect(source, "drag-begin", G_CALLBACK(on_drag_begin), window);
     g_signal_connect(source, "drag-end", G_CALLBACK(on_drag_end), window);
     gtk_widget_add_controller(window->area, GTK_EVENT_CONTROLLER(source));
 
@@ -1382,9 +1526,21 @@ void ui_window_show(UiWindow *window)
     ui_window_show_with(window, !window->options.no_activate);
 }
 
+/// 层壳窗口要不要键盘：平时按需（点一下才收），X11 应用正拖着东西时先不要——
+/// 键盘一换到我们这边，Hyprland 就把键盘从 XWayland 收走，X 那边的拖动会被直接结束、东西放不下来。
+/// 这种时候先记着，第一次点它再打开（见 on_pressed）。
+static void update_layer_keyboard(UiWindow *window)
+{
+    if (!window->layer || window->options.no_activate) return;
+    window->keyboard_deferred = xdnd_drag_in_progress();
+    gtk_layer_set_keyboard_mode(GTK_WINDOW(window->window),
+        window->keyboard_deferred ? GTK_LAYER_SHELL_KEYBOARD_MODE_NONE : GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
+}
+
 void ui_window_show_with(UiWindow *window, bool activate)
 {
     if (!window || window->destroyed) return;
+    update_layer_keyboard(window);
     update_layer_position(window);
     window->visible = true;
     gtk_widget_set_visible(window->window, TRUE);
@@ -1401,6 +1557,7 @@ void ui_window_show_with(UiWindow *window, bool activate)
 void ui_window_close(UiWindow *window)
 {
     if (!window || window->destroyed) return;
+    release_active_drag(window);
     gtk_window_destroy(GTK_WINDOW(window->window));
 }
 
@@ -1410,10 +1567,20 @@ void ui_close_all_windows(void)
     while (window)
     {
         UiWindow *next = window->next;
-        if (!window->destroyed) gtk_window_destroy(GTK_WINDOW(window->window));
+        ui_window_close(window);
         window = next;
     }
     windows = NULL;
+}
+
+bool ui_window_frame(UiWindow *window, int *x, int *y, int *width, int *height)
+{
+    if (!window || window->destroyed || !window->visible) return false;
+    if (x) *x = window->x;
+    if (y) *y = window->y;
+    if (width) *width = (int)lroundf(window->width);
+    if (height) *height = (int)lroundf(window->height);
+    return true;
 }
 
 void ui_window_place(UiWindow *window, int x, int y, float width, float height)

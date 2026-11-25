@@ -7,6 +7,7 @@
 #include "clipboard.h"
 #else
 #include "ui_linux.h"
+#include "xdnd_linux.h"
 #include <gdk/gdk.h>
 #endif
 #include "folder_watch.h"
@@ -1238,8 +1239,6 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
 
 #else
 // Linux 的拖入拖出走 GdkDrop / GdkDrag，接在 ui_window 的 GTK 后端上；读取结果和移除逻辑和 Windows 共用。
-static GdkDrag *active_drag;    // 正在从这个进程拖出的数据，用来认出拖回自己身上的情况
-static bool self_drag;          // 拖动是从本进程的置物架开始的（GTK 的拖动源没有拿到 GdkDrag 之前）
 
 static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, double x, double y, GdkDragAction *actions, void **data);
 static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDragAction action);
@@ -1388,25 +1387,26 @@ struct LinuxDragOut
 typedef struct LinuxDragOut LinuxDragOut;
 static LinuxDragOut *current_drag_out;
 
-static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDrop *drop, const GValue *value, double x, double y,
-    GdkDragAction *action)
+/// GTK（Wayland 源）和 X11 接放窗口（X11 源）最后都走到这里：按阶段更新置物架的拖动状态，松手时把数据放进去。
+/// 顶部“复制/移动”开关也管从别的程序拖进来的东西：移动时按移动收尾，来源那边会删掉原文。
+/// 来源不允许我们选的动作时保持原样，由 GTK 按来源允许的动作来。
+static void apply_inbound_action(ShelfWindow *shelf, bool from_self, GdkDragAction *action)
 {
-    (void)window;
-    ShelfWindow *shelf = context;
+    if (!action || from_self) return;
+    // 只管文字和图片：置物架存的是它们的拷贝。文件拖进来只记一个路径，
+    // 答应“移动”的话文件管理器会把原文件删掉，置物架里就只剩一个失效项。
+    if (shelf->drag_kind != DROP_TEXT && shelf->drag_kind != DROP_IMAGE) return;
+    GdkDragAction wanted = shelf->move_mode ? GDK_ACTION_MOVE : GDK_ACTION_COPY;
+    if (*action & wanted) *action = wanted;
+}
+
+static bool shelf_drop_phase(ShelfWindow *shelf, UiDropPhase phase, DropContentKind incoming_kind, bool from_self, const GValue *value,
+    double x, double y, GdkDragAction *action)
+{
     if (shelf->closing || shelf->closed)
     {
         log_info(L"拖入：置物架已经关闭，忽略（阶段 %d）", (int)phase);
         return false;
-    }
-    GdkDrag *source = drop ? gdk_drop_get_drag(drop) : NULL;
-    bool from_self = source && (source == active_drag || self_drag);
-    if (phase == UI_DROP_ENTER)
-    {
-        GdkContentFormats *formats = drop ? gdk_drop_get_formats(drop) : NULL;
-        char *format_text = formats ? gdk_content_formats_to_string(formats) : NULL;
-        log_info(L"拖入：进入置物架（%g, %g），格式 %hs，允许动作 0x%x，来自本程序 %ls", x, y,
-            format_text ? format_text : "", (unsigned)(drop ? gdk_drop_get_actions(drop) : 0), from_self ? L"是" : L"否");
-        g_free(format_text);
     }
     switch (phase)
     {
@@ -1414,7 +1414,7 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             shelf->drag_inside = true;
             shelf->drag_from_self = from_self;
             shelf->drag_from_shelf = false;
-            shelf->drag_kind = from_self ? DROP_NONE : classify_drop(drop);
+            shelf->drag_kind = from_self ? DROP_NONE : incoming_kind;
             if (!from_self && shelf->drag_kind != DROP_NONE && !shelf->model->busy)
             {
 #ifdef LOOK_VARIANT_CARDS
@@ -1429,11 +1429,16 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
             log_info(L"拖入：识别为 %ls，置物架%ls，%ls", from_self ? L"本程序自己的拖动" : shelf->drag_kind == DROP_FILES ? L"文件" :
                 shelf->drag_kind == DROP_IMAGE ? L"图片" : shelf->drag_kind == DROP_TEXT ? L"文字" : L"不支持的内容",
                 shelf->model->busy ? L"正忙" : L"空闲", accepted ? L"接受" : L"不接受");
+            if (accepted) apply_inbound_action(shelf, from_self, action);
             return accepted;
         }
         case UI_DROP_MOTION:
             log_trace(L"拖入：移动到（%g, %g）", x, y);
-            return !shelf->model->busy && (from_self || shelf->drag_kind != DROP_NONE);
+            {
+                bool accepted = !shelf->model->busy && (from_self || shelf->drag_kind != DROP_NONE);
+                if (accepted) apply_inbound_action(shelf, from_self, action);
+                return accepted;
+            }
         case UI_DROP_LEAVE:
             log_info(L"拖入：离开置物架");
             shelf_end_drag(shelf);
@@ -1537,11 +1542,180 @@ static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDr
     return false;
 }
 
+static bool linux_drop(UiWindow *window, void *context, UiDropPhase phase, GdkDrop *drop, const GValue *value, double x, double y,
+    GdkDragAction *action)
+{
+    (void)window;
+    ShelfWindow *shelf = context;
+    // 拖动是不是本程序从置物架里拖出去的那一次，要认准同一个 GdkDrag。
+    // 不能只看一个全局开关：合成器漏发结束通知时，那个开关会一直留着，把之后拖进来的东西全当成自己的。
+    // 也不能只看“是不是本程序的窗口”：设置页和输入框里拖出来的文字是要放进置物架的，不算自己拖出。
+    GdkDrag *source = drop ? gdk_drop_get_drag(drop) : NULL;
+    // 拖出的来源置物架已经关掉的话，这次拖动早就该结束了，按外部拖入处理。
+    bool from_self = source && source == ui_active_drag() && current_drag_out && !current_drag_out->shelf->closed;
+    DropContentKind kind = DROP_NONE;
+    if (phase == UI_DROP_ENTER)
+    {
+        GdkContentFormats *formats = drop ? gdk_drop_get_formats(drop) : NULL;
+        char *format_text = formats ? gdk_content_formats_to_string(formats) : NULL;
+        log_info(L"拖入：进入置物架（%g, %g），格式 %hs，允许动作 0x%x，来自本程序 %ls", x, y,
+            format_text ? format_text : "", (unsigned)(drop ? gdk_drop_get_actions(drop) : 0), from_self ? L"是" : L"否");
+        g_free(format_text);
+        if (!from_self) kind = classify_drop(drop);
+    }
+    return shelf_drop_phase(shelf, phase, kind, from_self, value, x, y, action);
+}
+
+// ───────────── X11 应用的拖放 ─────────────
+// Hyprland 不会把 X11 源的拖动转给原生 Wayland 窗口（见 xdnd_linux.c），X11 拖放桥在探针或置物架的
+// 位置放一个看不见的 X11 窗口接住拖动。数据在这里变回和 GTK 一样的 GValue，再走同一个 shelf_drop_phase。
+
+static DropContentKind xdnd_kind(XdndKind kind)
+{
+    switch (kind)
+    {
+        case XDND_KIND_FILES: return DROP_FILES;
+        case XDND_KIND_TEXT: return DROP_TEXT;
+        case XDND_KIND_IMAGE: return DROP_IMAGE;
+        default: return DROP_NONE;
+    }
+}
+
+static const wchar_t *xdnd_kind_name(XdndKind kind)
+{
+    switch (kind)
+    {
+        case XDND_KIND_FILES: return L"文件列表";
+        case XDND_KIND_TEXT: return L"文字";
+        case XDND_KIND_IMAGE: return L"图片";
+        default: return L"不支持的内容";
+    }
+}
+
+/// text/uri-list 里一行一个地址：本地文件变成路径，网页地址按链接收（和 GTK 那边一样）。
+static GdkFileList *file_list_from_uri_list(const char *text)
+{
+    if (!text) return NULL;
+    GSList *files = NULL;
+    char **lines = g_strsplit(text, "\n", -1);
+    for (int index = 0; lines[index]; index++)
+    {
+        char *line = lines[index];
+        size_t length = strlen(line);
+        while (length > 0 && (line[length - 1] == '\r' || line[length - 1] == ' ' || line[length - 1] == '\t')) line[--length] = 0;
+        while (*line == ' ' || *line == '\t') line++;
+        if (!*line || *line == '#') continue;
+        if (g_str_has_prefix(line, "file://"))
+        {
+            char *path = g_filename_from_uri(line, NULL, NULL);
+            if (path)
+            {
+                files = g_slist_append(files, g_file_new_for_path(path));
+                g_free(path);
+            }
+        }
+        else if (g_str_has_prefix(line, "http://") || g_str_has_prefix(line, "https://"))
+            files = g_slist_append(files, g_file_new_for_uri(line));
+    }
+    g_strfreev(lines);
+    if (!files) return NULL;
+    GdkFileList *list = gdk_file_list_new_from_list(files);
+    g_slist_free_full(files, g_object_unref);
+    return list;
+}
+
+static void x11_drag_enter(void *context, XdndKind kind, double x, double y)
+{
+    ShelfWindow *shelf = context;
+    GdkDragAction action = GDK_ACTION_COPY;
+    log_info(L"X11 拖入：进入置物架（%g, %g），%ls", x, y, xdnd_kind_name(kind));
+    shelf_drop_phase(shelf, UI_DROP_ENTER, xdnd_kind(kind), false, NULL, x, y, &action);
+}
+
+static void x11_drag_motion(void *context, XdndKind kind, double x, double y)
+{
+    ShelfWindow *shelf = context;
+    GdkDragAction action = GDK_ACTION_COPY;
+    shelf_drop_phase(shelf, UI_DROP_MOTION, xdnd_kind(kind), false, NULL, x, y, &action);
+}
+
+static void x11_drag_leave(void *context)
+{
+    ShelfWindow *shelf = context;
+    log_info(L"X11 拖入：离开置物架");
+    GdkDragAction action = 0;
+    shelf_drop_phase(shelf, UI_DROP_LEAVE, DROP_NONE, false, NULL, 0, 0, &action);
+}
+
+static void x11_drag_drop(void *context, const XdndPayload *payload, double x, double y)
+{
+    ShelfWindow *shelf = context;
+    if (!payload) return;
+    GValue value = G_VALUE_INIT;
+    bool have_value = false;
+    if (payload->kind == XDND_KIND_FILES)
+    {
+        GdkFileList *list = file_list_from_uri_list(payload->text);
+        if (list)
+        {
+            g_value_init(&value, GDK_TYPE_FILE_LIST);
+            g_value_take_boxed(&value, list);
+            have_value = true;
+        }
+    }
+    else if (payload->kind == XDND_KIND_TEXT)
+    {
+        g_value_init(&value, G_TYPE_STRING);
+        g_value_set_string(&value, payload->text ? payload->text : "");
+        have_value = true;
+    }
+    else if (payload->kind == XDND_KIND_IMAGE && payload->image && payload->image_size > 0)
+    {
+        GBytes *bytes = g_bytes_new(payload->image, payload->image_size);
+        GError *error = NULL;
+        GdkTexture *texture = gdk_texture_new_from_bytes(bytes, &error);
+        g_bytes_unref(bytes);
+        if (texture)
+        {
+            g_value_init(&value, GDK_TYPE_TEXTURE);
+            g_value_take_object(&value, texture);
+            have_value = true;
+        }
+        else
+        {
+            log_info(L"X11 拖入：图片解不开（%hs）", error ? error->message : "?");
+            g_clear_error(&error);
+        }
+    }
+    log_info(L"X11 拖入：在（%g, %g）放下，%ls", x, y, xdnd_kind_name(payload->kind));
+    GdkDragAction action = GDK_ACTION_COPY;
+    shelf_drop_phase(shelf, UI_DROP_DROP, xdnd_kind(payload->kind), false, have_value ? &value : NULL, x, y, &action);
+    if (G_IS_VALUE(&value)) g_value_unset(&value);
+}
+
+/// 顶部“复制/移动”开关也管拖进来的东西：移动时按移动收尾，WPS、Obsidian 这些来源松手后会删掉原文。
+static bool x11_want_move(void *context)
+{
+    ShelfWindow *shelf = context;
+    return shelf && !shelf->closed && !shelf->closing && shelf->move_mode;
+}
+
+static bool x11_drag_frame(void *context, int *x, int *y, int *width, int *height)
+{
+    ShelfWindow *shelf = context;
+    if (!shelf || !shelf->ui) return false;
+    return ui_window_frame(shelf->ui, x, y, width, height);
+}
+
 void shelf_register_drop_target(ShelfWindow *shelf)
 {
     if (!shelf || !shelf->ui) return;
     ui_window_set_drop_handler(shelf->ui, linux_drop, shelf);
     ui_window_set_drag_handler(shelf->ui, linux_drag_prepare, drag_out_finished, shelf);
+    // X11 应用的拖动接不到 Wayland 窗口上，给置物架也挂一个 X11 接放窗口。
+    if (!shelf->xdnd_sink)
+        shelf->xdnd_sink = xdnd_add_sink(shelf, x11_drag_enter, x11_drag_motion, x11_drag_leave, x11_drag_drop, x11_drag_frame,
+            x11_want_move);
 }
 
 void shelf_revoke_drop_target(ShelfWindow *shelf)
@@ -1549,6 +1723,11 @@ void shelf_revoke_drop_target(ShelfWindow *shelf)
     if (!shelf || !shelf->ui) return;
     ui_window_set_drop_handler(shelf->ui, NULL, NULL);
     ui_window_set_drag_handler(shelf->ui, NULL, NULL, NULL);
+    if (shelf->xdnd_sink)
+    {
+        xdnd_remove_sink(shelf->xdnd_sink);
+        shelf->xdnd_sink = NULL;
+    }
 }
 
 static GdkDragAction gdk_action(DWORD effects)
@@ -1620,8 +1799,6 @@ static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDr
         }
         shelf_restore_dimmed(shelf);
     }
-    active_drag = NULL;
-    self_drag = false;
     current_drag_out = NULL;
     for (int index = 0; index < out->count; index++) shelf_item_release(out->items[index]);
     free(out->items);
@@ -1753,7 +1930,6 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。
     if (model->expanded && count < model->count) split_pad_show_for(shelf);
     free(items);
-    self_drag = true;
     return provider;
 }
 

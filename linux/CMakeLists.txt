@@ -21,6 +21,7 @@ pkg_check_modules(LAYER_SHELL REQUIRED IMPORTED_TARGET gtk4-layer-shell-0)
 pkg_check_modules(GDK_PIXBUF REQUIRED IMPORTED_TARGET gdk-pixbuf-2.0)
 pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 
 set(DROPSHELF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/src")
 set(DROPSHELF_LINUX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/platform/linux")
@@ -83,6 +84,7 @@ add_library(dropshelf_core STATIC
     "${DROPSHELF_LINUX_DIR}/gesture_service_linux.c"
     "${DROPSHELF_LINUX_DIR}/foreground_linux.c"
     "${DROPSHELF_LINUX_DIR}/probe_linux.c"
+    "${DROPSHELF_LINUX_DIR}/xdnd_linux.c"
     "${DROPSHELF_LINUX_DIR}/hotkey_linux.c"
     "${DROPSHELF_LINUX_DIR}/tray_linux.c"
     "${DROPSHELF_LINUX_DIR}/folder_watch_linux.c"
@@ -102,7 +104,7 @@ target_include_directories(dropshelf_flags INTERFACE
 )
 target_compile_definitions(dropshelf_flags INTERFACE _GNU_SOURCE DROPSHELF_VERSION=L\"${DROPSHELF_VERSION}\")
 target_compile_options(dropshelf_flags INTERFACE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(dropshelf_flags INTERFACE Threads::Threads m PkgConfig::GTK4 PkgConfig::LAYER_SHELL PkgConfig::GDK_PIXBUF PkgConfig::CURL PkgConfig::FONTCONFIG)
+target_link_libraries(dropshelf_flags INTERFACE Threads::Threads m PkgConfig::GTK4 PkgConfig::LAYER_SHELL PkgConfig::GDK_PIXBUF PkgConfig::CURL PkgConfig::FONTCONFIG PkgConfig::XCB)
 target_link_libraries(dropshelf_core PUBLIC dropshelf_flags)
 
 # 置物架和设置页在两种风格（简洁、纸牌）下差别很大：这几个文件各编译两遍，纸牌那一遍定义 LOOK_VARIANT_CARDS，
