@@ -79,6 +79,7 @@ struct UiWindow
     bool drag_active;
     bool drag_saw_button;               // 这次拖动期间至少看到过一次左键按着
     bool drag_stale;                    // 已经替 GTK 收过尾、GTK 那边还挂着：下次从这里拖出前取消掉
+    bool drag_taken_over;               // 这次拖出已经交给 X11 拖动源，收尾由它来做
     UiWindow *next;
 };
 
@@ -934,6 +935,8 @@ static void on_window_destroy(GtkWidget *widget, gpointer data)
     UiWindow *window = data;
     if (window->destroyed) return;
     window->destroyed = true;
+    // 窗口在拖动中被关掉：X11 拖动源按取消收尾，置物架那边才能把项目放回去。
+    if (window->drag_taken_over) xdnd_source_abort();
     // 拖动还挂着（GTK 没收到结束通知，或者窗口在拖动中被关掉）时，把挂在这个源上的回调断开：
     // 窗口马上要释放，迟到的结束通知不能再回调进来。拖动源这时还被 GdkDrag 撑着（GTK 为拖动多引用了一份），
     // 断开是安全的；拖动和数据源本身不碰，接收方还能把数据取完。
@@ -1117,6 +1120,39 @@ GdkDrag *ui_active_drag(void)
 // 松开以后还等一会儿：给合成器和接收方正常结束的机会，迟迟等不到才当作漏发。
 #define DRAG_GUARD_RELEASE_DELAY_MICROSECONDS 1000000
 
+/// 从置物架往 XWayland 程序（WPS 这类）拖的时候，Hyprland 转过去的那次拖动对面拿不到数据：
+/// 拖动期间它不让 X11 程序读 selection，对面只能退回粘贴剪贴板，或者干脆没反应。
+/// 光标停在 XWayland 窗口上够久，就把这次拖出换成自己的 Xdnd，数据直接由我们给。
+static bool take_over_for_x11(void)
+{
+    if (xdnd_source_active()) return false;
+    UiWindow *owner = NULL;
+    for (UiWindow *window = windows; window; window = window->next)
+    {
+        if (window->destroyed || !window->drag_active || !window->drag_data) continue;
+        owner = window;
+        break;
+    }
+    if (!owner) return false;
+    // 光标还在置物架上时不算。置物架是层壳，不在合成器的窗口列表里，底下那个 X11 窗口会被
+    // 当成“光标下的程序”——刚拖着没离开置物架就把 GTK 的拖动掐掉就错了。
+    POINT cursor;
+    int frame_x = 0, frame_y = 0, frame_width = 0, frame_height = 0;
+    if (GetCursorPos(&cursor) && ui_window_frame(owner, &frame_x, &frame_y, &frame_width, &frame_height)
+        && cursor.x >= frame_x && cursor.x < frame_x + frame_width && cursor.y >= frame_y
+        && cursor.y < frame_y + frame_height)
+        return false;
+    if (!xdnd_source_should_take_over()) return false;
+    if (!xdnd_source_begin()) return false;
+    if (!ui_drag_take_over(owner))
+    {
+        xdnd_source_abort();
+        return false;
+    }
+    log_info(L"拖出：改由自己的 X11 拖动源送到光标下的程序");
+    return true;
+}
+
 static gboolean drag_guard_tick(gpointer data)
 {
     UiWindow *window = data;
@@ -1126,6 +1162,11 @@ static gboolean drag_guard_tick(gpointer data)
         return G_SOURCE_REMOVE;
     }
     if (g_get_monotonic_time() - window->drag_began_at < DRAG_GUARD_GRACE_MICROSECONDS) return G_SOURCE_CONTINUE;
+    if (take_over_for_x11())
+    {
+        window->drag_guard = 0;
+        return G_SOURCE_REMOVE;
+    }
     int buttons = gesture_left_button_state();
     // 没看到过按下就松开的不算：可能是触摸板这种看不到左键的设备，宁可不收也不能把正常拖动掐掉。
     if (buttons == 1)
@@ -1181,6 +1222,37 @@ static void release_active_drag(UiWindow *window)
     if (window->drag_source) gtk_drag_source_drag_cancel(window->drag_source);
 }
 
+bool ui_drag_take_over(UiWindow *window)
+{
+    if (!window || window->destroyed || !window->drag_active || !window->drag_data || !window->drag_source) return false;
+    GtkDragSource *drag_source = window->drag_source;
+    window->drag_taken_over = true;
+    window->drag_active = false;
+    window->drag = NULL;
+    window->drag_stale = false;
+    if (active_drag) active_drag = NULL;
+    drag_guard_stop(window);
+    // 取消 GTK 的拖动：Hyprland 那边那次拖动跟着结束，对方也就不会再收到它发过去的 Xdnd，
+    // 免得两个拖动源同时往一个窗口上放。drag-end 可能紧接着就到，收尾留给 X11 拖动源。
+    gtk_drag_source_drag_cancel(drag_source);
+    return true;
+}
+
+void ui_drag_taken_over_finished(GdkDragAction action)
+{
+    for (UiWindow *window = windows; window; window = window->next)
+    {
+        if (!window->drag_taken_over) continue;
+        window->drag_taken_over = false;
+        void *data = window->drag_data;
+        window->drag_data = NULL;
+        if (!data || !window->drag_end) return;
+        log_info(L"拖出：X11 拖动源收尾，动作 0x%x", (unsigned)action);
+        window->drag_end(window, window->drag_context, data, action);
+        return;
+    }
+}
+
 void ui_window_set_drop_handler(UiWindow *window, UiDropHandler handler, void *context)
 {
     if (!window) return;
@@ -1193,7 +1265,12 @@ void ui_window_set_drag_handler(UiWindow *window, UiDragPrepare prepare, UiDragE
 {
     if (!window) return;
     // 收掉处理器时如果还在拖动，先让它按取消收尾，再换掉回调，否则这次拖动永远结束不了。
-    if (!prepare) release_active_drag(window);
+    if (!prepare)
+    {
+        release_active_drag(window);
+        // 交给 X11 拖动源的那次拖出不归 GTK 管：这里也要让它收尾，不然置物架一直停在“正在拖”。
+        if (window->drag_taken_over) xdnd_source_abort();
+    }
     window->drag_prepare = prepare;
     window->drag_end = end;
     window->drag_context = context;
@@ -1250,6 +1327,12 @@ static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_da
     window->drag_active = false;
     window->drag_stale = false;
     drag_guard_stop(window);
+    if (window->drag_taken_over)
+    {
+        // 这次拖出已经交给 X11 拖动源：GTK 的拖动只是被取消了，收尾等 X11 那边谈完再说。
+        log_info(L"拖出结束：GTK 的拖动收起来了，由 X11 拖动源继续");
+        return;
+    }
     log_info(L"拖出结束：收到 GTK 的结束通知，动作 0x%x", (unsigned)gdk_drag_get_selected_action(drag));
     if (window->drag_end) window->drag_end(window, window->drag_context, window->drag_data, gdk_drag_get_selected_action(drag));
     window->drag_data = NULL;

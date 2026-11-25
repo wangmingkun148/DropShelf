@@ -231,6 +231,88 @@ void hyprland_monitors_free(HyprMonitor *monitors, int count)
     memset(monitors, 0, (size_t)count * sizeof(HyprMonitor));
 }
 
+/// 从 JSON 数组里取第 index 个数字。
+static bool json_number_at(const JsonValue *array, int index, double *out)
+{
+    if (!array || array->type != JSON_ARRAY || index < 0 || index >= array->count) return false;
+    const JsonValue *value = array->items[index];
+    if (!value || value->type != JSON_NUMBER) return false;
+    *out = value->number;
+    return true;
+}
+
+/// hyprctl -j clients 的一条：窗口在逻辑坐标里的位置。缩放和旋转都已经算进去了。
+static bool parse_client_rect(const JsonValue *value, RECT *rect)
+{
+    const JsonValue *at = json_get(value, L"at");
+    const JsonValue *size = json_get(value, L"size");
+    double x = 0, y = 0, width = 0, height = 0;
+    if (!json_number_at(at, 0, &x) || !json_number_at(at, 1, &y)) return false;
+    if (!json_number_at(size, 0, &width) || !json_number_at(size, 1, &height)) return false;
+    if (width < 1 || height < 1) return false;
+    *rect = (RECT){ (LONG)lround(x), (LONG)lround(y), (LONG)lround(x + width), (LONG)lround(y + height) };
+    return true;
+}
+
+bool hyprland_client_at(int x, int y, HyprClientAt *out)
+{
+    if (!out) return false;
+    memset(out, 0, sizeof *out);
+    if (!hyprland_available()) return false;
+    char *clients_text = hyprland_request("j/clients");
+    if (!clients_text) return false;
+    char *workspace_text = hyprland_request("j/activeworkspace");
+    size_t clients_length = strlen(clients_text);
+    size_t workspace_length = workspace_text ? strlen(workspace_text) : 0;
+    wchar_t *clients_wide = wide_from_utf8(clients_text, clients_length);
+    wchar_t *workspace_wide = workspace_text ? wide_from_utf8(workspace_text, workspace_length) : NULL;
+    free(clients_text);
+    free(workspace_text);
+    JsonValue *clients = clients_wide ? json_parse(clients_wide, 0) : NULL;
+    JsonValue *workspace = workspace_wide ? json_parse(workspace_wide, 0) : NULL;
+    free(clients_wide);
+    free(workspace_wide);
+    bool result = false;
+    if (clients && clients->type == JSON_ARRAY)
+    {
+        // 别的虚拟桌面上的窗口在 X 那边照样存在，得按当前工作区筛一遍。
+        int active = -1;
+        const JsonValue *id = workspace && workspace->type == JSON_OBJECT ? json_get(workspace, L"id") : NULL;
+        if (id && id->type == JSON_NUMBER) active = (int)lround(id->number);
+        int best_focus = 0;
+        for (int index = 0; index < clients->count; index++)
+        {
+            const JsonValue *client = clients->items[index];
+            if (!client || client->type != JSON_OBJECT) continue;
+            const JsonValue *mapped = json_get(client, L"mapped");
+            const JsonValue *hidden = json_get(client, L"hidden");
+            if (mapped && mapped->type == JSON_BOOL && !mapped->boolean) continue;
+            if (hidden && hidden->type == JSON_BOOL && hidden->boolean) continue;
+            const JsonValue *space = json_get(client, L"workspace");
+            const JsonValue *space_id = space && space->type == JSON_OBJECT ? json_get(space, L"id") : NULL;
+            if (active >= 0 && (!space_id || space_id->type != JSON_NUMBER || (int)lround(space_id->number) != active)) continue;
+            RECT rect;
+            if (!parse_client_rect(client, &rect)) continue;
+            if (x < rect.left || y < rect.top || x >= rect.right || y >= rect.bottom) continue;
+            // 窗口叠在一起时，最后动过的那个在最好的一面。
+            const JsonValue *focus = json_get(client, L"focusHistoryID");
+            int focus_value = focus && focus->type == JSON_NUMBER ? (int)lround(focus->number) : 999;
+            if (result && focus_value >= best_focus) continue;
+            const JsonValue *xwayland = json_get(client, L"xwayland");
+            const JsonValue *pid = json_get(client, L"pid");
+            out->found = true;
+            out->xwayland = xwayland && xwayland->type == JSON_BOOL && xwayland->boolean;
+            out->pid = pid && pid->type == JSON_NUMBER ? (int)lround(pid->number) : 0;
+            out->rect = rect;
+            best_focus = focus_value;
+            result = true;
+        }
+    }
+    if (clients) json_free(clients);
+    if (workspace) json_free(workspace);
+    return result;
+}
+
 // ───────────── 快捷键 ─────────────
 
 /// 我们加的绑定用这个描述，运行时再看到它就知道是自己上次留下的。

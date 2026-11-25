@@ -55,3 +55,22 @@ XdndSink *xdnd_add_sink(void *context,
     bool (*frame)(void *context, int *x, int *y, int *width, int *height),
     bool (*want_move)(void *context));
 void xdnd_remove_sink(XdndSink *sink);
+
+// ───────────── 从置物架拖到 XWayland 程序 ─────────────
+
+/// 把这次要拖出的东西交给 X11 拖动源：paths 是 UTF-8 的文件路径（没有文件时传 NULL），
+/// text 是纯文字。move_allowed 表示置物架那边按“移动”算。
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, bool move_allowed);
+
+/// 从置物架往外拖的时候看一眼光标底下：停在 XWayland 程序上够久、而且真能找到它的 X 窗口时返回 true。
+/// 只在这时候才值得把 GTK 的 Wayland 拖动换成自己的 Xdnd。
+bool xdnd_source_should_take_over(void);
+
+/// 接管这次拖出（先把 GTK 的拖动取消掉再调用）。真正开始发 Xdnd 要等一小会儿。
+bool xdnd_source_begin(void);
+
+/// 自己正在（或者马上要）当 X11 拖动源。
+bool xdnd_source_active(void);
+
+/// 取消接管；收尾会照常通知回去。
+void xdnd_source_abort(void);

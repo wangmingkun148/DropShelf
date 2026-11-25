@@ -60,6 +60,7 @@ typedef struct Atoms
     xcb_atom_t action_copy, action_move;
     xcb_atom_t uri_list, image_png, image_jpeg, text_utf8, text_plain, utf8_string;
     xcb_atom_t data_property;
+    xcb_atom_t targets, net_wm_pid;
 } Atoms;
 
 static struct
@@ -142,6 +143,8 @@ static void intern_atoms(void)
     atoms->text_plain = intern("text/plain");
     atoms->utf8_string = intern("UTF8_STRING");
     atoms->data_property = intern(DATA_PROPERTY);
+    atoms->targets = intern("TARGETS");
+    atoms->net_wm_pid = intern("_NET_WM_PID");
 }
 
 static void send_message(xcb_window_t destination, xcb_atom_t type, const uint32_t data[5])
@@ -578,6 +581,595 @@ static void read_property_chunk(bool first)
     if (complete) deliver_data();
 }
 
+// ───────────── 自己当 X11 拖动源 ─────────────
+// 从置物架往 WPS 这类 XWayland 程序拖东西时，Hyprland 会把 Wayland 的拖动转成 Xdnd 发给对方，
+// 可是拖动期间它不让 X11 程序读任何 selection（连剪贴板都读不到），对方拿不到数据，只能退回
+// 粘贴剪贴板，或者干脆什么都不做。所以光标停在 XWayland 程序上时改成自己发 Xdnd：消息和数据
+// 都直接由我们给，不经过合成器。
+
+/// 光标在同一个 XWayland 窗口上停这么久，才把这次拖出接过来。
+#define TAKEOVER_DWELL_MICROSECONDS 250000
+/// 取消 GTK 的拖动以后等一会儿再发 XdndEnter：让 Hyprland 先把它的那次拖动收干净。
+#define TAKEOVER_SETTLE_MICROSECONDS 160000
+/// 每隔多久重新看一眼光标底下还是不是原来那个窗口。
+#define SOURCE_RECHECK_MICROSECONDS 200000
+/// 发过 XdndDrop 以后等 XdndFinished 的上限。
+#define SOURCE_FINISH_TIMEOUT_MICROSECONDS 3000000
+/// 自己送太久（看不到按键状态时会这样）就不再挂着。
+#define SOURCE_TIMEOUT_MICROSECONDS 30000000
+
+static struct
+{
+    // 置物架交过来的东西。
+    bool prepared;
+    char *uri_list;                 // text/uri-list 的内容（\r\n 分隔）
+    char *text;                     // 纯文字；有文件时是路径列表
+    bool move_allowed;
+    // 光标底下停在哪；两次轮询之间不做别的。
+    int dwell_pid;
+    gint64 dwell_since;
+    // 取消 GTK 的拖动以后，等一小会儿再真正接管。
+    bool starting;
+    gint64 start_at;
+    // 接管以后。
+    bool active;
+    xcb_window_t window;            // 我们自己的 selection 窗口
+    xcb_window_t target;            // 接收方 X 窗口
+    xcb_window_t entered;           // 已经发过 XdndEnter 的窗口
+    RECT target_rect;               // 接收方在逻辑坐标里的位置
+    int target_pid;
+    int target_x, target_y;         // 接收方窗口在 X 根坐标里的位置
+    int target_width, target_height;
+    bool accepted;                  // 对方接受了这次拖动
+    uint32_t action;                // 对方答应的动作
+    uint32_t proposed;              // 我们提议的动作
+    uint32_t time;                  // 服务器时间，XdndPosition / XdndDrop 要带
+    bool have_point;
+    int point_x, point_y;
+    bool waiting_finish;
+    gint64 drop_at;
+    gint64 started_at;
+    gint64 checked_at;
+    int owner_retries;
+} source;
+
+static void source_finish(bool dropped);
+
+static void source_clear_payload(void)
+{
+    g_free(source.uri_list);
+    g_free(source.text);
+    source.uri_list = NULL;
+    source.text = NULL;
+    source.prepared = false;
+}
+
+/// 路径里的特殊字节按 URI 的规矩转义：WPS 这类程序要的是能直接用的 file:// URI。
+static void append_uri_path(GString *out, const char *path)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    for (const unsigned char *cursor = (const unsigned char *)path; *cursor; cursor++)
+    {
+        unsigned char byte = *cursor;
+        bool plain = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9')
+            || byte == '-' || byte == '.' || byte == '_' || byte == '~' || byte == '/';
+        if (plain) g_string_append_c(out, (char)byte);
+        else
+        {
+            g_string_append_c(out, '%');
+            g_string_append_c(out, digits[byte >> 4]);
+            g_string_append_c(out, digits[byte & 15]);
+        }
+    }
+}
+
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, bool move_allowed)
+{
+    if (source.active || source.starting) return;
+    source_clear_payload();
+    source.move_allowed = move_allowed;
+    GString *list = g_string_new(NULL);
+    GString *plain = g_string_new(NULL);
+    for (int index = 0; paths && index < count; index++)
+    {
+        if (!paths[index] || !*paths[index]) continue;
+        if (list->len > 0) g_string_append(list, "\r\n");
+        g_string_append(list, "file://");
+        append_uri_path(list, paths[index]);
+        if (plain->len > 0) g_string_append_c(plain, '\n');
+        g_string_append(plain, paths[index]);
+    }
+    if (list->len > 0)
+    {
+        g_string_append(list, "\r\n");
+        source.uri_list = g_string_free(list, FALSE);
+        source.text = g_string_free(plain, FALSE);
+    }
+    else
+    {
+        g_string_free(list, TRUE);
+        g_string_free(plain, TRUE);
+        if (text && *text) source.text = g_strdup(text);
+    }
+    source.prepared = source.uri_list != NULL || source.text != NULL;
+    source.proposed = source.move_allowed ? bridge.atoms.action_move : bridge.atoms.action_copy;
+}
+
+static uint32_t window_pid(xcb_window_t window)
+{
+    if (!bridge.connection || !bridge.atoms.net_wm_pid) return 0;
+    xcb_get_property_cookie_t cookie = xcb_get_property(bridge.connection, 0, window, bridge.atoms.net_wm_pid, XCB_ATOM_CARDINAL, 0, 1);
+    xcb_get_property_reply_t *reply = xcb_get_property_reply(bridge.connection, cookie, NULL);
+    uint32_t pid = 0;
+    if (reply)
+    {
+        if (xcb_get_property_value_length(reply) >= 4) memcpy(&pid, xcb_get_property_value(reply), 4);
+        free(reply);
+    }
+    return pid;
+}
+
+static bool window_aware(xcb_window_t window)
+{
+    if (!bridge.connection || !bridge.atoms.aware) return false;
+    xcb_get_property_cookie_t cookie = xcb_get_property(bridge.connection, 0, window, bridge.atoms.aware, XCB_ATOM_ATOM, 0, 1);
+    xcb_get_property_reply_t *reply = xcb_get_property_reply(bridge.connection, cookie, NULL);
+    bool aware = false;
+    if (reply)
+    {
+        if (xcb_get_property_value_length(reply) >= 4)
+        {
+            xcb_atom_t version = XCB_ATOM_NONE;
+            memcpy(&version, xcb_get_property_value(reply), 4);
+            aware = version >= 3;
+        }
+        free(reply);
+    }
+    return aware;
+}
+
+/// 在 X 的顶层窗口里找 pid 那个程序的主窗口：同进程的窗口可能有好几个，取大小最接近的。
+static bool source_find_target(int pid, const RECT *rect)
+{
+    if (!bridge.connection || !bridge.screen || pid <= 0 || !rect) return false;
+    int width = rect->right - rect->left;
+    int height = rect->bottom - rect->top;
+    if (width <= 0 || height <= 0) return false;
+    xcb_query_tree_reply_t *tree = xcb_query_tree_reply(bridge.connection, xcb_query_tree(bridge.connection, bridge.screen->root), NULL);
+    if (!tree) return false;
+    xcb_window_t best = XCB_NONE;
+    int best_score = 0;
+    xcb_window_t best_x = 0, best_y = 0;
+    int best_width = 0, best_height = 0;
+    int count = xcb_query_tree_children_length(tree);
+    xcb_window_t *children = xcb_query_tree_children(tree);
+    for (int index = 0; index < count; index++)
+    {
+        xcb_window_t window = children[index];
+        if (!window || window_pid(window) != (uint32_t)pid) continue;
+        if (!window_aware(window)) continue;
+        xcb_get_window_attributes_reply_t *attributes =
+            xcb_get_window_attributes_reply(bridge.connection, xcb_get_window_attributes(bridge.connection, window), NULL);
+        bool viewable = attributes && attributes->map_state == XCB_MAP_STATE_VIEWABLE;
+        free(attributes);
+        if (!viewable) continue;
+        xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(bridge.connection, xcb_get_geometry(bridge.connection, window), NULL);
+        if (!geometry) continue;
+        int score = abs((int)geometry->width - width) + abs((int)geometry->height - height);
+        if (!best || score < best_score)
+        {
+            best = window;
+            best_score = score;
+            best_x = geometry->x;
+            best_y = geometry->y;
+            best_width = geometry->width;
+            best_height = geometry->height;
+        }
+        free(geometry);
+    }
+    free(tree);
+    if (!best) return false;
+    source.target = best;
+    source.target_pid = pid;
+    source.target_rect = *rect;
+    source.target_x = best_x;
+    source.target_y = best_y;
+    source.target_width = best_width;
+    source.target_height = best_height;
+    return true;
+}
+
+static int source_type_atoms(xcb_atom_t *out, int max)
+{
+    int count = 0;
+    if (source.uri_list && count < max) out[count++] = bridge.atoms.uri_list;
+    if (source.text)
+    {
+        if (count < max) out[count++] = bridge.atoms.utf8_string;
+        if (count < max) out[count++] = bridge.atoms.text_plain;
+    }
+    return count;
+}
+
+static bool source_create_window(void)
+{
+    if (source.window) return true;
+    if (!bridge.connection || !bridge.screen) return false;
+    // 只用来占着 XdndSelection 和收 XdndStatus，什么都不画。
+    source.window = xcb_generate_id(bridge.connection);
+    uint32_t values[1] = { XCB_EVENT_MASK_PROPERTY_CHANGE };
+    xcb_create_window(bridge.connection, XCB_COPY_FROM_PARENT, source.window, bridge.screen->root, -10, -10, 1, 1, 0,
+        XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, values);
+    xcb_flush(bridge.connection);
+    return true;
+}
+
+static bool source_take_ownership(void)
+{
+    xcb_set_selection_owner(bridge.connection, source.window, bridge.atoms.selection, XCB_CURRENT_TIME);
+    xcb_flush(bridge.connection);
+    xcb_get_selection_owner_reply_t *reply =
+        xcb_get_selection_owner_reply(bridge.connection, xcb_get_selection_owner(bridge.connection, bridge.atoms.selection), NULL);
+    if (!reply) return false;
+    bool owned = reply->owner == source.window;
+    free(reply);
+    if (!owned) log_info(L"X11 拖动源：XdndSelection 没抢到");
+    return owned;
+}
+
+static void source_send_enter(xcb_window_t window)
+{
+    if (!window) return;
+    xcb_atom_t all[8];
+    int total = source_type_atoms(all, (int)(sizeof all / sizeof all[0]));
+    bool in_property = total > 3;
+    if (in_property)
+        xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, source.window, bridge.atoms.type_list, XCB_ATOM_ATOM, 32,
+            (uint32_t)total, all);
+    uint32_t data[5];
+    memset(data, 0, sizeof data);
+    data[0] = source.window;
+    data[1] = ((uint32_t)XDND_VERSION << 24) | (in_property ? 1u : 0u);
+    if (total > 0) data[2] = all[0];
+    if (total > 1) data[3] = all[1];
+    if (total > 2) data[4] = all[2];
+    send_message(window, bridge.atoms.enter, data);
+    source.entered = window;
+    source.accepted = false;
+    source.action = 0;
+    source.have_point = false;
+}
+
+static void source_send_leave(void)
+{
+    if (!source.entered) return;
+    uint32_t data[5];
+    memset(data, 0, sizeof data);
+    data[0] = source.window;
+    send_message(source.entered, bridge.atoms.leave, data);
+    source.entered = 0;
+    source.accepted = false;
+    source.action = 0;
+    source.have_point = false;
+}
+
+/// 光标在接收方窗口里的本地坐标 -> X 根坐标。缩放过的屏幕上两边的尺寸不一样，按比例折算。
+static bool source_root_position(int *root_x, int *root_y)
+{
+    POINT cursor;
+    if (!GetCursorPos(&cursor)) return false;
+    int width = source.target_rect.right - source.target_rect.left;
+    int height = source.target_rect.bottom - source.target_rect.top;
+    double scale_x = width > 0 && source.target_width > 0 ? (double)source.target_width / width : 1.0;
+    double scale_y = height > 0 && source.target_height > 0 ? (double)source.target_height / height : 1.0;
+    *root_x = source.target_x + (int)lround((cursor.x - source.target_rect.left) * scale_x);
+    *root_y = source.target_y + (int)lround((cursor.y - source.target_rect.top) * scale_y);
+    return true;
+}
+
+static void source_send_position(void)
+{
+    if (!source.active || !source.entered) return;
+    int root_x = 0, root_y = 0;
+    if (!source_root_position(&root_x, &root_y)) return;
+    if (source.have_point && root_x == source.point_x && root_y == source.point_y) return;
+    source.have_point = true;
+    source.point_x = root_x;
+    source.point_y = root_y;
+    uint32_t data[5];
+    memset(data, 0, sizeof data);
+    data[0] = source.window;
+    data[2] = ((uint32_t)root_x << 16) | ((uint32_t)root_y & 0xffff);
+    data[3] = source.time;
+    data[4] = source.proposed;
+    send_message(source.entered, bridge.atoms.position, data);
+}
+
+static void source_send_drop(void)
+{
+    if (!source.entered || !source.accepted)
+    {
+        log_info(L"X11 拖动源：接收方没接受，不放下");
+        source_finish(false);
+        return;
+    }
+    uint32_t data[5];
+    memset(data, 0, sizeof data);
+    data[0] = source.window;
+    data[2] = source.time;
+    send_message(source.entered, bridge.atoms.drop, data);
+    log_info(L"X11 拖动源：发出 XdndDrop");
+    source.waiting_finish = true;
+    source.drop_at = g_get_monotonic_time();
+}
+
+static bool source_start(void)
+{
+    if (!bridge.connection || !source.target) return false;
+    if (!source_create_window() || !source_take_ownership()) return false;
+    source.active = true;
+    source.waiting_finish = false;
+    source.have_point = false;
+    source.owner_retries = 0;
+    source.started_at = g_get_monotonic_time();
+    source.checked_at = source.started_at;
+    source_send_enter(source.target);
+    source_send_position();
+    log_info(L"X11 拖动源：接管这次拖出，目标窗口 0x%x（pid %d，%dx%d）", (unsigned)source.target, source.target_pid,
+        source.target_width, source.target_height);
+    return true;
+}
+
+static void source_finish(bool dropped)
+{
+    if (!source.active && !source.starting) return;
+    GdkDragAction action = 0;
+    if (dropped && source.accepted)
+        action = source.action == bridge.atoms.action_move && source.move_allowed ? GDK_ACTION_MOVE : GDK_ACTION_COPY;
+    log_info(L"X11 拖动源：%ls（动作 0x%x）", dropped ? L"放下完成" : L"取消", (unsigned)action);
+    if (source.active && bridge.connection)
+    {
+        if (!dropped) source_send_leave();
+        // 松手以后对方可能还在读数据，等它回过 XdndFinished（或者等够了）再把 selection 交回去。
+        if (source.window && bridge.atoms.selection)
+            xcb_set_selection_owner(bridge.connection, XCB_ATOM_NONE, bridge.atoms.selection, XCB_CURRENT_TIME);
+        xcb_flush(bridge.connection);
+    }
+    source.starting = false;
+    source.active = false;
+    source.target = 0;
+    source.entered = 0;
+    source.accepted = false;
+    source.action = 0;
+    source.waiting_finish = false;
+    source.have_point = false;
+    source.owner_retries = 0;
+    source.dwell_pid = 0;
+    source.dwell_since = 0;
+    ui_drag_taken_over_finished(action);
+}
+
+static void source_handle_status(xcb_client_message_event_t *event)
+{
+    if (!source.active || !source.entered) return;
+    if ((xcb_window_t)event->data.data32[0] != source.entered) return;
+    bool accepted = (event->data.data32[1] & 1) != 0;
+    uint32_t action = accepted ? event->data.data32[4] : 0;
+    if (accepted && action != bridge.atoms.action_move) action = bridge.atoms.action_copy;
+    if (accepted != source.accepted || action != source.action)
+        log_info(L"X11 拖动源：接收方%ls%ls", accepted ? L"接受" : L"不接受",
+            accepted ? (action == bridge.atoms.action_move ? L"（按移动）" : L"（按复制）") : L"");
+    source.accepted = accepted;
+    source.action = accepted ? action : 0;
+}
+
+static void source_handle_finished(xcb_client_message_event_t *event)
+{
+    if (!source.waiting_finish) return;
+    bool success = event->data.data32[1] != 0;
+    if (success && event->data.data32[2] == bridge.atoms.action_move) source.action = bridge.atoms.action_move;
+    log_info(L"X11 拖动源：对方收完了%ls", success ? L"" : L"（没收下）");
+    source_finish(success);
+}
+
+static void source_send_notify(xcb_selection_request_event_t *request, xcb_atom_t property)
+{
+    xcb_selection_notify_event_t notify;
+    memset(&notify, 0, sizeof notify);
+    notify.response_type = XCB_SELECTION_NOTIFY;
+    notify.time = request->time;
+    notify.requestor = request->requestor;
+    notify.selection = request->selection;
+    notify.target = request->target;
+    notify.property = property;
+    xcb_send_event(bridge.connection, 0, request->requestor, XCB_EVENT_MASK_NO_EVENT, (const char *)&notify);
+    xcb_flush(bridge.connection);
+}
+
+static void source_serve_selection(xcb_selection_request_event_t *request)
+{
+    if (!bridge.connection || !source.window) return;
+    if (request->owner != source.window)
+    {
+        source_send_notify(request, XCB_ATOM_NONE);
+        return;
+    }
+    xcb_atom_t property = request->property ? request->property : request->target;
+    if (request->target == bridge.atoms.targets)
+    {
+        xcb_atom_t atoms[8];
+        int count = 0;
+        atoms[count++] = bridge.atoms.targets;
+        if (source.uri_list) atoms[count++] = bridge.atoms.uri_list;
+        if (source.text)
+        {
+            atoms[count++] = bridge.atoms.utf8_string;
+            atoms[count++] = bridge.atoms.text_plain;
+        }
+        xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, XCB_ATOM_ATOM, 32, (uint32_t)count, atoms);
+        source_send_notify(request, property);
+        return;
+    }
+    const char *data = NULL;
+    xcb_atom_t type = XCB_ATOM_NONE;
+    if (request->target == bridge.atoms.uri_list && source.uri_list)
+    {
+        data = source.uri_list;
+        type = bridge.atoms.uri_list;
+    }
+    else if ((request->target == bridge.atoms.utf8_string || request->target == bridge.atoms.text_plain
+                 || request->target == bridge.atoms.text_utf8) && source.text)
+    {
+        data = source.text;
+        type = bridge.atoms.utf8_string;
+    }
+    if (!data)
+    {
+        source_send_notify(request, XCB_ATOM_NONE);
+        return;
+    }
+    size_t length = strlen(data);
+    xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, type, 8, (uint32_t)length, data);
+    log_info(L"X11 拖动源：对方来要数据（%ls），给了 %zu 字节", type == bridge.atoms.uri_list ? L"文件列表" : L"文字", length);
+    source_send_notify(request, property);
+}
+
+static void source_handle_selection_clear(xcb_selection_clear_event_t *event)
+{
+    if (!source.active || event->selection != bridge.atoms.selection || event->owner == source.window) return;
+    // Hyprland 结束它那次拖动时会把 selection 收回去，下一拍再抢回来。
+    log_trace(L"X11 拖动源：XdndSelection 被 0x%x 抢走了", (unsigned)event->owner);
+    source.owner_retries = 0;
+}
+
+static void source_tick(gint64 now)
+{
+    if (source.starting)
+    {
+        if (now < source.start_at) return;
+        source.starting = false;
+        if (!source_start()) source_finish(false);
+        return;
+    }
+    if (!source.active || !bridge.connection) return;
+    if (source.waiting_finish)
+    {
+        if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
+        {
+            log_info(L"X11 拖动源：等 XdndFinished 等太久，按已放下收尾");
+            source_finish(true);
+        }
+        return;
+    }
+    if (now - source.started_at >= SOURCE_TIMEOUT_MICROSECONDS)
+    {
+        log_info(L"X11 拖动源：拖得太久，收起来");
+        source_finish(false);
+        return;
+    }
+    if (now - source.checked_at >= SOURCE_RECHECK_MICROSECONDS)
+    {
+        source.checked_at = now;
+        xcb_get_selection_owner_reply_t *owner =
+            xcb_get_selection_owner_reply(bridge.connection, xcb_get_selection_owner(bridge.connection, bridge.atoms.selection), NULL);
+        bool ours = owner && owner->owner == source.window;
+        free(owner);
+        if (!ours && source.owner_retries < 5)
+        {
+            source.owner_retries++;
+            if (!source_take_ownership())
+            {
+                log_info(L"X11 拖动源：XdndSelection 抢不回来，取消");
+                source_finish(false);
+                return;
+            }
+        }
+        POINT cursor;
+        HyprClientAt client;
+        if (!GetCursorPos(&cursor) || !hyprland_client_at(cursor.x, cursor.y, &client) || !client.found || !client.xwayland
+            || client.pid <= 0)
+        {
+            log_info(L"X11 拖动源：光标离开 X11 程序，取消");
+            source_finish(false);
+            return;
+        }
+        if (client.pid != source.target_pid)
+        {
+            if (!source_find_target(client.pid, &client.rect))
+            {
+                log_info(L"X11 拖动源：找不到新的接收窗口，取消");
+                source_finish(false);
+                return;
+            }
+            xcb_window_t window = source.target;
+            source_send_leave();
+            source_send_enter(window);
+        }
+    }
+    source_send_position();
+    if (gesture_left_button_state() == 0) source_send_drop();
+}
+
+bool xdnd_source_should_take_over(void)
+{
+    if (!bridge.connection || !bridge.atoms.selection) return false;
+    if (source.active || source.starting || !source.prepared) return false;
+    if (!hyprland_available()) return false;
+    POINT cursor;
+    if (!GetCursorPos(&cursor)) return false;
+    HyprClientAt client;
+    if (!hyprland_client_at(cursor.x, cursor.y, &client) || !client.found || !client.xwayland || client.pid <= 0)
+    {
+        log_trace(L"接管检查：光标（%d,%d）下没有 XWayland 窗口（找到 %d，xwayland %d，pid %d）", (int)cursor.x,
+            (int)cursor.y, client.found ? 1 : 0, client.xwayland ? 1 : 0, client.pid);
+        source.dwell_pid = 0;
+        source.dwell_since = 0;
+        return false;
+    }
+    log_trace(L"接管检查：光标（%d,%d）下是 XWayland pid %d，窗口 %d,%d %dx%d", (int)cursor.x, (int)cursor.y, client.pid,
+        (int)client.rect.left, (int)client.rect.top, (int)(client.rect.right - client.rect.left),
+        (int)(client.rect.bottom - client.rect.top));
+    gint64 now = g_get_monotonic_time();
+    if (source.dwell_pid != client.pid || source.dwell_since == 0)
+    {
+        source.dwell_pid = client.pid;
+        source.dwell_since = now;
+        return false;
+    }
+    if (now - source.dwell_since < TAKEOVER_DWELL_MICROSECONDS) return false;
+    // 真找到那个 X 窗口才动手：找不到就别把 GTK 的拖动打断。
+    if (!source_find_target(client.pid, &client.rect))
+    {
+        log_trace(L"接管检查：pid %d 没有 XdndAware 的可见窗口", client.pid);
+        source.dwell_pid = 0;
+        source.dwell_since = 0;
+        return false;
+    }
+    log_info(L"X11 拖动源：光标停在 XWayland 程序上（pid %d，窗口 0x%x）", client.pid, (unsigned)source.target);
+    return true;
+}
+
+bool xdnd_source_begin(void)
+{
+    if (!bridge.connection || !source.target || source.active || source.starting) return false;
+    source.starting = true;
+    source.start_at = g_get_monotonic_time() + TAKEOVER_SETTLE_MICROSECONDS;
+    source.dwell_pid = 0;
+    source.dwell_since = 0;
+    return true;
+}
+
+bool xdnd_source_active(void)
+{
+    return source.active || source.starting;
+}
+
+void xdnd_source_abort(void)
+{
+    if (!source.active && !source.starting) return;
+    source_finish(false);
+}
+
 // ───────────── X 事件 ─────────────
 
 static void handle_enter(xcb_client_message_event_t *event)
@@ -744,11 +1336,18 @@ static gboolean on_x_event(GIOChannel *channel, GIOCondition condition, gpointer
                     handle_drop(message);
                 }
             }
+            else if (source.window && message->window == source.window)
+            {
+                if (message->type == bridge.atoms.status) source_handle_status(message);
+                else if (message->type == bridge.atoms.finished) source_handle_finished(message);
+            }
             else log_trace(L"X11 拖放：客户端消息 0x%x（窗口 0x%x，不是我们）", (unsigned)message->type, (unsigned)message->window);
         }
         // 其它事件（X 错误、配置变化）不用管。
         else if (type == XCB_SELECTION_NOTIFY) handle_selection_notify((xcb_selection_notify_event_t *)event);
         else if (type == XCB_PROPERTY_NOTIFY) handle_property_notify((xcb_property_notify_event_t *)event);
+        else if (type == XCB_SELECTION_REQUEST) source_serve_selection((xcb_selection_request_event_t *)event);
+        else if (type == XCB_SELECTION_CLEAR) source_handle_selection_clear((xcb_selection_clear_event_t *)event);
         free(event);
     }
     xcb_flush(bridge.connection);
@@ -761,7 +1360,7 @@ static gboolean poll_tick(gpointer data)
 {
     (void)data;
     if (!bridge.connection || !bridge.window) return G_SOURCE_CONTINUE;
-    if (!probe_active && !sinks && !drag_active)
+    if (!probe_active && !sinks && !drag_active && !xdnd_source_active())
     {
         if (bridge.mapped) hide_window();
         return G_SOURCE_CONTINUE;
@@ -769,6 +1368,8 @@ static gboolean poll_tick(gpointer data)
     gint64 now = g_get_monotonic_time();
     POINT cursor = {0};
     bool have_cursor = GetCursorPos(&cursor);
+    // 自己当拖动源的时候，位置、换窗口、松手都靠这一拍盯着。
+    source_tick(now);
 
     // 探针等不到拖动就收起来，和 Wayland 探针一样。
     if (probe_active && !drag_active)
@@ -823,7 +1424,7 @@ static gboolean poll_tick(gpointer data)
     bool holding = gesture_left_button_state() != 0;
     // 自己正从置物架往外拖：这时候左键按着、光标也在置物架上，条件全对，但窗口一挂上去
     // 落点就变成我们自己了，拖到哪儿都没有接收方——图片、文件都拖不出去。让它待在下面。
-    bool outgoing = ui_active_drag() != NULL;
+    bool outgoing = ui_active_drag() != NULL || xdnd_source_active();
     bool interested = drag_active || (dragging && !outgoing && holding && (probe_active || under != NULL));
 
     // 接放窗口铺满整个 X 屏幕。拖动源是拿 X 光标的位置去找窗口的，而 XWayland 里的 X 光标
@@ -887,6 +1488,17 @@ void xdnd_stop(void)
     // 置物架那边还拿着 sink 指针（关窗口时会来注销），关掉桥时只断开连接，不再回调它们。
     target = NULL;
     reset_drag();
+    // 自己当拖动源的那套也一起收掉，不再回调置物架。
+    source.starting = false;
+    source.active = false;
+    source.target = 0;
+    source.entered = 0;
+    source.waiting_finish = false;
+    source.dwell_pid = 0;
+    source.dwell_since = 0;
+    source_clear_payload();
+    if (bridge.connection && source.window) xcb_destroy_window(bridge.connection, source.window);
+    source.window = 0;
     if (bridge.connection)
     {
         if (bridge.window) xcb_destroy_window(bridge.connection, bridge.window);

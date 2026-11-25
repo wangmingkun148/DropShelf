@@ -39,5 +39,12 @@ typedef void (*UiDragEnd)(UiWindow *window, void *context, void *drag_data, GdkD
 
 void ui_window_set_drag_handler(UiWindow *window, UiDragPrepare prepare, UiDragEnd end, void *context);
 
+/// 把这次拖出交给 X11 拖动源：GTK 的 Wayland 拖动取消掉，窗口的 drag_end 改由
+/// ui_drag_taken_over_finished 调用（drag_data 一直留着）。成功返回 true。
+bool ui_drag_take_over(UiWindow *window);
+
+/// X11 拖动源收尾：动作是它和对方谈下来的 GdkDragAction（取消时为 0）。
+void ui_drag_taken_over_finished(GdkDragAction action);
+
 /// 鼠标事件穿透到下面的窗口（Windows 上是 WS_EX_TRANSPARENT）：收尾动画卡片窗口用。
 void ui_window_set_click_through(UiWindow *window, bool on);

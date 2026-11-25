@@ -1859,14 +1859,17 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         for (int index = 0; index < file_count; index++) strlist_add(&paths, files[index]->value);
         for (int index = 0; index < extra.count; index++) strlist_add(&paths, extra.items[index]);
         GFile **objects = g_new0(GFile *, (gsize)paths.count);
+        // 路径的 UTF-8 版本留一份：光标停在 XWayland 程序上时，自己的 X11 拖动源要用。
+        char **names = xalloc((size_t)paths.count * sizeof(char *));
         int object_count = 0;
         for (int index = 0; index < paths.count; index++)
         {
             size_t length = 0;
             char *utf8 = utf8_from_wide(paths.items[index], &length);
             if (!utf8) continue;
-            objects[object_count++] = g_file_new_for_path(utf8);
-            free(utf8);
+            objects[object_count] = g_file_new_for_path(utf8);
+            names[object_count] = utf8;
+            object_count++;
         }
         strlist_clear(&paths);
         GdkFileList *list = object_count > 0 ? gdk_file_list_new_from_array(objects, (gsize)object_count) : NULL;
@@ -1880,7 +1883,10 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             g_boxed_free(GDK_TYPE_FILE_LIST, list);
             *actions = gdk_action(drag_allowed_effects(shelf->move_mode, has_temporary || extra.count > 0));
             if (!*actions) *actions = GDK_ACTION_COPY;
+            xdnd_source_set_payload((const char *const *)names, object_count, NULL, (*actions & GDK_ACTION_MOVE) != 0);
         }
+        for (int index = 0; index < object_count; index++) free(names[index]);
+        free(names);
     }
     else
     {
@@ -1900,6 +1906,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             if (utf8_text)
             {
                 provider = gdk_content_provider_new_typed(G_TYPE_STRING, utf8_text);
+                xdnd_source_set_payload(NULL, 0, utf8_text, false);
                 free(utf8_text);
             }
         }

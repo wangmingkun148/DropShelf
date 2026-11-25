@@ -64,6 +64,7 @@ static EdgeDwellDetector edge_detector;
 static bool any_pressed;
 static bool triggered;
 static int moves_this_press;
+static bool paused_this_press;      // 这次按住期间手势被暂停过（全屏程序、屏蔽名单等）
 static int last_x, last_y;
 static bool has_last_point;
 static long long last_edge_check;
@@ -277,6 +278,7 @@ static void begin_press(void)
     power_hold(&detector, true);
     moves_this_press = 0;
     triggered = false;
+    paused_this_press = false;
     has_last_point = false;
     last_edge_check = 0;
     // 每次按下时重新读显示器信息，显示器布局变化后也能正确判断边缘。
@@ -289,9 +291,12 @@ static void end_press(void)
 {
     power_hold(&detector, false);
     power_background_thread();
-    // 按住期间光标位置是靠 Hyprland IPC 取的，这里记一笔能让“晃动没反应”有据可查。
-    if (moves_this_press >= 8)
-        log_info(L"按住期间取到 %d 次光标位置，%ls", moves_this_press, triggered ? L"已识别手势" : L"未识别手势");
+    // 按住期间光标位置是靠 Hyprland IPC 取的。只在真识别出手势、或者这次按住被暂停拦住时
+    // 记一笔，能让“晃动没反应”有据可查，又不会每次拖动、点击都往日志里刷一行。
+    if (triggered)
+        log_info(L"按住期间取到 %d 次光标位置，已识别手势", moves_this_press);
+    else if (paused_this_press)
+        log_info(L"按住期间取到 %d 次光标位置，手势暂停中，没有反应", moves_this_press);
     bool released = triggered;
     triggered = false;
     shake_detector_reset(&detector);
@@ -305,7 +310,12 @@ static void end_press(void)
 /// 按住的每轮：有位置变化就交给晃动和边缘检测；停着不动时按间隔检查边缘停留。
 static void on_tick(void)
 {
-    if (triggered || paused) return;
+    if (triggered) return;
+    if (paused)
+    {
+        paused_this_press = true;
+        return;
+    }
     int x = 0, y = 0;
     if (!hyprland_cursor_position(&x, &y)) return;
     long long now = now_milliseconds();
