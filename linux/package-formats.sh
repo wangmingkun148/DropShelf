@@ -156,8 +156,11 @@ fi
 # 本地没网时可以用 DROPSHELF_SKIP_APPSTREAM=1 跳过这一步。
 appstream_flag=()
 if [ "${DROPSHELF_SKIP_APPSTREAM:-}" = "1" ]; then appstream_flag+=(--no-appstream); fi
+# 它每次都要从 GitHub 下载 type2 runtime；没网时可以先用 DROPSHELF_APPIMAGE_RUNTIME 指一个本地的。
+runtime_flag=()
+if [ -n "${DROPSHELF_APPIMAGE_RUNTIME:-}" ]; then runtime_flag+=(--runtime-file "$DROPSHELF_APPIMAGE_RUNTIME"); fi
 
 ARCH="$arch" APPIMAGE_EXTRACT_AND_RUN=1 \
-    "$tools/appimagetool" "${appstream_flag[@]}" "$appdir" "$out/DropShelf-$version-$arch.AppImage"
+    "$tools/appimagetool" "${appstream_flag[@]}" "${runtime_flag[@]}" "$appdir" "$out/DropShelf-$version-$arch.AppImage"
 
 ls -lh "$out"
