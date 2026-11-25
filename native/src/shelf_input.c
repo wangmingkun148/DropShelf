@@ -1215,7 +1215,8 @@ static void begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count)
             // 聊天软件和浏览器常在放下之后才读取文件，临时附件要多保留一会儿。
             for (int index = 0; index < dragged_count; index++)
                 if (dragged[index]->temporary || !shelf_item_is_file_system(dragged[index])) shelf_model_keep_temporary_files(model);
-            shelf_model_apply_drag_out(model, dragged, dragged_count, outcome.result, close_when_empty());
+            // 只有按“移动”拖出的项目才离开置物架：目标程序只肯复制时也算移动。
+            shelf_model_apply_drag_out(model, dragged, dragged_count, outcome.result, shelf->move_mode);
         }
         else if (outcome.refused && dragged_count > 0)
         {
@@ -1795,7 +1796,8 @@ static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDr
             for (int index = 0; index < out->count; index++)
                 if (out->items[index]->temporary || !shelf_item_is_file_system(out->items[index]))
                     shelf_model_keep_temporary_files(shelf->model);
-            shelf_model_apply_drag_out(shelf->model, out->items, out->count, result, close_when_empty());
+            // 只有按“移动”拖出的项目才离开置物架：目标程序只肯复制时也算移动。
+            shelf_model_apply_drag_out(shelf->model, out->items, out->count, result, shelf->move_mode);
         }
         shelf_restore_dimmed(shelf);
     }

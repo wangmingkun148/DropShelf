@@ -693,6 +693,9 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
     }
     source.prepared = source.uri_list != NULL || source.text != NULL;
     source.proposed = source.move_allowed ? bridge.atoms.action_move : bridge.atoms.action_copy;
+    log_trace(L"X11 拖动源：准备好内容（%d 个文件，文字 %ls，%ls），提议动作 0x%x（移动 0x%x，复制 0x%x）", count,
+        text ? L"有" : L"无", source.move_allowed ? L"可移动" : L"只复制", (unsigned)source.proposed,
+        (unsigned)bridge.atoms.action_move, (unsigned)bridge.atoms.action_copy);
 }
 
 static uint32_t window_pid(xcb_window_t window)
@@ -955,6 +958,19 @@ static void source_handle_status(xcb_client_message_event_t *event)
     if ((xcb_window_t)event->data.data32[0] != source.entered) return;
     bool accepted = (event->data.data32[1] & 1) != 0;
     uint32_t action = accepted ? event->data.data32[4] : 0;
+    log_trace(L"X11 拖动源：XdndStatus 接受 %d，动作 0x%x（我们提议 0x%x）", accepted ? 1 : 0,
+        (unsigned)event->data.data32[4], (unsigned)source.proposed);
+    if (!accepted && source.proposed == bridge.atoms.action_move)
+    {
+        // 文档程序（WPS 这类）往往只肯复制，不接受移动。改成复制重新进入一次——
+        // 它们只在进入时认一次动作，光换个位置不行。不然这次拖出去一点反应都没有。
+        source.proposed = bridge.atoms.action_copy;
+        log_info(L"X11 拖动源：接收方不接受移动，改按复制重新进入");
+        source_send_leave();
+        source_send_enter(source.target);
+        source_send_position();
+        return;
+    }
     if (accepted && action != bridge.atoms.action_move) action = bridge.atoms.action_copy;
     if (accepted != source.accepted || action != source.action)
         log_info(L"X11 拖动源：接收方%ls%ls", accepted ? L"接受" : L"不接受",

@@ -155,7 +155,9 @@ wchar_t *shelf_item_file_name(const ShelfItem *item);
 // ───────────── 拖出、打开、复制 ─────────────
 
 /// 处理拖出的结果；dragged 是实际交给目标程序的项目。
-void shelf_model_apply_drag_out(ShelfModel *model, ShelfItem *const *dragged, int count, DragOutResult result, bool remove_copied);
+/// requested_move：置物架是按“移动”拖出的——目标程序只肯复制时项目也离开置物架；
+/// 按“复制”拖出的项目总留在架上，可以再拖到别处。
+void shelf_model_apply_drag_out(ShelfModel *model, ShelfItem *const *dragged, int count, DragOutResult result, bool requested_move);
 
 /// 临时附件已交给其他程序（拖出、复制、用程序打开），关闭置物架后稍晚再清理。
 void shelf_model_keep_temporary_files(ShelfModel *model);

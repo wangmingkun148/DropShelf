@@ -385,7 +385,7 @@ static void test_shelf_model(void)
           owned_text_is(shelf_model_title(model), L"3 个项目"), "汇总不正确");
     shelf_model_release(model);
 
-    // 拖出之后：取消、复制时按设置决定、移走了就移除。
+    // 拖出之后：取消什么都不动；目标只肯复制时，按移动拖出的照样移除、按复制拖出的留着；移走了就移除。
     model = shelf_model_new(NULL);
     add_paths(model, (const wchar_t *const *)paths, 3);
     ShelfItem *head = model->items[0];

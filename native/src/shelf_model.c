@@ -869,7 +869,7 @@ static void remove_when_gone(void *data)
     free(check);
 }
 
-void shelf_model_apply_drag_out(ShelfModel *model, ShelfItem *const *dragged, int count, DragOutResult result, bool remove_copied)
+void shelf_model_apply_drag_out(ShelfModel *model, ShelfItem *const *dragged, int count, DragOutResult result, bool requested_move)
 {
     if (result == DRAG_OUT_MOVED)
     {
@@ -898,7 +898,9 @@ void shelf_model_apply_drag_out(ShelfModel *model, ShelfItem *const *dragged, in
         task_delay(REMOVE_WHEN_GONE_DELAY, remove_when_gone, check);
         return;
     }
-    if ((result == DRAG_OUT_COPIED || result == DRAG_OUT_LINKED) && remove_copied) remove_shown(model, dragged, count);
+    // 目标程序只肯复制时（文档程序、聊天软件大多这样）：按移动拖出的照样离开置物架，
+    // 按复制拖出的留在架上——复制出去的东西本来就该还在。
+    if ((result == DRAG_OUT_COPIED || result == DRAG_OUT_LINKED) && requested_move) remove_shown(model, dragged, count);
 }
 
 void shelf_model_keep_temporary_files(ShelfModel *model)
