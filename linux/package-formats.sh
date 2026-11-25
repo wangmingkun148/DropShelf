@@ -152,7 +152,12 @@ if [ -f "$metainfo" ]; then
     cp "$metainfo" "${metainfo%.metainfo.xml}.appdata.xml"
 fi
 
+# appimagetool 会调 appstreamcli 校验元数据，里面要访问 GitHub；网络不通时整个打包会失败。
+# 本地没网时可以用 DROPSHELF_SKIP_APPSTREAM=1 跳过这一步。
+appstream_flag=()
+if [ "${DROPSHELF_SKIP_APPSTREAM:-}" = "1" ]; then appstream_flag+=(--no-appstream); fi
+
 ARCH="$arch" APPIMAGE_EXTRACT_AND_RUN=1 \
-    "$tools/appimagetool" "$appdir" "$out/DropShelf-$version-$arch.AppImage"
+    "$tools/appimagetool" "${appstream_flag[@]}" "$appdir" "$out/DropShelf-$version-$arch.AppImage"
 
 ls -lh "$out"
