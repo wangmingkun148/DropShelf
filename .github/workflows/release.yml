@@ -162,4 +162,15 @@ jobs:
         run: |
           # 容器里以 root 运行，检出目录归另一个用户，gh 调用 git 时会当成可疑仓库拒绝执行。
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # 已经在 Releases 页面建好（说明也在那里写好了）时只附上文件；还没有时新建一个：
+          # 仓库里有这一版的发布说明 docs/releases/<标签>.md 就用它，没有时按提交记录自动生成。
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            version=$(printf '%s' "$TAG" | sed 's/^[^0-9]*//')
+            notes="docs/releases/$TAG.md"
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" --title "DropShelf $version" --notes-file "$notes"
+            else
+              gh release create "$TAG" --title "DropShelf $version" --generate-notes
+            fi
+          fi
           gh release upload "$TAG" dist/* --clobber
