@@ -86,7 +86,7 @@ overrides:
       - libgtk-4-1
       - libgtk4-layer-shell0
       - libgdk-pixbuf-2.0-0
-      - libarchive13 | libarchive13t64
+      - libarchive-tools
       - libcurl4 | libcurl4t64
       - fontconfig
   rpm:
@@ -94,7 +94,7 @@ overrides:
       - gtk4
       - gtk4-layer-shell
       - gdk-pixbuf2
-      - libarchive
+      - bsdtar
       - libcurl
       - fontconfig
   archlinux:

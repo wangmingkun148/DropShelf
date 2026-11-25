@@ -128,6 +128,35 @@ int main(void)
         strlist_clear(&one);
     }
 
+    // 7z 交给 bsdtar：先用它打一个 7z，再走 archive_run 解开。没装 bsdtar（libarchive-tools）时这里会失败。
+    char *seven = g_build_filename(output, "七.7z", NULL);
+    char *pack[] = { "bsdtar", "--format", "7zip", "-cf", seven, "-C", source, "a.txt", "子文件夹", NULL };
+    char **environment = g_environ_setenv(g_get_environ(), "LC_ALL", "C.UTF-8", TRUE);
+    int status = -1;
+    bool packed = g_spawn_sync(NULL, pack, environment, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, NULL) && status == 0;
+    g_strfreev(environment);
+    check(packed, "bsdtar 打不出 7z（装了 bsdtar 吗？）");
+    if (packed)
+    {
+        wchar_t *wide_seven = wide_from_utf8(seven, strlen(seven));
+        wchar_t *wide_unpack = wide_from_utf8(unpack, strlen(unpack));
+        StrList one = {0};
+        strlist_add(&one, wide_seven);
+        QuickActionResult extracted = {0};
+        archive_run(&one, wide_unpack, &extracted);
+        check(extracted.succeeded, "解压 7z 失败");
+        char *file_b = g_build_filename(unpack, "七", "子文件夹", "b.txt", NULL);
+        char *text_b = read_file(file_b);
+        check(text_b && strcmp(text_b, "world") == 0, "7z 解压出来的 b.txt 内容不对");
+        free(text_b);
+        g_free(file_b);
+        quick_action_result_free(&extracted);
+        strlist_clear(&one);
+        free(wide_seven);
+        free(wide_unpack);
+    }
+    g_free(seven);
+
     free(archive);
     strlist_clear(&paths);
     free(wide_first);

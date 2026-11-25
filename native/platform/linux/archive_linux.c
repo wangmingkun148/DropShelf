@@ -241,10 +241,13 @@ static bool extract_7z(const wchar_t *source, const char *temporary)
     char *archive = narrow(source);
     if (!archive) return false;
     char *argv[] = { "bsdtar", "-xf", archive, "-C", (char *)temporary, NULL };
+    // 7z 里的文件名是 UTF-16，bsdtar 按当前区域设置转换；会话没设 LANG（C 区域）时中文名会解不出来。
+    char **environment = g_environ_setenv(g_get_environ(), "LC_ALL", "C.UTF-8", TRUE);
     int status = 0;
     GError *error = NULL;
-    bool started = g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, &error);
+    bool started = g_spawn_sync(NULL, argv, environment, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, &error);
     if (error) g_error_free(error);
+    g_strfreev(environment);
     free(archive);
     if (!started || status != 0) return false;
     // Windows 版不允许压缩包里带链接；这里解压后发现有链接就当作失败。

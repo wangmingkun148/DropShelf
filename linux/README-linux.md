@@ -10,7 +10,8 @@
 - gdk-pixbuf
 - fontconfig（运行时注册随程序附带的图标字体）
 - libcurl（检查更新）
-- libarchive / `bsdtar`（解压 7z；ZIP 用内置的 miniz，不需要这个）
+- `bsdtar`（解压 7z；ZIP 用内置的 miniz，不需要这个）：Arch 在 libarchive 里，
+  Debian/Ubuntu 是 libarchive-tools，Fedora 是 bsdtar
 - gdk-pixbuf 的图片加载器：JPEG、PNG、WebP 一般在 gdk-pixbuf2 里，
   HEIC/AVIF 需要系统装了对应的加载器（如 libheif、libavif）
 - 支持 wlr-layer-shell 的合成器：Hyprland / Sway / KDE（KDE 需要 compositor 支持）
@@ -90,8 +91,6 @@ cd linux && makepkg -si
   以及自定义的复制/移动到文件夹、压缩图片、转换图片、用程序打开都可以用。
 - **属性窗口**：Linux 没有系统提供的文件属性对话框，属性窗口是程序自绘的，
   显示名称、类型、位置、大小和修改时间；文件夹大小在后台统计，没有 Windows 那些扩展属性页。
-- **电源**：窗口显示或有拖动操作时，用 `systemd-inhibit` 阻止系统因为空闲而锁屏、休眠；
-  没有 systemd-inhibit（或不在 systemd 会话里）时自动跳过，显示器休眠仍按桌面设置。
 - **输入法**：自绘输入框有焦点时会在上面盖一个真正的 `GtkEntry`，中文输入可用。
 - **卸载**：用发行版的包管理器；没有 `unins000.exe` 那样的卸载程序。
 

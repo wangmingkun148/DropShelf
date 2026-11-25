@@ -26,7 +26,6 @@
 
 #include <gtk/gtk.h>
 #include <math.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -87,53 +86,17 @@ int MessageBoxW(HWND owner, LPCWSTR text, LPCWSTR caption, UINT type)
 
 // ───────────── 电源 ─────────────
 
-// 有窗口显示或按住鼠标时不让系统因为空闲而锁屏、休眠。用 systemd-inhibit 保持一个空闲抑制，
-// 没有 systemd-inhibit（或者不在 systemd 会话里）时不做事；显示器休眠、屏保仍然按用户设置走。
+// Windows 上这里是请系统别给后台进程降频；Linux 没有对应的按进程节能，只记个数供诊断日志用。
+// 不阻止空闲：置物架可以一直开着，阻止了就会一直不锁屏、不休眠。
 static GMutex power_lock;
 static int power_holders;
-static GPid inhibitor_pid;
-static int inhibitor_stdin = -1;
-
-static void inhibitor_start(void)
-{
-    char *argv[] = { "systemd-inhibit", "--what=idle", "--who=DropShelf", "--why=DropShelf shelf is open",
-        "--mode=block", "cat", NULL };
-    GError *error = NULL;
-    if (g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_SEARCH_PATH, NULL, NULL,
-        &inhibitor_pid, &inhibitor_stdin, NULL, NULL, &error))
-        return;
-    if (error) g_error_free(error);
-    inhibitor_pid = 0;
-    inhibitor_stdin = -1;
-}
-
-static void inhibitor_stop(void)
-{
-    if (inhibitor_stdin >= 0)
-    {
-        close(inhibitor_stdin);
-        inhibitor_stdin = -1;
-    }
-    if (inhibitor_pid)
-    {
-        kill(inhibitor_pid, SIGTERM);
-        g_spawn_close_pid(inhibitor_pid);
-        inhibitor_pid = 0;
-    }
-}
 
 void power_hold(const void *holder, bool active)
 {
     (void)holder;
     g_mutex_lock(&power_lock);
-    if (active)
-    {
-        if (power_holders++ == 0) inhibitor_start();
-    }
-    else if (power_holders > 0)
-    {
-        if (--power_holders == 0) inhibitor_stop();
-    }
+    if (active) power_holders++;
+    else if (power_holders > 0) power_holders--;
     g_mutex_unlock(&power_lock);
 }
 

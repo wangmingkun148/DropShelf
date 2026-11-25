@@ -125,7 +125,13 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *command_l
         }
         else if (argv[index][0] != '-')
         {
-            wchar_t *wide = wide_from_utf8(argv[index], strlen(argv[index]));
+            // 相对路径按调用方的工作目录解析（转发给已在运行的实例时，它的工作目录不一样），
+            // 桌面入口用 %U 传来的 file:// 也在这里转成本地路径。
+            GFile *file = g_application_command_line_create_file_for_arg(command_line, argv[index]);
+            char *path = g_file_get_path(file);
+            g_object_unref(file);
+            wchar_t *wide = path ? wide_from_utf8(path, strlen(path)) : NULL;
+            g_free(path);
             if (wide)
             {
                 strlist_add(&paths, wide);
