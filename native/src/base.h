@@ -89,6 +89,18 @@ wchar_t *wide_from_utf8(const char *text, size_t length);
 
 // ───────────── 路径和文件 ─────────────
 
+/// 文件名分不分大小写：Windows 不分，Linux 分（photo.JPG 和 photo.jpg 是两个文件）。
+#ifdef _WIN32
+#define PATHS_IGNORE_CASE true
+#else
+#define PATHS_IGNORE_CASE false
+#endif
+/// 两个路径是不是同一个文件（按 PATHS_IGNORE_CASE 比较）。
+static inline bool path_equal(const wchar_t *first, const wchar_t *second)
+{
+    return PATHS_IGNORE_CASE ? wcs_equal_ignore_case(first, second) : wcs_equal(first, second);
+}
+
 wchar_t *path_join(const wchar_t *directory, const wchar_t *name);
 wchar_t *path_directory(const wchar_t *path);           // 没有文件夹部分时返回 NULL
 const wchar_t *path_file_name(const wchar_t *path);     // 指向 path 里最后一段

@@ -461,6 +461,39 @@ static void test_shelf_model(void)
     CHECK(summary.duplicates == 2);
     CHECK(model->count == 2);
 
+    // Linux 的文件名分大小写：note.txt 和 NOTE.txt、Note.TXT 是不同的文件，都要放进来。
+    // 一次放一项走逐个比较，一次放 16 项以上走排好序的集合，两条路都试。
+    wchar_t *upper = path_join(root, L"NOTE.txt");
+    CHECK(file_write_atomic(upper, "upper", 5));
+    DropReadResult *other_case = xcalloc(1, sizeof(DropReadResult));
+    other_case->entries = xcalloc(1, sizeof(DroppedEntry));
+    other_case->entries[0].kind = ITEM_FILE;
+    other_case->entries[0].value = wcs_dup(upper);
+    other_case->count = 1;
+    summary = shelf_model_add(model, other_case);
+    drop_result_free(other_case);
+    CHECK(summary.added == 1 && summary.duplicates == 0);
+    wchar_t *mixed = path_join(root, L"Note.TXT");
+    CHECK(file_write_atomic(mixed, "mixed", 5));
+    DropReadResult *many = xcalloc(1, sizeof(DropReadResult));
+    many->entries = xcalloc(16, sizeof(DroppedEntry));
+    for (int index = 0; index < 15; index++)
+    {
+        WStr text = {0};
+        wstr_appendf(&text, L"第 %d 段", index);
+        many->entries[index].kind = ITEM_TEXT;
+        many->entries[index].value = wstr_take(&text);
+    }
+    many->entries[15].kind = ITEM_FILE;
+    many->entries[15].value = wcs_dup(mixed);
+    many->count = 16;
+    summary = shelf_model_add(model, many);
+    drop_result_free(many);
+    CHECK(summary.added == 16 && summary.duplicates == 0);
+    CHECK(model->count == 19);
+    free(upper);
+    free(mixed);
+
     shelf_model_release(model);
     free(file);
     CHECK(directory_delete_tree(root));

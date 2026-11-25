@@ -273,7 +273,7 @@ static bool has_value(const ShelfModel *model, const wchar_t *value, bool file_s
     {
         const ShelfItem *item = model->items[index];
         if (shelf_item_is_file_system(item) != file_system) continue;
-        if (file_system ? wcs_equal_ignore_case(item->value, value) : wcs_equal(item->value, value)) return true;
+        if (file_system ? path_equal(item->value, value) : wcs_equal(item->value, value)) return true;
     }
     return false;
 }
@@ -281,7 +281,7 @@ static bool has_value(const ShelfModel *model, const wchar_t *value, bool file_s
 /// 一次放入的项目达到这么多时，查重改用排好序的集合。
 #define SORTED_FROM_COUNT 16
 
-/// 放入一批项目期间用来查重：置物架上已经有没有同样的路径（不分大小写）或同样的文本、链接。
+/// 放入一批项目期间用来查重：置物架上已经有没有同样的路径（Windows 上不分大小写）或同样的文本、链接。
 /// 一两项时逐个比较就够了；一次放入几千个文件时逐个比较要比几百万次路径，界面会卡住，
 /// 所以数量多时先把已有的排好序，之后每项只比十几次。期间放入的用 value_index_add 记进去，
 /// 项目的 value 在这期间不能变。
@@ -300,7 +300,7 @@ static void value_index_add(ValueIndex *index, const ShelfItem *item)
 static void value_index_begin(ValueIndex *index, const ShelfModel *model, int incoming)
 {
     *index = (ValueIndex){ .model = model, .sorted = incoming >= SORTED_FROM_COUNT };
-    index->paths.ignore_case = true;
+    index->paths.ignore_case = PATHS_IGNORE_CASE;
     for (int at = 0; index->sorted && at < model->count; at++) value_index_add(index, model->items[at]);
 }
 
@@ -1046,7 +1046,7 @@ void shelf_model_reveal(ShelfModel *model, ShelfItem *const *items, int count)
 static int index_of_path(const ShelfModel *model, const wchar_t *path)
 {
     for (int index = 0; index < model->count; index++)
-        if (shelf_item_is_file_system(model->items[index]) && wcs_equal_ignore_case(model->items[index]->value, path)) return index;
+        if (shelf_item_is_file_system(model->items[index]) && path_equal(model->items[index]->value, path)) return index;
     return -1;
 }
 
@@ -1058,7 +1058,7 @@ static wchar_t *find_moved_path(ShelfItemKind kind, const wchar_t *path, const F
 {
     if ((kind != ITEM_FILE && kind != ITEM_FOLDER) || !file_identity_valid(identity)) return NULL;
     wchar_t *found = file_identity_resolve(identity, path, kind == ITEM_FOLDER);
-    if (found && wcs_equal_ignore_case(found, path))
+    if (found && path_equal(found, path))
     {
         free(found);
         return NULL;

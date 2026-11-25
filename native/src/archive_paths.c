@@ -8,11 +8,7 @@ StrList archive_sources(const StrList *paths)
 {
     StrList sources = {0};
     // 查重用排好序的集合：一次压缩几千个文件时不用两两比较。
-#ifdef _WIN32
-    TextSet seen = { .ignore_case = true };
-#else
-    TextSet seen = { .ignore_case = false };
-#endif
+    TextSet seen = { .ignore_case = PATHS_IGNORE_CASE };
     for (int index = 0; index < paths->count; index++)
     {
         if (!path_is_available(paths->items[index])) continue;

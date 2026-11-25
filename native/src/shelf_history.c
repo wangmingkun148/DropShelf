@@ -348,7 +348,7 @@ bool shelf_history_record_at(ShelfItem *const *items, int count, ULONGLONG close
         ShelfItem *item = items[index];
         if (!shelf_item_is_file_system(item) || item->temporary || !shelf_item_refresh_availability(item)) continue;
         bool duplicate = false;
-        for (int at = 0; at < entry->count && !duplicate; at++) duplicate = wcs_equal_ignore_case(entry->items[at].path, item->value);
+        for (int at = 0; at < entry->count && !duplicate; at++) duplicate = path_equal(entry->items[at].path, item->value);
         if (duplicate) continue;
         entry->items[entry->count].path = wcs_dup(item->value);
         entry->items[entry->count++].name = wcs_dup(shelf_item_display_name(item));
