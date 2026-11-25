@@ -49,6 +49,8 @@ struct UiWindow
     bool destroyed;
     bool moving;
     bool move_by_cursor;                // 层壳窗口拖动时用全局光标定位（Hyprland IPC / 已知指针位置）
+    bool move_button_seen;              // 这次拖动里 evdev 至少看到过一次左键按下
+    int move_blind_ticks;               // evdev 还没看到按下时按下去的轮数，用来兜底
     guint move_source;                  // 拖动期间按固定间隔查光标；pointer 离开窗口后 GTK 不再送事件，靠它继续跟
     int move_offset_x, move_offset_y;   // 按下时全局光标相对窗口左上角的偏移
     // 上次设过的层壳位置：值没变就不再设，省掉每帧一次 configure 往返。
@@ -469,6 +471,8 @@ static void end_move(UiWindow *window, const wchar_t *reason)
     log_info(L"窗口拖动结束：%ls，停在 (%d,%d)", reason, window->x, window->y);
     window->moving = false;
     window->move_by_cursor = false;
+    window->move_button_seen = false;
+    window->move_blind_ticks = 0;
     // 拖动期间指针跑到窗口外面去了，收尾时补一次“离开”，界面上的悬停状态才不会停住。
     if (!window->pointer_inside && !window->destroyed) send_leave_event(window);
 }
@@ -477,6 +481,24 @@ static void end_move(UiWindow *window, const wchar_t *reason)
 /// 指针就跑到窗口外面，之后既收不到移动也收不到松手；这里直接问全局光标，
 /// 松手用 evdev 的全局左键状态判断，窗口就能一直贴着指针走。
 #define MOVE_FOLLOW_MILLISECONDS 8
+/// evdev 最多等这么久才把“一直没看到按下”当成松手（设备刚插上时要过一会儿才开始监听）。
+#define MOVE_BLIND_MILLISECONDS 1500
+
+/// 这次拖动该不该按“左键松开了”收尾。刚按下时 evdev 可能还没轮到新设备（先返回 0），
+/// 这时不能立刻当成松手，否则拖一下就断。
+static bool move_should_release(UiWindow *window)
+{
+    int buttons = gesture_left_button_state();
+    if (buttons > 0)
+    {
+        window->move_button_seen = true;
+        window->move_blind_ticks = 0;
+        return false;
+    }
+    if (buttons < 0) return false;
+    if (window->move_button_seen) return true;
+    return ++window->move_blind_ticks * MOVE_FOLLOW_MILLISECONDS >= MOVE_BLIND_MILLISECONDS;
+}
 
 static gboolean move_follow_tick(gpointer data)
 {
@@ -486,14 +508,13 @@ static gboolean move_follow_tick(gpointer data)
         window->move_source = 0;
         return G_SOURCE_REMOVE;
     }
-    int buttons = gesture_left_button_state();
-    if (buttons == 0)
+    if (move_should_release(window))
     {
         window->move_source = 0;
         end_move(window, L"全局左键已经松开");
         return G_SOURCE_REMOVE;
     }
-    if (buttons < 0)
+    if (gesture_left_button_state() < 0)
     {
         // 没有 evdev 权限时看不到全局按键，只能退回 GTK 的 release/leave。
         window->move_source = 0;
@@ -552,7 +573,7 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y, 
     {
         // GTK 偶尔会在窗口跟手移动的途中漏掉 release（指针刚好离开 surface 的时候），
         // 只信点击手势的话窗口会一直粘着鼠标。evdev 能看到全局左键，松开了就收尾。
-        if (gesture_left_button_state() == 0)
+        if (move_should_release(window))
         {
             end_move(window, L"全局左键已经松开");
             return;
@@ -942,6 +963,10 @@ static void update_layer_position(UiWindow *window)
         g_object_unref(monitor);
         return;
     }
+    if (window->layer_placed && window->layer_monitor != monitor)
+        log_info(L"窗口跨屏：换到显示器 %hs（%d,%d %dx%d），窗口在 (%d,%d)，margin %d,%d",
+            gdk_monitor_get_model(monitor) ? gdk_monitor_get_model(monitor) : "?",
+            geometry.x, geometry.y, geometry.width, geometry.height, window->x, window->y, margin_x, margin_y);
     window->layer_placed = true;
     window->layer_monitor = monitor;
     window->layer_margin_x = margin_x;
@@ -1408,6 +1433,8 @@ void ui_window_begin_move(UiWindow *window)
         window->moving = true;
         window->move_last_x = window->pointer_x;
         window->move_last_y = window->pointer_y;
+        window->move_button_seen = gesture_left_button_state() > 0;
+        window->move_blind_ticks = 0;
         POINT cursor;
         window->move_by_cursor = GetCursorPos(&cursor);
         if (window->move_by_cursor)

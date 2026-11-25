@@ -42,7 +42,30 @@ static void close_probe(void)
     }
 }
 
+static POINT probe_center;          // 探针现在摆在哪
+
+/// 把探针摆到光标正中；取不到那个点所在的显示器就返回 false。
+static bool place_probe(POINT center)
+{
+    HMONITOR monitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info;
+    memset(&info, 0, sizeof info);
+    info.cbSize = sizeof info;
+    if (!GetMonitorInfoW(monitor, &info))
+    {
+        log_info(L"探针窗口：取不到 (%ld, %ld) 所在显示器的工作区，不显示", center.x, center.y);
+        return false;
+    }
+    int size = (int)lround(PROBE_SIZE);
+    POINT position = probe_place(center, info.rcWork, size, size);
+    ui_window_place(probe_window, position.x, position.y, (float)size, (float)size);
+    probe_center = position;
+    return true;
+}
+
 /// 探针活着的时候定期看一眼：左键还按着就继续等，松开了或者等太久了就收起来。
+/// 同时让探针一直待在光标下面：拖动中合成器只在光标移动时重新找拖放目标，
+/// 探针被落在原地的话，用户晃完不动了就一直收不到拖放。
 static gboolean probe_check(gpointer data)
 {
     (void)data;
@@ -51,7 +74,18 @@ static gboolean probe_check(gpointer data)
     if (buttons == 0) log_info(L"探针窗口关闭：左键已经松开，没有收到拖放");
     else if (elapsed >= (buttons < 0 ? PROBE_TIMEOUT_MILLISECONDS : PROBE_MAXIMUM_MILLISECONDS))
         log_info(L"探针窗口关闭：等了 %lld 毫秒没有收到拖放", (long long)elapsed);
-    else return G_SOURCE_CONTINUE;
+    else
+    {
+        POINT cursor;
+        if (probe_window && GetCursorPos(&cursor))
+        {
+            int size = (int)lround(PROBE_SIZE);
+            int moved_x = (int)(cursor.x - (probe_center.x + size / 2));
+            int moved_y = (int)(cursor.y - (probe_center.y + size / 2));
+            if (moved_x * moved_x + moved_y * moved_y > 16) place_probe(cursor);
+        }
+        return G_SOURCE_CONTINUE;
+    }
     timeout_source = 0;
     close_probe();
     return G_SOURCE_REMOVE;
@@ -96,17 +130,7 @@ void probe_show_at(POINT center)
 {
     if (!detected_callback) return;
     close_probe();
-    HMONITOR monitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO info;
-    memset(&info, 0, sizeof info);
-    info.cbSize = sizeof info;
-    if (!GetMonitorInfoW(monitor, &info))
-    {
-        log_info(L"探针窗口：取不到 (%ld, %ld) 所在显示器的工作区，不显示", center.x, center.y);
-        return;
-    }
     int size = (int)lround(PROBE_SIZE);
-    POINT position = probe_place(center, info.rcWork, size, size);
     UiWindowOptions options = {0};
     options.title = L"DropShelf Probe";
     options.width = (float)size;
@@ -120,9 +144,13 @@ void probe_show_at(POINT center)
         return;
     }
     ui_window_set_drop_handler(probe_window, probe_drop, NULL);
-    ui_window_place(probe_window, position.x, position.y, (float)size, (float)size);
+    if (!place_probe(center))
+    {
+        close_probe();
+        return;
+    }
     ui_window_show_with(probe_window, false);
-    log_info(L"探针窗口：在 (%d,%d) %dx%d 等着拖放，左键%ls", position.x, position.y, size, size,
+    log_info(L"探针窗口：在 (%d,%d) %dx%d 等着拖放，左键%ls", probe_center.x, probe_center.y, size, size,
         gesture_left_button_state() > 0 ? L"按着" : gesture_left_button_state() == 0 ? L"没按" : L"状态未知");
     probe_shown_at = g_get_monotonic_time();
     timeout_source = g_timeout_add(PROBE_HOLD_POLL_MILLISECONDS, probe_check, NULL);
