@@ -861,7 +861,7 @@ static HANDLE find_first(LPCWSTR pattern, WIN32_FIND_DATAW *data)
     {
         free(pattern_bytes);
         pattern_bytes = xalloc(2);
-        strcpy(pattern_bytes, "*");
+        memcpy(pattern_bytes, "*", 2);
     }
     free(directory);
 
@@ -1344,33 +1344,90 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
 {
     wchar_t *directory = path_directory(path);
     if (directory) directory_create(directory);
-    free(directory);
 
-    WStr temporary = {0};
-    wstr_append(&temporary, path);
-    wstr_append(&temporary, L".tmp");
-    bool succeeded = false;
-    HANDLE file = io_create_file(temporary.data, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file != INVALID_HANDLE_VALUE)
+    char *target = path_bytes(path);
+    char *directory_bytes = directory ? path_bytes(directory) : NULL;
+    free(directory);
+    if (!target)
     {
-        DWORD written = 0;
-        succeeded = WriteFile(file, data, (DWORD)length, &written, NULL) && written == length;
-        // 先落盘再换名字：突然断电时不会留下一个空的新文件。
-        if (succeeded) succeeded = FlushFileBuffers(file) != 0;
-        DWORD error = GetLastError();
-        CloseHandle(file);
+        free(directory_bytes);
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    size_t target_length = strlen(target);
+    char *temporary = xalloc(target_length + 12);
+    snprintf(temporary, target_length + 12, "%s.XXXXXX", target);
+
+    struct stat existing;
+    bool has_existing = stat(target, &existing) == 0 && S_ISREG(existing.st_mode);
+
+    bool succeeded = false;
+    int saved_errno = 0;
+    int fd = mkstemp(temporary);
+    if (fd >= 0)
+    {
+        const unsigned char *bytes = data;
+        size_t written = 0;
+        succeeded = true;
+        while (written < length)
+        {
+            ssize_t part = write(fd, bytes + written, length - written);
+            if (part < 0)
+            {
+                if (errno == EINTR) continue;
+                saved_errno = errno;
+                succeeded = false;
+                break;
+            }
+            if (part == 0)
+            {
+                saved_errno = EIO;
+                succeeded = false;
+                break;
+            }
+            written += (size_t)part;
+        }
+        // 新建文件保留 mkstemp 的 0600，覆盖已有文件时沿用原权限，避免绕过 umask 暴露私有配置和历史记录。
+        if (succeeded && has_existing) (void)fchmod(fd, existing.st_mode & 0777);
+        if (succeeded && fsync(fd) != 0)
+        {
+            saved_errno = errno;
+            succeeded = false;
+        }
+        if (close(fd) != 0 && succeeded)
+        {
+            saved_errno = errno;
+            succeeded = false;
+        }
         if (succeeded)
         {
-            succeeded = io_move_file(temporary.data, path, MOVEFILE_REPLACE_EXISTING) != 0;
-            error = GetLastError();
+            if (rename(temporary, target) != 0)
+            {
+                saved_errno = errno;
+                succeeded = false;
+            }
+            else if (directory_bytes)
+            {
+                int dir_fd = open(directory_bytes, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+                if (dir_fd >= 0)
+                {
+                    (void)fsync(dir_fd);
+                    close(dir_fd);
+                }
+            }
         }
-        if (!succeeded)
-        {
-            io_delete_file(temporary.data);
-            SetLastError(error);
-        }
+        if (!succeeded) unlink(temporary);
     }
-    wstr_free(&temporary);
+    else
+    {
+        saved_errno = errno;
+    }
+
+    free(temporary);
+    free(target);
+    free(directory_bytes);
+    if (!succeeded) SetLastError(error_from_errno(saved_errno));
     return succeeded;
 }
 
@@ -1756,32 +1813,65 @@ DWORD GetTempPathW(DWORD length, LPWSTR buffer)
     return result;
 }
 
+static char *normalize_posix_path(const char *path)
+{
+    char *joined = NULL;
+    if (path[0] == '/')
+    {
+        joined = strdup(path);
+    }
+    else
+    {
+        char *current = getcwd(NULL, 0);
+        if (!current) return NULL;
+        size_t need = strlen(current) + 1 + strlen(path) + 1;
+        joined = xalloc(need);
+        snprintf(joined, need, "%s/%s", current, path);
+        free(current);
+    }
+    if (!joined) return NULL;
+
+    // 词法规范化：折叠多余斜杠、. 和 ..，但不跟随符号链接，和 Windows 的 GetFullPathNameW 语义一致。
+    GPtrArray *parts = g_ptr_array_new();
+    char *cursor = joined;
+    while (*cursor)
+    {
+        while (*cursor == '/') cursor++;
+        if (!*cursor) break;
+        char *start = cursor;
+        while (*cursor && *cursor != '/') cursor++;
+        if (*cursor) *cursor++ = 0;
+        if (strcmp(start, ".") == 0) continue;
+        if (strcmp(start, "..") == 0)
+        {
+            if (parts->len > 0) g_ptr_array_remove_index(parts, parts->len - 1);
+            continue;
+        }
+        g_ptr_array_add(parts, start);
+    }
+
+    GString *out = g_string_new("/");
+    for (guint index = 0; index < parts->len; index++)
+    {
+        if (index > 0) g_string_append_c(out, '/');
+        g_string_append(out, parts->pdata[index]);
+    }
+    g_ptr_array_free(parts, TRUE);
+    free(joined);
+    return g_string_free(out, FALSE);
+}
+
 DWORD GetFullPathNameW(LPCWSTR path, DWORD length, LPWSTR buffer, LPWSTR *file_part)
 {
     if (!path || !*path) return 0;
     size_t utf8_length = 0;
     char *utf8 = utf8_from_wide(path, &utf8_length);
     if (!utf8) return 0;
-    char *resolved = realpath(utf8, NULL);
-    char *full = NULL;
-    if (resolved) full = resolved;
-    else if (utf8[0] == '/') full = strdup(utf8);
-    else
-    {
-        // realpath 要求路径存在；不存在的相对路径就拼上当前目录。
-        char *current = getcwd(NULL, 0);
-        if (current)
-        {
-            size_t need = strlen(current) + 1 + utf8_length + 1;
-            full = xalloc(need);
-            snprintf(full, need, "%s/%s", current, utf8);
-            free(current);
-        }
-    }
+    char *full = normalize_posix_path(utf8);
     free(utf8);
     if (!full) return 0;
     wchar_t *wide = wide_from_utf8(full, strlen(full));
-    free(full);
+    g_free(full);
     if (!wide) return 0;
     DWORD needed = (DWORD)wcslen(wide) + 1;
     if (buffer && length >= needed)

@@ -441,9 +441,8 @@ static void quote_argument(WStr *text, const wchar_t *path)
 {
     wstr_append_char(text, L'"');
     wstr_append(text, path);
-    // 以反斜杠结尾的路径（如磁盘根目录）要补一个反斜杠，否则会转义结尾的引号。
-    size_t length = wcslen(path);
-    if (length > 0 && path[length - 1] == L'\\') wstr_append_char(text, L'\\');
+    // 以反斜杠结尾的路径（如磁盘根目录）要把结尾的反斜杠写成两倍，否则会转义结尾的引号；Windows 路径里不会有引号。
+    for (size_t length = wcslen(path); length > 0 && path[length - 1] == L'\\'; length--) wstr_append_char(text, L'\\');
     wstr_append_char(text, L'"');
 }
 

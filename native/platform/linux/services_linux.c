@@ -447,62 +447,80 @@ void quick_action_result_free(QuickActionResult *result)
     *result = (QuickActionResult){0};
 }
 
-wchar_t *quick_action_build_arguments(const wchar_t *template_text, const StrList *paths)
+/// 把每个文件作为一个参数加进 argv；token 不为空时是含 {files} 的参数，按每个文件替换一份。
+static void add_paths(GPtrArray *argv, const StrList *paths, const char *token)
 {
-    WStr quoted = {0};
     for (int index = 0; paths && index < paths->count; index++)
     {
-        if (index > 0) wstr_append_char(&quoted, L' ');
-        wstr_append_char(&quoted, L'"');
-        wstr_append(&quoted, paths->items[index]);
-        wstr_append_char(&quoted, L'"');
-    }
-    const wchar_t *files = paths ? quoted.data : NULL;
-    const wchar_t *template = template_text ? template_text : L"";
-    const wchar_t *placeholder = wcsstr(template, L"{files}");
-    WStr text = {0};
-    if (placeholder)
-    {
-        wstr_append_n(&text, template, (size_t)(placeholder - template));
-        wstr_append(&text, files ? files : L"");
-        wstr_append(&text, placeholder + 7);
-    }
-    else
-    {
-        wstr_append(&text, template);
-        if (files && *files)
+        char *path = utf8_from_wide(paths->items[index], NULL);
+        if (!path) continue;
+        if (!token)
         {
-            if (*template) wstr_append_char(&text, L' ');
-            wstr_append(&text, files);
+            g_ptr_array_add(argv, g_strdup(path));
         }
+        else
+        {
+            char **parts = g_regex_split_simple("\\{files\\}", token, G_REGEX_CASELESS, 0);
+            g_ptr_array_add(argv, g_strjoinv(path, parts));
+            g_strfreev(parts);
+        }
+        free(path);
     }
-    wstr_free(&quoted);
-    return wstr_take(&text);
 }
 
-/// 用 GAppInfo 的方式启动程序：先试程序自己的名字（在 PATH 里找），再试完整路径。
-static bool launch_program(const wchar_t *program, const wchar_t *arguments, const StrList *paths)
+/// 直接构造 argv 启动程序：只解析用户配置的参数模板，文件路径原样作为独立参数传入，避免特殊字符注入额外参数。
+static bool launch_program(const wchar_t *program, const wchar_t *arguments_template, const StrList *paths)
 {
-    (void)paths;
     if (wcs_is_blank(program)) return false;
     char *program_utf8 = utf8_from_wide(program, NULL);
-    char *arguments_utf8 = utf8_from_wide(arguments ? arguments : L"", NULL);
     if (!program_utf8) return false;
+
+    GPtrArray *argv = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(argv, g_strdup(program_utf8));
+
+    bool ok = true;
+    bool expanded_files = false;
     GError *error = NULL;
-    char *command_line = arguments_utf8 && *arguments_utf8 ? g_strdup_printf("\"%s\" %s", program_utf8, arguments_utf8)
-                                                            : g_strdup_printf("\"%s\"", program_utf8);
-    char **argv = NULL;
-    bool ok = g_shell_parse_argv(command_line, NULL, &argv, &error);
-    if (ok) ok = g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
-    if (argv) g_strfreev(argv);
-    g_free(command_line);
+
+    if (!wcs_is_blank(arguments_template))
+    {
+        char *template_utf8 = utf8_from_wide(arguments_template, NULL);
+        char **tokens = NULL;
+        int token_count = 0;
+        if (!template_utf8 || !g_shell_parse_argv(template_utf8, &token_count, &tokens, &error))
+        {
+            ok = false;
+        }
+        else
+        {
+            for (int index = 0; index < token_count; index++)
+            {
+                const char *token = tokens[index];
+                if (!g_regex_match_simple("\\{files\\}", token, G_REGEX_CASELESS, 0))
+                {
+                    g_ptr_array_add(argv, g_strdup(token));
+                    continue;
+                }
+                // 单独的 {files} 展开成每个文件一个参数；--x={files} 这样的按每个文件各写一份。
+                add_paths(argv, paths, g_ascii_strcasecmp(token, "{files}") == 0 ? NULL : token);
+                expanded_files = true;
+            }
+            g_strfreev(tokens);
+        }
+        free(template_utf8);
+    }
+
+    if (ok && !expanded_files) add_paths(argv, paths, NULL);
+
+    g_ptr_array_add(argv, NULL);
+    if (ok) ok = g_spawn_async(NULL, (char **)argv->pdata, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
+    g_ptr_array_free(argv, TRUE);
     if (!ok && error)
     {
         log_error(L"启动程序失败：%ls", program);
         g_error_free(error);
     }
     free(program_utf8);
-    free(arguments_utf8);
     return ok;
 }
 
@@ -911,9 +929,7 @@ static void execute_fast(ExecuteFast *job)
     }
     else if (request->action.is_custom && request->action.custom.kind == CUSTOM_ACTION_OPEN_WITH)
     {
-        wchar_t *arguments = quick_action_build_arguments(request->action.custom.arguments, &request->paths);
-        bool started = launch_program(request->action.custom.program_path, arguments, &request->paths);
-        free(arguments);
+        bool started = launch_program(request->action.custom.program_path, request->action.custom.arguments, &request->paths);
         if (started)
         {
             wchar_t *name = program_display_name(request->action.custom.program_path);

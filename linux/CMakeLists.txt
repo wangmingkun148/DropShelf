@@ -112,8 +112,11 @@ target_link_libraries(dropshelf_core PUBLIC dropshelf_flags)
 # 对外的函数分别加上 simple_、cards_ 前缀（见 look_variant.h），由 look_dispatch.c 按当前的风格调用其中一份。
 set(LOOK_SOURCES
     "${DROPSHELF_SOURCE_DIR}/shelf_window.c"
+    "${DROPSHELF_SOURCE_DIR}/shelf_paint.c"
     "${DROPSHELF_SOURCE_DIR}/shelf_input.c"
-    "${DROPSHELF_SOURCE_DIR}/main_pages.c")
+    "${DROPSHELF_SOURCE_DIR}/shelf_drop.c"
+    "${DROPSHELF_SOURCE_DIR}/main_pages.c"
+    "${DROPSHELF_SOURCE_DIR}/main_overview.c")
 add_library(look_simple OBJECT ${LOOK_SOURCES} "${DROPSHELF_SOURCE_DIR}/shelf_motion.c")
 add_library(look_cards OBJECT ${LOOK_SOURCES} "${DROPSHELF_SOURCE_DIR}/shelf_motion_cards.c")
 target_compile_definitions(look_cards PRIVATE LOOK_VARIANT_CARDS)

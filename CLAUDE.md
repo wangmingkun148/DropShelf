@@ -18,7 +18,7 @@
 
 # 两种风格
 
-- 改界面时两种风格都要照顾到：差别大的几个文件（`native/src/shelf_window.c`、`shelf_input.c`、`main_pages.c`）用 `#ifdef LOOK_VARIANT_CARDS` 分出纸牌的部分，各编译一遍；置物架动画分成 `shelf_motion.c`（简洁）和 `shelf_motion_cards.c`（纸牌）；其余地方用 `theme_is_cards()` 分支。机制见 `native/src/look_variant.h`。
+- 改界面时两种风格都要照顾到：差别大的几个文件（`native/src/shelf_window.c`、`shelf_paint.c`、`shelf_input.c`、`shelf_drop.c`、`main_pages.c`、`main_overview.c`）用 `#ifdef LOOK_VARIANT_CARDS` 分出纸牌的部分，各编译一遍；置物架动画分成 `shelf_motion.c`（简洁）和 `shelf_motion_cards.c`（纸牌）；其余地方用 `theme_is_cards()` 分支。机制见 `native/src/look_variant.h`。
 - 这几个文件里新增对外的函数时，在 `look_variant.h` 里加上改名；别的文件要调用它时，在 `look_dispatch.c` 里加一个按风格转发的函数。
 
 # 沟通

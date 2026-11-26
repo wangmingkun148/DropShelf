@@ -191,9 +191,8 @@ static char *download(long *status)
     curl_easy_setopt(curl, CURLOPT_URL, "https://api.github.com/repos/wangmingkun148/dropshelf/releases?per_page=30");
     curl_easy_setopt(curl, CURLOPT_USERAGENT, narrow_agent ? narrow_agent : "DropShelf");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     // 只连本项目用的地址，不接受内容里给出的其他跳转。
-    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 0L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, TIMEOUT_MILLISECONDS / 1000);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_MILLISECONDS / 1000);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_received);

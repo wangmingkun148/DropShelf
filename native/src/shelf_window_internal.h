@@ -1,17 +1,38 @@
-// 置物架窗口内部共用的定义：shelf_window.c（窗口、排版、绘制）、shelf_input.c（鼠标、键盘、拖入拖出、提示）、
-// shelf_motion.c（动画）、shelves.c（管理多个置物架）。
-// 两种风格的置物架：shelf_window.c、shelf_input.c 各编译两遍（LOOK_VARIANT_CARDS 定义与否），动画分成 shelf_motion.c（简洁）
+// 置物架窗口内部共用的定义：shelf_window.c（窗口、排版）、shelf_paint.c（绘制）、shelf_input.c（鼠标、键盘、菜单、提示）、
+// shelf_drop.c（拖入拖出）、shelf_motion.c（动画）、shelves.c（管理多个置物架）。
+// 两种风格的置物架：上述源文件各编译两遍（LOOK_VARIANT_CARDS 定义与否），动画分成 shelf_motion.c（简洁）
 // 和 shelf_motion_cards.c（纸牌），见 look_variant.h。结构体里两种风格的字段都在，各用各的；函数的声明按风格分开。
 #pragma once
 
 #define COBJMACROS
 #include "app.h"
 #include "card_face.h"
+#include "drop_read.h"
 #include "shelf_window.h"
 #include "shelf_drag.h"
 #include "shelf_model.h"
 #include "strings.h"
 #include "ui.h"
+#ifndef _WIN32
+typedef struct _GdkTexture GdkTexture;
+#endif
+
+// 图标字形（shelf_window.c 排版测量与 shelf_paint.c 绘制共用）
+#define GLYPH_PIN L"\xE718"
+#define GLYPH_PINNED L"\xE840"
+#define GLYPH_MORE L"\xE712"
+#define GLYPH_CLOSE L"\xE711"
+#define GLYPH_DOWNLOAD L"\xE896"
+#define GLYPH_COLLAPSE L"\xE81E"
+#ifdef LOOK_VARIANT_CARDS
+#define GLYPH_SPREAD L"\xF0E2"
+#else
+#define GLYPH_LIST L"\xE8FD"
+#endif
+#define GLYPH_COPY L"\xE8C8"
+#define GLYPH_MOVE L"\xE7C2"
+#define GLYPH_COMPLETED L"\xE930"
+#define GLYPH_WARNING L"\xE7BA"
 
 // ───────────── 尺寸（DIP），与 C# 版的 XAML 相同 ─────────────
 
@@ -438,8 +459,29 @@ void shelf_to_canvas(ShelfWindow *shelf, float x, float y, float *cx, float *cy)
 float shelf_width_for(int size);
 /// 重新生成快速操作的名称和提示（换了操作或界面语言）。
 void shelf_rebuild_actions(ShelfWindow *shelf);
+float shelf_line_height(float size, int weight);
+float shelf_text_width(const wchar_t *text, float size, int weight, GfxFont font);
 
-// ───────────── shelf_input.c ─────────────
+static inline GfxTextStyle shelf_text_style(float size, int weight, GfxAlign align)
+{
+    return (GfxTextStyle){ GFX_FONT_TEXT, size, weight, false, true, align, GFX_ALIGN_CENTER, 0 };
+}
+
+static inline GfxTextStyle shelf_glyph_style(float size)
+{
+    return (GfxTextStyle){ GFX_FONT_ICON, size, 400, false, false, GFX_ALIGN_CENTER, GFX_ALIGN_CENTER, 0 };
+}
+
+static inline GfxRect shelf_rect_of(float left, float top, float width, float height)
+{
+    return (GfxRect){ left, top, left + width, top + height };
+}
+
+// ───────────── shelf_paint.c ─────────────
+
+void shelf_paint(UiWindow *window, void *context, double time);
+
+// ───────────── shelf_input.c / shelf_drop.c ─────────────
 
 bool shelf_on_mouse(UiWindow *window, void *context, const UiMouseEvent *event);
 bool shelf_on_key(UiWindow *window, void *context, unsigned key);
@@ -458,6 +500,36 @@ void shelf_remove_visibly(void *context, ShelfItem **items, int count);
 void shelf_add_paths(ShelfWindow *shelf, const StrList *paths);
 /// 恢复最近关闭的置物架：在后台读文件信息，读完放入并提示恢复了几项。
 void shelf_restore_paths(ShelfWindow *shelf, const StrList *paths);
+
+// shelf_input.c 与 shelf_drop.c 之间的内部协作函数
+typedef struct Receive
+{
+    ShelfWindow *shelf;
+    float x, y;
+    bool paste;
+    bool paths;
+    bool restore;               // 恢复最近关闭的置物架：读完提示恢复了几项
+    bool for_action;            // 直接拖到了快速操作上：读到的文件交给这个操作
+    QuickAction action;
+} Receive;
+
+bool shelf_close_when_empty(void);
+double shelf_seconds_since(LARGE_INTEGER start);
+void shelf_fade(Anim *anim, double to, double duration);
+void shelf_request_frame(ShelfWindow *shelf);
+ShelfItem **shelf_selected_items(ShelfWindow *shelf, int *count);
+void shelf_clear_selection(ShelfWindow *shelf);
+void shelf_show_receiving(ShelfWindow *shelf, const wchar_t *text);
+void shelf_received(DropReadResult *result, void *context);
+ShelfTarget shelf_hit_test(ShelfWindow *shelf, float x, float y, int *row);
+#ifdef _WIN32
+void shelf_offer_convert(ShelfWindow *shelf, ShelfItem **items, int count);
+#else
+void shelf_receive_paths_at(ShelfWindow *shelf, const StrList *paths, float x, float y);
+void shelf_receive_text_at(ShelfWindow *shelf, const wchar_t *text, float x, float y);
+void shelf_receive_texture_at(ShelfWindow *shelf, GdkTexture *texture, float x, float y);
+#endif
+void shelf_begin_drag_out(ShelfWindow *shelf, ShelfItem **items, int count);
 /// 快速操作收起成按钮栏的高度（立即到位）。
 void shelf_reset_tiles(ShelfWindow *shelf);
 /// 拖到哪张快速操作卡片上（-1 是没有）：那张卡片铺上强调色、略微放大，放置区域变淡。force 时直接到位。
