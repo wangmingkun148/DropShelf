@@ -148,7 +148,7 @@ const wchar_t *main_page_glyph(int page);
 /// 打开置物架：主窗口开着时放在它旁边。返回打开的置物架（可能是 NULL）。
 struct ShelfWindow *main_open_shelf(void);
 
-// ───────────── main_pages.c ─────────────
+// ───────────── main_pages.c / main_overview.c ─────────────
 
 /// 建好概览页和四个设置页，放进 M。
 void pages_build(void);
@@ -164,6 +164,17 @@ void pages_paint_tile_face(UiElement *tile, GfxMatrix matrix, float opacity);
 void pages_close(void);
 /// 采用校准给出的灵敏度：立即保存，滑块随之移到新的位置。
 void pages_apply_calibration(int level);
+
+// main_pages.c 与 main_overview.c 之间的内部协作函数
+void pages_section_header(UiElement *parent, StringId text, float top, float bottom);
+UiElement *pages_column_create(void);
+void pages_dismiss_getting_started(void *context);
+void pages_open_shelf(void *context);
+void pages_overview_build(void);
+void pages_overview_refresh(const AppSettings *settings, bool has_hotkey, int history_count);
+void pages_overview_animate(double time);
+void pages_overview_close(void);
+UiElement *pages_overview_getting_started(void);
 
 // ───────────── main_flip.c ─────────────
 

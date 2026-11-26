@@ -148,8 +148,9 @@ void log_cleanup_old(void)
         while ((entry = readdir(opened)) != NULL)
         {
             if (fnmatch("dropshelf-*.log", entry->d_name, 0) != 0) continue;
-            char *path = xalloc(strlen(directory_bytes) + strlen(entry->d_name) + 2);
-            sprintf(path, "%s/%s", directory_bytes, entry->d_name);
+            size_t path_size = strlen(directory_bytes) + strlen(entry->d_name) + 2;
+            char *path = xalloc(path_size);
+            snprintf(path, path_size, "%s/%s", directory_bytes, entry->d_name);
             struct stat information;
             if (stat(path, &information) == 0 && S_ISREG(information.st_mode) && information.st_mtime < now - 14 * 24 * 60 * 60)
                 unlink(path);

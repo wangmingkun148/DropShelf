@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # 版本号改动时同步 res/app.manifest 和 installer 下的两个 .iss 文件（见仓库根目录的 CLAUDE.md）。
-project(DropShelf VERSION 3.1.5 LANGUAGES C CXX RC)
+project(DropShelf VERSION 3.1.6 LANGUAGES C CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "DropShelf 只支持用 MSVC 编译")
@@ -93,7 +93,7 @@ target_link_libraries(dropshelf_core PUBLIC dropshelf_flags)
 
 # 置物架和设置页在两种风格（简洁、纸牌）下差别很大：这几个文件各编译两遍，纸牌那一遍定义 LOOK_VARIANT_CARDS，
 # 对外的函数分别加上 simple_、cards_ 前缀（见 look_variant.h），由 look_dispatch.c 按当前的风格调用其中一份。
-set(LOOK_SOURCES src/shelf_window.c src/shelf_input.c src/main_pages.c)
+set(LOOK_SOURCES src/shelf_window.c src/shelf_paint.c src/shelf_input.c src/shelf_drop.c src/main_pages.c src/main_overview.c)
 add_library(look_simple OBJECT ${LOOK_SOURCES} src/shelf_motion.c)
 add_library(look_cards OBJECT ${LOOK_SOURCES} src/shelf_motion_cards.c)
 target_compile_definitions(look_cards PRIVATE LOOK_VARIANT_CARDS)

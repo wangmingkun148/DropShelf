@@ -39,11 +39,14 @@ void json_free(JsonValue *value);
 const JsonValue *json_get(const JsonValue *object, const wchar_t *key);
 
 /// 写出带缩进的 JSON：每层两个空格，换行为 \r\n，与 C# 版写出的文件格式相同。
+#define JSON_WRITER_MAX_DEPTH 32
+
 typedef struct JsonWriter
 {
     WStr out;
     int depth;
-    bool has_items[32];
+    bool has_items[JSON_WRITER_MAX_DEPTH];
+    bool overflow;
 } JsonWriter;
 
 // key 为 NULL 表示写的是数组元素或最外层的值。

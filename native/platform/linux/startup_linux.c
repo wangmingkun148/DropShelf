@@ -15,9 +15,33 @@
 
 wchar_t *startup_build_command(const wchar_t *executable)
 {
+    // 按 Freedesktop Desktop Entry 规范转义 Exec= 引号内的特殊字符和字段代码 %。
     WStr command = {0};
-    wstr_appendf(&command, L"\"%ls\" --background", executable);
+    wstr_append_char(&command, L'"');
+    for (const wchar_t *cursor = executable ? executable : L""; *cursor; cursor++)
+    {
+        if (*cursor == L'\r' || *cursor == L'\n') continue;
+        if (*cursor == L'\\') wstr_append(&command, L"\\\\");
+        else if (*cursor == L'"') wstr_append(&command, L"\\\"");
+        else if (*cursor == L'$') wstr_append(&command, L"\\$");
+        else if (*cursor == L'`') wstr_append(&command, L"\\`");
+        else if (*cursor == L'%') wstr_append(&command, L"%%");
+        else wstr_append_char(&command, *cursor);
+    }
+    wstr_append(&command, L"\" --background");
     return wstr_take(&command);
+}
+
+static wchar_t *autostart_executable_path(void)
+{
+    // AppImage 运行时 /proc/self/exe 指向临时的 /tmp/.mount_*，开机自启必须记录外部的 .AppImage 路径。
+    const char *appimage = getenv("APPIMAGE");
+    if (appimage && *appimage)
+    {
+        wchar_t *path = wide_from_utf8(appimage, strlen(appimage));
+        if (path) return path;
+    }
+    return executable_path();
 }
 
 static wchar_t *autostart_path(void)
@@ -45,7 +69,7 @@ bool startup_set_enabled(bool enabled)
         log_error(L"删除开机启动文件失败");
         return false;
     }
-    wchar_t *executable = executable_path();
+    wchar_t *executable = autostart_executable_path();
     wchar_t *command = startup_build_command(executable);
     free(executable);
     WStr entry = {0};

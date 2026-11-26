@@ -440,10 +440,29 @@ wchar_t *program_display_name(const wchar_t *path)
 static void quote_argument(WStr *text, const wchar_t *path)
 {
     wstr_append_char(text, L'"');
-    wstr_append(text, path);
-    // 以反斜杠结尾的路径（如磁盘根目录）要补一个反斜杠，否则会转义结尾的引号。
-    size_t length = wcslen(path);
-    if (length > 0 && path[length - 1] == L'\\') wstr_append_char(text, L'\\');
+    size_t backslashes = 0;
+    for (const wchar_t *cursor = path ? path : L""; *cursor; cursor++)
+    {
+        if (*cursor == L'\\')
+        {
+            backslashes++;
+        }
+        else if (*cursor == L'"')
+        {
+            // CommandLineToArgvW 规则：引号前的 N 个反斜杠要写成 2N+1 个，再跟引号。
+            for (size_t index = 0; index < backslashes * 2 + 1; index++) wstr_append_char(text, L'\\');
+            wstr_append_char(text, L'"');
+            backslashes = 0;
+        }
+        else
+        {
+            for (size_t index = 0; index < backslashes; index++) wstr_append_char(text, L'\\');
+            backslashes = 0;
+            wstr_append_char(text, *cursor);
+        }
+    }
+    // 以反斜杠结尾的路径（如磁盘根目录）要成倍写出反斜杠，否则会转义结尾的引号。
+    for (size_t index = 0; index < backslashes * 2; index++) wstr_append_char(text, L'\\');
     wstr_append_char(text, L'"');
 }
 
