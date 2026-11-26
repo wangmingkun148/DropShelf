@@ -44,7 +44,7 @@ static char *narrow(const wchar_t *path)
 
 // ───────────── 写入 ZIP ─────────────
 
-/// 递归加入文件。符号链接不打包，免得解压后指向压缩包外面。
+/// 递归加入文件。目录内部的符号链接不打包，免得解压后指向压缩包外面；顶层显式传入的符号链接按目标文件处理（与 Windows 版一致）。
 /// 里面什么都没写进去的文件夹（空文件夹）单独留一个条目，解压后还在。wrote 记下写进了东西。
 static bool add_tree(mz_zip_archive *zip, const char *disk, const char *entry, bool *wrote, int depth)
 {
@@ -54,8 +54,8 @@ static bool add_tree(mz_zip_archive *zip, const char *disk, const char *entry, b
         return false;
     }
     struct stat info;
-    if (lstat(disk, &info) != 0) return false;
-    if (S_ISLNK(info.st_mode)) return true;
+    if ((depth == 0 ? stat(disk, &info) : lstat(disk, &info)) != 0) return false;
+    if (depth > 0 && S_ISLNK(info.st_mode)) return true;
     if (S_ISDIR(info.st_mode))
     {
         DIR *directory = opendir(disk);
@@ -120,6 +120,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
     }
     // 条目名和 Windows 版一样：文件带扩展名，文件夹用它的名称，重名的加 (2)。
     StrList used = {0};
+    bool any_written = false;
     for (int index = 0; ok && index < sources.count; index++)
     {
         const wchar_t *source = sources.items[index];
@@ -131,10 +132,16 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
         free(name);
         bool wrote = false;
         ok = disk && entry && add_tree(&zip, disk, entry, &wrote, 0);
+        if (wrote) any_written = true;
         free(entry);
         free(disk);
     }
     strlist_clear(&used);
+    if (ok && !any_written)
+    {
+        log_error(L"没有可压缩的内容");
+        ok = false;
+    }
     if (ok) ok = mz_zip_writer_finalize_archive(&zip) != 0;
     if (!ok && output_narrow && path_exists(output)) io_delete_file(output);
     if (zip.m_zip_mode != MZ_ZIP_MODE_INVALID) mz_zip_writer_end(&zip);
@@ -146,7 +153,7 @@ void archive_compress(const StrList *paths, const wchar_t *output_directory, Qui
     else
     {
         log_error(L"快速压缩失败");
-        quick_action_result_fail(result, STR_CompressFailed);
+        quick_action_result_fail(result, any_written ? STR_CompressFailed : STR_NothingToCompress);
     }
     free(output_narrow);
     free(directory);

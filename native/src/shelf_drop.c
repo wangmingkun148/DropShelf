@@ -9,10 +9,14 @@
 #include "xdnd_linux.h"
 #include <gdk/gdk.h>
 #endif
+#include "folder_watch.h"
 #include "log.h"
 #include "task.h"
 
 #include <math.h>
+#if defined(_WIN32) && defined(LOOK_VARIANT_CARDS)
+#include <shellapi.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 

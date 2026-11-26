@@ -1359,6 +1359,9 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
     char *temporary = xalloc(target_length + 12);
     snprintf(temporary, target_length + 12, "%s.XXXXXX", target);
 
+    struct stat existing;
+    bool has_existing = stat(target, &existing) == 0 && S_ISREG(existing.st_mode);
+
     bool succeeded = false;
     int saved_errno = 0;
     int fd = mkstemp(temporary);
@@ -1385,8 +1388,8 @@ bool file_write_atomic(const wchar_t *path, const void *data, size_t length)
             }
             written += (size_t)part;
         }
-        // mkstemp 默认 0600，按常见用户文件权限设为 0644，先落盘再原子改名。
-        if (succeeded) (void)fchmod(fd, 0644);
+        // 新建文件保留 mkstemp 的 0600，覆盖已有文件时沿用原权限，避免绕过 umask 暴露私有配置和历史记录。
+        if (succeeded && has_existing) (void)fchmod(fd, existing.st_mode & 0777);
         if (succeeded && fsync(fd) != 0)
         {
             saved_errno = errno;

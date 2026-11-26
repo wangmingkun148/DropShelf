@@ -72,27 +72,30 @@ bool startup_set_enabled(bool enabled)
     wchar_t *executable = autostart_executable_path();
     wchar_t *command = startup_build_command(executable);
     free(executable);
-    WStr entry = {0};
-    wstr_appendf(&entry,
-        L"[Desktop Entry]\n"
-        L"Type=Application\n"
-        L"Name=DropShelf\n"
-        L"Comment=拖一拖就收好的置物架\n"
-        L"Exec=%ls\n"
-        L"Icon=io.github.wangmingkun148.DropShelf\n"
-        L"Terminal=false\n"
-        L"X-GNOME-Autostart-enabled=true\n"
-        L"StartupNotify=false\n",
-        command);
+    char *command_utf8 = command ? utf8_from_wide(command, NULL) : NULL;
     free(command);
+
+    GKeyFile *entry = g_key_file_new();
+    g_key_file_set_string(entry, "Desktop Entry", "Type", "Application");
+    g_key_file_set_string(entry, "Desktop Entry", "Name", "DropShelf");
+    g_key_file_set_string(entry, "Desktop Entry", "Comment", "拖一拖就收好的置物架");
+    // GKeyFile 负责第一层 .desktop 字符串转义（如 \ -> \\），配合 startup_build_command 的第二层 Exec 引号转义。
+    g_key_file_set_string(entry, "Desktop Entry", "Exec", command_utf8 ? command_utf8 : "");
+    g_key_file_set_string(entry, "Desktop Entry", "Icon", "io.github.wangmingkun148.DropShelf");
+    g_key_file_set_boolean(entry, "Desktop Entry", "Terminal", FALSE);
+    g_key_file_set_boolean(entry, "Desktop Entry", "X-GNOME-Autostart-enabled", TRUE);
+    g_key_file_set_boolean(entry, "Desktop Entry", "StartupNotify", FALSE);
+    free(command_utf8);
+
+    gsize length = 0;
+    gchar *bytes = g_key_file_to_data(entry, &length, NULL);
+    g_key_file_free(entry);
+
     wchar_t *folder = path_directory(path);
     bool ready = folder && directory_create(folder);
     free(folder);
-    size_t length = 0;
-    char *bytes = utf8_from_wide(entry.data, &length);
-    wstr_free(&entry);
-    bool written = ready && bytes && file_write_atomic(path, bytes, length);
-    free(bytes);
+    bool written = ready && bytes && file_write_atomic(path, bytes, (size_t)length);
+    g_free(bytes);
     free(path);
     if (!written) log_error(L"写入开机启动文件失败");
     return written;
