@@ -648,6 +648,19 @@ static ShelfAddSummary add_paths(ShelfModel *model, const wchar_t *const *paths,
     return summary;
 }
 
+static bool starts_with_png(const wchar_t *path)
+{
+    unsigned char header[4] = {0};
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    DWORD read = 0;
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        ReadFile(file, header, 4, &read, NULL);
+        CloseHandle(file);
+    }
+    return read == 4 && memcmp(header, "\x89PNG", 4) == 0;
+}
+
 static void test_drop_read(void)
 {
     language_set_mode(LANGUAGE_CHINESE);
