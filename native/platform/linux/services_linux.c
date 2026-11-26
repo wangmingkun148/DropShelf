@@ -447,76 +447,25 @@ void quick_action_result_free(QuickActionResult *result)
     *result = (QuickActionResult){0};
 }
 
-static void append_shell_quoted_path(WStr *out, const wchar_t *path)
+/// 把每个文件作为一个参数加进 argv；token 不为空时是含 {files} 的参数，按每个文件替换一份。
+static void add_paths(GPtrArray *argv, const StrList *paths, const char *token)
 {
-    char *utf8 = utf8_from_wide(path ? path : L"", NULL);
-    if (!utf8) return;
-    char *quoted = g_shell_quote(utf8);
-    free(utf8);
-    if (!quoted) return;
-    wchar_t *wide = wide_from_utf8(quoted, strlen(quoted));
-    g_free(quoted);
-    if (wide)
-    {
-        wstr_append(out, wide);
-        free(wide);
-    }
-}
-
-wchar_t *quick_action_build_arguments(const wchar_t *template_text, const StrList *paths)
-{
-    WStr quoted = {0};
     for (int index = 0; paths && index < paths->count; index++)
     {
-        if (index > 0) wstr_append_char(&quoted, L' ');
-        append_shell_quoted_path(&quoted, paths->items[index]);
-    }
-    const wchar_t *files = quoted.data ? quoted.data : L"";
-    const wchar_t *template = template_text ? template_text : L"";
-    WStr text = {0};
-    if (wcs_find_ignore_case(template, L"{files}"))
-    {
-        const wchar_t *cursor = template, *found;
-        while ((found = wcs_find_ignore_case(cursor, L"{files}")) != NULL)
+        char *path = utf8_from_wide(paths->items[index], NULL);
+        if (!path) continue;
+        if (!token)
         {
-            wstr_append_n(&text, cursor, (size_t)(found - cursor));
-            wstr_append(&text, files);
-            cursor = found + 7;
+            g_ptr_array_add(argv, g_strdup(path));
         }
-        wstr_append(&text, cursor);
-    }
-    else
-    {
-        wstr_append(&text, template);
-        if (*files)
+        else
         {
-            if (*template) wstr_append_char(&text, L' ');
-            wstr_append(&text, files);
+            char **parts = g_regex_split_simple("\\{files\\}", token, G_REGEX_CASELESS, 0);
+            g_ptr_array_add(argv, g_strjoinv(path, parts));
+            g_strfreev(parts);
         }
+        free(path);
     }
-    wstr_free(&quoted);
-    return wstr_take(&text);
-}
-
-static const char *find_files_placeholder(const char *text)
-{
-    for (const char *cursor = text; *cursor; cursor++)
-        if (g_ascii_strncasecmp(cursor, "{files}", 7) == 0) return cursor;
-    return NULL;
-}
-
-static char *replace_files_placeholder(const char *token, const char *replacement)
-{
-    GString *out = g_string_new(NULL);
-    const char *cursor = token, *found;
-    while ((found = find_files_placeholder(cursor)) != NULL)
-    {
-        g_string_append_len(out, cursor, (gssize)(found - cursor));
-        g_string_append(out, replacement);
-        cursor = found + 7;
-    }
-    g_string_append(out, cursor);
-    return g_string_free(out, FALSE);
 }
 
 /// 直接构造 argv 启动程序：只解析用户配置的参数模板，文件路径原样作为独立参数传入，避免特殊字符注入额外参数。
@@ -547,54 +496,21 @@ static bool launch_program(const wchar_t *program, const wchar_t *arguments_temp
             for (int index = 0; index < token_count; index++)
             {
                 const char *token = tokens[index];
-                if (g_ascii_strcasecmp(token, "{files}") == 0)
-                {
-                    expanded_files = true;
-                    for (int path_index = 0; paths && path_index < paths->count; path_index++)
-                    {
-                        char *path_utf8 = utf8_from_wide(paths->items[path_index], NULL);
-                        if (path_utf8)
-                        {
-                            g_ptr_array_add(argv, g_strdup(path_utf8));
-                            free(path_utf8);
-                        }
-                    }
-                }
-                else if (find_files_placeholder(token))
-                {
-                    expanded_files = true;
-                    for (int path_index = 0; paths && path_index < paths->count; path_index++)
-                    {
-                        char *path_utf8 = utf8_from_wide(paths->items[path_index], NULL);
-                        if (path_utf8)
-                        {
-                            g_ptr_array_add(argv, replace_files_placeholder(token, path_utf8));
-                            free(path_utf8);
-                        }
-                    }
-                }
-                else
+                if (!g_regex_match_simple("\\{files\\}", token, G_REGEX_CASELESS, 0))
                 {
                     g_ptr_array_add(argv, g_strdup(token));
+                    continue;
                 }
+                // 单独的 {files} 展开成每个文件一个参数；--x={files} 这样的按每个文件各写一份。
+                add_paths(argv, paths, g_ascii_strcasecmp(token, "{files}") == 0 ? NULL : token);
+                expanded_files = true;
             }
             g_strfreev(tokens);
         }
         free(template_utf8);
     }
 
-    if (ok && !expanded_files)
-    {
-        for (int path_index = 0; paths && path_index < paths->count; path_index++)
-        {
-            char *path_utf8 = utf8_from_wide(paths->items[path_index], NULL);
-            if (path_utf8)
-            {
-                g_ptr_array_add(argv, g_strdup(path_utf8));
-                free(path_utf8);
-            }
-        }
-    }
+    if (ok && !expanded_files) add_paths(argv, paths, NULL);
 
     g_ptr_array_add(argv, NULL);
     if (ok) ok = g_spawn_async(NULL, (char **)argv->pdata, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);

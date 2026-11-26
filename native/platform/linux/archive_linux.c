@@ -25,10 +25,8 @@
 #include <unistd.h>
 
 #define ARCHIVE_MAX_TREE_DEPTH 128
-#define ARCHIVE_MAX_ENTRIES 100000u
-#define ARCHIVE_MAX_TOTAL_BYTES (8ULL * 1024ULL * 1024ULL * 1024ULL)
 #define ARCHIVE_MAX_ENTRY_NAME 4096u
-#define ARCHIVE_7Z_TIMEOUT_US (60LL * 1000LL * 1000LL)
+#define ARCHIVE_7Z_TIMEOUT_US (30LL * 60 * 1000 * 1000)  // 和 Windows 版的 tar 一样等 30 分钟
 
 /// 写入压缩包时的条目名：统一用 /，去掉开头的分隔符。
 static char *entry_name(const char *prefix, const char *name)
@@ -185,19 +183,16 @@ static bool safe_entry(const char *name)
 typedef struct LimitedWriter
 {
     int fd;
-    uint64_t entry_written;
-    uint64_t entry_limit;
-    uint64_t *total_written;
-    uint64_t total_limit;
+    uint64_t written, limit;
     bool exceeded;
 } LimitedWriter;
 
-/// 限制实际写出的字节数，防止声明很小但解压出海量数据的 zip 炸弹写满磁盘。
+/// 实际解出的内容超过条目声明的大小时视为损坏或恶意的压缩包，防止声明很小、解出很大的压缩包写满磁盘（和 Windows 版一致）。
 static size_t write_limited(void *opaque, mz_uint64 offset, const void *buffer, size_t count)
 {
     (void)offset;
     LimitedWriter *writer = opaque;
-    if (count > writer->entry_limit - writer->entry_written || count > writer->total_limit - *writer->total_written)
+    if (count > writer->limit - writer->written)
     {
         writer->exceeded = true;
         return 0;
@@ -214,8 +209,7 @@ static size_t write_limited(void *opaque, mz_uint64 offset, const void *buffer, 
         if (part == 0) return 0;
         written += (size_t)part;
     }
-    writer->entry_written += written;
-    *writer->total_written += written;
+    writer->written += written;
     return written;
 }
 
@@ -229,13 +223,8 @@ static bool extract_zip(const wchar_t *source, const char *temporary)
     free(archive);
     if (!ok) return false;
     mz_uint count = mz_zip_reader_get_num_files(&zip);
-    if (count > ARCHIVE_MAX_ENTRIES)
-    {
-        log_error(L"压缩包条目数量超过上限");
-        mz_zip_reader_end(&zip);
-        return false;
-    }
 
+    // 压缩包声明的解压后总大小放不下时直接失败，不会先把磁盘写满。
     uint64_t required = 0;
     for (mz_uint index = 0; ok && index < count; index++)
     {
@@ -253,32 +242,20 @@ static bool extract_zip(const wchar_t *source, const char *temporary)
             ok = false;
             break;
         }
-        if (stat.m_uncomp_size > ARCHIVE_MAX_TOTAL_BYTES - required)
+        if (required + stat.m_uncomp_size < required)
         {
-            log_error(L"压缩包解压后体积超过上限");
             ok = false;
             break;
         }
         required += stat.m_uncomp_size;
     }
-
-    uint64_t total_limit = ARCHIVE_MAX_TOTAL_BYTES;
     struct statvfs fs;
-    if (ok && statvfs(temporary, &fs) == 0)
+    if (ok && statvfs(temporary, &fs) == 0 && required > (uint64_t)fs.f_bavail * fs.f_frsize)
     {
-        uint64_t available = (uint64_t)fs.f_bavail * (uint64_t)fs.f_frsize;
-        if (required > available)
-        {
-            log_error(L"磁盘空间不足，无法解压");
-            ok = false;
-        }
-        else if (available < total_limit)
-        {
-            total_limit = available;
-        }
+        log_error(L"磁盘空间不足，无法解压");
+        ok = false;
     }
 
-    uint64_t total_written = 0;
     for (mz_uint index = 0; ok && index < count; index++)
     {
         mz_zip_archive_file_stat stat;
@@ -318,17 +295,10 @@ static bool extract_zip(const wchar_t *source, const char *temporary)
             }
             else
             {
-                LimitedWriter writer = {
-                    .fd = fd,
-                    .entry_written = 0,
-                    .entry_limit = stat.m_uncomp_size,
-                    .total_written = &total_written,
-                    .total_limit = total_limit,
-                    .exceeded = false,
-                };
+                LimitedWriter writer = { fd, 0, stat.m_uncomp_size, false };
                 ok = mz_zip_reader_extract_to_callback(&zip, index, write_limited, &writer, 0) != 0 && !writer.exceeded;
                 if (close(fd) != 0) ok = false;
-                if (writer.exceeded) log_error(L"压缩包实际解压体积超出限制");
+                if (writer.exceeded) log_error(L"压缩包条目的实际大小超过声明的大小");
             }
         }
         g_free(target);
@@ -394,7 +364,7 @@ static bool extract_7z(const wchar_t *source, const char *temporary)
             waitpid(pid, &status, 0);
             break;
         }
-        g_usleep(10000);
+        g_usleep(100000);
     }
     g_spawn_close_pid(pid);
     if (!exited || !WIFEXITED(status) || WEXITSTATUS(status) != 0) return false;

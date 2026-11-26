@@ -300,7 +300,6 @@ static void write_escaped(WStr *out, const wchar_t *text)
 /// 写一个值之前：补上逗号、换行和缩进，以及属性名。
 static void write_prefix(JsonWriter *writer, const wchar_t *key)
 {
-    if (writer->overflow) return;
     if (writer->depth > 0)
     {
         if (writer->has_items[writer->depth]) wstr_append_char(&writer->out, L',');
@@ -317,21 +316,14 @@ static void write_prefix(JsonWriter *writer, const wchar_t *key)
 
 static void write_begin(JsonWriter *writer, const wchar_t *key, wchar_t open)
 {
-    if (writer->overflow) return;
-    if (writer->depth >= JSON_WRITER_MAX_DEPTH - 1)
-    {
-        writer->overflow = true;
-        return;
-    }
     write_prefix(writer, key);
     wstr_append_char(&writer->out, open);
-    writer->depth++;
+    if (writer->depth < 31) writer->depth++;
     writer->has_items[writer->depth] = false;
 }
 
 static void write_end(JsonWriter *writer, wchar_t close)
 {
-    if (writer->overflow) return;
     bool had_items = writer->has_items[writer->depth];
     if (writer->depth > 0) writer->depth--;
     if (had_items)
@@ -349,14 +341,12 @@ void json_write_end_array(JsonWriter *writer) { write_end(writer, L']'); }
 
 void json_write_null(JsonWriter *writer, const wchar_t *key)
 {
-    if (writer->overflow) return;
     write_prefix(writer, key);
     wstr_append(&writer->out, L"null");
 }
 
 void json_write_string(JsonWriter *writer, const wchar_t *key, const wchar_t *value)
 {
-    if (writer->overflow) return;
     if (!value)
     {
         json_write_null(writer, key);
@@ -368,14 +358,12 @@ void json_write_string(JsonWriter *writer, const wchar_t *key, const wchar_t *va
 
 void json_write_int(JsonWriter *writer, const wchar_t *key, long long value)
 {
-    if (writer->overflow) return;
     write_prefix(writer, key);
     wstr_appendf(&writer->out, L"%lld", value);
 }
 
 void json_write_double(JsonWriter *writer, const wchar_t *key, double value)
 {
-    if (writer->overflow) return;
     if (isnan(value))
     {
         json_write_string(writer, key, L"NaN");
@@ -406,20 +394,12 @@ void json_write_double(JsonWriter *writer, const wchar_t *key, double value)
 
 void json_write_bool(JsonWriter *writer, const wchar_t *key, bool value)
 {
-    if (writer->overflow) return;
     write_prefix(writer, key);
     wstr_append(&writer->out, value ? L"true" : L"false");
 }
 
 wchar_t *json_write_finish(JsonWriter *writer)
 {
-    bool overflow = writer->overflow;
     writer->depth = 0;
-    writer->overflow = false;
-    if (overflow)
-    {
-        wstr_free(&writer->out);
-        return NULL;
-    }
     return wstr_take(&writer->out);
 }
