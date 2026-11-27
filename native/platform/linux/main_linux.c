@@ -205,7 +205,7 @@ static void on_startup(GApplication *app, gpointer data)
     // 初始风格和配色跟着设置走，两种风格（简洁、纸牌）在同一个程序里，见 theme.h 的 Look。
     const AppSettings *settings = app_settings();
     theme_initialize(settings->theme, settings->accent_color, (Look)settings->look);
-    language_set_mode(LANGUAGE_SYSTEM);
+    language_set_mode(settings->language);
     shelf_history_load(NULL);
     shelves_prewarm();
     app_start(NULL, true);
