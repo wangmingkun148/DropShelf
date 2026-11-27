@@ -76,10 +76,12 @@ int MessageBoxW(HWND owner, LPCWSTR text, LPCWSTR caption, UINT type)
     char *message = text ? utf8_from_wide(text, NULL) : NULL;
     GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", message ? message : "");
     gtk_alert_dialog_set_modal(dialog, TRUE);
-    const char *buttons[] = { "好", NULL };
+    char *ok = utf8_from_wide(S(STR_Ok), NULL);
+    const char *buttons[] = { ok ? ok : "OK", NULL };
     gtk_alert_dialog_set_buttons(dialog, buttons);
     gtk_alert_dialog_show(dialog, NULL);
     g_object_unref(dialog);
+    free(ok);
     free(message);
     return 1;
 }
@@ -941,7 +943,7 @@ static void execute_fast(ExecuteFast *job)
     }
     else
     {
-        quick_action_result_set(&result, false, wcs_dup(L"这个快速操作已不再支持"));
+        quick_action_result_set(&result, false, wcs_dup(S(STR_ActionUnsupported)));
     }
     finish_request(request, &result, job->done, job->context);
     free(job);
@@ -1037,10 +1039,14 @@ static void folder_picked(GtkNativeDialog *dialog, int response, gpointer data)
 wchar_t *pick_folder(HWND owner, const wchar_t *title)
 {
     (void)owner;
-    char *title_utf8 = title && *title ? utf8_from_wide(title, NULL) : NULL;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(title_utf8 ? title_utf8 : "选择文件夹", NULL,
-        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "选择", "取消");
+    char *title_utf8 = title && *title ? utf8_from_wide(title, NULL) : utf8_from_wide(S(STR_ChooseTargetFolder), NULL);
+    char *select_utf8 = utf8_from_wide(S(STR_Select), NULL);
+    char *cancel_utf8 = utf8_from_wide(S(STR_Cancel), NULL);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(title_utf8 ? title_utf8 : "", NULL,
+        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, select_utf8 ? select_utf8 : "Select", cancel_utf8 ? cancel_utf8 : "Cancel");
     free(title_utf8);
+    free(select_utf8);
+    free(cancel_utf8);
     FolderPicker picker = { .loop = g_main_loop_new(NULL, FALSE) };
     g_signal_connect(dialog, "response", G_CALLBACK(folder_picked), &picker);
     gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));

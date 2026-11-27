@@ -151,13 +151,14 @@ Linux：
 
 ## 项目结构
 
-- `native`：C 版（发布的就是它）。`native/src` 是程序，`native/tests` 是测试，`native/res` 是图标、清单和版本信息。
+- `native`：C 版（发布的就是它）。`native/src` 是程序，`native/platform/linux` 是 Linux 平台层，`native/tests` 是测试，`native/res` 是图标、清单和版本信息。
+- `linux`：Linux 版的 CMake 构建入口、打包脚本、桌面文件与测试。
 - `installer`：安装包和卸载程序的 Inno Setup 脚本。
 - `legacy/csharp`：原来的 C# 版，不再使用。
 
 ## 发布新版本
 
-1. 修改 `native/CMakeLists.txt`、`native/res/app.manifest` 和 `installer` 下两个 `.iss` 文件中的版本号，合并到 `main`。
+1. 修改 `native/CMakeLists.txt`、`native/res/app.manifest`、`installer` 下两个 `.iss` 文件、`linux/PKGBUILD` 与 `linux/io.github.wangmingkun148.DropShelf.metainfo.xml` 中的版本号，合并到 `main`。
 2. 在 GitHub 的 Releases 页面点“Draft a new release”，新建标签 `v版本号`（如 `v2.1.9`，须与版本号一致）并发布。也可以把发布说明写在 `docs/releases/v版本号.md`，再直接推送这个标签：Actions 新建 Release 时用这份说明，没有这个文件时按提交记录自动生成。
 3. GitHub Actions 会自动编译 C 版的安装包和便携版，几分钟后附加到这个 Release 上，Linux 版的 AppImage 和 pacman 包也一起附上。改动 `native` 里的代码时，Actions 还会编译并运行 C 版的测试（`.github/workflows/build.yml`）。
 

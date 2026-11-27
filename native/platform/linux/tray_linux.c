@@ -6,7 +6,9 @@
 #endif
 
 #include "tray.h"
+#include "lang.h"
 #include "log.h"
+#include "strings.h"
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -134,20 +136,22 @@ static char *narrow(const wchar_t *text)
 
 static char *show_label(void)
 {
-    return g_strdup("显示 DropShelf");
+    return narrow(S(STR_OpenSettings));
 }
 
 static char *new_shelf_label(void)
 {
     wchar_t *hotkey = actions.hotkey_text ? actions.hotkey_text() : NULL;
+    char *base = narrow(S(STR_NewShelf));
     char *result;
     if (hotkey && *hotkey)
     {
         char *text = narrow(hotkey);
-        result = g_strdup_printf("新建置物架（%s）", text);
+        result = g_strdup_printf(language_is_chinese() ? "%s（%s）" : "%s (%s)", base, text);
         g_free(text);
     }
-    else result = g_strdup("新建置物架");
+    else result = g_strdup(base);
+    g_free(base);
     free(hotkey);
     return result;
 }
@@ -270,7 +274,7 @@ static char *menu_label(int id)
         case MENU_SHOW: return show_label();
         case MENU_NEW_SHELF: return new_shelf_label();
         case MENU_SEPARATOR: return NULL;
-        case MENU_QUIT: return g_strdup("退出");
+        case MENU_QUIT: return narrow(S(STR_Quit));
         default: return NULL;
     }
 }
@@ -636,7 +640,7 @@ void tray_refresh_text(void)
 
 void tray_show_still_running_hint(void)
 {
-    send_notification(L"DropShelf 还在运行", L"可以从通知区域的图标重新打开主窗口。");
+    send_notification(S(STR_StillRunningTitle), S(STR_StillRunningBody));
 }
 
 void tray_show_notice(const wchar_t *title, const wchar_t *body)
