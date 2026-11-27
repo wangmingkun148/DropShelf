@@ -236,7 +236,7 @@ static void test_gesture_and_settings(void)
     free(json);
 }
 
-/// 观察文件夹探出的几个角沿着边排开：先往下、再往上找最近的空处，不超出工作区。
+/// 观察文件夹探出的几个角沿着边排开：挪到紧贴别的角上面或下面、离原处最近的空处（一样近时往下），不超出工作区。
 static void test_peek_stack(void)
 {
     RECT work = { 0, 0, 1920, 1040 };
