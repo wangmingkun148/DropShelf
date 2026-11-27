@@ -120,7 +120,7 @@ void ui_window_place(UiWindow *window, int x, int y, float width, float height);
 void ui_window_center(UiWindow *window);
 
 /// 隐身：窗口照常显示和绘制，只是不画到屏幕上；取消隐身后立即以画好的样子出现。
-/// Windows 用 DWM 的 cloak（见 shelf_card.c），Wayland 没有对应物，Linux 后端用 0 透明度顶替。
+/// Windows 用 DWM 的 cloak（见 shelf_card.c），Wayland 没有对应物，Linux 后端照常推进动画、只是画成全透明。
 void ui_window_set_cloaked(HWND window, bool cloaked);
 
 /// 显示窗口；activate 为 false 时不抢当前程序的焦点。

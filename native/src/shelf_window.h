@@ -13,8 +13,17 @@ typedef struct ShelfHistoryEntry ShelfHistoryEntry;
 ShelfWindow *shelves_open_at(POINT center, bool by_gesture, bool activate, ScreenEdge edge);
 ShelfWindow *shelves_open_at_cursor(bool activate);
 
-/// 从屏幕边缘 edge 滑出一个放着 paths 的置物架（观察的文件夹里出现了新文件，点开探出的角时）。不抢当前程序的焦点。
-ShelfWindow *shelves_open_with_paths(POINT center, ScreenEdge edge, const StrList *paths);
+/// 观察文件夹探出的角被点开时角的样子：置物架从这里转一圈飞出来。
+typedef struct ShelfPopOrigin
+{
+    POINT center;               // 角（整个小置物架或整张牌，包括藏在屏幕边缘外的部分）的中心，屏幕像素
+    float width, height;        // 它的大小（DIP）
+    float angle;                // 它的转角（度，顺时针为正）
+} ShelfPopOrigin;
+
+/// 点开观察文件夹探出的角：放着 paths 的置物架从角那里（贴着屏幕边缘 edge）转一整圈飞出来，落在角旁边、离边缘不远的地方。
+/// 不抢当前程序的焦点。文件都已不在时不打开，返回 NULL。
+ShelfWindow *shelves_open_from_peek(ScreenEdge edge, const ShelfPopOrigin *origin, const StrList *paths);
 
 /// 在 anchor 窗口旁边打开（右边放不下就放左边）；anchor 为 NULL 时在光标处。
 ShelfWindow *shelves_open_next_to(HWND anchor, bool activate);

@@ -3,6 +3,7 @@
 #include "shelf_card.h"
 #include "lang.h"
 #include "shelf_history.h"
+#include "shelf_peek.h"
 #include "log.h"
 #include "task.h"
 
@@ -11,6 +12,9 @@
 #include <shellscalingapi.h>
 #endif
 #include <stdlib.h>
+
+#define PEEK_GAP 72                 // 从观察文件夹的角点开的置物架离屏幕边缘多远（DIP）：让开沿边排着的其他角
+#define PEEK_SPACING 12             // 接连点开的几个置物架上下隔开多远（DIP）
 
 static ShelfWindow *open_shelves;   // 打开着的置物架
 static ShelfWindow *spare;          // 隐藏着待命的窗口
@@ -138,10 +142,55 @@ ShelfWindow *shelves_open_at(POINT center, bool by_gesture, bool activate, Scree
     return shelf;
 }
 
-ShelfWindow *shelves_open_with_paths(POINT center, ScreenEdge edge, const StrList *paths)
+ShelfWindow *shelves_open_from_peek(ScreenEdge edge, const ShelfPopOrigin *origin, const StrList *paths)
 {
-    ShelfWindow *shelf = shelves_open_at(center, false, false, edge);
-    if (shelf) shelf_window_add_paths(shelf, paths);
+    if (shutting_down) return NULL;
+    // 这段时间里被删掉或挪走的不放。
+    StrList existing = {0};
+    for (int index = 0; index < paths->count; index++)
+        if (path_exists(paths->items[index])) strlist_add(&existing, paths->items[index]);
+    if (existing.count == 0) return NULL;
+    ensure_listener();
+    // 不复用晃动打开的空置物架：新的置物架从角那里转出来。
+    ShelfWindow *shelf = spare ? spare : shelf_window_create();
+    spare = NULL;
+    if (!shelf)
+    {
+        strlist_clear(&existing);
+        return NULL;
+    }
+    shelf->next = open_shelves;
+    open_shelves = shelf;
+    shelf->model->opened_by_gesture = false;
+    // 先放进去再出场：转出来的置物架里已经是这些文件，大小也是放好以后的。
+    shelf_model_add_files(shelf->model, &existing);
+    strlist_clear(&existing);
+    // 落在角旁边，离开屏幕边缘一点。
+    HMONITOR monitor = MonitorFromPoint(origin->center, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info = { .cbSize = sizeof(info) };
+    GetMonitorInfoW(monitor, &info);
+    UINT dpi_x = 96, dpi_y = 96;
+    double scale = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y) == S_OK && dpi_x > 0 ? dpi_x / 96.0 : 1.0;
+    float width, height;
+    shelf_target_size(shelf, shelf->model->expanded, &width, &height);
+    double offset = (PEEK_GAP + width / 2) * scale;
+    POINT center = { (LONG)lround(edge == EDGE_LEFT ? info.rcWork.left + offset : info.rcWork.right - offset), origin->center.y };
+    // 不盖住已经开着的置物架（一个文件一个置物架时可能接连点开好几个）：上下挪到最近的空处，隔开一点。
+    int pixel_width = (int)lround(width * scale), pixel_height = (int)lround(height * scale), gap = (int)lround(PEEK_SPACING * scale);
+    int busy[2 * 16], busy_count = 0;
+    for (ShelfWindow *other = open_shelves; other && busy_count < 16; other = other->next)
+    {
+        RECT rect;
+        if (other == shelf || !shelf_window_is_visible(other) || !GetWindowRect(other->handle, &rect)) continue;
+        if (rect.right <= center.x - pixel_width / 2 || rect.left >= center.x + pixel_width / 2) continue;
+        busy[2 * busy_count] = rect.top - gap;
+        busy[2 * busy_count++ + 1] = rect.bottom + gap;
+    }
+    center.y = shelf_peek_stack(center.y - pixel_height / 2, pixel_height, info.rcWork, busy, busy_count) + pixel_height / 2;
+    shelf->from_peek = true;
+    shelf->peek_origin = *origin;
+    shelf_window_show_at(shelf, center, false, ENTRANCE_EDGE, edge);
+    shelves_prewarm();
     return shelf;
 }
 

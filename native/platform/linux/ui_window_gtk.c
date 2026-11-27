@@ -49,6 +49,8 @@ struct UiWindow
     bool subscribed;
     bool rendering;
     bool destroyed;
+    bool cloaked;                       // 隐身：照常推进动画，只是什么都不画（见 ui_window_set_cloaked）
+    bool hide_posted;                   // 绘制回调里要求隐藏，等这一帧画完再藏（见 ShowWindow）
     bool moving;
     bool move_by_cursor;                // 层壳窗口拖动时用全局光标定位（Hyprland IPC / 已知指针位置）
     bool move_button_seen;              // 这次拖动里 evdev 至少看到过一次左键按下
@@ -429,10 +431,10 @@ static void draw_frame(UiWindow *window, cairo_t *cairo, int width, int height)
     gfx_surface_set_cairo(window->surface, cairo);
     if (gfx_begin(window->surface, width, height, 96.0f))
     {
-        bool transparent = window->options.popup;
+        bool transparent = window->options.popup || window->cloaked;
         gfx_clear(transparent ? COLOR_TRANSPARENT : theme_color(window->options.background));
-        if (window->options.paint) window->options.paint(window, window->options.context, frames_time());
-        if (window->root) ui_paint(window->root, frames_time());
+        if (window->options.paint && !window->cloaked) window->options.paint(window, window->options.context, frames_time());
+        if (window->root && !window->cloaked) ui_paint(window->root, frames_time());
         gfx_end(window->surface);
     }
     window->rendering = false;
@@ -1757,6 +1759,15 @@ BOOL DestroyIcon(HICON icon)
     return TRUE;
 }
 
+static gboolean hide_after_frame(gpointer data)
+{
+    UiWindow *window = data;
+    window->hide_posted = false;
+    // 这期间又显示出来或已经关掉了，就不用再藏。关掉的窗口由排在这之后的空闲回调释放，这里还能读。
+    if (!window->destroyed && !window->visible) gtk_widget_set_visible(window->window, FALSE);
+    return G_SOURCE_REMOVE;
+}
+
 /// 共享代码里的 ShowWindow：隐藏、显示、最小化、最大化和还原。
 BOOL ShowWindow(HWND handle, int command)
 {
@@ -1766,7 +1777,14 @@ BOOL ShowWindow(HWND handle, int command)
     {
         window->visible = false;
         window->hovered = window->captured = NULL;
-        gtk_widget_set_visible(window->window, FALSE);
+        // 动画播完时是在绘制回调里藏的：当场藏起来的话，GTK 还会把这一帧提交到已经撤掉层壳的 surface 上，
+        // 下次再显示时合成器按协议错误断开连接。等这一帧画完再藏。
+        if (!window->rendering) gtk_widget_set_visible(window->window, FALSE);
+        else if (!window->hide_posted)
+        {
+            window->hide_posted = true;
+            g_idle_add(hide_after_frame, window);
+        }
         return TRUE;
     }
     if (command == SW_MINIMIZE)
@@ -1788,13 +1806,14 @@ BOOL ShowWindow(HWND handle, int command)
     return TRUE;
 }
 
-/// 隐身：Wayland 没有 DWM 那样的 cloak，用 0 透明度顶替。窗口照样映射、照样出帧，取消隐身后第一帧已经是画好的样子，
-/// 不会闪出空白或旧画面。
+/// 隐身：Wayland 没有 DWM 那样的 cloak。窗口照样映射、照样出帧，只是画成全透明，取消隐身后下一帧就是画好的样子。
+/// 不用透明度 0：GTK 不给透明度为 0 的窗口调绘制回调，而动画是在绘制里推进的，牌和置物架的出场会停住。
 void ui_window_set_cloaked(HWND handle, bool cloaked)
 {
     UiWindow *window = (UiWindow *)handle;
-    if (!window || window->destroyed) return;
-    gtk_widget_set_opacity(window->window, cloaked ? 0 : 1);
+    if (!window || window->destroyed || window->cloaked == cloaked) return;
+    window->cloaked = cloaked;
+    gtk_widget_queue_draw(window->area);
 }
 
 void ui_window_set_click_through(UiWindow *window, bool on)

@@ -311,6 +311,24 @@ CardMotion card_motion_edge_in(ScreenEdge edge, RECT target, RECT work, double d
     return edge_motion(edge, tilt, list, steps(d, list));
 }
 
+// ───────────── 从观察文件夹的角弹出 ─────────────
+
+CardMotion card_motion_peek_pop(RECT target, double dpi_scale, POINT from, double from_width, double from_height, double from_angle, ScreenEdge edge)
+{
+    double width = (target.right - target.left) / dpi_scale, height = (target.bottom - target.top) / dpi_scale;
+    double x = (from.x - (target.left + target.right) / 2.0) / dpi_scale, y = (from.y - (target.top + target.bottom) / 2.0) / dpi_scale;
+    // 起手和角一样大（按面积算，两者长宽比不同）。
+    double scale = width > 0 && height > 0 ? fmin(1, sqrt(from_width * from_height / (width * height))) : 0.3;
+    // 像轮子一样往外滚：从右边出来逆时针转，从左边出来顺时针转，最后多转一点再回来。
+    double turn = edge == EDGE_LEFT ? 360 : -360, over = edge == EDGE_LEFT ? 6 : -6;
+    CardKey keys[] = {
+        eased(key(0, x, y, scale, from_angle, 0), EASE_BEZIER_OF(0.2, 0.55, 0.3, 1)),
+        eased(key(440, 0, 0, 1.025, turn + over, 0), EASE_IN_OUT),
+        key(540, 0, 0, 1, turn, 0),
+    };
+    return motion_of(keys, ARRAYSIZE(keys), false, 90);
+}
+
 /// 翻回背面，缩小淡出。
 static CardMotion flip_away(bool horizontal_axis)
 {
@@ -382,7 +400,7 @@ void window_set_cloaked(HWND window, bool cloaked)
     BOOL value = cloaked;
     DwmSetWindowAttribute(window, DWMWA_CLOAK, &value, sizeof(value));
 #else
-    // Wayland 没有隐身属性，Linux 后端用 0 透明度顶替（见 ui_window_set_cloaked）。
+    // Wayland 没有隐身属性，Linux 后端照常推进动画、只是画成全透明（见 ui_window_set_cloaked）。
     ui_window_set_cloaked(window, cloaked);
 #endif
 }
@@ -582,23 +600,26 @@ void shelf_card_prewarm(void)
 }
 
 /// 窗口的范围：盖住每一帧牌的外接矩形（按转角和翻面时最大的放大量估算），再留出阴影，限制在 area 内。
+/// 逐帧取样而不是只看关键帧：转一整圈时中间斜着的那几帧比两头都宽。
 static RECT card_bounds(RECT target, RECT area, double dpi_scale, const CardMotion *motion)
 {
     double center_x = target.left + (target.right - target.left) / 2.0, center_y = target.top + (target.bottom - target.top) / 2.0;
     double half_width = (target.right - target.left) / 2.0, half_height = (target.bottom - target.top) / 2.0;
     double left = target.left, top = target.top, right = target.right, bottom = target.bottom;
-    for (int index = 0; index < motion->count; index++)
+    double duration = card_motion_duration(motion);
+    for (double ms = 0;; ms += 8)
     {
-        const CardKey *key = &motion->keys[index];
-        double angle = fabs(key->angle) * PI / 180;
-        double grow = key->scale * CARD_LIFT;
-        double extent_x = (cos(angle) * half_width + sin(angle) * half_height) * grow;
-        double extent_y = (sin(angle) * half_width + cos(angle) * half_height) * grow;
-        double x = center_x + key->x * dpi_scale, y = center_y + key->y * dpi_scale;
+        CardKey key = card_motion_at(motion, fmin(ms, duration));
+        double cosine = fabs(cos(key.angle * PI / 180)), sine = fabs(sin(key.angle * PI / 180));
+        double grow = key.scale * CARD_LIFT;
+        double extent_x = (cosine * half_width + sine * half_height) * grow;
+        double extent_y = (sine * half_width + cosine * half_height) * grow;
+        double x = center_x + key.x * dpi_scale, y = center_y + key.y * dpi_scale;
         left = fmin(left, x - extent_x);
         right = fmax(right, x + extent_x);
         top = fmin(top, y - extent_y);
         bottom = fmax(bottom, y + extent_y);
+        if (ms >= duration) break;
     }
     double room = SHADOW_ROOM * dpi_scale;
     RECT bounds = { (LONG)fmax(area.left, floor(left - room)), (LONG)fmax(area.top, floor(top - room)), (LONG)fmin(area.right, ceil(right + room)),

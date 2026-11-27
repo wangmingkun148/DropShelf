@@ -36,6 +36,9 @@ CardMotion card_motion_shake_in(double cursor_x, double cursor_y);
 /// 从边缘呼出：牌带着倾角从屏幕外滑进来，边走边回正，冲过落点一点再停稳。target 是落定时的位置，work 是工作区，都是屏幕像素；
 /// dpi_scale 是那里的显示缩放比例。
 CardMotion card_motion_edge_in(ScreenEdge edge, RECT target, RECT work, double dpi_scale);
+/// 点开观察文件夹探出的角：牌从角的位置（from，屏幕像素）、大小（DIP）和转角出发，往离开边缘 edge 的方向滚着转一整圈，
+/// 一边变大一边飞到 target，冲过一点再停稳。dpi_scale 是那里的显示缩放比例。
+CardMotion card_motion_peek_pop(RECT target, double dpi_scale, POINT from, double from_width, double from_height, double from_angle, ScreenEdge edge);
 /// 关闭：从边缘呼出的（edge 不是 EDGE_NONE）先往里收一下再甩回那条边；其余的翻回背面、缩小淡出，翻的方向和出场时一致。
 CardMotion card_motion_exit(ScreenEdge edge, bool horizontal_axis, RECT target, RECT work, double dpi_scale);
 

@@ -224,10 +224,13 @@ struct ShelfWindow
     bool leaving;               // 正在播放关闭的动画
     MotionClock leave_clock;
     float leave_from_opacity, leave_from_scale, leave_shift_x, leave_shift_y, leave_from_dx, leave_from_dy;
-    /// 纸牌：正在替置物架出场或离场的那张牌。正常播完时出场的让置物架现身、离场的关闭窗口；出场途中置物架又被复用或要关闭时
+    /// 正在替置物架出场或离场的那张牌（纸牌的出场和离场，两种风格从观察文件夹的角点开时的出场）。正常播完时出场的让置物架现身、离场的关闭窗口；出场途中置物架又被复用或要关闭时
     /// 牌立即撤下、置物架现身（shelf_finish_entrance）；窗口关闭时剩下的动画直接取消，不再回调置物架（shelf_cancel_card）。
     struct ShelfCard *card;
     bool flipped_on_horizontal_axis;    // 出场时那张牌是上下翻开的，关闭时按同样的方向翻回去
+    /// 从观察文件夹探出的角点开：下一次出场由一张牌从角的样子转一整圈飞到置物架的位置（两种风格都是），出场时清掉。
+    bool from_peek;
+    ShelfPopOrigin peek_origin;
 
     // 内容的动画
     Tween *tweens;
@@ -598,6 +601,16 @@ void shelf_reset_merge_charge(ShelfWindow *shelf);
 /// 窗口关闭：放掉合并途中拿着的别的置物架。
 void shelf_merge_forget(ShelfWindow *shelf);
 
+// ───────────── 由牌替置物架出场（shelf_window.c） ─────────────
+
+/// 截下置物架作为牌面，置物架隐身期间由牌表演，落定时置物架现身。截不下时直接现身。纸牌晃动或从边缘呼出时用，
+/// 晃动时牌从光标处（cursor，屏幕像素）翻开；两种风格从观察文件夹的角点开时（from_peek）牌从角那里转一整圈飞出来。
+void shelf_deal_in(ShelfWindow *shelf, POINT cursor);
+/// 出场的牌还没落定时直接让置物架现身。
+void shelf_finish_entrance(ShelfWindow *shelf);
+/// 窗口关闭时撤下还在播放的牌。
+void shelf_cancel_card(ShelfWindow *shelf);
+
 // ───────────── shelf_motion.c ─────────────
 
 bool clock_tick(MotionClock *clock, double time);
@@ -605,13 +618,6 @@ void shelf_animate(UiWindow *window, void *context, double time);
 #ifdef LOOK_VARIANT_CARDS
 /// 主动打开时的弹出动画：窗口从下方升起一点，内容淡入并放大到原尺寸。
 void shelf_animate_in(ShelfWindow *shelf);
-/// 晃动或从边缘呼出时的出场：截下置物架作为牌面，置物架隐身期间由牌表演，落定时置物架现身。截不下时直接现身。
-/// 晃动时牌从光标处（cursor，屏幕像素）翻开。
-void shelf_deal_in(ShelfWindow *shelf, POINT cursor);
-/// 出场的牌还没落定时直接让置物架现身。
-void shelf_finish_entrance(ShelfWindow *shelf);
-/// 窗口关闭时撤下还在播放的牌。
-void shelf_cancel_card(ShelfWindow *shelf);
 /// 关闭：一张牌先盖住置物架，置物架隐身后牌再离场，播完才真正关闭窗口。截不下置物架时返回 false。
 bool shelf_play_exit(ShelfWindow *shelf);
 #else

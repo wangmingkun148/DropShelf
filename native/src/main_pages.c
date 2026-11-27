@@ -28,7 +28,7 @@ static struct
     UiElement *performance, *performance_description;
     UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
     UiElement *blocked_list, *pause_fullscreen;
-    UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
+    UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card, *separate_shelves, *separate_shelves_card;
     UiElement *shelf_size, *drag_out_mode, *mixed_drag, *close_when_empty;
     UiElement *history_description, *clear_history;
     UiElement *layout, *layout_description;
@@ -85,6 +85,8 @@ static void on_layout(int index, void *context)
 
 static void change_close_when_empty(AppSettings *settings, void *context) { settings->close_when_empty = *(bool *)context; }
 static void on_close_when_empty(bool checked, void *context) { (void)context; app_update_settings(change_close_when_empty, &checked); }
+static void change_separate_shelves(AppSettings *settings, void *context) { settings->watch_separate_shelves = *(bool *)context; }
+static void on_separate_shelves(bool checked, void *context) { (void)context; app_update_settings(change_separate_shelves, &checked); }
 
 static void change_pause_fullscreen(AppSettings *settings, void *context) { settings->pause_in_fullscreen = *(bool *)context; }
 static void on_pause_fullscreen(bool checked, void *context) { (void)context; app_update_settings(change_pause_fullscreen, &checked); }
@@ -356,6 +358,16 @@ static void on_add_app(void *context)
     free(items);
 }
 
+/// 上面那项列表里的一行（屏蔽的应用、观察的文件夹）：往右缩进一截、矮一点、底色深一点点，一眼看出属于上面那项。
+/// 行尾是删除按钮，它自己带着留白，右边留白给小一点。
+static void make_sub_item(UiElement *card, float minimum_height)
+{
+    ui_stack_set_background(card, THEME_SUB_ROW, theme_is_cards() ? THEME_SETTING_ROW_BORDER : THEME_CARD_BORDER, 6);
+    ui_set_margin(card, 40, 0, 0, 4);
+    ui_stack_set_padding(card, 16, 6, 10, 6);
+    card->minimum_height = minimum_height;
+}
+
 /// 列表上显示的程序名；删除按钮记着自己在第几个。
 static StrList blocked_names;
 
@@ -382,8 +394,7 @@ static void rebuild_blocked_list(void)
         ui_button_set_font_size(remove, 14);
         ui_set_tooltip(remove, UI_STR(STR_RemoveBlockedApp));
         UiElement *card = ui_settings_card(NULL, UI_LIT(blocked_names.items[index]), UI_NO_TEXT, remove, NULL);
-        ui_stack_set_padding(card, 60, 4, 10, 4);
-        card->minimum_height = 44;
+        make_sub_item(card, 44);
         ui_add(P.blocked_list, card);
     }
 }
@@ -424,8 +435,7 @@ static void rebuild_watch_list(void)
         wchar_t *name = path_folder_name(watch_names.items[index]);
         UiElement *card = ui_settings_card(NULL, UI_LIT(name), UI_LIT(watch_names.items[index]), remove, NULL);
         free(name);
-        ui_stack_set_padding(card, 60, 6, 10, 6);
-        card->minimum_height = 52;
+        make_sub_item(card, 52);
         ui_add(P.watch_list, card);
     }
 }
@@ -713,6 +723,9 @@ static void build_shelf_page(void)
     add_card(content, GLYPH_VIEW, UI_STR(STR_WatchedFoldersHeader), UI_STR(STR_WatchFoldersDescription), P.add_folder_button, NULL);
     P.watch_list = ui_stack(false, 0);
     ui_add(content, P.watch_list);
+    P.separate_shelves = ui_toggle(settings->watch_separate_shelves, on_separate_shelves, NULL);
+    P.separate_shelves_card = add_card(content, GLYPH_VIEW_ALL, UI_STR(STR_WatchSeparateShelves), UI_STR(STR_WatchSeparateShelvesDescription),
+        P.separate_shelves, NULL);
     P.peek_seconds_card = add_card(content, GLYPH_TIMER, UI_STR(STR_WatchPeekSecondsHeader), UI_STR(STR_WatchPeekSecondsDescription),
         build_peek_seconds_control(), NULL);
 }
@@ -1117,8 +1130,9 @@ void pages_refresh(void)
     else ui_label_set_text(P.history_description, UI_STR(STR_HistoryEmpty));
     ui_set_disabled(P.clear_history, history_count == 0);
     rebuild_watch_list();
-    // 没有观察的文件夹时停留时间用不上。
-    P.peek_seconds_card->hidden = settings->watched_folders.count == 0;
+    // 没有观察的文件夹时这两项用不上。
+    P.separate_shelves_card->hidden = P.peek_seconds_card->hidden = settings->watched_folders.count == 0;
+    ui_toggle_set_checked(P.separate_shelves, settings->watch_separate_shelves);
     refresh_peek_seconds(settings);
 
     // 快速操作。

@@ -16,6 +16,7 @@
 #include "log.h"
 #include "settings.h"
 #include "shelf_model.h"
+#include "shelf_peek.h"
 #include "task.h"
 
 #include <glib.h>
@@ -212,7 +213,9 @@ static void test_gesture_and_settings(void)
     CHECK(settings.hotkey != NULL);
     CHECK(settings.pause_in_fullscreen);
     CHECK(settings.mixed_drag == MIXED_DRAG_BATCH);
+    CHECK(settings.watch_separate_shelves);
     settings.shake_sensitivity = 80;
+    settings.watch_separate_shelves = false;
     settings.pause_in_fullscreen = false;
     settings.mixed_drag = MIXED_DRAG_TEXT;
     strlist_add(&settings.watched_folders, L"/tmp/watched");
@@ -225,11 +228,24 @@ static void test_gesture_and_settings(void)
     CHECK(parsed.shake_sensitivity == 80);
     CHECK(!parsed.pause_in_fullscreen);
     CHECK(parsed.mixed_drag == MIXED_DRAG_TEXT);
+    CHECK(!parsed.watch_separate_shelves);
     CHECK(parsed.watched_folders.count == 1);
     CHECK(wcs_is(parsed.watched_folders.items[0], L"/tmp/watched"));
     settings_free(&parsed);
     settings_free(&settings);
     free(json);
+}
+
+/// 观察文件夹探出的几个角沿着边排开：挪到紧贴别的角上面或下面、离原处最近的空处（一样近时往下），不超出工作区。
+static void test_peek_stack(void)
+{
+    RECT work = { 0, 0, 1920, 1040 };
+    int busy[] = { 450, 550, 550, 650 };
+    CHECK(shelf_peek_stack(300, 100, work, busy, 0) == 300);
+    CHECK(shelf_peek_stack(450, 100, work, busy, 1) == 550);
+    CHECK(shelf_peek_stack(450, 100, work, busy, 2) == 350);
+    int bottom[] = { 940, 1040 };
+    CHECK(shelf_peek_stack(940, 100, work, bottom, 1) == 840);
 }
 
 static long long measure_quality(void *context, int quality)
@@ -686,6 +702,7 @@ int main(void)
     test_files();
     test_json();
     test_gesture_and_settings();
+    test_peek_stack();
     test_image_quality();
     test_settings_path();
     test_file_identity();

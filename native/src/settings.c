@@ -309,6 +309,7 @@ void settings_init(AppSettings *settings)
     settings->close_when_empty = true;
     settings->pause_in_fullscreen = true;
     settings->watch_peek_seconds = WATCH_PEEK_DEFAULT_SECONDS;
+    settings->watch_separate_shelves = true;
     settings->performance_mode = PERFORMANCE_AUTO;
     settings->hotkey = hotkey_to_text(HOTKEY_DEFAULT);
     settings->show_getting_started = true;
@@ -688,6 +689,7 @@ bool settings_parse(const wchar_t *json, AppSettings *settings)
         else if (wcscmp(key, L"CloseWhenEmpty") == 0) ok = read_bool(value, &settings->close_when_empty);
         else if (wcscmp(key, L"WatchedFolders") == 0) ok = read_string_list(value, &settings->watched_folders, NULL);
         else if (wcscmp(key, L"WatchPeekSeconds") == 0) ok = read_int(value, &settings->watch_peek_seconds);
+        else if (wcscmp(key, L"WatchSeparateShelves") == 0) ok = read_bool(value, &settings->watch_separate_shelves);
         else if (wcscmp(key, L"PerformanceMode") == 0) ok = read_enum(value, &performance_table, &settings->performance_mode);
         else if (wcscmp(key, L"LowPerformanceMode") == 0)
         {
@@ -768,6 +770,7 @@ wchar_t *settings_serialize(const AppSettings *settings)
     json_write_bool(&writer, L"CloseWhenEmpty", settings->close_when_empty);
     write_string_list(&writer, L"WatchedFolders", &settings->watched_folders);
     json_write_int(&writer, L"WatchPeekSeconds", settings->watch_peek_seconds);
+    json_write_bool(&writer, L"WatchSeparateShelves", settings->watch_separate_shelves);
     write_enum(&writer, L"PerformanceMode", &performance_table, settings->performance_mode);
     json_write_string(&writer, L"Hotkey", settings->hotkey);
     json_write_bool(&writer, L"HasCompletedFirstRun", settings->has_completed_first_run);
