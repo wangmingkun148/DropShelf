@@ -358,13 +358,13 @@ static void on_add_app(void *context)
     free(items);
 }
 
-/// 上面那项的子项（列表里的一行、只在它有用时才出现的设置）：往右缩进一截、矮一点、底色深一点点，一眼看出属于上面那项。
-/// right 是右边的留白，行尾是图标按钮时它自己带着留白，给小一点。
-static void make_sub_item(UiElement *card, float right, float minimum_height)
+/// 上面那项列表里的一行（屏蔽的应用、观察的文件夹）：往右缩进一截、矮一点、底色深一点点，一眼看出属于上面那项。
+/// 行尾是删除按钮，它自己带着留白，右边留白给小一点。
+static void make_sub_item(UiElement *card, float minimum_height)
 {
     ui_stack_set_background(card, THEME_SUB_ROW, theme_is_cards() ? THEME_SETTING_ROW_BORDER : THEME_CARD_BORDER, 6);
     ui_set_margin(card, 40, 0, 0, 4);
-    ui_stack_set_padding(card, 16, 6, right, 6);
+    ui_stack_set_padding(card, 16, 6, 10, 6);
     card->minimum_height = minimum_height;
 }
 
@@ -394,7 +394,7 @@ static void rebuild_blocked_list(void)
         ui_button_set_font_size(remove, 14);
         ui_set_tooltip(remove, UI_STR(STR_RemoveBlockedApp));
         UiElement *card = ui_settings_card(NULL, UI_LIT(blocked_names.items[index]), UI_NO_TEXT, remove, NULL);
-        make_sub_item(card, 10, 44);
+        make_sub_item(card, 44);
         ui_add(P.blocked_list, card);
     }
 }
@@ -435,7 +435,7 @@ static void rebuild_watch_list(void)
         wchar_t *name = path_folder_name(watch_names.items[index]);
         UiElement *card = ui_settings_card(NULL, UI_LIT(name), UI_LIT(watch_names.items[index]), remove, NULL);
         free(name);
-        make_sub_item(card, 10, 52);
+        make_sub_item(card, 52);
         ui_add(P.watch_list, card);
     }
 }
@@ -724,12 +724,10 @@ static void build_shelf_page(void)
     P.watch_list = ui_stack(false, 0);
     ui_add(content, P.watch_list);
     P.separate_shelves = ui_toggle(settings->watch_separate_shelves, on_separate_shelves, NULL);
-    P.separate_shelves_card = add_card(content, NULL, UI_STR(STR_WatchSeparateShelves), UI_STR(STR_WatchSeparateShelvesDescription),
+    P.separate_shelves_card = add_card(content, GLYPH_VIEW_ALL, UI_STR(STR_WatchSeparateShelves), UI_STR(STR_WatchSeparateShelvesDescription),
         P.separate_shelves, NULL);
-    make_sub_item(P.separate_shelves_card, 16, 52);
-    P.peek_seconds_card = add_card(content, NULL, UI_STR(STR_WatchPeekSecondsHeader), UI_STR(STR_WatchPeekSecondsDescription),
+    P.peek_seconds_card = add_card(content, GLYPH_TIMER, UI_STR(STR_WatchPeekSecondsHeader), UI_STR(STR_WatchPeekSecondsDescription),
         build_peek_seconds_control(), NULL);
-    make_sub_item(P.peek_seconds_card, 16, 52);
 }
 
 // ───────────── 快速操作 ─────────────
