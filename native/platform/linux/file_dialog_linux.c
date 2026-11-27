@@ -5,6 +5,7 @@
 #endif
 
 #include "file_dialog.h"
+#include "strings.h"
 
 #include <gtk/gtk.h>
 #include <stdlib.h>
@@ -109,10 +110,20 @@ static wchar_t *with_extension(wchar_t *path, const wchar_t *extension)
     return result;
 }
 
+static char *utf8_string(StringId id)
+{
+    char *text = utf8_from_wide(S(id), NULL);
+    return text ? text : strdup("");
+}
+
 wchar_t *file_dialog_open(HWND owner, const wchar_t *title, const wchar_t *filter, const wchar_t *initial_directory)
 {
     (void)owner;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new("打开", NULL, GTK_FILE_CHOOSER_ACTION_OPEN, "打开", "取消");
+    char *open = utf8_string(STR_MenuOpen);
+    char *cancel = utf8_string(STR_Cancel);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(open, NULL, GTK_FILE_CHOOSER_ACTION_OPEN, open, cancel);
+    free(open);
+    free(cancel);
     apply_title(GTK_NATIVE_DIALOG(dialog), title);
     apply_filter(dialog, filter);
     apply_directory(dialog, initial_directory);
@@ -124,7 +135,13 @@ wchar_t *file_dialog_open(HWND owner, const wchar_t *title, const wchar_t *filte
 wchar_t *file_dialog_folder(HWND owner, const wchar_t *title, const wchar_t *initial_directory)
 {
     (void)owner;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new("选择文件夹", NULL, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "选择", "取消");
+    char *choose = utf8_string(STR_ChooseTargetFolder);
+    char *select = utf8_string(STR_Select);
+    char *cancel = utf8_string(STR_Cancel);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(choose, NULL, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, select, cancel);
+    free(choose);
+    free(select);
+    free(cancel);
     apply_title(GTK_NATIVE_DIALOG(dialog), title);
     apply_directory(dialog, initial_directory);
     wchar_t *result = run_dialog(dialog);
@@ -136,7 +153,11 @@ wchar_t *file_dialog_save(HWND owner, const wchar_t *title, const wchar_t *filte
     const wchar_t *initial_directory, const wchar_t *default_extension)
 {
     (void)owner;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new("保存", NULL, GTK_FILE_CHOOSER_ACTION_SAVE, "保存", "取消");
+    char *save = utf8_string(STR_Save);
+    char *cancel = utf8_string(STR_Cancel);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(save, NULL, GTK_FILE_CHOOSER_ACTION_SAVE, save, cancel);
+    free(save);
+    free(cancel);
     apply_title(GTK_NATIVE_DIALOG(dialog), title);
     apply_filter(dialog, filter);
     apply_directory(dialog, initial_directory);

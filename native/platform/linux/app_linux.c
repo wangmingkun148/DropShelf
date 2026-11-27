@@ -18,6 +18,7 @@
 #include "main_window.h"
 #include "onboarding_window.h"
 #include "probe.h"
+#include "strings.h"
 #include "quick_action.h"
 #include "shelf_history.h"
 #include "shelf_peek.h"
@@ -151,7 +152,7 @@ void app_unwatch_folder(const wchar_t *folder)
 
 bool app_choose_watch_folder(HWND owner)
 {
-    wchar_t *folder = pick_folder(owner, L"选择要观察的文件夹");
+    wchar_t *folder = pick_folder(owner, S(STR_ChooseWatchFolder));
     if (!folder) return false;
     app_watch_folder(folder);
     free(folder);

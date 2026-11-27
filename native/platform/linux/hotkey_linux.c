@@ -8,6 +8,7 @@
 #include "hotkey.h"
 #include "hyprland_linux.h"
 #include "log.h"
+#include "strings.h"
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -305,7 +306,9 @@ static void bind_shortcuts(void)
     g_variant_builder_open(&shortcuts, G_VARIANT_TYPE("(sa{sv})"));
     g_variant_builder_add(&shortcuts, "s", SHORTCUT_ID);
     g_variant_builder_open(&shortcuts, G_VARIANT_TYPE_VARDICT);
-    g_variant_builder_add(&shortcuts, "{sv}", "description", g_variant_new_string("打开置物架"));
+    char *description = utf8_from_wide(S(STR_OpenShelf), NULL);
+    g_variant_builder_add(&shortcuts, "{sv}", "description", g_variant_new_string(description ? description : "Open shelf"));
+    free(description);
     if (trigger) g_variant_builder_add(&shortcuts, "{sv}", "preferred_trigger", g_variant_new_string(trigger));
     g_variant_builder_close(&shortcuts);
     g_variant_builder_close(&shortcuts);

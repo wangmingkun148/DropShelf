@@ -6,6 +6,7 @@
 
 #include "drop_read.h"
 #include "attachment_cache.h"
+#include "strings.h"
 #include "task.h"
 
 #include <stdlib.h>
@@ -86,7 +87,7 @@ static void work(void *data)
         if (wcs_is_blank(job->paths.items[index])) continue;
         read_one(result, job->paths.items[index]);
     }
-    if (result->count == 0) result->error = wcs_dup(L"没有可读取的文件");
+    if (result->count == 0) result->error = wcs_dup(S(STR_NoFilesRead));
     job->result = result;
 }
 

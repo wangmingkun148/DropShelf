@@ -4,7 +4,7 @@
 
 I only recently realised that there are a few other projects with the same name. I apologise for my almost non-existent naming skills (lol). That said, I haven't referenced the UI or logic of any other projects. My only source of inspiration was Dropover, which I mentioned below. I also hope to keep animations as one of the project's defining features and continue improving them.
 
-DropShelf is a temporary shelf for files on Windows. While dragging files, shake the mouse or pause at a screen edge, and a shelf appears. Drop your files on it, switch to the window you need, then drag them all to File Explorer, a chat app or a browser in one go.
+DropShelf is a temporary shelf for files. While dragging files, shake the mouse or pause at a screen edge, and a shelf appears. Drop your files on it, switch to the window you need, then drag them all to File Explorer, a chat app or a browser in one go.
 
 Both the Windows build and a native Wayland Linux build (C + GTK 4 + gtk4-layer-shell) are maintained. Build steps, dependencies and differences for Linux are in [linux/README-linux.md](linux/README-linux.md).
 
@@ -60,7 +60,7 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - The list button in the title bar (also in the "⋯" menu) switches between the thumbnail stack and the list; the window resizes smoothly and each card flies to its own row. In the list you can multi-select, drag out the selection, double-click to open or right-click for more.
 - Dragging out moves files by default. Switch with settings or the Move/Copy button at the top of the shelf, or hold Ctrl or Shift to change it temporarily; chat apps and browsers get a copy automatically.
 - While dragging in, move to the bottom button bar to reveal quick actions and drop directly on one.
-- "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf. A pinned shelf never closes when empty.
+- "Close empty shelves" is on by default: dragged-out files leave the shelf and an empty shelf closes. With it off, copied files stay on the shelf.
 - Chat app support: temporary images and files deleted right after the drop are saved; PNG, JPG, GIF and DIB image data and older QQ versions are supported; temporary attachments dragged or copied to chat apps are kept for 10 more minutes.
 - Shelves that still hold files when closed are kept under "Recently closed shelves" (up to 10) and can be reopened from the Overview page in settings, the tray menu or the shelf's "⋯" menu. You can also drag a card out of the Overview page to reopen the shelf where you let go, or drop it back anywhere in the stack, where the other cards make room for it.
 - If a file on a shelf is renamed elsewhere, or moved to another folder on the same disk, the shelf follows it instead of showing "Moved or deleted". Files sent to the Recycle Bin or moved to another disk or a network location aren't followed. This works for files on NTFS disks.
@@ -87,7 +87,11 @@ DropShelf is not code-signed, so Windows may show "Windows protected your PC" th
 - Light (ivory background), Dark or System theme; the accent color follows Windows or can be one of eight colors (Cards defaults to cobalt).
 - English and Simplified Chinese interface, following the system language by default. Other languages can be added as language packs (a JSON file each) without changing the program; see [docs/translating.md](docs/translating.md).
 - Settings apply immediately and are saved automatically.
+- On the Overview page, drag a settings card left or right to flip it open with the mouse; drag the blank area of a settings page to flip back to Overview. Drag past halfway or flick to complete the flip; otherwise it springs back.
+- A settings page is the flipped card itself: the other cards tuck beneath it with three edges showing; hover an edge to peek which page it is.
+- Press `Esc`, `Alt+←` or the mouse Back button on a settings page to return to Overview.
 - A tutorial is shown on first run and can be viewed again from General.
+- "Low-performance mode" under General defaults to Auto: on battery or when Windows energy saver is on, it lowers rendering precision during animations, updates every other frame on displays above 100 Hz (e.g. ~82 fps on 165 Hz), animates shelf content in place instead of moving the window, and uses opaque backgrounds instead of Acrylic/Mica, restoring full quality once plugged back in. It can also be set to On or Off.
 
 ### System integration
 - Tray icon: left-click opens settings; right-click to create a shelf, reopen a recently closed one or quit.
@@ -146,13 +150,14 @@ For debugging, set `DROPSHELF_INSTANCE` to run a separate instance, and `DROPSHE
 
 ## Project structure
 
-- `native`: the C version (the one that is released). `native/src` is the program, `native/tests` the tests, and `native/res` the icons, manifest and version info.
+- `native`: the C version (the one that is released). `native/src` is the program, `native/platform/linux` is the Linux platform layer, `native/tests` the tests, and `native/res` the icons, manifest and version info.
+- `linux`: CMake entry point, packaging scripts, desktop metadata and tests for the Linux build.
 - `installer`: Inno Setup scripts for the installer and uninstaller.
 - `legacy/csharp`: the original C# version, no longer used.
 
 ## Releasing a new version
 
-1. Update the version in `native/CMakeLists.txt`, `native/res/app.manifest` and both `.iss` files under `installer`, then merge into `main`.
+1. Update the version in `native/CMakeLists.txt`, `native/res/app.manifest`, both `.iss` files under `installer`, `linux/PKGBUILD` and `linux/io.github.wangmingkun148.DropShelf.metainfo.xml`, then merge into `main`.
 2. On the GitHub Releases page, click "Draft a new release", create the tag `v<version>` (e.g. `v2.1.9`, matching the version) and publish. Alternatively, write the release notes in `docs/releases/v<version>.md` and just push the tag: Actions then creates the release with those notes, or generates notes from the commits if the file is missing.
 3. GitHub Actions builds the installer and portable version of the C version and attaches them to the release a few minutes later. The Linux AppImage and pacman package are attached too. Changes to `native` also make Actions build the C version and run its tests (`.github/workflows/build.yml`).
 
