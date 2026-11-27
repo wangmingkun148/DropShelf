@@ -358,10 +358,11 @@ static void on_add_app(void *context)
     free(items);
 }
 
-/// 上面那项的子项（列表里的一行、只在它有用时才出现的设置）：往右缩进一截、矮一点，一眼看出属于上面那项。
+/// 上面那项的子项（列表里的一行、只在它有用时才出现的设置）：往右缩进一截、矮一点、底色深一点点，一眼看出属于上面那项。
 /// right 是右边的留白，行尾是图标按钮时它自己带着留白，给小一点。
 static void make_sub_item(UiElement *card, float right, float minimum_height)
 {
+    ui_stack_set_background(card, THEME_SUB_ROW, theme_is_cards() ? THEME_SETTING_ROW_BORDER : THEME_CARD_BORDER, 6);
     ui_set_margin(card, 40, 0, 0, 4);
     ui_stack_set_padding(card, 16, 6, right, 6);
     card->minimum_height = minimum_height;

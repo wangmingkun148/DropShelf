@@ -83,6 +83,7 @@ typedef enum ThemeColor
     THEME_FLYOUT_BORDER,
     THEME_SETTING_ROW,
     THEME_SETTING_ROW_BORDER,
+    THEME_SUB_ROW,              // 设置里缩进的子项（列表行、子设置）：比上面那项深一点点
     THEME_SHELF_SOLID,
     THEME_SHELF_ACRYLIC_TINT,
     THEME_SHELF_BORDER,
