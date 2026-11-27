@@ -369,8 +369,7 @@ static bool saving_power(void)
     saving = GetSystemPowerStatus(&status) && (status.ACLineStatus == 0 || status.SystemStatusFlag == 1);
     return saving;
 #else
-    // M2 接上 /sys/class/power_supply 和 power-profiles-daemon；在此之前不自动进入低性能模式。
-    return false;
+    return anim_linux_saving_power();
 #endif
 }
 

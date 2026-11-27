@@ -104,6 +104,11 @@ int low_performance_mode(void);
 /// 现在是否启用。自动时在使用电池或系统开启节能模式期间启用，每次用到时现查（两秒内不重复查）。
 bool low_performance_enabled(void);
 
+#ifndef _WIN32
+/// Linux：在用电池放电，或系统开着节能模式（power-profiles-daemon）。两秒内不重复查。实现在 anim_linux.c。
+bool anim_linux_saving_power(void);
+#endif
+
 /// 逐帧回调里调用：这一帧要不要跳过不更新。各窗口在同一帧拿到同样的时刻，都跳过同一帧。跟着光标的动画不用它。
 bool low_performance_skip(double time);
 

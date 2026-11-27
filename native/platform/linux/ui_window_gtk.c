@@ -1066,6 +1066,9 @@ static GdkDragAction drop_enter_motion(UiWindow *window, GdkDrop *drop, double x
     GdkDragAction action = gdk_drop_get_actions(drop);
     if (!(action & (GDK_ACTION_COPY | GDK_ACTION_MOVE))) action = GDK_ACTION_COPY | GDK_ACTION_MOVE;
     if (!window->drop_handler(window, window->drop_context, enter ? UI_DROP_ENTER : UI_DROP_MOTION, drop, NULL, x, y, &action)) return 0;
+    // GTK 要一个确定的动作：处理函数没挑时，和 Windows 版一样优先复制。
+    if (action & GDK_ACTION_COPY) return GDK_ACTION_COPY;
+    if (action & GDK_ACTION_MOVE) return GDK_ACTION_MOVE;
     return action;
 }
 
