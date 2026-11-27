@@ -315,7 +315,11 @@ wchar_t *str_general_summary(int language, bool start_with_windows, const wchar_
 {
     WStr text = {0};
     join_part(&text, language == LANGUAGE_CHINESE ? L"中文" : language == LANGUAGE_ENGLISH ? L"English" : tr(L"语言跟随系统", L"System language"));
+#ifdef _WIN32
     join_part(&text, start_with_windows ? tr(L"开机启动", L"Starts with Windows") : tr(L"不开机启动", L"Doesn't start with Windows"));
+#else
+    join_part(&text, start_with_windows ? tr(L"开机启动", L"Starts at login") : tr(L"不开机启动", L"Doesn't start at login"));
+#endif
     join_part(&text, hotkey && *hotkey ? hotkey : S(STR_HotkeyNotSet));
     return wstr_take(&text);
 }
@@ -356,7 +360,12 @@ wchar_t *str_appearance_summary(int look, int theme, const wchar_t *accent)
     join_part(&text, theme == THEME_LIGHT ? S(STR_ThemeLight) : theme == THEME_DARK ? S(STR_ThemeDark) : tr(L"主题跟随系统", L"System theme"));
     // 没有自选时简洁跟随 Windows，纸牌用钴蓝；"system" 两种风格都跟随 Windows。
     bool system = wcs_equal(accent, L"system") || (!accent && look != 1);
-    join_part(&text, system ? tr(L"Windows 强调色", L"Windows accent color") : !accent ? S(STR_AccentCobalt) : tr(L"自选强调色", L"Custom accent color"));
+#ifdef _WIN32
+    const wchar_t *system_accent = tr(L"Windows 强调色", L"Windows accent color");
+#else
+    const wchar_t *system_accent = tr(L"系统强调色", L"System accent color");
+#endif
+    join_part(&text, system ? system_accent : !accent ? S(STR_AccentCobalt) : tr(L"自选强调色", L"Custom accent color"));
     return wstr_take(&text);
 }
 

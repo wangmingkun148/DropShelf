@@ -50,9 +50,22 @@ STR(RemoveHistoryTooltip, L"删除这条记录", L"Remove from history")
 STR(General, L"常规", L"General")
 STR(Language, L"语言", L"Language")
 STR(LanguageDescription, L"切换后立即生效，无需重启", L"Applies right away, no restart needed")
+// 说到 Windows 的条目，Linux 上换成不提系统的说法（名称不变，语言包照样能翻）。
+#ifdef _WIN32
 STR(StartWithWindows, L"开机自动启动", L"Start with Windows")
+#else
+STR(StartWithWindows, L"开机自动启动", L"Start at login")
+#endif
+#ifdef _WIN32
 STR(StartupDescription, L"登录 Windows 后在后台运行，不弹出窗口", L"Runs in the background after you sign in, without opening a window")
+#else
+STR(StartupDescription, L"登录后在后台运行，不弹出窗口", L"Runs in the background after you sign in, without opening a window")
+#endif
+#ifdef _WIN32
 STR(StartupFailed, L"Windows 没有允许修改开机启动，设置保持不变", L"Windows didn't allow the startup change, so the setting is unchanged")
+#else
+STR(StartupFailed, L"没能修改开机启动，设置保持不变", L"Couldn't change the startup setting, so it's unchanged")
+#endif
 STR(LowPerformanceMode, L"低性能模式", L"Low-performance mode")
 STR(PerformanceAuto, L"自动", L"Auto")
 STR(PerformanceOff, L"关闭", L"Off")
@@ -96,7 +109,11 @@ STR(BlockedAppsHeader, L"屏蔽的应用", L"Excluded apps")
 STR(BlockedAppsDescription, L"这些应用在前台、或拖动经过它们的窗口时不弹出置物架，快捷键也交给应用自己使用", L"Shelves don't open while one of these apps is in the foreground or while you drag over its windows, and the keyboard shortcut goes to the app instead")
 STR(AddApp, L"添加应用", L"Add app")
 STR(BrowseApp, L"浏览…", L"Browse…")
+#ifdef _WIN32
 STR(AppFilter, L"程序|*.exe", L"Programs|*.exe")
+#else
+STR(AppFilter, L"所有文件|*.*", L"All files|*.*")
+#endif
 STR(RemoveBlockedApp, L"移除", L"Remove")
 STR(Size, L"尺寸", L"Size")
 STR(SizeDescription, L"置物架窗口的大小", L"How large shelves appear")
@@ -165,7 +182,11 @@ STR(LookSimple, L"简洁", L"Simple")
 STR(LookCards, L"纸牌", L"Cards")
 STR(AccentColor, L"强调色", L"Accent color")
 STR(AccentDescription, L"按钮、开关和选中状态的颜色", L"Used for buttons, switches and selections")
+#ifdef _WIN32
 STR(AccentFollowSystem, L"跟随 Windows", L"Match Windows")
+#else
+STR(AccentFollowSystem, L"跟随系统", L"Match system")
+#endif
 STR(AccentCobalt, L"钴蓝", L"Cobalt")
 STR(CaptionMinimize, L"最小化", L"Minimize")
 STR(CaptionMaximize, L"最大化", L"Maximize")
@@ -192,10 +213,18 @@ STR(ClearHotkey, L"清除快捷键", L"Clear shortcut")
 STR(OnboardingWelcomeTitle, L"欢迎使用 DropShelf", L"Welcome to DropShelf")
 STR(OnboardingWelcomeBody, L"一个随叫随到的临时置物架：把文件先放进来，换个窗口、换个文件夹，再从这里拖出去。", L"A temporary shelf that's there whenever you need it: put files on it, switch to another window or folder, then drag them back out.")
 STR(OnboardingLookTitle, L"挑一种风格", L"Pick a style")
+#ifdef _WIN32
 STR(OnboardingLookBody, L"简洁和 Windows 11 的设置一样清爽；纸牌把置物架做成一摞牌，牌面、牌背和牌桌都有。以后也可以在设置的外观页里换。", L"Simple looks like Windows 11 Settings; Cards turns the shelf into a deck with card faces, backs and a table. You can switch any time on the Appearance page in Settings.")
+#else
+STR(OnboardingLookBody, L"简洁和系统设置一样清爽；纸牌把置物架做成一摞牌，牌面、牌背和牌桌都有。以后也可以在设置的外观页里换。", L"Simple is as clean as your system settings; Cards turns the shelf into a deck with card faces, backs and a table. You can switch any time on the Appearance page in Settings.")
+#endif
 STR(OnboardingLookDone, L"就用这个", L"Use this")
 STR(OnboardingShakeTitle, L"拖住文件，晃一晃", L"Drag a file and shake")
+#ifdef _WIN32
 STR(OnboardingShakeBody, L"在资源管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。", L"While dragging a file in File Explorer, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.")
+#else
+STR(OnboardingShakeBody, L"在文件管理器、桌面、浏览器或聊天软件里拖住文件，快速左右晃动鼠标，置物架就会出现在光标处。也可以拖到屏幕边缘停一下。", L"While dragging a file in a file manager, on the desktop, in a browser or in a chat app, shake the mouse quickly left and right and a shelf appears at the cursor. You can also pause at the edge of the screen.")
+#endif
 STR(OnboardingStackTitle, L"放进来，再拖出去", L"Drop it in, drag it out")
 STR(OnboardingStackBody, L"松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的列表按钮展开列表后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。", L"Let go and the files stay on the shelf. Drag the thumbnail stack to take everything at once, or click the list button at the top to open the list and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.")
 STR(OnboardingStackBodyCards, L"松开即可暂存。拖动缩略图堆叠可一次带走全部文件；点顶部的平铺按钮把牌摊开后也能多选，只拖走需要的部分。拖出时默认移动文件，点左上角的“移动”可切换为复制。", L"Let go and the files stay on the shelf. Drag the thumbnail stack to take everything at once, or click the spread button at the top to lay the cards out and pick only the files you need. Files are moved when you drag them out; click Move at the top left to copy them instead.")
@@ -244,7 +273,11 @@ STR(MenuSelectAll, L"全选", L"Select all")
 STR(MenuCopy, L"复制", L"Copy")
 STR(MenuPaste, L"粘贴", L"Paste")
 STR(MenuCopyPath, L"复制路径", L"Copy path")
+#ifdef _WIN32
 STR(MenuReveal, L"在资源管理器中显示", L"Show in File Explorer")
+#else
+STR(MenuReveal, L"在文件管理器中显示", L"Show in file manager")
+#endif
 STR(MenuClear, L"清空置物架", L"Clear shelf")
 STR(MenuSettings, L"DropShelf 设置", L"DropShelf settings")
 STR(MenuOpen, L"打开", L"Open")
@@ -302,7 +335,11 @@ STR(Save, L"保存", L"Save")
 STR(Cancel, L"取消", L"Cancel")
 STR(ChooseTargetFolder, L"选择文件夹", L"Choose a folder")
 STR(ChooseProgram, L"选择程序", L"Choose a program")
+#ifdef _WIN32
 STR(ProgramFilter, L"程序|*.exe;*.bat;*.cmd;*.lnk|所有文件|*.*", L"Programs|*.exe;*.bat;*.cmd;*.lnk|All files|*.*")
+#else
+STR(ProgramFilter, L"所有文件|*.*", L"All files|*.*")
+#endif
 STR(ChooseFolderFirst, L"请选择文件夹", L"Choose a folder")
 STR(FolderNotFoundShort, L"找不到这个文件夹", L"Folder not found")
 STR(ChooseProgramFirst, L"请选择程序", L"Choose a program")
@@ -317,7 +354,11 @@ STR(OutputFolderUnavailable, L"无法使用输出文件夹，原文件没有改�
 STR(ClipboardBusyOtherApp, L"剪贴板正被其他程序占用，请重试", L"Another app is using the clipboard. Please try again")
 STR(MoveCancelled, L"已取消移动", L"Move canceled")
 STR(MoveFailed, L"移动失败，原项目保持不变", L"Move failed. The items are unchanged")
+#ifdef _WIN32
 STR(ShownInExplorer, L"已在文件资源管理器中显示", L"Shown in File Explorer")
+#else
+STR(ShownInExplorer, L"已在文件管理器中显示", L"Shown in file manager")
+#endif
 STR(PropertiesName, L"名称", L"Name")
 STR(PropertiesType, L"类型", L"Type")
 STR(PropertiesLocation, L"位置", L"Location")
@@ -329,7 +370,11 @@ STR(PropertiesMultipleLocations, L"多个位置", L"Multiple locations")
 STR(PropertiesCalculating, L"正在计算…", L"Calculating…")
 STR(NoFilesForProperties, L"没有可查看属性的文件", L"No files to show properties for")
 STR(OpenedProperties, L"已打开属性", L"Opened properties")
+#ifdef _WIN32
 STR(PropertiesUnavailable, L"Windows 未能打开属性窗口", L"Windows couldn't open the properties window")
+#else
+STR(PropertiesUnavailable, L"未能打开属性窗口", L"Couldn't open the properties window")
+#endif
 STR(PropertiesFailed, L"未能打开属性窗口，原文件没有改变", L"Couldn't open the properties window. The original files are unchanged")
 STR(NothingToArchive, L"没有可压缩或解压的文件", L"No files to compress or extract")
 STR(NothingToCompress, L"没有可压缩的文件", L"No files to compress")
@@ -363,7 +408,11 @@ STR(StartupSettingsUnavailable, L"Windows 启动设置不可用", L"Windows star
 STR(StartupRefused, L"Windows 拒绝了这项设置", L"Windows refused this setting")
 
 // C# 版里写在带参数的方法里、但本身没有参数的文字。
+#ifdef _WIN32
 STR(PerformanceDescriptionAuto, L"使用电池或 Windows 开启节能模式时，降低动画对显卡的负担", L"Reduces the graphics load from animations on battery or when Windows energy saver is on")
+#else
+STR(PerformanceDescriptionAuto, L"使用电池或系统开启节能模式时，降低动画对显卡的负担", L"Reduces the graphics load from animations on battery or when power saver is on")
+#endif
 STR(PerformanceDescriptionNormal, L"动画始终完整播放。用电池时卡顿的话，可以改为自动", L"Animations always play in full. If they stutter on battery, switch to Auto")
 STR(DragOutModeTooltipCopy, L"所有置物架拖出时复制文件，点按改为移动", L"All shelves copy files when dragged out. Click to move instead")
 STR(DragOutModeTooltipMove, L"所有置物架拖出时移动文件，点按改为复制", L"All shelves move files when dragged out. Click to copy instead")
@@ -373,8 +422,16 @@ STR(PerformanceDescriptionLow,L"始终降低动画对显卡的负担", L"Always 
 STR(QuickActionDescriptionCompress, L"压缩为 ZIP；只有一个 ZIP 或 7z 时改为解压到它旁边。", L"Compresses into a ZIP. A single ZIP or 7z file is extracted next to it instead.")
 STR(QuickActionDescriptionCopyPath, L"把完整路径复制到剪贴板，多个项目按行分隔。", L"Copies full paths to the clipboard, one item per line.")
 STR(QuickActionDescriptionMoveTo, L"移动到你选择的文件夹，重名时两份都保留。", L"Moves items to a folder you choose, keeping both if names clash.")
+#ifdef _WIN32
 STR(QuickActionDescriptionReveal, L"在文件资源管理器中选中这些项目。", L"Selects these items in File Explorer.")
+#else
+STR(QuickActionDescriptionReveal, L"在文件管理器中选中这些项目。", L"Selects these items in the file manager.")
+#endif
+#ifdef _WIN32
 STR(QuickActionDescriptionProperties, L"打开 Windows 文件属性窗口。", L"Opens the Windows file properties window.")
+#else
+STR(QuickActionDescriptionProperties, L"打开文件属性窗口。", L"Opens the file properties window.")
+#endif
 STR(BusyCompressing, L"正在压缩…", L"Compressing…")
 STR(BusyCopyingPaths, L"正在复制路径…", L"Copying paths…")
 STR(BusyMoving, L"正在移动…", L"Moving…")
