@@ -1161,6 +1161,27 @@ static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDr
     free(out);
 }
 
+/// 单张图片再备一份图片格式：聊天的 Wayland 程序（微信）只把 image/png 当成图片，
+/// 文件列表它不认，只会把路径当文字插进输入框。
+static GdkContentProvider *drag_image_provider(const char *path)
+{
+    if (!path || !*path) return NULL;
+    const char *dot = strrchr(path, '.');
+    if (!dot) return NULL;
+    const char *mime = NULL;
+    if (g_ascii_strcasecmp(dot, ".png") == 0) mime = "image/png";
+    else if (g_ascii_strcasecmp(dot, ".jpg") == 0 || g_ascii_strcasecmp(dot, ".jpeg") == 0) mime = "image/jpeg";
+    if (!mime) return NULL;
+    char *contents = NULL;
+    gsize length = 0;
+    if (!g_file_get_contents(path, &contents, &length, NULL) || length == 0 || length > (gsize)32 * 1024 * 1024)
+    {
+        g_free(contents);
+        return NULL;
+    }
+    return gdk_content_provider_new_for_bytes(mime, g_bytes_new_take(contents, length));
+}
+
 static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, double x, double y, GdkDragAction *actions, void **data)
 {
     (void)window;
@@ -1269,7 +1290,39 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         }
         if (list)
         {
-            provider = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
+            GdkContentProvider *files_provider = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, list);
+            provider = files_provider;
+            // GdkFileList 只给出 text/plain;charset=utf-8，微信要找的是不带 charset 的 text/plain，
+            // 找不到就退回粘贴剪贴板。补一份纯 text/plain（路径），它就会把路径当文字插进去。
+            // 图片不加这份：微信优先认 image/png，多一份纯文字反而可能把它顶掉。
+            GdkContentProvider *image = NULL;
+            // 只拖一张图片时，再附一份图片格式。文件列表放前面，别的程序拿到的还是文件，行为不变。
+            if (list_count == 1 && file_count == 1 && extra.count == 0)
+            {
+                char *only = utf8_from_wide(files[0]->value, NULL);
+                image = only ? drag_image_provider(only) : NULL;
+                free(only);
+            }
+            GdkContentProvider *parts[3];
+            int part_count = 1;
+            parts[0] = files_provider;
+            if (image)
+                parts[part_count++] = image;
+            else if (object_count > 0)
+            {
+                GString *plain = g_string_new(NULL);
+                for (int index = 0; index < object_count; index++)
+                {
+                    if (plain->len > 0) g_string_append_c(plain, '\n');
+                    g_string_append(plain, names[index]);
+                }
+                gsize length = plain->len;
+                char *text = g_string_free(plain, FALSE);
+                parts[part_count++] = gdk_content_provider_new_for_bytes("text/plain", g_bytes_new_take(text, length));
+            }
+            // union 直接接管传进去的 provider，别再 unref：实测它不额外持有引用，
+            // 掉到零就没了，拖动时再去用就是访问已释放的内存。
+            if (part_count > 1) provider = gdk_content_provider_new_union(parts, (gsize)part_count);
             // GdkFileList 是 boxed 类型，不是 GObject：用 g_boxed_free 释放，g_object_unref 会报
             // “g_object_unref: assertion 'G_IS_OBJECT (object)' failed”，而且是漏掉的。
             g_boxed_free(GDK_TYPE_FILE_LIST, list);
