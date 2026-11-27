@@ -1174,7 +1174,7 @@ static GdkContentProvider *drag_image_provider(const char *path)
     if (!mime) return NULL;
     char *contents = NULL;
     gsize length = 0;
-    if (!g_file_get_contents(path, &contents, &length, NULL) || length == 0 || length > (gsize)32 * 1024 * 1024)
+    if (!g_file_get_contents(path, &contents, &length, NULL) || length == 0 || length > XDND_MAXIMUM_IMAGE_BYTES)
     {
         g_free(contents);
         return NULL;
@@ -1303,7 +1303,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                 image = only ? drag_image_provider(only) : NULL;
                 free(only);
             }
-            GdkContentProvider *parts[3];
+            GdkContentProvider *parts[2];
             int part_count = 1;
             parts[0] = files_provider;
             if (image)

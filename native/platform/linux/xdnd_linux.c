@@ -595,8 +595,6 @@ static void read_property_chunk(bool first)
 #define DROP_TYPE_TEXT 2u
 #define DROP_TYPE_HTML 4u
 #define DROP_TYPE_IMAGE 8u
-/// 图片原样塞进 selection 的上限；再大就只给文件 URI，别让一次拖出搬几十兆。
-#define MAXIMUM_IMAGE_BYTES ((gsize)32 * 1024 * 1024)
 
 static struct
 {
@@ -726,7 +724,7 @@ static void source_image_load(const char *path)
     if (type == XCB_ATOM_NONE) return;
     char *data = NULL;
     gsize length = 0;
-    if (!g_file_get_contents(path, &data, &length, NULL) || length == 0 || length > MAXIMUM_IMAGE_BYTES)
+    if (!g_file_get_contents(path, &data, &length, NULL) || length == 0 || length > XDND_MAXIMUM_IMAGE_BYTES)
     {
         g_free(data);
         return;
@@ -1438,6 +1436,8 @@ static void source_send_notify(xcb_selection_request_event_t *request, xcb_atom_
 }
 
 #define INCR_CHUNK_SIZE ((size_t)128 * 1024)
+/// 分段送时对方这么久没来取下一段，就当它不要了：放掉那份拷贝（最大是一整张图片）。
+#define INCR_STALL_SECONDS 5
 
 /// 正在分段（ICCCM 的 INCR）送给对方的数据：一次 X 请求塞不下时一段一段写。
 static struct
@@ -1447,15 +1447,41 @@ static struct
     xcb_atom_t property, type;
     char *data;
     size_t length, offset;
+    guint stall_timer;
 } served;
 
 static void served_clear(void)
 {
     if (!served.active) return;
     served.active = false;
+    if (served.stall_timer) g_source_remove(served.stall_timer);
+    served.stall_timer = 0;
+    // 不再关心对方窗口的属性变化（自己的窗口不动，它们本来就选了别的事件）。
+    if (bridge.connection && served.requestor != bridge.window && served.requestor != source.window)
+    {
+        uint32_t none = XCB_EVENT_MASK_NO_EVENT;
+        xcb_change_window_attributes(bridge.connection, served.requestor, XCB_CW_EVENT_MASK, &none);
+        xcb_flush(bridge.connection);
+    }
     g_free(served.data);
     served.data = NULL;
     served.length = served.offset = 0;
+}
+
+static gboolean served_stalled(gpointer data)
+{
+    (void)data;
+    served.stall_timer = 0;
+    log_info(L"X11 拖动源：分段送到 %zu / %zu 字节，对方 %d 秒没来取，不送了", served.offset, served.length, INCR_STALL_SECONDS);
+    served_clear();
+    return G_SOURCE_REMOVE;
+}
+
+/// 每写一段重新计时。
+static void served_wait(void)
+{
+    if (served.stall_timer) g_source_remove(served.stall_timer);
+    served.stall_timer = g_timeout_add_seconds(INCR_STALL_SECONDS, served_stalled, NULL);
 }
 
 /// 写下一块；对方删掉属性以后才写（见 handle_property_notify）。
@@ -1477,6 +1503,7 @@ static void served_step(void)
         (uint32_t)chunk, served.data + served.offset);
     xcb_flush(bridge.connection);
     served.offset += chunk;
+    served_wait();
 }
 
 static void served_begin(xcb_selection_request_event_t *request, xcb_atom_t property, xcb_atom_t type, const char *data,
@@ -1498,6 +1525,7 @@ static void served_begin(xcb_selection_request_event_t *request, xcb_atom_t prop
     uint32_t total = (uint32_t)length;
     xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, bridge.atoms.incr, 32, 1,
         &total);
+    served_wait();
     log_info(L"X11 拖动源：数据 %zu 字节，改成分段送（INCR）", length);
     source_send_notify(request, property);
 }

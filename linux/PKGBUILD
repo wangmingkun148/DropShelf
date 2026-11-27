@@ -1,7 +1,7 @@
 # Arch Linux 打包脚本：从 GitHub 的版本标签取源码，用 CMake 编译并安装。
 # 用法：makepkg -si（在包含本文件的目录里，和 linux/ 构建入口同级）。
 pkgname=dropshelf
-pkgver=3.2.0
+pkgver=3.2.1
 pkgrel=1
 pkgdesc="Temporarily hold files, text and links on a shelf (native Wayland)"
 arch=('x86_64' 'aarch64')

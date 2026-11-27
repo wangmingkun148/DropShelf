@@ -56,6 +56,9 @@ void xdnd_remove_sink(XdndSink *sink);
 
 // ───────────── 从置物架拖到 XWayland 程序 ─────────────
 
+/// 单张图片拖出时连图片内容一起给对方（聊天程序只把图片格式当图片收）；再大就只给文件，别让一次拖出搬几十兆。
+#define XDND_MAXIMUM_IMAGE_BYTES ((size_t)32 * 1024 * 1024)
+
 /// 把这次要拖出的东西交给 X11 拖动源：paths 是 UTF-8 的文件路径（没有文件时传 NULL），
 /// text 是纯文字；html 是一份 HTML（混合拖出时把文字和图片放在一起），没有时传 NULL。
 /// move_allowed 表示置物架那边按“移动”算。
