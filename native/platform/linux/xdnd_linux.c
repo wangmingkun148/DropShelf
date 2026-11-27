@@ -13,12 +13,16 @@
 #include "platform_linux.h"
 #include "ui_linux.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <gdk/gdk.h>
 #include <glib.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <xcb/xcb.h>
 
 /// 接放窗口建好时的初始大小；挂上去之前会改成整个 X 屏幕那么大（见 poll_tick）。
@@ -603,8 +607,7 @@ static struct
     char *uri_list;                 // text/uri-list 的内容（\r\n 分隔）
     char *text;                     // 纯文字；有文件时是路径列表
     char *html;                     // text/html：混合拖出时把文字和图片放在一起
-    char *image;                    // 单张图片的原文件内容：聊天程序只把它当图片收
-    size_t image_length;
+    GBytes *image;                  // 单张图片的原文件内容，与 GTK 提供器共用
     xcb_atom_t image_type;          // image/png 或 image/jpeg
     bool move_allowed;
     uint32_t drop_types;            // 发出 XdndDrop 以后对方取了哪些格式（DROP_TYPE_*）
@@ -654,6 +657,8 @@ static struct
 
 static void source_finish(bool dropped);
 static gboolean source_batch_start(gpointer data);
+static void served_clear_all(void);
+static GList *served_transfers;
 
 /// 排着队、主拖动放下后一批一批送出去的内容。
 typedef struct SourceBatch
@@ -702,36 +707,57 @@ static void source_clear_payload(void)
     g_free(source.uri_list);
     g_free(source.text);
     g_free(source.html);
-    g_free(source.image);
+    g_clear_pointer(&source.image, g_bytes_unref);
     source.uri_list = NULL;
     source.text = NULL;
     source.html = NULL;
-    source.image = NULL;
-    source.image_length = 0;
     source.image_type = XCB_ATOM_NONE;
     source.prepared = false;
 }
 
-/// 单张图片再按图片格式备一份：聊天程序（微信）只认 image/png，文件 URI 它当文字插进去。
-static void source_image_load(const char *path)
+GBytes *xdnd_read_drag_image(const char *path, const char **mime)
 {
-    if (!bridge.connection || !path || !*path) return;
-    const char *dot = strrchr(path, '.');
-    if (!dot) return;
-    xcb_atom_t type = XCB_ATOM_NONE;
-    if (g_ascii_strcasecmp(dot, ".png") == 0) type = bridge.atoms.image_png;
-    else if (g_ascii_strcasecmp(dot, ".jpg") == 0 || g_ascii_strcasecmp(dot, ".jpeg") == 0) type = bridge.atoms.image_jpeg;
-    if (type == XCB_ATOM_NONE) return;
-    char *data = NULL;
-    gsize length = 0;
-    if (!g_file_get_contents(path, &data, &length, NULL) || length == 0 || length > XDND_MAXIMUM_IMAGE_BYTES)
+    *mime = NULL;
+    const char *dot = path ? strrchr(path, '.') : NULL;
+    if (!dot) return NULL;
+    const char *type = NULL;
+    if (g_ascii_strcasecmp(dot, ".png") == 0) type = "image/png";
+    else if (g_ascii_strcasecmp(dot, ".jpg") == 0 || g_ascii_strcasecmp(dot, ".jpeg") == 0) type = "image/jpeg";
+    if (!type) return NULL;
+
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return NULL;
+    struct stat info;
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0
+        || (uintmax_t)info.st_size > XDND_MAXIMUM_IMAGE_BYTES)
     {
-        g_free(data);
-        return;
+        close(fd);
+        return NULL;
     }
-    source.image = data;
-    source.image_length = length;
-    source.image_type = type;
+
+    // 多留一个字节，以便发现文件在读取期间变大，不发送截断的图片。
+    size_t expected = (size_t)info.st_size;
+    char *buffer = g_malloc(expected + 1);
+    size_t length = 0;
+    while (length <= expected)
+    {
+        ssize_t count = read(fd, buffer + length, expected + 1 - length);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0)
+        {
+            if (count < 0) length = 0;
+            break;
+        }
+        length += (size_t)count;
+    }
+    close(fd);
+    if (length != expected)
+    {
+        g_free(buffer);
+        return NULL;
+    }
+    *mime = type;
+    return g_bytes_new_take(buffer, length);
 }
 
 /// 路径里的特殊字节按 URI 的规矩转义：WPS 这类程序要的是能直接用的 file:// URI。
@@ -782,7 +808,8 @@ static void source_paths_build(const char *const *paths, int count, char **uri_l
     }
 }
 
-void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed)
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed,
+    GBytes *image, const char *image_mime)
 {
     if (source.active || source.starting) return;
     // 上一次拖出还留着 selection：新的一次要开始了，立刻收回来，别让旧数据再被取到。
@@ -795,6 +822,7 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
         xcb_set_selection_owner(bridge.connection, XCB_ATOM_NONE, bridge.atoms.selection, XCB_CURRENT_TIME);
     source.assisting = false;
     source_batches_cancel(true);
+    served_clear_all();
     source_clear_payload();
     source.move_allowed = move_allowed;
     source.html = html && *html ? g_strdup(html) : NULL;
@@ -804,7 +832,11 @@ void xdnd_source_set_payload(const char *const *paths, int count, const char *te
     source.delivered = 0;
     source_paths_build(paths, count, &source.uri_list, &source.text);
     if (!source.uri_list && !source.text && text && *text) source.text = g_strdup(text);
-    if (count == 1 && paths && paths[0]) source_image_load(paths[0]);
+    if (bridge.connection && image && image_mime)
+    {
+        source.image_type = strcmp(image_mime, "image/png") == 0 ? bridge.atoms.image_png : bridge.atoms.image_jpeg;
+        if (source.image_type) source.image = g_bytes_ref(image);
+    }
     source.prepared = source.uri_list != NULL || source.text != NULL || source.html != NULL || source.image != NULL;
     source.proposed = source.move_allowed ? bridge.atoms.action_move : bridge.atoms.action_copy;
     log_trace(L"X11 拖动源：准备好内容（%d 个文件，文字 %ls，HTML %ls，排着 %u 批，%ls），提议动作 0x%x（移动 0x%x，复制 0x%x）", count,
@@ -964,6 +996,7 @@ static bool source_find_target(int pid, const RECT *rect, const wchar_t *title)
     if (!tree) return false;
     xcb_window_t best = XCB_NONE;
     int best_score = 0;
+    bool tied = false;
     xcb_window_t best_x = 0, best_y = 0;
     int best_width = 0, best_height = 0;
     int count = xcb_query_tree_children_length(tree);
@@ -984,31 +1017,23 @@ static bool source_find_target(int pid, const RECT *rect, const wchar_t *title)
             xcb_get_geometry_reply_t *geometry =
                 xcb_get_geometry_reply(bridge.connection, xcb_get_geometry(bridge.connection, window), NULL);
             if (!geometry) continue;
-            int score;
-            if (pass == 0)
+            int score = abs((int)geometry->x - (int)rect->left) + abs((int)geometry->y - (int)rect->top)
+                + abs((int)geometry->width - width) + abs((int)geometry->height - height);
+            if (pass == 1 && score > TARGET_GEOMETRY_TOLERANCE)
             {
-                score = abs((int)geometry->width - width) + abs((int)geometry->height - height);
-                if (title && *title)
-                {
-                    wchar_t *own = window_title(window);
-                    // Hyprland 那边的标题最多存 255 个字，只比这么长。
-                    if (!own || wcsncmp(own, title, 255) != 0) score += 1 << 20;
-                    free(own);
-                }
+                free(geometry);
+                continue;
             }
-            else
+            if (pass == 0 && title && *title)
             {
-                // pid 不可靠时，位置和大小都得对上；差得多的窗口一律不认，免得把拖动递给旁边的程序。
-                score = abs((int)geometry->x - (int)rect->left) + abs((int)geometry->y - (int)rect->top)
-                    + abs((int)geometry->width - width) + abs((int)geometry->height - height);
-                if (score > TARGET_GEOMETRY_TOLERANCE)
-                {
-                    free(geometry);
-                    continue;
-                }
+                wchar_t *own = window_title(window);
+                // Hyprland 那边的标题最多存 255 个字，只比这么长。
+                if (!own || wcsncmp(own, title, 255) != 0) score += 1 << 20;
+                free(own);
             }
             if (!best || score < best_score)
             {
+                tied = false;
                 best = window;
                 best_score = score;
                 best_x = geometry->x;
@@ -1016,11 +1041,13 @@ static bool source_find_target(int pid, const RECT *rect, const wchar_t *title)
                 best_width = geometry->width;
                 best_height = geometry->height;
             }
+            // pid 对得上时并列就取第一个；pid 靠不住的第二轮并列说明认不准，宁可不接管。
+            else if (pass == 1 && score == best_score) tied = true;
             free(geometry);
         }
     }
     free(tree);
-    if (!best) return false;
+    if (!best || tied) return false;
     source.target = best;
     source.target_pid = pid;
     source.target_rect = *rect;
@@ -1096,6 +1123,7 @@ bool xdnd_source_assist_begin(void)
 static gboolean assist_clear(gpointer data)
 {
     (void)data;
+    if (served_transfers) return G_SOURCE_CONTINUE;
     source.assist_clear_source = 0;
     if (!source.assisting) return G_SOURCE_REMOVE;
     source.assisting = false;
@@ -1113,6 +1141,7 @@ static gboolean assist_clear(gpointer data)
             log_info(L"X11 拖动源：交回拖动的数据 selection");
         }
     }
+    source_clear_payload();
     return G_SOURCE_REMOVE;
 }
 
@@ -1244,6 +1273,7 @@ static void source_batches_abort(void)
 static void source_finish(bool dropped)
 {
     if (!source.active && !source.starting) return;
+    // 正在分段送的数据不在这里收掉：对方可能先回 XdndFinished 再接着读，各自送完或停顿超时再放。
     bool batching = source.batching;
     GdkDragAction action = 0;
     if (batching) action = source.batch_report;
@@ -1283,7 +1313,7 @@ static void source_finish(bool dropped)
     }
     if (source.active && bridge.connection)
     {
-        if (!dropped) source_send_leave();
+        if (!dropped && !source.waiting_finish) source_send_leave();
         // 松手以后对方可能还在读数据，等它回过 XdndFinished（或者等够了）再把 selection 交回去。
         if (source.window && bridge.atoms.selection)
             xcb_set_selection_owner(bridge.connection, XCB_ATOM_NONE, bridge.atoms.selection, XCB_CURRENT_TIME);
@@ -1310,6 +1340,7 @@ static void source_finish(bool dropped)
     }
     source_batches_clear();
     source.batch_report = 0;
+    source_clear_payload();
     ui_drag_taken_over_finished(action);
 }
 
@@ -1362,9 +1393,7 @@ static gboolean source_batch_start(gpointer data)
     g_free(source.html);
     source.html = NULL;
     // 分批送的都是文件 URI 和文字，不拆图片；上一批的图片内容不能跟着这一批发出去。
-    g_free(source.image);
-    source.image = NULL;
-    source.image_length = 0;
+    g_clear_pointer(&source.image, g_bytes_unref);
     source.image_type = XCB_ATOM_NONE;
     source_batch_free(batch);
     source.prepared = source.uri_list != NULL || source.text != NULL;
@@ -1413,6 +1442,9 @@ static void source_handle_status(xcb_client_message_event_t *event)
 static void source_handle_finished(xcb_client_message_event_t *event)
 {
     if (!source.waiting_finish) return;
+    if (event->data.data32[0] != source.entered)
+        log_trace(L"X11 拖动源：XdndFinished 报的窗口 0x%x 不是放下的 0x%x，照样算", (unsigned)event->data.data32[0],
+            (unsigned)source.entered);
     bool success = event->data.data32[1] != 0;
     if (success && event->data.data32[2] == bridge.atoms.action_move) source.action = bridge.atoms.action_move;
     log_info(L"X11 拖动源：对方收完了%ls", success ? L"" : L"（没收下）");
@@ -1438,109 +1470,112 @@ static void source_send_notify(xcb_selection_request_event_t *request, xcb_atom_
 #define INCR_CHUNK_SIZE ((size_t)128 * 1024)
 /// 分段送时对方这么久没来取下一段，就当它不要了：放掉那份拷贝（最大是一整张图片）。
 #define INCR_STALL_SECONDS 5
+#define INCR_MAX_TRANSFERS 8
 
 /// 正在分段（ICCCM 的 INCR）送给对方的数据：一次 X 请求塞不下时一段一段写。
-static struct
+typedef struct ServedTransfer
 {
-    bool active;
     xcb_window_t requestor;
     xcb_atom_t property, type;
-    char *data;
-    size_t length, offset;
+    GBytes *bytes;
+    size_t offset;
     guint stall_timer;
-} served;
+} ServedTransfer;
 
-static void served_clear(void)
+static ServedTransfer *served_find(xcb_window_t window, xcb_atom_t property)
 {
-    if (!served.active) return;
-    served.active = false;
-    if (served.stall_timer) g_source_remove(served.stall_timer);
-    served.stall_timer = 0;
-    // 不再关心对方窗口的属性变化（自己的窗口不动，它们本来就选了别的事件）。
-    if (bridge.connection && served.requestor != bridge.window && served.requestor != source.window)
+    for (GList *link = served_transfers; link; link = link->next)
+    {
+        ServedTransfer *transfer = link->data;
+        if (transfer->requestor == window && (!property || transfer->property == property)) return transfer;
+    }
+    return NULL;
+}
+
+static void served_clear(ServedTransfer *transfer)
+{
+    served_transfers = g_list_remove(served_transfers, transfer);
+    if (transfer->stall_timer) g_source_remove(transfer->stall_timer);
+    xcb_window_t requestor = transfer->requestor;
+    if (bridge.connection && requestor != bridge.window && requestor != source.window && !served_find(requestor, XCB_ATOM_NONE))
     {
         uint32_t none = XCB_EVENT_MASK_NO_EVENT;
-        xcb_change_window_attributes(bridge.connection, served.requestor, XCB_CW_EVENT_MASK, &none);
+        xcb_change_window_attributes(bridge.connection, requestor, XCB_CW_EVENT_MASK, &none);
         xcb_flush(bridge.connection);
     }
-    g_free(served.data);
-    served.data = NULL;
-    served.length = served.offset = 0;
+    g_bytes_unref(transfer->bytes);
+    g_free(transfer);
+    // 已经放下的话，最后一份数据结束（送完、停顿超时或被新请求顶掉）后才开始等 XdndFinished。
+    if (!served_transfers && source.waiting_finish) source.drop_at = g_get_monotonic_time();
+}
+
+static void served_clear_all(void)
+{
+    while (served_transfers) served_clear(served_transfers->data);
 }
 
 static gboolean served_stalled(gpointer data)
 {
-    (void)data;
-    served.stall_timer = 0;
-    log_info(L"X11 拖动源：分段送到 %zu / %zu 字节，对方 %d 秒没来取，不送了", served.offset, served.length, INCR_STALL_SECONDS);
-    served_clear();
+    ServedTransfer *transfer = data;
+    transfer->stall_timer = 0;
+    log_info(L"X11 拖动源：对方 %d 秒没有取下一段，停止发送", INCR_STALL_SECONDS);
+    served_clear(transfer);
     return G_SOURCE_REMOVE;
 }
 
-/// 每写一段重新计时。
-static void served_wait(void)
+static void served_wait(ServedTransfer *transfer)
 {
-    if (served.stall_timer) g_source_remove(served.stall_timer);
-    served.stall_timer = g_timeout_add_seconds(INCR_STALL_SECONDS, served_stalled, NULL);
+    if (transfer->stall_timer) g_source_remove(transfer->stall_timer);
+    transfer->stall_timer = g_timeout_add_seconds(INCR_STALL_SECONDS, served_stalled, transfer);
 }
 
-/// 写下一块；对方删掉属性以后才写（见 handle_property_notify）。
-static void served_step(void)
+static void served_step(ServedTransfer *transfer)
 {
-    if (!served.active || !bridge.connection) return;
-    size_t remaining = served.length - served.offset;
-    if (remaining == 0)
+    size_t length;
+    const char *data = g_bytes_get_data(transfer->bytes, &length);
+    size_t chunk = MIN(length - transfer->offset, INCR_CHUNK_SIZE);
+    xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, transfer->requestor, transfer->property, transfer->type, 8,
+        (uint32_t)chunk, chunk ? data + transfer->offset : NULL);
+    xcb_flush(bridge.connection);
+    if (chunk == 0)
     {
-        // ICCCM：写完数据再写一个零长度的属性，对方才知道收齐了。
-        xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, served.requestor, served.property, served.type, 8, 0,
-            NULL);
-        xcb_flush(bridge.connection);
-        served_clear();
+        served_clear(transfer);
         return;
     }
-    size_t chunk = remaining > INCR_CHUNK_SIZE ? INCR_CHUNK_SIZE : remaining;
-    xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, served.requestor, served.property, served.type, 8,
-        (uint32_t)chunk, served.data + served.offset);
-    xcb_flush(bridge.connection);
-    served.offset += chunk;
-    served_wait();
+    transfer->offset += chunk;
+    served_wait(transfer);
 }
 
-static void served_begin(xcb_selection_request_event_t *request, xcb_atom_t property, xcb_atom_t type, const char *data,
-    size_t length)
+static void served_begin(xcb_selection_request_event_t *request, xcb_atom_t property, xcb_atom_t type, GBytes *bytes)
 {
-    served_clear();
-    served.active = true;
-    served.requestor = request->requestor;
-    served.property = property;
-    served.type = type;
-    // 按长度拷，不能 g_strdup：图片是二进制，中间可能有 NUL。
-    served.data = g_malloc(length > 0 ? length : 1);
-    if (length > 0) memcpy(served.data, data, length);
-    served.length = length;
-    served.offset = 0;
-    // 对方删掉属性时要收到通知，才知道可以写下一段。事件掩码是每个客户端各算各的，不影响对方自己选的。
+    ServedTransfer *transfer = g_new0(ServedTransfer, 1);
+    transfer->requestor = request->requestor;
+    transfer->property = property;
+    transfer->type = type;
+    transfer->bytes = g_bytes_ref(bytes);
+    served_transfers = g_list_prepend(served_transfers, transfer);
     uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
     xcb_change_window_attributes(bridge.connection, request->requestor, XCB_CW_EVENT_MASK, &mask);
-    uint32_t total = (uint32_t)length;
+    uint32_t total = (uint32_t)g_bytes_get_size(bytes);
     xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, bridge.atoms.incr, 32, 1,
         &total);
-    served_wait();
-    log_info(L"X11 拖动源：数据 %zu 字节，改成分段送（INCR）", length);
+    served_wait(transfer);
+    log_info(L"X11 拖动源：数据 %u 字节，改成分段送（INCR）", total);
     source_send_notify(request, property);
 }
 
 static void source_serve_selection(xcb_selection_request_event_t *request)
 {
     if (!bridge.connection || !source.window) return;
-    if (request->owner != source.window)
+    if (request->owner != source.window || request->selection != bridge.atoms.selection)
     {
         source_send_notify(request, XCB_ATOM_NONE);
         return;
     }
     xcb_atom_t property = request->property ? request->property : request->target;
-    // 上一次分段送还没写完、对方又改要别的格式：先把上一次收掉。
-    if (served.active && (served.requestor != request->requestor || served.property != property)) served_clear();
+    // 同一个窗口在同一个属性上又来要（多半是不会收分段、改要别的格式）：上一次作废，按新的来。
+    ServedTransfer *previous = served_find(request->requestor, property);
+    if (previous) served_clear(previous);
     if (request->target == bridge.atoms.targets)
     {
         xcb_atom_t atoms[8];
@@ -1565,10 +1600,9 @@ static void source_serve_selection(xcb_selection_request_event_t *request)
     size_t binary_length = 0;
     if (source.image && request->target == source.image_type)
     {
-        data = source.image;
+        data = g_bytes_get_data(source.image, &binary_length);
         type = source.image_type;
         drop_type = DROP_TYPE_IMAGE;
-        binary_length = source.image_length;
     }
     else if (request->target == bridge.atoms.uri_list && source.uri_list)
     {
@@ -1607,7 +1641,14 @@ static void source_serve_selection(xcb_selection_request_event_t *request)
     size_t length = binary_length ? binary_length : strlen(data);
     if (length > INCR_CHUNK_SIZE)
     {
-        served_begin(request, property, type, data, length);
+        if (g_list_length(served_transfers) >= INCR_MAX_TRANSFERS)
+        {
+            source_send_notify(request, XCB_ATOM_NONE);
+            return;
+        }
+        GBytes *bytes = binary_length ? g_bytes_ref(source.image) : g_bytes_new(data, length);
+        served_begin(request, property, type, bytes);
+        g_bytes_unref(bytes);
         return;
     }
     xcb_change_property(bridge.connection, XCB_PROP_MODE_REPLACE, request->requestor, property, type, 8, (uint32_t)length, data);
@@ -1644,39 +1685,23 @@ static void source_tick(gint64 now)
         return;
     }
     if (!source.active || !bridge.connection) return;
-    if (source.batching)
+    if (source.waiting_finish)
     {
-        // 自动分批不跟着鼠标走，也不看按键：接受了就放下，等 XdndFinished 收尾。
-        if (source.waiting_finish)
+        if (!served_transfers && now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
         {
-            if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
-            {
-                // 迟到的 XdndFinished 会被记到下一批头上：不再往下送，只算之前确认过的几批。
-                log_info(L"X11 拖动源：这一批等 XdndFinished 等太久，剩下 %u 批不送了", g_queue_get_length(&batches));
-                source_batches_clear();
-                source_finish(true);
-            }
-            return;
-        }
-        if (source.accepted)
-        {
-            source_send_drop();
-            return;
-        }
-        if (now - source.started_at >= BATCH_ACCEPT_TIMEOUT_MICROSECONDS)
-        {
-            log_info(L"X11 拖动源：接收方不理这一批，剩下的不送了");
+            log_info(L"X11 拖动源：等 XdndFinished 超时，剩余批次不再发送");
             source_finish(false);
         }
         return;
     }
-    if (source.waiting_finish)
+    if (source.batching)
     {
-        if (now - source.drop_at >= SOURCE_FINISH_TIMEOUT_MICROSECONDS)
+        // 自动分批不跟着鼠标走，也不看按键。
+        if (source.accepted) source_send_drop();
+        else if (now - source.started_at >= BATCH_ACCEPT_TIMEOUT_MICROSECONDS)
         {
-            log_info(L"X11 拖动源：等 XdndFinished 等太久，不算送到，排着的批次也不送了");
-            source_batches_clear();
-            source_finish(true);
+            log_info(L"X11 拖动源：接收方不理这一批，剩下的不送了");
+            source_finish(false);
         }
         return;
     }
@@ -1686,7 +1711,8 @@ static void source_tick(gint64 now)
         source_finish(false);
         return;
     }
-    if (now - source.checked_at >= SOURCE_RECHECK_MICROSECONDS)
+    bool released = gesture_left_button_state() == 0;
+    if (released || now - source.checked_at >= SOURCE_RECHECK_MICROSECONDS)
     {
         source.checked_at = now;
         xcb_get_selection_owner_reply_t *owner =
@@ -1732,7 +1758,7 @@ static void source_tick(gint64 now)
         }
     }
     source_send_position();
-    if (gesture_left_button_state() == 0) source_send_drop();
+    if (released) source_send_drop();
 }
 
 bool xdnd_source_should_take_over(void)
@@ -1782,7 +1808,7 @@ bool xdnd_source_should_take_over(void)
 
 bool xdnd_source_begin(void)
 {
-    if (!bridge.connection || !source.target || source.active || source.starting) return false;
+    if (!bridge.connection || !source.target || source.active || source.starting || gesture_left_button_state() < 0) return false;
     source.starting = true;
     source.start_at = g_get_monotonic_time() + TAKEOVER_SETTLE_MICROSECONDS;
     source.dwell_pid = 0;
@@ -1942,10 +1968,10 @@ static void handle_selection_notify(xcb_selection_notify_event_t *event)
 static void handle_property_notify(xcb_property_notify_event_t *event)
 {
     // 我们当拖动源、分段送数据：对方把属性删掉了，就该接着写下一段。
-    if (served.active && event->window == served.requestor && event->atom == served.property
-        && event->state == XCB_PROPERTY_DELETE)
+    if (event->state == XCB_PROPERTY_DELETE)
     {
-        served_step();
+        ServedTransfer *transfer = served_find(event->window, event->atom);
+        if (transfer) served_step(transfer);
         return;
     }
     if (!reading || !incremental || event->window != bridge.window) return;
@@ -2182,6 +2208,7 @@ void xdnd_stop(void)
     source.waiting_finish = false;
     source.dwell_pid = 0;
     source.dwell_since = 0;
+    served_clear_all();
     source_clear_payload();
     if (bridge.connection && source.window) xcb_destroy_window(bridge.connection, source.window);
     source.window = 0;

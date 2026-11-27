@@ -18,6 +18,7 @@
 #include "shelf_model.h"
 #include "shelf_peek.h"
 #include "task.h"
+#include "xdnd_linux.h"
 
 #include <glib.h>
 #include <math.h>
@@ -219,6 +220,7 @@ static void test_gesture_and_settings(void)
     settings.pause_in_fullscreen = false;
     settings.mixed_drag = MIXED_DRAG_TEXT;
     strlist_add(&settings.watched_folders, L"/tmp/watched");
+    strlist_add(&settings.watched_folders, L"/tmp/Watched");
     wchar_t *json = settings_serialize(&settings);
     CHECK(json != NULL);
 
@@ -229,8 +231,9 @@ static void test_gesture_and_settings(void)
     CHECK(!parsed.pause_in_fullscreen);
     CHECK(parsed.mixed_drag == MIXED_DRAG_TEXT);
     CHECK(!parsed.watch_separate_shelves);
-    CHECK(parsed.watched_folders.count == 1);
+    CHECK(parsed.watched_folders.count == 2);
     CHECK(wcs_is(parsed.watched_folders.items[0], L"/tmp/watched"));
+    CHECK(parsed.watched_folders.count == 2 && wcs_is(parsed.watched_folders.items[1], L"/tmp/Watched"));
     settings_free(&parsed);
     settings_free(&settings);
     free(json);
@@ -694,6 +697,37 @@ static void test_foreground_parsing(void)
     CHECK(classes.count == 0);
 }
 
+static void test_drag_image_read(void)
+{
+    GError *error = NULL;
+    char *folder = g_dir_make_tmp("dropshelf-drag-XXXXXX", &error);
+    CHECK(folder != NULL);
+    g_clear_error(&error);
+    if (!folder) return;
+
+    char *path = g_build_filename(folder, "image.png", NULL);
+    const char contents[] = { 'p', 0, 'n', 'g' };
+    CHECK(g_file_set_contents(path, contents, sizeof contents, NULL));
+    const char *mime = NULL;
+    GBytes *image = xdnd_read_drag_image(path, &mime);
+    CHECK(image && g_strcmp0(mime, "image/png") == 0);
+    if (image)
+    {
+        gsize length;
+        const void *bytes = g_bytes_get_data(image, &length);
+        CHECK(length == sizeof contents && memcmp(bytes, contents, length) == 0);
+        g_bytes_unref(image);
+    }
+    CHECK(truncate(path, XDND_MAXIMUM_IMAGE_BYTES + 1) == 0);
+    image = xdnd_read_drag_image(path, &mime);
+    CHECK(image == NULL && mime == NULL);
+    g_clear_pointer(&image, g_bytes_unref);
+    unlink(path);
+    g_free(path);
+    rmdir(folder);
+    g_free(folder);
+}
+
 int main(void)
 {
     test_wide_strings();
@@ -704,6 +738,7 @@ int main(void)
     test_gesture_and_settings();
     test_peek_stack();
     test_image_quality();
+    test_drag_image_read();
     test_settings_path();
     test_file_identity();
     test_attachment_names();

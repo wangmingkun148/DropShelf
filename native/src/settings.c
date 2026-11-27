@@ -483,7 +483,7 @@ void settings_normalize(AppSettings *settings)
         wchar_t *folder = wcs_trim_dup(settings->watched_folders.items[index]);
         size_t length = wcslen(folder);
         while (length > 3 && (folder[length - 1] == L'\\' || folder[length - 1] == L'/')) folder[--length] = 0;
-        if (*folder && strlist_index_of(&folders, folder, true) < 0) strlist_add(&folders, folder);
+        if (*folder && strlist_index_of(&folders, folder, PATHS_IGNORE_CASE) < 0) strlist_add(&folders, folder);
         free(folder);
     }
     strlist_clear(&settings->watched_folders);

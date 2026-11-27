@@ -4,6 +4,7 @@
 // 读出的文字、文件或图片交给置物架，和 Wayland 源走同一套处理。
 #pragma once
 
+#include <glib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -59,10 +60,14 @@ void xdnd_remove_sink(XdndSink *sink);
 /// 单张图片拖出时连图片内容一起给对方（聊天程序只把图片格式当图片收）；再大就只给文件，别让一次拖出搬几十兆。
 #define XDND_MAXIMUM_IMAGE_BYTES ((size_t)32 * 1024 * 1024)
 
+/// 读取单张拖出图片，超限或不支持时返回 NULL。调用方释放 GBytes。
+GBytes *xdnd_read_drag_image(const char *path, const char **mime);
+
 /// 把这次要拖出的东西交给 X11 拖动源：paths 是 UTF-8 的文件路径（没有文件时传 NULL），
 /// text 是纯文字；html 是一份 HTML（混合拖出时把文字和图片放在一起），没有时传 NULL。
-/// move_allowed 表示置物架那边按“移动”算。
-void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed);
+/// move_allowed 表示置物架那边按“移动”算；image 和 image_mime 可为空。
+void xdnd_source_set_payload(const char *const *paths, int count, const char *text, const char *html, bool move_allowed,
+    GBytes *image, const char *image_mime);
 
 /// 再排一批：这次拖动真正放下以后，自动按排队的顺序一批一批地送给同一个窗口
 /// （每一批都被对方收下才接着送下一批）。paths 是这一批的文件，text 是这一批的纯文字，内容会被复制。

@@ -1161,27 +1161,6 @@ static void drag_out_finished(UiWindow *window, void *context, void *data, GdkDr
     free(out);
 }
 
-/// 单张图片再备一份图片格式：聊天的 Wayland 程序（微信）只把 image/png 当成图片，
-/// 文件列表它不认，只会把路径当文字插进输入框。
-static GdkContentProvider *drag_image_provider(const char *path)
-{
-    if (!path || !*path) return NULL;
-    const char *dot = strrchr(path, '.');
-    if (!dot) return NULL;
-    const char *mime = NULL;
-    if (g_ascii_strcasecmp(dot, ".png") == 0) mime = "image/png";
-    else if (g_ascii_strcasecmp(dot, ".jpg") == 0 || g_ascii_strcasecmp(dot, ".jpeg") == 0) mime = "image/jpeg";
-    if (!mime) return NULL;
-    char *contents = NULL;
-    gsize length = 0;
-    if (!g_file_get_contents(path, &contents, &length, NULL) || length == 0 || length > XDND_MAXIMUM_IMAGE_BYTES)
-    {
-        g_free(contents);
-        return NULL;
-    }
-    return gdk_content_provider_new_for_bytes(mime, g_bytes_new_take(contents, length));
-}
-
 static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, double x, double y, GdkDragAction *actions, void **data)
 {
     (void)window;
@@ -1208,14 +1187,21 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
     GdkContentProvider *provider = NULL;
     ShelfItem **files = xalloc((size_t)count * sizeof(ShelfItem *));
     ShelfItem **others = xalloc((size_t)count * sizeof(ShelfItem *));
+    // 文件索引从前往后存，文本索引从后往前存。
+    int *dragged_indices = xalloc((size_t)count * sizeof(int));
     int file_count = 0, other_count = 0;
     bool has_temporary = false;
     for (int index = 0; index < count; index++)
     {
         ShelfItem *item = items[index];
-        if (!shelf_item_is_file_system(item)) others[other_count++] = item;
+        if (!shelf_item_is_file_system(item))
+        {
+            dragged_indices[count - 1 - other_count] = index;
+            others[other_count++] = item;
+        }
         else if (shelf_item_refresh_availability(item))
         {
+            dragged_indices[file_count] = index;
             files[file_count++] = item;
             has_temporary |= item->temporary;
         }
@@ -1297,12 +1283,10 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             // 图片不加这份：微信优先认 image/png，多一份纯文字反而可能把它顶掉。
             GdkContentProvider *image = NULL;
             // 只拖一张图片时，再附一份图片格式。文件列表放前面，别的程序拿到的还是文件，行为不变。
-            if (list_count == 1 && file_count == 1 && extra.count == 0)
-            {
-                char *only = utf8_from_wide(files[0]->value, NULL);
-                image = only ? drag_image_provider(only) : NULL;
-                free(only);
-            }
+            const char *image_mime = NULL;
+            GBytes *image_bytes = object_count == 1 ? xdnd_read_drag_image(names[0], &image_mime) : NULL;
+            if (image_bytes && list_count == 1 && extra.count == 0)
+                image = gdk_content_provider_new_for_bytes(image_mime, image_bytes);
             GdkContentProvider *parts[2];
             int part_count = 1;
             parts[0] = files_provider;
@@ -1318,7 +1302,9 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                 }
                 gsize length = plain->len;
                 char *text = g_string_free(plain, FALSE);
-                parts[part_count++] = gdk_content_provider_new_for_bytes("text/plain", g_bytes_new_take(text, length));
+                GBytes *bytes = g_bytes_new_take(text, length);
+                parts[part_count++] = gdk_content_provider_new_for_bytes("text/plain", bytes);
+                g_bytes_unref(bytes);
             }
             // union 直接接管传进去的 provider，别再 unref：实测它不额外持有引用，
             // 掉到零就没了，拖动时再去用就是访问已释放的内存。
@@ -1355,8 +1341,15 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                     }
                     if (first)
                     {
-                        if (shelf_item_is_file_system(item)) xdnd_source_set_payload((const char *const *)&one, 1, NULL, NULL, move);
-                        else xdnd_source_set_payload(NULL, 0, one, NULL, false);
+                        if (shelf_item_is_file_system(item))
+                        {
+                            const char *first_mime = image_mime;
+                            bool reuse_image = object_count == 1 && strcmp(one, names[0]) == 0;
+                            GBytes *first_image = reuse_image ? image_bytes : xdnd_read_drag_image(one, &first_mime);
+                            xdnd_source_set_payload((const char *const *)&one, 1, NULL, NULL, move, first_image, first_mime);
+                            if (!reuse_image) g_clear_pointer(&first_image, g_bytes_unref);
+                        }
+                        else xdnd_source_set_payload(NULL, 0, one, NULL, false, NULL, NULL);
                         first = false;
                         item_parts[index] = 0;
                     }
@@ -1368,7 +1361,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                 // 一个能送的都没有（文件全找不到了）：还是按整组文件交过去，至少不让这次拖动变成空的。
                 if (first)
                 {
-                    xdnd_source_set_payload((const char *const *)names, object_count, NULL, NULL, move);
+                    xdnd_source_set_payload((const char *const *)names, object_count, NULL, NULL, move, image_bytes, image_mime);
                     for (int index = 0; index < count; index++)
                         if (shelf_item_is_file_system(items[index])) item_parts[index] = 0;
                 }
@@ -1376,7 +1369,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
             else
             {
                 char *html = mixed_smart ? xdnd_source_html_build(utf8_text, (const char *const *)names, object_count) : NULL;
-                xdnd_source_set_payload((const char *const *)names, object_count, NULL, html, move);
+                xdnd_source_set_payload((const char *const *)names, object_count, NULL, html, move, image_bytes, image_mime);
                 // 智能：HTML 里已经有文字，可文档程序常常只肯从文件列表里插图片；放下后再补一批纯文字。
                 // 文字算在补送的那批里：HTML 对方未必用了，补送那批被拒时文字留在置物架上。
                 bool text_queued = text_planned && xdnd_source_add_batch(NULL, 0, utf8_text);
@@ -1385,6 +1378,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
                         item_parts[index] = shelf_item_is_file_system(items[index]) ? 0 : text_queued ? 1 : -1;
                 free(html);
             }
+            g_clear_pointer(&image_bytes, g_bytes_unref);
         }
         for (int index = 0; index < object_count; index++) free(names[index]);
         free(names);
@@ -1399,7 +1393,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         {
             // GTK 要的是 UTF-8：直接给 wchar_t 那边收到的是乱码，拖出去的文字也会坏掉。
             provider = gdk_content_provider_new_typed(G_TYPE_STRING, utf8_text);
-            xdnd_source_set_payload(NULL, 0, utf8_text, NULL, false);
+            xdnd_source_set_payload(NULL, 0, utf8_text, NULL, false, NULL, NULL);
         }
         *actions = GDK_ACTION_COPY;
     }
@@ -1413,6 +1407,7 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         for (int index = 0; index < dragged_count; index++) shelf_item_release(dragged[index]);
         free(dragged);
         free(item_parts);
+        free(dragged_indices);
         shelf->dragging_out = false;
         model->dragging_out = false;
         free(items);
@@ -1429,12 +1424,12 @@ static GdkContentProvider *linux_drag_prepare(UiWindow *window, void *context, d
         out->parts = xalloc((size_t)dragged_count * sizeof(int));
         for (int index = 0; index < dragged_count; index++)
         {
-            out->parts[index] = -1;
-            for (int search = 0; search < count; search++)
-                if (items[search] == dragged[index]) out->parts[index] = item_parts[search];
+            int original = index < file_count ? dragged_indices[index] : dragged_indices[count - 1 - (index - file_count)];
+            out->parts[index] = item_parts[original];
         }
         free(item_parts);
     }
+    free(dragged_indices);
     current_drag_out = out;
     shelf_dim_dragged(shelf, items, count);
     // 从列表里只拖出一部分时，下边伸出“新置物架”，放上去就拆成一个新的置物架。

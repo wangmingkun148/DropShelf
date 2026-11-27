@@ -598,7 +598,7 @@ static void add_to(Peek *peek, const StrList *added)
 {
     int before = peek->paths.count;
     for (int index = 0; index < added->count; index++)
-        if (strlist_index_of(&peek->paths, added->items[index], true) < 0) strlist_add(&peek->paths, added->items[index]);
+        if (strlist_index_of(&peek->paths, added->items[index], PATHS_IGNORE_CASE) < 0) strlist_add(&peek->paths, added->items[index]);
     if (peek->paths.count == 0 || (peek->shown && peek->paths.count == before)) return;
     FileSuit *suits = xalloc((size_t)peek->paths.count * sizeof(FileSuit));
     for (int index = 0; index < peek->paths.count; index++) suits[index] = file_suit_of_path(peek->paths.items[index]);
@@ -624,7 +624,7 @@ static Peek *free_peek(void)
 static bool already_shown(const wchar_t *path)
 {
     for (int index = 0; index < SHELF_PEEK_MAXIMUM; index++)
-        if (peeks[index].shown && strlist_index_of(&peeks[index].paths, path, true) >= 0) return true;
+        if (peeks[index].shown && strlist_index_of(&peeks[index].paths, path, PATHS_IGNORE_CASE) >= 0) return true;
     return false;
 }
 
@@ -675,7 +675,7 @@ void shelf_peek_add(const StrList *added)
     if (!shelf_peek_is_shown() && user_is_busy())
     {
         for (int index = 0; index < added->count; index++)
-            if (strlist_index_of(&waiting, added->items[index], true) < 0) strlist_add(&waiting, added->items[index]);
+            if (strlist_index_of(&waiting, added->items[index], PATHS_IGNORE_CASE) < 0) strlist_add(&waiting, added->items[index]);
         if (!waiting_scheduled)
         {
             waiting_scheduled = true;
