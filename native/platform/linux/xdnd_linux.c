@@ -1041,7 +1041,8 @@ static bool source_find_target(int pid, const RECT *rect, const wchar_t *title)
                 best_width = geometry->width;
                 best_height = geometry->height;
             }
-            else if (score == best_score) tied = true;
+            // pid 对得上时并列就取第一个；pid 靠不住的第二轮并列说明认不准，宁可不接管。
+            else if (pass == 1 && score == best_score) tied = true;
             free(geometry);
         }
     }
@@ -1272,7 +1273,7 @@ static void source_batches_abort(void)
 static void source_finish(bool dropped)
 {
     if (!source.active && !source.starting) return;
-    served_clear_all();
+    // 正在分段送的数据不在这里收掉：对方可能先回 XdndFinished 再接着读，各自送完或停顿超时再放。
     bool batching = source.batching;
     GdkDragAction action = 0;
     if (batching) action = source.batch_report;
@@ -1440,7 +1441,10 @@ static void source_handle_status(xcb_client_message_event_t *event)
 
 static void source_handle_finished(xcb_client_message_event_t *event)
 {
-    if (!source.waiting_finish || event->data.data32[0] != source.entered) return;
+    if (!source.waiting_finish) return;
+    if (event->data.data32[0] != source.entered)
+        log_trace(L"X11 拖动源：XdndFinished 报的窗口 0x%x 不是放下的 0x%x，照样算", (unsigned)event->data.data32[0],
+            (unsigned)source.entered);
     bool success = event->data.data32[1] != 0;
     if (success && event->data.data32[2] == bridge.atoms.action_move) source.action = bridge.atoms.action_move;
     log_info(L"X11 拖动源：对方收完了%ls", success ? L"" : L"（没收下）");
@@ -1501,6 +1505,8 @@ static void served_clear(ServedTransfer *transfer)
     }
     g_bytes_unref(transfer->bytes);
     g_free(transfer);
+    // 已经放下的话，最后一份数据结束（送完、停顿超时或被新请求顶掉）后才开始等 XdndFinished。
+    if (!served_transfers && source.waiting_finish) source.drop_at = g_get_monotonic_time();
 }
 
 static void served_clear_all(void)
@@ -1514,7 +1520,6 @@ static gboolean served_stalled(gpointer data)
     transfer->stall_timer = 0;
     log_info(L"X11 拖动源：对方 %d 秒没有取下一段，停止发送", INCR_STALL_SECONDS);
     served_clear(transfer);
-    if (source.waiting_finish) source_finish(false);
     return G_SOURCE_REMOVE;
 }
 
@@ -1535,8 +1540,6 @@ static void served_step(ServedTransfer *transfer)
     if (chunk == 0)
     {
         served_clear(transfer);
-        // 最后一段发送完毕后，才开始等接收方确认放下。
-        if (!served_transfers && source.waiting_finish) source.drop_at = g_get_monotonic_time();
         return;
     }
     transfer->offset += chunk;
@@ -1570,11 +1573,9 @@ static void source_serve_selection(xcb_selection_request_event_t *request)
         return;
     }
     xcb_atom_t property = request->property ? request->property : request->target;
-    if (served_find(request->requestor, property))
-    {
-        source_send_notify(request, XCB_ATOM_NONE);
-        return;
-    }
+    // 同一个窗口在同一个属性上又来要（多半是不会收分段、改要别的格式）：上一次作废，按新的来。
+    ServedTransfer *previous = served_find(request->requestor, property);
+    if (previous) served_clear(previous);
     if (request->target == bridge.atoms.targets)
     {
         xcb_atom_t atoms[8];
