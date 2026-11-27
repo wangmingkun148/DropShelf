@@ -1008,6 +1008,14 @@ static void test_folder_watch_names(void)
     RECT second = { 1920, 40, 3840, 1080 };
     place = shelf_peek_place((POINT){ 2500, 1075 }, second, 66, 100, &edge);
     CHECK(edge == EDGE_LEFT && place.x == 1920 && place.y == 980, "第二块屏幕上应贴它自己的边，不超出下沿");
+
+    // 几个角沿着边排开：挪到紧贴别的角上面或下面、离原处最近的空处（一样近时往下），不超出工作区。
+    int busy[] = { 450, 550, 550, 650 };
+    CHECK(shelf_peek_stack(300, 100, work, busy, 0) == 300, "没有别的角时就放在原处");
+    CHECK(shelf_peek_stack(450, 100, work, busy, 1) == 550, "被占着时应挪到下面一格");
+    CHECK(shelf_peek_stack(450, 100, work, busy, 2) == 350, "下面也被占着时应挪到上面一格");
+    int bottom[] = { 940, 1040 };
+    CHECK(shelf_peek_stack(940, 100, work, bottom, 1) == 840, "贴着下沿时应往上挪");
 }
 
 static void test_folder_watch(void)

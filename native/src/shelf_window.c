@@ -1,7 +1,7 @@
 #include "look_variant.h"
 #include "shelf_window_internal.h"
-#ifdef LOOK_VARIANT_CARDS
 #include "shelf_card.h"
+#ifdef LOOK_VARIANT_CARDS
 #include "card_face.h"
 #endif
 #include "log.h"
@@ -139,11 +139,7 @@ void shelf_update_window_size(ShelfWindow *shelf)
     if (rect.right - rect.left != pixel_width || rect.bottom - rect.top != pixel_height)
         SetWindowPos(shelf->handle, NULL, 0, 0, pixel_width, pixel_height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     // 滑入动画结束时会再检查一次，动画进行中不要把窗口拉回原处。
-#ifdef LOOK_VARIANT_CARDS
     if (IsWindowVisible(shelf->handle) && !shelf->sliding && !shelf->card) shelf_keep_in_work_area(shelf);
-#else
-    if (IsWindowVisible(shelf->handle) && !shelf->sliding) shelf_keep_in_work_area(shelf);
-#endif
     ui_window_invalidate(shelf->ui);
 }
 
@@ -727,9 +723,7 @@ static void on_closed(UiWindow *window, void *context)
     ShelfWindow *shelf = context;
     shelf->closed = true;
     shelf->closing = true;
-#ifdef LOOK_VARIANT_CARDS
     shelf_cancel_card(shelf);
-#endif
     shelf_stop_slide(shelf);
     shelf_stop_pop(shelf);
     shelf_merge_forget(shelf);
@@ -885,6 +879,71 @@ bool shelf_window_is_animating(const ShelfWindow *shelf)
 #endif
 }
 
+// ───────────── 由牌替置物架出场 ─────────────
+
+/// 出场的牌落定：置物架现身。
+static void entrance_finished(void *context)
+{
+    ShelfWindow *shelf = context;
+    shelf->card = NULL;
+    window_set_cloaked(shelf->handle, false);
+}
+
+void shelf_deal_in(ShelfWindow *shelf, POINT cursor)
+{
+    bool from_peek = shelf->from_peek;
+    shelf->from_peek = false;
+    shelf->surface_opacity = 1;
+    shelf->surface_scale = 1;
+    shelf->surface_dx = shelf->surface_dy = 0;
+    RECT rect = {0};
+    GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
+    ShelfCard *card = face ? shelf_card_rent() : NULL;
+    if (!card)
+    {
+        gfx_image_release(face);
+        window_set_cloaked(shelf->handle, false);
+        shelf_repaint(shelf);
+        return;
+    }
+    double scale = shelf_scale(shelf);
+    RECT work = work_area_at((POINT){ rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2 }, NULL);
+    double width = rect.right - rect.left, height = rect.bottom - rect.top;
+    CardMotion motion;
+    if (from_peek)
+    {
+        const ShelfPopOrigin *origin = &shelf->peek_origin;
+        motion = card_motion_peek_pop(rect, scale, origin->center, origin->width, origin->height, origin->angle, shelf->edge);
+    }
+    else if (shelf->entrance == ENTRANCE_SHAKE)
+    {
+        // 光标离置物架中心太远时按靠近中心的位置算，牌不会从老远飞过来。
+        double dx = fmax(-0.35 * width, fmin(0.35 * width, cursor.x - (rect.left + width / 2))) / scale;
+        double dy = fmax(-0.35 * height, fmin(0.35 * height, cursor.y - (rect.top + height / 2))) / scale;
+        motion = card_motion_shake_in(dx, dy);
+    }
+    else motion = card_motion_edge_in(shelf->edge, rect, work, scale);
+    shelf->flipped_on_horizontal_axis = motion.horizontal_axis;
+    shelf->card = card;
+    shelf_card_play(card, rect, work, scale, face, &motion, NULL, entrance_finished, shelf);
+    gfx_image_release(face);
+}
+
+void shelf_finish_entrance(ShelfWindow *shelf)
+{
+    ShelfCard *card = shelf->card;
+    if (!card) return;
+    shelf->card = NULL;
+    window_set_cloaked(shelf->handle, false);
+    shelf_card_cancel(card);
+}
+
+void shelf_cancel_card(ShelfWindow *shelf)
+{
+    shelf_card_cancel(shelf->card);
+    shelf->card = NULL;
+}
+
 /// 以 center 为中心、完整落在那个显示器的工作区内；跨缩放比例不同的显示器时按实际大小再放一次。
 static void center_on(ShelfWindow *shelf, POINT center)
 {
@@ -906,20 +965,23 @@ static void center_on(ShelfWindow *shelf, POINT center)
 void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, ShelfEntranceKind entrance, ScreenEdge edge)
 {
     bool was_visible = shelf_window_is_visible(shelf);
-#ifdef LOOK_VARIANT_CARDS
     // 复用正在出场的置物架时先让它落定，否则下一帧会把窗口拉回原来的位置。
     if (was_visible)
     {
         shelf_stop_slide(shelf);
         shelf_finish_entrance(shelf);
     }
-    // 晃动和边缘呼出由一张牌替置物架出场：置物架先隐身，照常显示和绘制，牌落定时直接现身。
+    // 由一张牌替置物架出场：置物架先隐身，照常显示和绘制，牌落定时直接现身。纸牌晃动和边缘呼出时都这样，
+    // 简洁只在从观察文件夹的角点开时（牌从角那里转出来）。
+#ifdef LOOK_VARIANT_CARDS
     bool dealt = !was_visible && anim_enabled() && entrance != ENTRANCE_PLAIN;
-    if (dealt) window_set_cloaked(shelf->handle, true);
 #else
-    // 复用正在滑入的置物架时停止动画，否则下一帧会把窗口拉回原来的位置。
-    if (was_visible) shelf_stop_slide(shelf);
+    bool dealt = !was_visible && anim_enabled() && shelf->from_peek;
 #endif
+    if (!dealt) shelf->from_peek = false;
+    if (dealt) window_set_cloaked(shelf->handle, true);
+    // 刚放进去的文件还没排好时先排好，截下的牌面和窗口大小都是放好以后的。
+    if (dealt && shelf->refresh_posted) shelf_refresh_views(shelf);
     RECT before = {0};
     if (was_visible) GetWindowRect(shelf->handle, &before);
     center_on(shelf, center);
@@ -933,11 +995,7 @@ void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, Shelf
         shelf->entrance = entrance;
         shelf->edge = edge;
         // 先把内容摆到出场的起点再显示，第一帧就不会闪出完整的内容。
-#ifdef LOOK_VARIANT_CARDS
         shelf->surface_opacity = dealt ? 1.0f : 0.0f;
-#else
-        shelf->surface_opacity = 0;
-#endif
     }
     if (!was_visible)
     {
@@ -947,11 +1005,11 @@ void shelf_window_show_at(ShelfWindow *shelf, POINT center, bool activate, Shelf
         center_on(shelf, center);
     }
     else if (activate) SetForegroundWindow(shelf->handle);
-#ifdef LOOK_VARIANT_CARDS
     if (dealt) shelf_deal_in(shelf, center);
+#ifdef LOOK_VARIANT_CARDS
     else if (!was_visible || moved) shelf_animate_in(shelf);
 #else
-    if (!was_visible || moved) shelf_animate_in(shelf, center);
+    else if (!was_visible || moved) shelf_animate_in(shelf, center);
 #endif
     shelf_repaint(shelf);
 }
@@ -975,8 +1033,8 @@ void shelf_window_close_animated(ShelfWindow *shelf)
 {
     if (shelf->closing || shelf->closed) return;
     shelf->closing = true;
-#ifdef LOOK_VARIANT_CARDS
     shelf_finish_entrance(shelf);
+#ifdef LOOK_VARIANT_CARDS
     shelf_stop_slide(shelf);
     shelf_stop_pop(shelf);
     // 发牌、移除、补位和窗口大小的动画停在这一帧：截下的牌面和屏幕上一样。没做完的收尾（比如待移除的项目）在窗口关闭时补上。
@@ -1006,9 +1064,7 @@ void shelf_window_add_paths(ShelfWindow *shelf, const StrList *paths)
 void shelf_window_leave_look(ShelfWindow *shelf)
 {
     // 按原来的风格把正在播的动画都走到终点、收起提示和拖入时的放置区域，切换时不留下半截。
-#ifdef LOOK_VARIANT_CARDS
     if (shelf->card) shelf_finish_entrance(shelf);
-#endif
     shelf_finish_motion(shelf);
     shelf_hide_toast(shelf);
     shelf_end_drag(shelf);

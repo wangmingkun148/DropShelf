@@ -1080,57 +1080,6 @@ static RECT work_area_of(RECT rect)
     return info.rcWork;
 }
 
-/// 出场的牌落定：置物架现身。
-static void entrance_finished(void *context)
-{
-    ShelfWindow *shelf = context;
-    shelf->card = NULL;
-    window_set_cloaked(shelf->handle, false);
-}
-
-void shelf_deal_in(ShelfWindow *shelf, POINT cursor)
-{
-    shelf->surface_opacity = 1;
-    shelf->surface_scale = 1;
-    shelf->surface_dx = shelf->surface_dy = 0;
-    RECT rect = {0};
-    GfxImage *face = shelf->handle && GetWindowRect(shelf->handle, &rect) ? ui_window_capture(shelf->ui) : NULL;
-    ShelfCard *card = face ? shelf_card_rent() : NULL;
-    if (!card)
-    {
-        gfx_image_release(face);
-        window_set_cloaked(shelf->handle, false);
-        shelf_repaint(shelf);
-        return;
-    }
-    double scale = shelf_scale(shelf);
-    RECT work = work_area_of(rect);
-    double width = rect.right - rect.left, height = rect.bottom - rect.top;
-    // 光标离置物架中心太远时按靠近中心的位置算，牌不会从老远飞过来。
-    double dx = fmax(-0.35 * width, fmin(0.35 * width, cursor.x - (rect.left + width / 2))) / scale;
-    double dy = fmax(-0.35 * height, fmin(0.35 * height, cursor.y - (rect.top + height / 2))) / scale;
-    CardMotion motion = shelf->entrance == ENTRANCE_SHAKE ? card_motion_shake_in(dx, dy) : card_motion_edge_in(shelf->edge, rect, work, scale);
-    shelf->flipped_on_horizontal_axis = motion.horizontal_axis;
-    shelf->card = card;
-    shelf_card_play(card, rect, work, scale, face, &motion, NULL, entrance_finished, shelf);
-    gfx_image_release(face);
-}
-
-void shelf_finish_entrance(ShelfWindow *shelf)
-{
-    ShelfCard *card = shelf->card;
-    if (!card) return;
-    shelf->card = NULL;
-    window_set_cloaked(shelf->handle, false);
-    shelf_card_cancel(card);
-}
-
-void shelf_cancel_card(ShelfWindow *shelf)
-{
-    shelf_card_cancel(shelf->card);
-    shelf->card = NULL;
-}
-
 /// 离场的牌现身的同一刻置物架隐身，中间不会空一帧，两层阴影也不会叠在一起。
 static void exit_shown(void *context)
 {

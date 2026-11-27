@@ -142,6 +142,7 @@ typedef struct AppSettings
     /// 观察这些文件夹：出现新文件时屏幕边缘探出置物架的一角，点开后新文件就在里面。
     StrList watched_folders;
     int watch_peek_seconds;
+    bool watch_separate_shelves;    // 每个新文件单独探出一个角、点开成一个置物架；关闭时角缩回前来的新文件合在一个角里
     int performance_mode;
     wchar_t *hotkey;
     bool has_completed_first_run;

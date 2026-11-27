@@ -28,7 +28,7 @@ static struct
     UiElement *performance, *performance_description;
     UiElement *trigger, *sensitivity_card, *sensitivity_description, *sensitivity_slider, *edge_dwell_card, *edge_dwell;
     UiElement *blocked_list, *pause_fullscreen;
-    UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card;
+    UiElement *watch_list, *add_folder_button, *peek_seconds, *peek_seconds_card, *separate_shelves, *separate_shelves_card;
     UiElement *shelf_size, *drag_out_mode, *mixed_drag, *close_when_empty;
     UiElement *history_description, *clear_history;
     UiElement *layout, *layout_description;
@@ -85,6 +85,8 @@ static void on_layout(int index, void *context)
 
 static void change_close_when_empty(AppSettings *settings, void *context) { settings->close_when_empty = *(bool *)context; }
 static void on_close_when_empty(bool checked, void *context) { (void)context; app_update_settings(change_close_when_empty, &checked); }
+static void change_separate_shelves(AppSettings *settings, void *context) { settings->watch_separate_shelves = *(bool *)context; }
+static void on_separate_shelves(bool checked, void *context) { (void)context; app_update_settings(change_separate_shelves, &checked); }
 
 static void change_pause_fullscreen(AppSettings *settings, void *context) { settings->pause_in_fullscreen = *(bool *)context; }
 static void on_pause_fullscreen(bool checked, void *context) { (void)context; app_update_settings(change_pause_fullscreen, &checked); }
@@ -713,6 +715,9 @@ static void build_shelf_page(void)
     add_card(content, GLYPH_VIEW, UI_STR(STR_WatchedFoldersHeader), UI_STR(STR_WatchFoldersDescription), P.add_folder_button, NULL);
     P.watch_list = ui_stack(false, 0);
     ui_add(content, P.watch_list);
+    P.separate_shelves = ui_toggle(settings->watch_separate_shelves, on_separate_shelves, NULL);
+    P.separate_shelves_card = add_card(content, GLYPH_VIEW_ALL, UI_STR(STR_WatchSeparateShelves), UI_STR(STR_WatchSeparateShelvesDescription),
+        P.separate_shelves, NULL);
     P.peek_seconds_card = add_card(content, GLYPH_TIMER, UI_STR(STR_WatchPeekSecondsHeader), UI_STR(STR_WatchPeekSecondsDescription),
         build_peek_seconds_control(), NULL);
 }
@@ -1117,8 +1122,9 @@ void pages_refresh(void)
     else ui_label_set_text(P.history_description, UI_STR(STR_HistoryEmpty));
     ui_set_disabled(P.clear_history, history_count == 0);
     rebuild_watch_list();
-    // 没有观察的文件夹时停留时间用不上。
-    P.peek_seconds_card->hidden = settings->watched_folders.count == 0;
+    // 没有观察的文件夹时这两项用不上。
+    P.separate_shelves_card->hidden = P.peek_seconds_card->hidden = settings->watched_folders.count == 0;
+    ui_toggle_set_checked(P.separate_shelves, settings->watch_separate_shelves);
     refresh_peek_seconds(settings);
 
     // 快速操作。
