@@ -920,6 +920,8 @@ void gfx_text_draw(const wchar_t *text, GfxRect rect, const GfxTextStyle *style,
     cairo_move_to(cairo, x, y);
     set_color(cairo, color);
     pango_cairo_show_layout(cairo, layout);
+    // 路径不在 save/restore 保存的状态里：清掉 move_to，不然下一个圆弧会从文字起点连一条线过去。
+    cairo_new_path(cairo);
     cairo_restore(cairo);
     g_object_unref(layout);
 }

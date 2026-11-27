@@ -205,7 +205,14 @@ static void on_startup(GApplication *app, gpointer data)
     // 初始风格和配色跟着设置走，两种风格（简洁、纸牌）在同一个程序里，见 theme.h 的 Look。
     const AppSettings *settings = app_settings();
     theme_initialize(settings->theme, settings->accent_color, (Look)settings->look);
-    language_set_mode(LANGUAGE_SYSTEM);
+    language_set_mode(settings->language);
+    // 语言包也在启动时就装上，不用等打开设置窗口（设置窗口每次打开时会再找一遍）。
+    wchar_t *data_folder = settings_data_directory();
+    wchar_t *packs = path_join(data_folder, LANGUAGE_PACK_FOLDER);
+    language_packs_reload(packs);
+    language_set_pack(language_packs_find(settings->language_pack));
+    free(packs);
+    free(data_folder);
     shelf_history_load(NULL);
     shelves_prewarm();
     app_start(NULL, true);
