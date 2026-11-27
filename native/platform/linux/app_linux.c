@@ -110,7 +110,7 @@ void app_watch_folder(const wchar_t *folder)
     app_settings();
     for (int index = 0; index < current_settings.watched_folders.count; index++)
     {
-        if (wcs_equal_ignore_case(current_settings.watched_folders.items[index], folder)) return;
+        if (path_equal(current_settings.watched_folders.items[index], folder)) return;
     }
     StrList updated = {0};
     for (int index = 0; index < current_settings.watched_folders.count; index++)
@@ -138,7 +138,7 @@ void app_unwatch_folder(const wchar_t *folder)
     StrList kept = {0};
     for (int index = 0; index < copy.watched_folders.count; index++)
     {
-        if (wcs_equal_ignore_case(copy.watched_folders.items[index], folder)) continue;
+        if (path_equal(copy.watched_folders.items[index], folder)) continue;
         strlist_add(&kept, copy.watched_folders.items[index]);
     }
     strlist_clear(&copy.watched_folders);

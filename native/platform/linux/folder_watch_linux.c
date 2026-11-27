@@ -196,7 +196,7 @@ static bool written_by_us(const wchar_t *path, ULONGLONG now)
     int kept = 0;
     for (int index = 0; index < expected_count; index++)
     {
-        if (!found && _wcsicmp(expected[index].path, path) == 0)
+        if (!found && path_equal(expected[index].path, path))
         {
             found = true;
             free(expected[index].path);
@@ -222,7 +222,7 @@ static void flush_held(void)
     {
         const wchar_t *path = held.items[index];
         if (written_by_us(path, now) || came_from_drag(path, held_seen[index])) continue;
-        if (strlist_index_of(&ready, path, true) < 0) strlist_add(&ready, path);
+        if (strlist_index_of(&ready, path, PATHS_IGNORE_CASE) < 0) strlist_add(&ready, path);
     }
     strlist_clear(&held);
     if (ready.count > 0 && watch_handler) watch_handler(&ready);
@@ -254,7 +254,7 @@ static void deliver(void *data)
 static int pending_index(WatchState *state, const wchar_t *path)
 {
     for (int index = 0; index < state->pending_count; index++)
-        if (_wcsicmp(state->pending[index].path, path) == 0) return index;
+        if (path_equal(state->pending[index].path, path)) return index;
     return -1;
 }
 
@@ -303,7 +303,7 @@ static void remember_gone(WatchState *state, const wchar_t *path, bool was_pendi
 static bool was_replaced(WatchState *state, const wchar_t *path, ULONGLONG now)
 {
     for (int index = state->gone_count - 1; index >= 0; index--)
-        if (now - state->gone[index].at <= GONE_MEMORY && _wcsicmp(state->gone[index].path, path) == 0) return !state->gone[index].was_pending;
+        if (now - state->gone[index].at <= GONE_MEMORY && path_equal(state->gone[index].path, path)) return !state->gone[index].was_pending;
     return false;
 }
 
@@ -528,7 +528,7 @@ static bool apply_wanted(WatchState *state, int inotify)
     int kept = 0;
     for (int index = 0; index < state->watch_count; index++)
     {
-        if (strlist_index_of(&wanted, state->watches[index].folder, true) >= 0) state->watches[kept++] = state->watches[index];
+        if (strlist_index_of(&wanted, state->watches[index].folder, PATHS_IGNORE_CASE) >= 0) state->watches[kept++] = state->watches[index];
         else
         {
             close_watch(inotify, &state->watches[index]);
@@ -540,7 +540,7 @@ static bool apply_wanted(WatchState *state, int inotify)
     for (int index = 0; index < wanted.count; index++)
     {
         bool known = false;
-        for (int at = 0; at < kept && !known; at++) known = _wcsicmp(state->watches[at].folder, wanted.items[index]) == 0;
+        for (int at = 0; at < kept && !known; at++) known = path_equal(state->watches[at].folder, wanted.items[index]);
         if (known) continue;
         Watch *watch = &state->watches[state->watch_count++];
         memset(watch, 0, sizeof *watch);
@@ -744,7 +744,7 @@ void folder_watch_set(const StrList *folders, FolderWatchHandler handler)
     watch_handler = handler;
     StrList list = {0};
     for (int index = 0; folders && index < folders->count && list.count < FOLDER_WATCH_MAXIMUM; index++)
-        if (!wcs_is_blank(folders->items[index]) && strlist_index_of(&list, folders->items[index], true) < 0)
+        if (!wcs_is_blank(folders->items[index]) && strlist_index_of(&list, folders->items[index], PATHS_IGNORE_CASE) < 0)
             strlist_add(&list, folders->items[index]);
     if (list.count == 0)
     {
